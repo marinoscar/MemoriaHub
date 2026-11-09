@@ -165,7 +165,7 @@ export class UploadNotificationService {
       select: { displayName: true, providerDisplayName: true, email: true },
     });
 
-    // Same fallback ladder as the circle-invitation email sender.
+    // Same fallback ladder as the former circle-invitation email sender.
     const name =
       user?.displayName ?? user?.providerDisplayName ?? user?.email ?? 'Someone';
 

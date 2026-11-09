@@ -122,13 +122,7 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
   { model: 'MediaMetadataStatus', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
   { model: 'MediaTagStatus', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
   { model: 'MediaTranscript', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
-  {
-    model: 'CircleInvite',
-    actorFields: ['addedById', 'claimedById'],
-    purge: 'detach',
-    export: 'exclude',
-    rationale: 'An invite names who sent it and who claimed it; the invite stays as the circle admin\'s record.',
-  },
+
   { model: 'BurstGroup', actorFields: ['resolvedById'], purge: 'detach', export: 'exclude', rationale: RESOLVER },
   { model: 'DuplicateGroup', actorFields: ['resolvedById'], purge: 'detach', export: 'exclude', rationale: RESOLVER },
   { model: 'LocationSuggestion', actorFields: ['resolvedById'], purge: 'detach', export: 'exclude', rationale: RESOLVER },

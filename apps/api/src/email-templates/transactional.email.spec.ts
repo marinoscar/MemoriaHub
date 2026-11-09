@@ -13,7 +13,6 @@ import {
 
 import { EMAIL_MODULE_OPTIONS } from '../platform/email/email.options';
 import { MEMORIAHUB_EMAIL_TEMPLATE_NAMES, registerMemoriaHubEmailTemplates } from './index';
-import { circleInvitationEmail } from './circle-invitation.email';
 import { membershipConfirmationEmail } from './membership-confirmation.email';
 
 configureEmailRendering(EMAIL_MODULE_OPTIONS);
@@ -23,7 +22,7 @@ const HOSTILE = '<script>alert(1)</script>"&';
 
 describe('registration', () => {
   it('registers the three permanent names', () => {
-    expect([...MEMORIAHUB_EMAIL_TEMPLATE_NAMES]).toEqual(['circle-invitation', 'membership-confirmation', 'memory-digest']);
+    expect([...MEMORIAHUB_EMAIL_TEMPLATE_NAMES]).toEqual(['membership-confirmation', 'memory-digest']);
     for (const name of MEMORIAHUB_EMAIL_TEMPLATE_NAMES) {
       expect(isEmailTemplateName(name)).toBe(true);
       expect(findEmailTemplate(name)).toBeDefined();
@@ -42,39 +41,6 @@ describe('registration', () => {
     });
     expect(rendered.subject).toBe('You\'ve been added to "Circle Alpha" on MemoriaHub');
     expect(rendered.html.toLowerCase()).toContain('#1976d2');
-  });
-});
-
-describe('circle-invitation', () => {
-  const base = {
-    circleName: 'Circle Alpha',
-    inviterName: 'Person A',
-    acceptUrl: 'https://app.example.test/activate?returnTo=%2Fcircles%2Fc1',
-    recipientEmail: 'person-b@example.test',
-  };
-
-  it('renders subject, html and a text part with the accept link', () => {
-    const r = circleInvitationEmail(base);
-    expect(r.subject).toBe('You\'re invited to join "Circle Alpha" on MemoriaHub');
-    expect(r.html).toContain('Accept Invitation');
-    expect(r.html).toContain('https://app.example.test/activate?returnTo=%2Fcircles%2Fc1');
-    expect(r.text).toContain('Sign in with person-b@example.test to accept.');
-    expect(r.text).toContain(base.acceptUrl);
-  });
-
-  it('escapes the circle name, the inviter and the address', () => {
-    const r = circleInvitationEmail({ ...base, circleName: HOSTILE, inviterName: HOSTILE, recipientEmail: HOSTILE });
-    expect(r.html).not.toContain('<script>');
-    expect(r.html).toContain('&lt;script&gt;');
-  });
-
-  it('admits the decline link only through safeUrl', () => {
-    expect(circleInvitationEmail({ ...base, declineUrl: 'https://app.example.test/decline' }).html).toContain(
-      'https://app.example.test/decline',
-    );
-    const unsafe = circleInvitationEmail({ ...base, declineUrl: 'javascript:alert(1)' });
-    expect(unsafe.html).not.toContain('javascript:');
-    expect(unsafe.text).not.toContain('javascript:');
   });
 });
 

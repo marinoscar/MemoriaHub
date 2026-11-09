@@ -17,6 +17,8 @@ import {
   PEOPLE_NAMED_FACT,
 } from '../../src/platform/onboarding/onboarding.facts';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { GroupInvitesService } from '@marinoscar/platform-api/sharing';
+import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -26,11 +28,17 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
   let userId: string;
   let otherId: string;
   let circleId: string;
+  let pendingTotal = 0;
 
   const ctxFor = (id: string) =>
     ({
       caller: { id, permissions: [], roles: [], activeOrgId: null },
-      get: () => prisma,
+      get: (token: unknown) =>
+        token === GroupInvitesService
+          ? { list: async () => ({ items: [], total: pendingTotal, page: 1, pageSize: 1, totalPages: 1 }) }
+          : token === DefaultOrgId
+            ? { get: async () => randomUUID() }
+            : prisma,
     }) as unknown as OnboardingRequestContext;
 
   beforeAll(async () => {
@@ -51,7 +59,6 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
     // Children first: `albums` and `people` reference the circle and the users without a cascade.
     await prisma.person.deleteMany({ where: { circleId } });
     await prisma.album.deleteMany({ where: { circleId } });
-    await prisma.circleInvite.deleteMany({ where: { circleId } });
     await prisma.circleMember.deleteMany({ where: { circleId } });
     await prisma.circle.deleteMany({ where: { id: circleId } });
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherId] } } });
@@ -64,13 +71,15 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
     await expect(ALBUM_COUNTS_FACT.resolve(ctxFor(otherId))).resolves.toEqual({ addedByUser: 1 });
   });
 
-  it('sees a lone circle admin, then the pending invite', async () => {
+  it('sees a lone circle admin, then a pending invite', async () => {
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctxFor(userId))).resolves.toEqual({
       collaboratorCircles: 1,
       otherMembers: 0,
       pendingInvites: 0,
     });
-    await prisma.circleInvite.create({ data: { circleId, email: `invitee-${Date.now()}@example.test` } });
+    // Pending invites are group invites read through the sharing slice since RETRO-I5
+    // (onboarding-facts.spec.ts); the stand-in below answers one.
+    pendingTotal = 1;
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctxFor(userId))).resolves.toMatchObject({ pendingInvites: 1 });
     // The other user is in no circle at all.
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctxFor(otherId))).resolves.toEqual({

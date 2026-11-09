@@ -5,13 +5,6 @@
 const HOSTILE = '<b>Circle Alpha</b>';
 
 export const EMAIL_TEMPLATE_SAMPLES: Readonly<Record<string, unknown>> = {
-  'circle-invitation': {
-    circleName: HOSTILE,
-    inviterName: '<i>Person A</i>',
-    acceptUrl: 'https://app.example.test/activate?returnTo=%2Fcircles%2Fc1',
-    declineUrl: 'https://app.example.test/decline',
-    recipientEmail: 'person-b@example.test',
-  },
   'membership-confirmation': {
     circleName: HOSTILE,
     circleDescription: '<script>x</script>',

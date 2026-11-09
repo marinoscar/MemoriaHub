@@ -15,7 +15,7 @@ import type { Prisma } from '@prisma/client';
 const SINGLE_ORG = 'MemoriaHub app table: single-organization mode, no org_id column until Epic I.';
 
 const SYSTEM_MODELS = [
-  'UserProfile', 'Circle', 'CircleMember', 'CircleInvite', 'AlbumItem', 'MediaTag', 'MediaFaceStatus', 'TagLabel',
+  'UserProfile', 'Circle', 'CircleMember', 'AlbumItem', 'MediaTag', 'MediaFaceStatus', 'TagLabel',
   'InsightsSnapshot', 'MediaSocialStatus', 'LocationGroup', 'LocationGroupAlias', 'ReviewRunItem',
   'TrashEmptyRunItem', 'WorkflowRunItem', 'MemoryItem', 'MemoryUserState', 'MediaSyncDevice', 'MediaSyncRun',
   'MediaSyncDiagnosticReport', 'NodeBackupConfig', 'NodeBackupRun', 'EnrichmentJob', 'AiProviderCredential',

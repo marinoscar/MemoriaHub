@@ -5,7 +5,7 @@
 // Imported by `platform/email/email.config.ts` BEFORE `EmailModule.forRoot`,
 // so every registration lands before bootstrap freezes the registries.
 //
-//   templates   circle-invitation, membership-confirmation, memory-digest
+//   templates   membership-confirmation, memory-digest (circle-invitation retired by RETRO-I5)
 //               (`email-templates/`, names permanent)
 //   transports  none: the built-in `ses` and `smtp` cover this app. SES no
 //               longer reads the S3 storage credential at send time; the
