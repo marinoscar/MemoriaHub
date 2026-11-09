@@ -10,6 +10,12 @@ enum MediaFaceStatusType {
 model Person {
   id                 String    @id @default(uuid()) @db.Uuid
   circleId           String    @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   name               String?
   addedById          String    @map("added_by_id") @db.Uuid
   coverFaceId        String?   @map("cover_face_id") @db.Uuid
@@ -35,11 +41,18 @@ model Person {
   // Profile picture management relations (issue #354)
   linkedProfiles   UserProfile[] @relation("UserLinkedPerson")
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("PersonOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("PersonOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("PersonOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
   @@index([circleId, favorite])
   @@index([circleId, hiddenAt], map: "people_circle_id_hidden_at_composite_idx")
   @@index([mergedIntoId])
   @@index([profileMediaItemId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("people")
 }
 
@@ -47,6 +60,12 @@ model Face {
   id                String    @id @default(uuid()) @db.Uuid
   mediaItemId       String    @map("media_item_id") @db.Uuid
   circleId          String    @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   personId          String?   @map("person_id") @db.Uuid
   boundingBox       Json      @map("bounding_box")
   confidence        Float?
@@ -84,10 +103,17 @@ model Face {
   person         Person?   @relation("PersonFaces", fields: [personId], references: [id], onDelete: SetNull)
   coverForPeople Person[]  @relation("PersonCoverFace")
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("FaceOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("FaceOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("FaceOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
   @@index([mediaItemId])
   @@index([personId])
   @@index([circleId, hiddenAt])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("faces")
 }
 

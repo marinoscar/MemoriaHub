@@ -21,6 +21,12 @@ model MediaItem {
   storageObjectId String        @unique @map("storage_object_id") @db.Uuid
   storageObject   StorageObject @relation(fields: [storageObjectId], references: [id])
   circleId        String        @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   circle          Circle        @relation(fields: [circleId], references: [id])
   addedById       String        @map("added_by_id") @db.Uuid
   addedBy         User          @relation("MediaAddedBy", fields: [addedById], references: [id])
@@ -143,6 +149,11 @@ model MediaItem {
   // Location Grouping relations (issue #373)
   locationGroupCovers    LocationGroup[]      @relation("LocationGroupCover")
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaItemOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaItemOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("MediaItemOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
   @@index([addedById])
   @@index([capturedAt])
@@ -175,6 +186,8 @@ model MediaItem {
   // representable here as a real directive — see that migration's header comment
   // for the full rationale (same hand-authored precedent as the "On This Day"
   // functional index in migration 20260615000000_media_oncethisday_index).
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_items")
 }
 
@@ -186,18 +199,37 @@ model MediaItemEmbedding {
   mediaItemId String                      @id @map("media_item_id") @db.Uuid
   mediaItem   MediaItem                   @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circleId    String                      @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   // Parentheses written as \u0028/\u0029 so the composer field reader accepts the type; Prisma decodes them (vector(1536)).
   embedding   Unsupported("vector\u00281536\u0029")
   model       String
   updatedAt   DateTime                    @updatedAt @map("updated_at") @db.Timestamptz
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaItemEmbeddingOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaItemEmbeddingOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("MediaItemEmbeddingOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_item_embedding")
 }
 
 model Album {
   id               String       @id @default(uuid()) @db.Uuid
   circleId         String       @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   circle           Circle       @relation(fields: [circleId], references: [id])
   addedById        String       @map("added_by_id") @db.Uuid
   addedBy          User         @relation("AlbumAddedBy", fields: [addedById], references: [id])
@@ -212,8 +244,15 @@ model Album {
   coverMediaItemId String?      @map("cover_media_item_id") @db.Uuid
   coverMediaItem   MediaItem?   @relation("AlbumCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("AlbumOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("AlbumOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("AlbumOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
   @@index([coverMediaItemId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("albums")
 }
 
@@ -233,6 +272,12 @@ model AlbumItem {
 model Tag {
   id        String     @id @default(uuid()) @db.Uuid
   circleId  String     @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   circle    Circle     @relation(fields: [circleId], references: [id])
   addedById String     @map("added_by_id") @db.Uuid
   addedBy   User       @relation("TagAddedBy", fields: [addedById], references: [id])
@@ -240,8 +285,15 @@ model Tag {
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
   mediaTags MediaTag[]
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("TagOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("TagOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("TagOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@unique([circleId, name])
   @@index([circleId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("tags")
 }
 

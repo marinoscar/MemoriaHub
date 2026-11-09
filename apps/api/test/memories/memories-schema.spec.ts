@@ -180,7 +180,7 @@ describe('Memories — data model schema-drift guard (issue #301)', () => {
       expect(body).toMatch(/@@unique\(\[circleId,\s*type,\s*periodKey,\s*subjectKey\]\)/);
     });
 
-    it('declares exactly the four documented @@index directives (in addition to the @@unique above)', () => {
+    it('declares exactly the six documented @@index directives (in addition to the @@unique above)', () => {
       const indexLines = Array.from(body.matchAll(/@@index\(\[([^\]]*)\]\)/g)).map((m) =>
         m[1].replace(/\s+/g, ' ').trim(),
       );
@@ -189,6 +189,9 @@ describe('Memories — data model schema-drift guard (issue #301)', () => {
         'circleId, type',
         'personId',
         'coverMediaItemId',
+        // RETRO-I2 (#569): the owner columns.
+        'ownerGroupId',
+        'ownerUserId',
       ];
       expect(indexLines).toHaveLength(expectedIndexes.length);
       expect(new Set(indexLines)).toEqual(new Set(expectedIndexes));

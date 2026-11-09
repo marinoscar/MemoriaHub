@@ -55,6 +55,29 @@ model Group {
   grants    Grant[]
 
   // The target of the members' and invites' composite foreign keys.
+
+  // composed from app:ownership.prisma
+  ownedMediaItems             MediaItem[]             @relation("MediaItemOwnerGroup")
+  ownedMediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOwnerGroup")
+  ownedAlbums                 Album[]                 @relation("AlbumOwnerGroup")
+  ownedTags                   Tag[]                   @relation("TagOwnerGroup")
+  ownedPersons                Person[]                @relation("PersonOwnerGroup")
+  ownedFaces                  Face[]                  @relation("FaceOwnerGroup")
+  ownedMemorys                Memory[]                @relation("MemoryOwnerGroup")
+  ownedBurstGroups            BurstGroup[]            @relation("BurstGroupOwnerGroup")
+  ownedDuplicateGroups        DuplicateGroup[]        @relation("DuplicateGroupOwnerGroup")
+  ownedLocationSuggestions    LocationSuggestion[]    @relation("LocationSuggestionOwnerGroup")
+  ownedMediaEnhancements      MediaEnhancement[]      @relation("MediaEnhancementOwnerGroup")
+  ownedMediaEnhancementBatchs MediaEnhancementBatch[] @relation("MediaEnhancementBatchOwnerGroup")
+  ownedMediaMetadataStatuss   MediaMetadataStatus[]   @relation("MediaMetadataStatusOwnerGroup")
+  ownedMediaGeocodeStatuss    MediaGeocodeStatus[]    @relation("MediaGeocodeStatusOwnerGroup")
+  ownedMediaTagStatuss        MediaTagStatus[]        @relation("MediaTagStatusOwnerGroup")
+  ownedMediaTranscripts       MediaTranscript[]       @relation("MediaTranscriptOwnerGroup")
+  ownedReviewRuns             ReviewRun[]             @relation("ReviewRunOwnerGroup")
+  ownedTrashEmptyRuns         TrashEmptyRun[]         @relation("TrashEmptyRunOwnerGroup")
+  ownedWorkflows              Workflow[]              @relation("WorkflowOwnerGroup")
+  ownedWorkflowRuns           WorkflowRun[]           @relation("WorkflowRunOwnerGroup")
+
   @@unique([id, orgId])
   @@index([orgId])
   @@map("groups")
