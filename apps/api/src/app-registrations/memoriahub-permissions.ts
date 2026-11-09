@@ -30,7 +30,8 @@
 // contributor, viewer) are the same.
 //
 // REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
-// system_settings:read|write), ai_settings:* (E1), storage_settings:* (D1, done:
+// system_settings:read|write), the AI settings pair (E4, done: replaced by the AI slice's
+// ai_config:read|write, admin only, which also gates the tag vocabulary), storage_settings:* (D1, done:
 // replaced by the storage slice's storage_config:read|write, admin only),
 // storage:* (D1: the storage slice's set, registered through `permissions.ts`),
 // db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications slice
@@ -133,18 +134,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   },
 
   // Provider and operations settings (Admin only)
-  AI_SETTINGS_READ: {
-    id: 'ai_settings:read',
-    description: 'Read AI provider settings and status',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  AI_SETTINGS_WRITE: {
-    id: 'ai_settings:write',
-    description: 'Configure AI provider credentials and settings',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
   FACE_SETTINGS_READ: {
     id: 'face_settings:read',
     description: 'Read face recognition provider settings and status',
