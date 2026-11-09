@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { LocationPickerMap } from '../../media/LocationPickerMap';
 import { usePeople } from '../../../hooks/usePeople';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import type { ExploreItem } from '../../../services/media';
 import type { Album } from '../../../types/media';
 import type { WorkflowActionInstance } from '../../../types/workflows';
@@ -51,8 +51,8 @@ export function ActionParamEditor({
   );
   // RETRO-I6 (#588): the destination libraries are the owner scopes ("My library" and the
   // caller's groups) where the caller may write; the API re-checks editor on BOTH scopes.
-  const { circles: scopes } = useCircle();
-  const circles = scopes.filter((c) => c.memberRole === 'collaborator' || c.memberRole === 'circle_admin');
+  const { scopes } = useOwnerScope();
+  const writableScopes = scopes.filter((s) => s.role === 'editor' || s.role === 'admin');
 
   switch (kind) {
     case 'none':
@@ -264,7 +264,39 @@ export function ActionParamEditor({
       );
     }
 
-    // --- move_to_circle ----------------------------------------------------
+    // --- move_to_owner -----------------------------------------------------
+    case 'owner': {
+      const target = action.target as { kind?: string; groupId?: string } | undefined;
+      const value =
+        target?.kind === 'group' && typeof target.groupId === 'string'
+          ? `group:${target.groupId}`
+          : target?.kind === 'me'
+            ? 'me'
+            : '';
+      return (
+        <FormControl size="small" sx={{ minWidth: 240 }}>
+          <InputLabel>Destination library</InputLabel>
+          <Select
+            label="Destination library"
+            value={value}
+            onChange={(e) => {
+              const v = String(e.target.value);
+              set({ target: v === 'me' ? { kind: 'me' } : { kind: 'group', groupId: v.slice('group:'.length) } });
+            }}
+          >
+            {writableScopes
+              .filter((s) => s.id !== circleId)
+              .map((s) => (
+                <MenuItem key={s.id} value={s.kind === 'me' ? 'me' : `group:${s.id}`}>
+                  {s.name}
+                </MenuItem>
+              ))}
+          </Select>
+        </FormControl>
+      );
+    }
+
+    // --- move_to_circle (deprecated alias, existing actions only) ---------
     case 'circle': {
       const targetCircleId =
         typeof action.targetCircleId === 'string' ? action.targetCircleId : '';
@@ -276,7 +308,7 @@ export function ActionParamEditor({
             value={targetCircleId}
             onChange={(e) => set({ targetCircleId: e.target.value })}
           >
-            {circles
+            {writableScopes
               .filter((c) => c.id !== circleId)
               .map((c) => (
                 <MenuItem key={c.id} value={c.id}>

@@ -27,7 +27,7 @@ import {
   useSearchParams,
   useNavigate,
 } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowSubjects } from '../../hooks/useWorkflowSubjects';
 import { useWorkflow } from '../../hooks/useWorkflow';
@@ -77,7 +77,7 @@ export default function WorkflowBuilderPage() {
   const navigate = useNavigate();
   const isEdit = Boolean(id);
 
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeOption: activeCircle, activeRole } = useOwnerScope();
   const { hasPermission } = usePermissions();
   const {
     subjects,
@@ -131,7 +131,7 @@ export default function WorkflowBuilderPage() {
     sysWorkflows?.requirePreview ?? DEFAULT_REQUIRE_PREVIEW;
 
   const canManage =
-    (activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin') &&
+    (activeRole === 'editor' || activeRole === 'admin') &&
     hasPermission('media:write');
 
   // Load the existing workflow when editing.

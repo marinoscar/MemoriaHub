@@ -16,6 +16,7 @@ export const MANUAL_ONLY_ACTIONS = new Set<string>(['hard_delete']);
 /** Actions flagged high-impact (extra warning surface in the builder). */
 export const HIGH_IMPACT_ACTIONS = new Set<string>([
   'hard_delete',
+  'move_to_owner',
   'move_to_circle',
 ]);
 
@@ -32,7 +33,8 @@ export type ActionParamKind =
   | 'capturedAt' // set_captured_at → { mode, value?, shiftMinutes? }
   | 'person' // assign_person / remove_person → { personId }
   | 'location' // set_location → { lat, lng }
-  | 'circle' // move_to_circle → { targetCircleId }
+  | 'owner' // move_to_owner → { target: { kind: 'me' } | { kind: 'group', groupId } }
+  | 'circle' // move_to_circle (deprecated alias) → { targetCircleId }
   | 'rerunKinds' // rerun_enrichment → { kinds: string[] }
   | 'resolveAction'; // resolve_(burst|duplicate)_group → { action: 'archive'|'trash' }
 
@@ -51,6 +53,7 @@ export const ACTION_PARAM_KIND: Record<string, ActionParamKind> = {
   remove_person: 'person',
   set_location: 'location',
   clear_location: 'none',
+  move_to_owner: 'owner',
   move_to_circle: 'circle',
   rerun_enrichment: 'rerunKinds',
   // The one-click form of "Re-run enrichment -> tick Tagging" (epic #452).
@@ -86,6 +89,8 @@ export function defaultActionInstance(type: string): WorkflowActionInstance {
       return { type, kinds: [] };
     case 'resolveAction':
       return { type, action: 'trash' };
+    case 'owner':
+      return { type, target: { kind: 'me' } };
     default:
       return { type };
   }

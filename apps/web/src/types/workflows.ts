@@ -154,6 +154,8 @@ export interface WorkflowActionDescriptor {
   type: string;
   label: string;
   destructive?: boolean;
+  /** A deprecated alias (`move_to_circle`): still valid, never offered for a new action. */
+  deprecated?: boolean;
 }
 
 export interface SubjectRegistryEntry {

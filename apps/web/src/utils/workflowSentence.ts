@@ -184,6 +184,10 @@ function actionPhrase(
       return 'set its location';
     case 'clear_location':
       return 'clear its location';
+    case 'move_to_owner':
+      return (a.target as { kind?: string } | undefined)?.kind === 'me'
+        ? 'move it to your library'
+        : 'move it to another library';
     case 'move_to_circle':
       return 'move it to another circle';
     case 'rerun_enrichment':
