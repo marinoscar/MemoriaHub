@@ -8,8 +8,6 @@ import { useAiSettings } from '../../hooks/useAiSettings';
 
 vi.mock('../../services/ai', () => ({
   getAiSettings: vi.fn(),
-  putAiCredentials: vi.fn(),
-  deleteAiCredentials: vi.fn(),
   testAiProvider: vi.fn(),
   getAiModels: vi.fn(),
   putAiSearchFeature: vi.fn(),
@@ -17,8 +15,6 @@ vi.mock('../../services/ai', () => ({
 
 import {
   getAiSettings,
-  putAiCredentials,
-  deleteAiCredentials,
   testAiProvider,
   getAiModels,
   putAiSearchFeature,
@@ -26,8 +22,6 @@ import {
 import type { AiSettingsResponse } from '../../services/ai';
 
 const mockGetAiSettings = vi.mocked(getAiSettings);
-const mockPutAiCredentials = vi.mocked(putAiCredentials);
-const mockDeleteAiCredentials = vi.mocked(deleteAiCredentials);
 const mockTestAiProvider = vi.mocked(testAiProvider);
 const mockGetAiModels = vi.mocked(getAiModels);
 const mockPutAiSearchFeature = vi.mocked(putAiSearchFeature);
@@ -45,10 +39,6 @@ const mockSettings: AiSettingsResponse = {
   ],
   features: {
     search: { provider: 'openai', model: 'gpt-4o' },
-  },
-  conversations: {
-    archiveAfterDays: 30,
-    deleteAfterArchiveDays: 30,
   },
 };
 
@@ -78,8 +68,9 @@ describe('useAiSettings', () => {
       const { result } = renderHook(() => useAiSettings());
 
       expect(typeof result.current.fetchSettings).toBe('function');
-      expect(typeof result.current.saveCredentials).toBe('function');
-      expect(typeof result.current.removeCredentials).toBe('function');
+      // RETRO-E4 (#607): keys are the platform provider cards' job, never this hook's.
+      expect((result.current as Record<string, unknown>).saveCredentials).toBeUndefined();
+      expect((result.current as Record<string, unknown>).removeCredentials).toBeUndefined();
       expect(typeof result.current.testProvider).toBe('function');
       expect(typeof result.current.getModels).toBe('function');
       expect(typeof result.current.saveSearchFeature).toBe('function');
@@ -169,81 +160,6 @@ describe('useAiSettings', () => {
 
       expect(result.current.error).toBeNull();
       expect(result.current.settings).toEqual(mockSettings);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('saveCredentials', () => {
-    it('calls putAiCredentials with the correct arguments', async () => {
-      mockPutAiCredentials.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useAiSettings());
-
-      await act(async () => {
-        await result.current.saveCredentials('openai', { apiKey: 'sk-test', enabled: true });
-      });
-
-      expect(mockPutAiCredentials).toHaveBeenCalledWith('openai', {
-        apiKey: 'sk-test',
-        enabled: true,
-      });
-    });
-
-    it('forwards the baseUrl when provided', async () => {
-      mockPutAiCredentials.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useAiSettings());
-
-      await act(async () => {
-        await result.current.saveCredentials('openai', {
-          apiKey: 'key',
-          baseUrl: 'https://custom.endpoint',
-        });
-      });
-
-      expect(mockPutAiCredentials).toHaveBeenCalledWith('openai', {
-        apiKey: 'key',
-        baseUrl: 'https://custom.endpoint',
-      });
-    });
-
-    it('propagates errors from putAiCredentials', async () => {
-      mockPutAiCredentials.mockRejectedValue(new Error('Save failed'));
-
-      const { result } = renderHook(() => useAiSettings());
-
-      await expect(
-        act(async () => {
-          await result.current.saveCredentials('openai', { apiKey: 'bad' });
-        }),
-      ).rejects.toThrow('Save failed');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('removeCredentials', () => {
-    it('calls deleteAiCredentials with the provider', async () => {
-      mockDeleteAiCredentials.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useAiSettings());
-
-      await act(async () => {
-        await result.current.removeCredentials('openai');
-      });
-
-      expect(mockDeleteAiCredentials).toHaveBeenCalledWith('openai');
-    });
-
-    it('propagates errors from deleteAiCredentials', async () => {
-      mockDeleteAiCredentials.mockRejectedValue(new Error('Delete failed'));
-
-      const { result } = renderHook(() => useAiSettings());
-
-      await expect(
-        act(async () => {
-          await result.current.removeCredentials('openai');
-        }),
-      ).rejects.toThrow('Delete failed');
     });
   });
 

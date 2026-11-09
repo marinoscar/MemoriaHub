@@ -41,7 +41,7 @@ import {
   buildThumbnailKey,
   randomThumbnailVersion,
 } from '../media-processing/thumbnail-key.util';
-import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiSettingsService } from '../ai-port/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';

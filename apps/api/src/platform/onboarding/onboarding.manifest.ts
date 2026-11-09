@@ -26,8 +26,8 @@ import { MEMORIAHUB_ONBOARDING_STEP_DEFS, MEMORIAHUB_ONBOARDING_STEP_IDS } from 
 //                  `memoriahub.storage_ready` (storage_config:read, /admin/settings/storage)
 //                  takes its place until the storage slice lands and the built-in can be reused.
 //   admin.ai       It checks the PLATFORM AI runtime (`ai.enabled`, `ai.providers`), which no MemoriaHub
-//                  feature calls yet (RETRO-E2), and links to `/admin/settings/ai`, which here is
-//                  MemoriaHub's own provider page (ai_settings:read). It would nag an administrator to
+//                  feature calls yet (RETRO-E2), and links to `/admin/settings/ai` (the platform's AI page since
+//                  RETRO-E4, whose switch MemoriaHub's legacy features ignore). It would nag an administrator to
 //                  turn on something nothing uses; `memoriahub.enable_tagging` asks the real question.
 //
 // `admin.email` IS MemoriaHub's "email ready" step (the issue's `memoriahub.email_ready`, "platform step

@@ -40,7 +40,7 @@ import {
 //   admin.email                required     the platform's step: it is MemoriaHub's `email_ready`
 //   admin.access               required     the platform's
 //   memoriahub.enable_faces    recommended  face_settings:read      flag on AND the Doctor's face.detection passes
-//   memoriahub.enable_tagging  recommended  ai_settings:read        flag on AND tagging model with an enabled key
+//   memoriahub.enable_tagging  recommended  ai_config:read          flag on AND tagging model with an enabled key
 //   memoriahub.enable_memories recommended  system_settings:read    flag on
 //   admin.push, admin.backup   recommended  the platform's
 //
@@ -228,8 +228,9 @@ export const ENABLE_TAGGING_STEP: OnboardingStepDef = {
   description: 'Describe and tag every photo with AI, which also makes search by meaning work.',
   actionLabel: 'Configure tagging',
   href: '/admin/settings/tagging',
-  // The tagging page reads `GET /api/ai/settings`, which enforces ai_settings:read.
-  permission: 'ai_settings:read',
+  // The tagging page's card and its tag vocabulary (`GET /api/tag-labels`) enforce ai_config:read
+  // (RETRO-E4, #607: the AI slice's pair replaced MemoriaHub's own).
+  permission: 'ai_config:read',
   skippable: true,
   facts: [F.FEATURE_READINESS],
   evaluate: (facts) => {

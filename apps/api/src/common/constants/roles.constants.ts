@@ -56,9 +56,11 @@ export const PERMISSIONS = {
   CIRCLES_MANAGE_ANY: 'circles:manage_any', // Admin: manage any circle
 
 
-  // AI Settings
-  AI_SETTINGS_READ: 'ai_settings:read',
-  AI_SETTINGS_WRITE: 'ai_settings:write',
+  // AI administration: the platform AI slice's pair (`@marinoscar/platform-api/ai`), which
+  // replaced MemoriaHub's own AI settings pair in RETRO-E4 (#607). Also gates the MemoriaHub feature
+  // selections (`/api/admin/memoriahub-ai/*`) and the tag vocabulary (`/api/tag-labels`).
+  AI_CONFIG_READ: 'ai_config:read',
+  AI_CONFIG_WRITE: 'ai_config:write',
 
   // Face Recognition Settings (Admin only)
   FACE_SETTINGS_READ: 'face_settings:read',

@@ -168,7 +168,7 @@ The active provider is controlled by the `storage.activeProvider` system setting
 
 ## 5. Connectivity Test
 
-`POST /api/storage-settings/test` performs a live round-trip to verify that credentials work before they are saved. This mirrors the pattern used by `POST /api/ai/test` and `POST /api/face/test`.
+`POST /api/storage-settings/test` performs a live round-trip to verify that credentials work before they are saved. This mirrors the pattern used by `POST /api/admin/memoriahub-ai/test` and `POST /api/face/test`.
 
 ### Test Flow
 

@@ -1888,7 +1888,7 @@ The key is cached in memory after first read. It must be identical across all AP
 | `last4` — final four characters of the key | Full key in any log |
 | `base_url` — provider endpoint (not sensitive) | Key in any HTTP response |
 
-`GET /api/ai/settings` returns only `last4`, `baseUrl`, and `enabled`. The `encrypted_key` column is excluded from all Prisma `select` queries in `AiSettingsService`.
+`GET /api/admin/memoriahub-ai/features` returns only `last4`, `baseUrl`, and `enabled`. The `encrypted_key` column is excluded from all Prisma `select` queries in `AiSettingsService`.
 
 ### Key Rotation Procedure
 
@@ -1980,8 +1980,8 @@ Even if a malicious or hallucinating model includes a `circleId` field in its to
 
 | Permission | Scope | Notes |
 |------------|-------|-------|
-| `ai_settings:read` | Admin only | View provider config, list models, test connectivity |
-| `ai_settings:write` | Admin only | Configure credentials, set active search model |
+| `ai_config:read` | Admin only | View provider config, list models, test connectivity |
+| `ai_config:write` | Admin only | Configure credentials, set active search model |
 | `search:use` | All roles | Use deterministic search and conversational search |
 
 ---

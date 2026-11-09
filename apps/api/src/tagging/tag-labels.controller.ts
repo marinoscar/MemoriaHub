@@ -44,7 +44,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Get('export')
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_READ] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_READ] })
   @ApiOperation({ summary: 'Export all tag labels as CSV' })
   @ApiResponse({
     status: 200,
@@ -64,7 +64,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Post('import')
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'CSV file with columns: id, name, delete (header row required)',
@@ -142,7 +142,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Get()
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_READ] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_READ] })
   @ApiOperation({ summary: 'List all tag labels' })
   @ApiResponse({ status: 200, description: 'List of tag labels' })
   async getAll() {
@@ -155,7 +155,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Post()
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiOperation({ summary: 'Create a new tag label' })
   @ApiResponse({ status: 201, description: 'Tag label created' })
   @ApiResponse({ status: 409, description: 'Tag label name already exists' })
@@ -169,7 +169,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Patch(':id')
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiOperation({ summary: 'Update a tag label' })
   @ApiParam({ name: 'id', description: 'Tag label ID' })
   @ApiResponse({ status: 200, description: 'Tag label updated' })
@@ -185,7 +185,7 @@ export class TagLabelsController {
   // --------------------------------------------------------------------------
 
   @Delete(':id')
-  @Auth({ permissions: [PERMISSIONS.AI_SETTINGS_WRITE] })
+  @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a tag label' })
   @ApiParam({ name: 'id', description: 'Tag label ID' })

@@ -9,7 +9,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SemanticSearchService } from './semantic-search.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiSettingsService } from '../ai-port/ai-settings.service';
 import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 

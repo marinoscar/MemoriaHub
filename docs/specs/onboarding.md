@@ -28,7 +28,7 @@ A step id is stored in users' `onboarding.skipped` and the activation milestone 
 | `admin.email` | admin | required | the platform's Doctor check `email.config` passes (this is MemoriaHub's "email ready" step) | always | `system_settings:read` | `/admin/settings/email` |
 | `admin.access` | admin | required | an allowlist entry other than `INITIAL_ADMIN_EMAIL` | always | `allowlist:read` | `/admin/settings/users` |
 | `memoriahub.enable_faces` | admin | recommended | `features.faceRecognition` on AND the Doctor check `memoriahub.face.detection` passes (CompreFace reachable) | the check is registered | `face_settings:read` | `/admin/settings/face` |
-| `memoriahub.enable_tagging` | admin | recommended | `features.autoTagging` on AND `ai.features.tagging` names a provider with an enabled key | always | `ai_settings:read` | `/admin/settings/tagging` |
+| `memoriahub.enable_tagging` | admin | recommended | `features.autoTagging` on AND `ai.features.tagging` names a provider with an enabled key | always | `ai_config:read` | `/admin/settings/tagging` |
 | `memoriahub.enable_memories` | admin | recommended | `features.memories` on (and `MEMORIES_ENABLED` not `false`) | always | `system_settings:read` | `/admin/settings/memories` |
 | `admin.push`, `admin.backup` | admin | recommended | the platform's (`push.vapid`, `backup.schedule`) | always (`push.vapid` comes with the notifications slice, RETRO-D3) | the platform's | the platform's |
 

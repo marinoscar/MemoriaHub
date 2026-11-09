@@ -1,8 +1,6 @@
 import { useState, useCallback } from 'react';
 import {
   getAiSettings,
-  putAiCredentials,
-  deleteAiCredentials,
   testAiProvider,
   getAiModels,
   putAiSearchFeature,
@@ -37,20 +35,6 @@ export function useAiSettings() {
       if (isMounted()) setLoading(false);
     }
   }, [isMounted]);
-
-  const saveCredentials = useCallback(
-    async (
-      provider: string,
-      body: { apiKey: string; baseUrl?: string; enabled?: boolean },
-    ) => {
-      await putAiCredentials(provider, body);
-    },
-    [],
-  );
-
-  const removeCredentials = useCallback(async (provider: string) => {
-    await deleteAiCredentials(provider);
-  }, []);
 
   const testProvider = useCallback(
     async (provider: string, model: string): Promise<AiTestResult> => {
@@ -122,8 +106,6 @@ export function useAiSettings() {
     loading,
     error,
     fetchSettings,
-    saveCredentials,
-    removeCredentials,
     testProvider,
     getModels,
     saveSearchFeature,

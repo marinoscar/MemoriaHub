@@ -23,7 +23,7 @@ import type {
   ChatStreamEvent,
 } from '../../ai-port/legacy-ai-provider.types';
 import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
-import { AiSettingsService } from '../../ai/ai-settings.service';
+import { AiSettingsService } from '../../ai-port/ai-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BACKFILL_AI_TITLE_CAP,

@@ -184,7 +184,7 @@ describe('adminSections', () => {
       expect(titles).toContain('Job Insights');
       expect(titles).toContain('Worker Nodes');
       expect(titles).not.toContain('System');
-      expect(titles).not.toContain('AI Providers');
+      expect(titles).not.toContain('AI');
       expect(titles).not.toContain('Database Backup');
     });
 
@@ -200,7 +200,7 @@ describe('adminSections', () => {
     });
 
     it('returns every section/card when every permission is granted and every feature is on', () => {
-      const sections = visibleAdminSections(allowAll(), '', { telemetry: true });
+      const sections = visibleAdminSections(allowAll(), '', { telemetry: true, ai: true });
 
       expect(sections).toHaveLength(ADMIN_SECTIONS.length);
       const totalCards = sections.reduce((sum, s) => sum + s.cards.length, 0);

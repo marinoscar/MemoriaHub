@@ -12,7 +12,7 @@
  *     (the documented footgun — replacing it clears every other flag);
  *   - `memories.*` round-trips with the stored values and with defaults when
  *     the namespace is absent, which is its normal state;
- *   - the AI provider/model picker persists through PUT /api/ai/features/memories
+ *   - the AI provider/model picker persists through PUT /api/admin/memoriahub-ai/features/memories
  *     and warns when the provider has no enabled credential;
  *   - the digest section warns when no email provider is configured;
  *   - the backfill button is gated on the feature flag, passes the selected

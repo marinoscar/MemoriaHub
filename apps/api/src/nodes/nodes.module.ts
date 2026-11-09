@@ -14,7 +14,7 @@ import { NodeStaleOfflineTask } from './node-stale-offline.task';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { AiModule } from '../ai/ai.module';
+import { LegacyAiModule } from '../ai-port/legacy-ai.module';
 import { TaggingModule } from '../tagging/tagging.module';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -26,7 +26,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * provider/bucket new uploads land in, mirroring
  * ThumbnailProcessor.uploadThumbnail's provider resolution.
  *
- * Also imports AiModule (AiSettingsService — resolveCredentials),
+ * Also imports LegacyAiModule (AiSettingsService — resolveCredentials),
  * SettingsModule (AppSystemSettingsService — active tagging/geo provider config),
  * and TaggingModule (AutoTaggingService — shared prompt builder) so
  * `POST /nodes/:id/jobs/:jobId/credentials` can resolve TRANSIENT, per-job
@@ -38,7 +38,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     PrismaModule,
     EnrichmentModule,
     MediaProcessingModule,
-    AiModule,
+    LegacyAiModule,
     
     TaggingModule,
     // Google key for the transient geocode credential (RETRO-B4)

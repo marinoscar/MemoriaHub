@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiSettingsService } from '../ai-port/ai-settings.service';
 import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 
 @Injectable()
