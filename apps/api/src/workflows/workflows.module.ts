@@ -21,6 +21,8 @@ import { WorkflowRunsRetentionHandler } from './runs/workflow-runs-retention.han
 import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
 import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
+import { WorkflowMicroRunFinalizeHandler } from './runs/workflow-micro-run-finalize.handler';
+import { WorkflowScheduleTickHandler } from './runs/workflow-schedule-tick.handler';
 import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
 import { WorkflowsAdminController } from './admin/workflows-admin.controller';
 import { WorkflowsAdminService } from './admin/workflows-admin.service';
@@ -76,6 +78,9 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
     WorkflowScheduleTask,
     WorkflowEvaluateItemHandler,
     WorkflowMicroRunFinalizeTask,
+    // RETRO-C9 (#612): the two every-minute crons only enqueue; these do the work.
+    WorkflowScheduleTickHandler,
+    WorkflowMicroRunFinalizeHandler,
     WorkflowTriggerListener,
   ],
   exports: [WorkflowDefinitionValidator, WorkflowConditionCompiler, WorkflowActionExecutor],
