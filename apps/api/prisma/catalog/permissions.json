@@ -447,6 +447,7 @@
       "storage:read",
       "storage:write",
       "groups:read",
+      "groups:write",
       "sharing:read",
       "webhooks:read",
       "webhooks:write",

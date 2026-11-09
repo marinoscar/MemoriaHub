@@ -64,6 +64,8 @@ There is no down migration. Before RETRO-I3 the change is additive, so the appli
 | `group ... mirrors a circle; delete the circle instead` | Someone deleted a mirrored group through `/api/groups/:id` | Expected: until RETRO-I3 a circle's group goes with the circle |
 | `circle ... cannot change is_personal` | Code flipped a circle's kind | Not done by any shipped code path; ownership would diverge, so it is refused |
 | Doctor `db.rls_role` fails | The API still connects as the superuser (an existing exception) | Unchanged by I2; the 21 tables join the switch tracked in local-exceptions.md |
+| A group member changed through `/api/groups/**` gains or loses access, but the circle's member list and the memories digest / review-queue notifications do not follow (RETRO-I3) | Access reads `group_members`; the background sweeps still read the mirrored `circle_members`, and the mirror is one-way (circle to group) | Change memberships through `/api/circles/:id/members` until RETRO-I5/I6. The list of sweeps and the equality test: [circles-to-groups.md §8](../platform-adoption/circles-to-groups.md#8-cross-circle-query-inventory) |
+| Someone who is not a member opens a shared photo or album and it works (RETRO-I3) | A user or group grant on that record (`/api/grants`) | Expected: a grant adds access to that one record. Revoke it through `/api/grants` |
 
 ## 6. Rehearsal record (SYNTHETIC)
 

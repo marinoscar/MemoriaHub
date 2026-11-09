@@ -1084,7 +1084,7 @@ Content-hash dedup is `(circle_id, content_hash)` (was `(owner_id, content_hash)
 
 > **Roles and permissions after RETRO-B2 (issue #611).** The identity slice owns the tables and the guards. `admin` is a system role; `org_admin`, `contributor` and `viewer` are org roles on the default-organization membership. The permission strings are unchanged. System-scope (admin only): `users:*`, `allowlist:*`, `rbac:manage`, `system_settings:*`, `jobs:*`, `ai_config:*`, `face_settings:*`, `geo_settings:*`, `storage_settings:*`, `push:*`, `broadcasts:*`, `db_backup:*`, `media:{read,write,delete}_any`, `storage:delete_any`, `circles:manage_any`, `shares:manage_any`. Org-scope: `user_settings:*`, `storage:{read,write}`, `media:{read,write,delete}`, `circles:{read,write}`, `search:use`, `shares:manage`, granted to `org_admin`, `contributor` and `viewer` exactly as the old matrix gave them to admin, contributor and viewer (`contributor` additionally holds `storage:write` and `shares:manage`; `viewer` has no `storage:write` or `shares:manage`). New platform capabilities (`organizations:*`, `org_members:*`, `org_invites:*`, `org_settings:*`) are held by administrators and hidden in single-organization mode. `email_settings:*` was retired by RETRO-D2 (#570): the platform email routes check `system_settings:*`. `shares:manage` and `shares:manage_any` were retired by RETRO-I4 (#578): public shares are the sharing slice's link grants, created and managed under `sharing:write` (contributor, org_admin) and listed organization-wide under `sharing:admin` (org_admin); see [public-sharing.md](specs/public-sharing.md). The source of truth is `apps/api/src/app-registrations/` (declarations) and `apps/api/prisma/catalog/permissions.json` (rendered); `apps/api/test/rbac/permission-matrix.spec.ts` pins the result against the pre-adoption matrix.
 
-> **Sharing permissions (RETRO-I1, #562).** The platform sharing slice adds six ORG-scope permissions: `groups:read` and `sharing:read` (`org_admin`, `contributor`, `viewer`), `groups:write` and `sharing:write` (`org_admin`, `contributor`), `groups:admin` and `sharing:admin` (`org_admin`; a system administrator holds them through its `org_admin` membership). They guard the slice's `/api/groups/**`, `/api/grants/**` and `/api/sharing/*` routes, which are mounted but empty until circles become groups (RETRO-I2..I5). Mapping to the circle permissions: [circles-to-groups.md §5](platform-adoption/circles-to-groups.md#5-permissions).
+> **Sharing permissions (RETRO-I1, #562).** The platform sharing slice adds six ORG-scope permissions: `groups:read` and `sharing:read` (`org_admin`, `contributor`, `viewer`), `groups:write` and `sharing:write` (`org_admin`, `contributor`), `groups:admin` and `sharing:admin` (`org_admin`; a system administrator holds them through its `org_admin` membership). They guard the slice's `/api/groups/**`, `/api/grants/**` and `/api/sharing/*` routes; since RETRO-I2 every shared circle is a group, and since RETRO-I3 group membership decides access and grants of `media_item` / `album` add access. `viewer` also holds `groups:write` (RETRO-I3), as it always held `circles:write`. Mapping to the circle permissions: [circles-to-groups.md §5](platform-adoption/circles-to-groups.md#5-permissions).
 
 The system uses two independent authorization layers that work together.
 
@@ -1124,17 +1124,23 @@ The system uses two independent authorization layers that work together.
 
 Note: `circles:read` and `circles:write` are granted to all three global roles. They grant API access to the circles endpoints; the per-circle role (Layer 2) governs what a user can do within a specific circle.
 
-**Layer 2: Per-circle roles** (new in FC)
+**Layer 2: Owner-scope roles, then grants** (RETRO-I3, #573)
 
-Each `circle_members` row carries a `CircleRole` enum. This layer is enforced by `CircleMembershipService.assertCircleAccess()` inside service methods, not by NestJS guards.
+Every content row has one owner: a group (a former shared circle; the group id IS the former circle id) or a user (a former personal circle). The caller's role in the row's owner scope is decided by `OwnerAccessService.requireOwnerRole(userId, scopeId, permissions, minRole)` (`apps/api/src/platform/sharing/owner-scope.ts`), inside service methods, from `group_members` through the sharing slice's `PrincipalGroupsProvider`; the owner of a personal library is its only member, as `admin`.
 
-| Per-circle Role | Rank | Capabilities |
+| Group role (former circle role) | Rank | Capabilities |
 |-----------------|------|--------------|
-| `viewer` | 1 | Read media, albums, tags in the circle |
-| `collaborator` | 2 | All viewer capabilities + add/edit/delete media, albums, tags |
-| `circle_admin` | 3 | All collaborator capabilities + manage members and invites |
+| `viewer` (`viewer`) | 1 | Read media, albums, tags in the scope |
+| `editor` (`collaborator`) | 2 | All viewer capabilities + add/edit/delete media, albums, tags |
+| `admin` (`circle_admin`) | 3 | All editor capabilities + manage members and invites, empty the trash, cluster faces, erase biometrics |
 
-**Super-admin bypass**: If the caller's global permissions include `circles:manage_any`, `media:read_any`, or `media:write_any`, the per-circle membership check is skipped entirely (`isSuperAdmin: true`). This allows the global Admin to manage any circle's content without being a member.
+A **non-member gets 404** (the scope's existence is hidden, the same body as an unknown scope); a member below the required role gets 403.
+
+**Grants on records** (`media_item`, `album`): when the owner-scope check refused, `RecordAccessService` (`apps/api/src/platform/sharing/record-access.ts`) asks the sharing slice's `AccessPolicy` whether a user or group grant (`/api/grants`) allows the action: `decide` for one record, ONE `decideMany` for a bulk batch, `accessibleWhere` (scope `shared`) AND-ed onto a non-member's list. Only a grant can add access this way, so a member's outcome, and a member's list query and its index plan, never change. A viewer grant reads; an editor grant also writes; no grant trashes a record (`delete` needs the owner) or reaches a group-`admin` action.
+
+**Super-admin bypass**: `groups:admin` (and the deprecated `circles:manage_any`, kept one release), `media:read_any` or `media:write_any` skip the owner-scope check entirely (`isSuperAdmin: true`).
+
+**Owner-scope parameter**: a route names the scope with `ownerGroupId` (a shared library) or `scope=me` (the caller's personal library); `circleId` is the deprecated alias for one release. Mapping and decisions: [circles-to-groups.md](platform-adoption/circles-to-groups.md).
 
 ### 7.4 Access Control Layers
 
