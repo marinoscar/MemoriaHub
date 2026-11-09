@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   type Job,
@@ -73,6 +74,8 @@ export class ReviewRunEvaluateHandler implements JobHandler, OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly runService: ReviewRunService,
     private readonly subjects: ReviewRunSubjectRegistry,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=review}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -172,7 +175,7 @@ export class ReviewRunEvaluateHandler implements JobHandler, OnModuleInit {
           where: { id: runId },
           data: { status: ReviewRunStatus.completed, finishedAt: new Date() },
         });
-        // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome=completed})
+        this.metrics?.add('runsFinished', 1, { engine: 'review', outcome: 'completed' });
         this.logTransition(run, ReviewRunStatus.completed, { matchedCount: 0 });
         return;
       }
@@ -200,7 +203,7 @@ export class ReviewRunEvaluateHandler implements JobHandler, OnModuleInit {
             },
           })
           .catch(() => undefined);
-        // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome=failed})
+        this.metrics?.add('runsFinished', 1, { engine: 'review', outcome: 'failed' });
         this.logTransition(run, ReviewRunStatus.failed, { error: message });
       }
       throw err;
