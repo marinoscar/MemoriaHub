@@ -141,8 +141,43 @@ export async function appPostBlob(
   return { blob: await response.blob(), headers: response.headers };
 }
 
-/** The `PlatformApiClient` over this app's HTTP client. Built ONCE, at module scope. */
-export const appPlatformApi: PlatformApiClient = {
+/**
+ * `POST` a `multipart/form-data` body and read the `{ data }` envelope (the android-app slice's APK
+ * upload, RETRO-D5 #586; the optional `postFormData` port of `createAndroidAppClient`). No
+ * `Content-Type`: the browser sets it with the boundary. Same bearer token, one refresh-and-retry
+ * on a 401 and maintenance recogniser as {@link appGetBlob}. The body streams from the `File`, it
+ * is never read into memory here.
+ *
+ * PLATFORM-ADOPTION-SHIM(#597): removed with `appPlatformApi` (RETRO-F1/B2).
+ */
+export async function appPostFormData<T>(path: string, form: FormData): Promise<T> {
+  const send = () => {
+    const token = api.getAccessToken();
+    return fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+  };
+  let response = await send();
+  if (response.status === 401 && (await api.refreshToken())) response = await send();
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const block = readMaintenanceBlock(response.status, body);
+    if (block) reportMaintenanceBlock(block);
+    throw new ApiError(
+      typeof body.message === 'string' ? body.message : 'Request failed',
+      response.status,
+      typeof body.code === 'string' ? body.code : undefined,
+      body.details,
+    );
+  }
+  return ('data' in body ? body.data : body) as T;
+}
+
+/** The `PlatformApiClient` over this app's HTTP client, plus the multipart port. Built ONCE, at module scope. */
+export const appPlatformApi: PlatformApiClient & { postFormData<T>(path: string, form: FormData): Promise<T> } = {
   get: (path, options) => api.get(path, toRequestInit(options)),
   post: (path, body, options) => api.post(path, body, toRequestInit(options)),
   put: (path, body, options) => api.put(path, body, toRequestInit(options)),
@@ -151,6 +186,7 @@ export const appPlatformApi: PlatformApiClient = {
   postSse: appPostSse,
   getBlob: appGetBlob,
   postBlob: appPostBlob,
+  postFormData: appPostFormData,
 };
 
 /** This app's {@link PlatformWebHost}, memoised. Must run inside the auth provider. */
