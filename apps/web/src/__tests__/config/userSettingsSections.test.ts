@@ -30,10 +30,10 @@ describe('USER_SETTINGS_SECTIONS', () => {
       '/settings/tokens',
       // RETRO-H4 (#603): the Integrations section, appended.
       '/settings/webhooks',
+      // RETRO-I6 (#588): the `Sharing` group (the platform groups page), before `Your data`.
+      '/settings/groups',
       // RETRO-H2 (#596): the `Your data` group, before the Danger Zone.
       '/settings/data-export',
-      // RETRO-I6 (#588): the `Sharing` group (the platform groups page), before the Danger Zone.
-      '/settings/groups',
       // RETRO-H1 (#591): the pinned-last Danger Zone group.
       '/settings/danger-zone',
     ]);

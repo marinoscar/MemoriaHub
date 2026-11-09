@@ -131,20 +131,20 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     cards: [...webhooksUserSettingsSections.integrations],
   },
   {
+    // RETRO-I6 (#588): `Groups` (`/settings/groups`), the sharing slice's card and pages as data:
+    // the shared libraries that were circles. `groups:read` is the string `GET /api/groups`
+    // enforces (every role holds it); create, rename, members and invites are gated inside the
+    // pages (`groups:write`, the group's admin role). Added before `Your data`, which stays right before the pinned-last Danger Zone.
+    label: 'Sharing',
+    cards: [{ ...groupsSettingsPage.card, Icon: groupsSettingsPage.Icon }],
+  },
+  {
     // RETRO-H2 (#596): "Download your data", the exports slice's card and page as data
     // (`dataExportSettingsPage`, route `/settings/data-export`, where `export.ready` links).
     // Added BEFORE the pinned-last Danger Zone group. No `permission`: the API checks each
     // source (`user-data` on `user_settings:read`, MemoriaHub's on `media:read`, both every role).
     label: 'Your data',
     cards: [{ ...dataExportSettingsPage.card, Icon: dataExportSettingsPage.Icon }],
-  },
-  {
-    // RETRO-I6 (#588): `Groups` (`/settings/groups`), the sharing slice's card and pages as data:
-    // the shared libraries that were circles. `groups:read` is the string `GET /api/groups`
-    // enforces (every role holds it); create, rename, members and invites are gated inside the
-    // pages (`groups:write`, the group's admin role). Added BEFORE the pinned-last Danger Zone.
-    label: 'Sharing',
-    cards: [{ ...groupsSettingsPage.card, Icon: groupsSettingsPage.Icon }],
   },
   {
     // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to
