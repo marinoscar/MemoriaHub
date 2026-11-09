@@ -478,21 +478,16 @@ apps/api/src/storage/
 
 ### 5.5 Family Circles Module
 
-The `circles/` module provides the shared-library collaboration layer. It is the authorization root for all circle-scoped resources.
+The `circles/` module provides the shared-library routes (`/api/circles/*`: CRUD, members, invites) until RETRO-I5/I6 move them to the platform's `/api/groups`. Since RETRO-I3 (#573) it is no longer the authorization root: every circle-scoped check is `OwnerAccessService` (`apps/api/src/platform/sharing/owner-scope.ts`), deciding on the platform sharing groups the circles are mirrored into (RETRO-I2). Mapping: [docs/platform-adoption/circles-to-groups.md](platform-adoption/circles-to-groups.md) §0c.
 
 #### Module Structure
 
 ```
 apps/api/src/circles/
-├── circles.module.ts
+├── circles.module.ts              # imports OwnerAccessModule
 ├── circles.controller.ts          # CRUD + members + invites endpoints
-├── circles.service.ts             # Business logic (create, list, members, invites)
-├── circle-membership.service.ts   # resolveRole, assertCircleAccess (separate service
-│                                  # to avoid circular imports with MediaModule/StorageModule)
-├── guards/
-│   └── circle-member.guard.ts
-├── decorators/
-│   └── circle-role.decorator.ts
+├── circles.service.ts             # create, list, members, invites; invalidates cached memberships
+├── identity-listeners.ts          # personal circle at sign-up, invite claim at sign-in
 └── dto/
     ├── create-circle.dto.ts
     ├── update-circle.dto.ts
@@ -500,30 +495,36 @@ apps/api/src/circles/
     ├── add-member.dto.ts
     ├── update-member-role.dto.ts
     └── create-invite.dto.ts
+
+apps/api/src/platform/sharing/
+├── owner-scope.ts                 # OwnerAccessService: requireOwnerRole, roleIn, invalidateMembers
+└── owner-access.module.ts         # imported by every feature module that checks a scope
 ```
 
 #### Authorization Flow
 
 ```
-API request with circleId
+API request with circleId (the owner scope id)
         │
         ▼
-CircleMembershipService.assertCircleAccess(userId, circleId, permissions, required)
+OwnerAccessService.requireOwnerRole(userId, scopeId, permissions, 'viewer' | 'editor' | 'admin')
         │
-        ├── isSuperAdmin = permissions includes circles:manage_any
+        ├── bypass = permissions include groups:admin (or the deprecated circles:manage_any)
         │   OR media:read_any OR media:write_any
-        │   └── if true: bypass membership check, return { role, isSuperAdmin: true }
+        │   └── if true: no membership check, return { role, isSuperAdmin: true }
         │
-        ├── circle existence check (404 if not found)
+        ├── resolve the scope: personal circle -> its owner; shared circle -> the group of the same id
+        │   └── unknown -> 404
         │
-        ├── resolveRole(userId, circleId) → CircleRole | null
-        │   └── null → 403 "not a member of this circle"
+        ├── role: the owner of a personal library is 'admin'; otherwise the caller's group_members
+        │   role via the sharing slice's PrincipalGroupsProvider
+        │   └── none -> 404 (the same body as an unknown scope; was 403 before RETRO-I3)
         │
-        └── ROLE_RANK[role] >= ROLE_RANK[required]
-            └── if insufficient → 403 "requires <role> or higher"
+        └── groupRoleAtLeast(role, required)
+            └── if insufficient -> 403 "requires <role> or higher"
 ```
 
-Per-circle role ranking: `viewer (1) < collaborator (2) < circle_admin (3)`.
+Role ranking: `viewer (1) < editor (2) < admin (3)` (the circle roles `viewer`, `collaborator`, `circle_admin`).
 
 #### LocalDiskStorageProvider
 
