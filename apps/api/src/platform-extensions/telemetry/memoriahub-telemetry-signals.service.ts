@@ -26,6 +26,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { readNodeCapabilities, type CapabilityCounts } from './gauges/fleet.gauges';
 import { memoizedRead, type MemoizedRead } from './gauges/memoized-read';
 import {
@@ -71,13 +72,15 @@ export class MemoriaHubTelemetrySignals {
 
   constructor(
     private readonly prisma: PrismaService,
+    // The bypass pool, for the cross-organization `storage_objects` backlog count (reason `admin-aggregate`).
+    private readonly system: PrismaSystemService,
     @Optional() private readonly jobHandlers?: JobHandlerRegistry,
   ) {
     const options = { now: () => this.now(), logger: this.logger };
     this.backlog = memoizedRead(
       'media.processing.backlog',
       async () => {
-        const counts = await readProcessingBacklog(this.prisma);
+        const counts = await readProcessingBacklog(this.system.asSystem('admin-aggregate'));
         this.recordBacklogSample(counts.processing);
         return counts;
       },
