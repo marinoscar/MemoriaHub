@@ -1,5 +1,6 @@
 import { api } from './api';
 import { createTrashEmptyRun } from './trashEmptyRuns';
+import { rewriteEndpoint } from './ownerScopeParams';
 import type { CreateTrashEmptyRunResponse } from '../types/trashEmptyRuns';
 import type { EnhanceParams } from './enhance';
 import type {
@@ -678,7 +679,9 @@ export async function exportMedia(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`/api/media/export?${searchParams.toString()}`, {
+  // RETRO-I6 (#588): a raw fetch bypasses `api.ts`, so apply its owner-scope rewrite here.
+  const endpoint = rewriteEndpoint(`/media/export?${searchParams.toString()}`);
+  const response = await fetch(`/api${endpoint}`, {
     method: 'GET',
     headers,
     credentials: 'include',

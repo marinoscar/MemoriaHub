@@ -2,6 +2,7 @@
 // Sends the FULL message history each call; backend is stateless.
 import { api } from './api';
 import type { MediaItem, MediaListMeta } from '../types/media';
+import { rewriteBody } from './ownerScopeParams';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -37,7 +38,9 @@ export async function streamAgent(
     method: 'POST',
     headers,
     credentials: 'include',
-    body: JSON.stringify(body),
+    // RETRO-I6 (#588): this stream bypasses `api.ts`, so it applies the same
+    // owner-scope rewrite (`circleId` -> `ownerGroupId` / `scope=me`).
+    body: JSON.stringify(rewriteBody('/search/agent', body)),
     signal,
   });
 
