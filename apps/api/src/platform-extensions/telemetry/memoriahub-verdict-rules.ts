@@ -23,6 +23,9 @@
 // `worker_nodes` tables) through `MemoriaHubTelemetrySignals`, refreshed in the
 // background at most once a minute. Seam gap reported on #628 (see
 // docs/platform-adoption/local-exceptions.md).
+//
+// PLATFORM-ADOPTION-SHIM(#628): the verdict reads PostgreSQL because the platform's
+// `VerdictInput` carries no window and no app metric (seam gap; local-exceptions.md).
 // =============================================================================
 
 /** The job types MemoriaHub's enrichment failure rule judges (each separately). */

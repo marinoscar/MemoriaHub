@@ -17,6 +17,9 @@
 //
 // The verdict signals are refreshed in the background: `verdictSignals()` returns
 // the last snapshot at once (the policy is synchronous) and starts a refresh.
+//
+// PLATFORM-ADOPTION-SHIM(#628): the verdict reads PostgreSQL because the platform's
+// `VerdictInput` carries no window and no app metric (seam gap; local-exceptions.md).
 // =============================================================================
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
