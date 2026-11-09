@@ -21,7 +21,7 @@ GitHub issue #98 shipped in two passes. The first pass landed DB migration, back
 - **keep_both now inherits the source item's metadata**, not just the AI breadcrumb (§5.2) — a follow-up fix within the same pass.
 - **Enhanced dimensions are read from the actual returned bytes**, not the requested canvas (§4.2) — `gpt-image-1` does not always honor the requested size, and the previous behavior could record wrong dims for the downscale warning and the keep_both item.
 - **Drawer rebuilt** (§9.3) around the new presets, a distinguished queued-vs-enhancing progress state with elapsed time, a draggable before/after slider with side-by-side toggle and full-screen zoom, and client-side replace-policy gating.
-- **§8.6 endpoints shipped as designed**: `PUT /api/ai/features/enhance` and `GET /api/ai/models?provider=openai&capability=image` (curated `['gpt-image-1']` list) both landed unchanged from the original draft.
+- **§8.6 endpoints shipped as designed**: `PUT /api/admin/memoriahub-ai/features/enhance` and `GET /api/admin/memoriahub-ai/models?provider=openai&capability=image` (curated `['gpt-image-1']` list) both landed unchanged from the original draft.
 - Two decisions from the original draft remain genuinely unshipped and are still open: the two-tier analyze-then-edit flag (`pictureEnhancement.analyzeFirst`, §4.3/§14 #4) and the first-class `aiEnhancedAt` column (§5.3/§14 #6). Everything else in this document (data model, endpoints, RBAC, config keys, Doctor check, retention cron) matches what was built; see [§14](#14-open-decisions-summary) for the resolved-decisions summary.
 - **A second follow-up — issue #201 PR1, "the AI Enhancements hub" — landed after phase G** and shipped a cross-item landing spot for the feature, which until now was reachable only per-item (gallery selection bar / lightbox). New: a `GET /api/media/enhancements` endpoint (§8.9) listing every enhancement in a circle regardless of which media item it belongs to; a `/enhancements` hub page (§9.7) with three tabs — **Pending review is live** (list, expiry countdown, review/keep-both/discard actions), **Enhanced photos** and **History** are placeholders, both deferred to PR3; a new "AI Enhancements" entry in the sidebar's Utilities section carrying the app's first sidebar nav-badge; a `pendingEnhancements` count on `GET /api/media/dashboard`, landed in the same commit as a fix for a pre-existing contract drift (`pendingBurstGroups`/`pendingDuplicateGroups`/`pendingLocationSuggestions` were returned top-level while the web client read them under `counts.*`, leaving those three Home review-queue banners permanently dead); and `pictureEnhancement.retentionHours`'s default raised **72h → 168h (7 days)**, since a hub users work through over time — rather than a use-immediately dialog — was being undercut by a retention window that reaped unreviewed, already-billed enhancements before anyone got to them. Bulk actions on the hub (multi-select, threshold-based bulk resolve) are explicitly **not** part of PR1 — see §15.
 - **Bulk enhance START shipped (epic #420, issues #421/#424) — bulk REVIEW still is not.** `POST /api/media/bulk/enhance` (a selection) and `POST /api/media/bulk/enhance/by-filter` (a saved/ad-hoc filter, resolved server-side) each queue up to `pictureEnhancement.maxBatchSize` (default 25) individual `picture_enhancement` jobs behind one new `media_enhancement_batches` row, polled via `GET /api/enhancement-batches/:id` and cancellable via `.../cancel`. This is **not** built on the `review_runs`/`review_run_items` engine the §15 table used to say it would be — see the new §6.6 for why a second evaluate/execute-batch engine would only re-implement work the existing per-item `picture_enhancement` job already does. What genuinely remains unbuilt is reviewing the *results*: the hub's Pending review tab is still single-item keep-both/replace/discard, so a 25-photo batch is still 25 individual decisions — see the corrected [§15](#15-future-work).
@@ -394,7 +394,7 @@ Validated via the shared Zod schema (`apps/api/src/settings/registry/namespaces/
 | Setting key | Type | Range | Default | Description |
 |-------------|------|-------|---------|-------------|
 | `features.pictureEnhancement` | boolean | — | `false` | Global on/off. Gates the trigger, endpoints, and enqueue. |
-| `ai.features.enhance` | object | — | `null` | Active `{ provider, model }` for enhancement (set via `PUT /api/ai/features/enhance`). |
+| `ai.features.enhance` | object | — | `null` | Active `{ provider, model }` for enhancement (set via `PUT /api/admin/memoriahub-ai/features/enhance`). |
 | `pictureEnhancement.defaultQuality` | enum | low\|medium\|high | `high` | `gpt-image-1` quality. |
 | `pictureEnhancement.defaultStrength` | enum | subtle\|balanced\|strong | `balanced` | Default correction aggressiveness. |
 | `pictureEnhancement.stampExif` | boolean | — | `true` | Whether `ExifCarryoverService` copies the original's EXIF/GPS/IPTC/XMP/ICC onto the enhanced file and stamps the AI marker (§5.1/§5.4). Shipped and honored — previously a dead setting with no writer behind it; see [Implementation status (v1)](#implementation-status-v1). |
@@ -416,7 +416,7 @@ The queue is governed by the shared enrichment-worker vars (`ENRICHMENT_WORKER_E
 
 ## 8. API Endpoints
 
-All endpoints require JWT Bearer authentication. No new system-level RBAC permission scopes are introduced — media endpoints reuse `media:read`/`media:write` + per-circle roles; model selection reuses `ai_settings:*`, consistent with sibling features.
+All endpoints require JWT Bearer authentication. No new system-level RBAC permission scopes are introduced — media endpoints reuse `media:read`/`media:write` + per-circle roles; model selection reuses `ai_config:*`, consistent with sibling features.
 
 ### 8.1 `POST /api/media/:id/enhance`
 Start an enhancement. Gated on `features.pictureEnhancement`.
@@ -461,14 +461,14 @@ Commit the result.
 Delete staging bytes, row → `discarded`. Response `204`. (`media:write` + `collaborator`.)
 
 ### 8.6 AI model selection (Admin)
-- `PUT /api/ai/features/enhance` body `{ provider, model }` — set active enhancement provider+model (`ai_settings:write`, Admin). New `SetEnhanceFeatureDto`; extends the `ai.features` Zod schema; updates the `getSettings` default.
-- `GET /api/ai/models?provider=openai&capability=image` — list image-capable models. New `capability=image` branch → curated list (`['gpt-image-1']`) since `client.models.list()` output is filtered *out* by the chat-model `isEligibleOpenAiModel` regex; image models need their own curated source.
+- `PUT /api/admin/memoriahub-ai/features/enhance` body `{ provider, model }` — set active enhancement provider+model (`ai_config:write`, Admin). New `SetEnhanceFeatureDto`; extends the `ai.features` Zod schema; updates the `getSettings` default.
+- `GET /api/admin/memoriahub-ai/models?provider=openai&capability=image` — list image-capable models. New `capability=image` branch → curated list (`['gpt-image-1']`) since `client.models.list()` output is filtered *out* by the chat-model `isEligibleOpenAiModel` regex; image models need their own curated source.
 
 ### 8.7 Admin status *(for Doctor + settings UI)*
-- `GET /api/admin/ai/enhance/status` — `{ featureEnabled, provider, model, credentialConfigured, ready }` (`system_settings:read` or `ai_settings:read`, Admin). Backs the Doctor check (§11) and the `/admin/settings/enhancer` readiness panel (§9.6).
+- `GET /api/admin/memoriahub-ai/enhance/status` — `{ featureEnabled, provider, model, credentialConfigured, ready }` (`system_settings:read` or `ai_config:read`, Admin). Backs the Doctor check (§11) and the `/admin/settings/enhancer` readiness panel (§9.6).
 
 ### 8.8 `GET /api/features` *(any authenticated user)*
-Least-privilege carrier added in the follow-up pass to fix the button-never-renders-for-non-admins gap (see [Implementation status (v1)](#implementation-status-v1)). Unlike every other endpoint in this section, it is **not** gated by `media:*`/`ai_settings:*` — it requires authentication only (`@Auth()` with no roles/permissions), so any logged-in user, regardless of role or circle membership, can call it.
+Least-privilege carrier added in the follow-up pass to fix the button-never-renders-for-non-admins gap (see [Implementation status (v1)](#implementation-status-v1)). Unlike every other endpoint in this section, it is **not** gated by `media:*`/`ai_config:*` — it requires authentication only (`@Auth()` with no roles/permissions), so any logged-in user, regardless of role or circle membership, can call it.
 - **Auth:** authenticated (any role, no permission).
 - **Response `200`:**
   ```json
@@ -596,7 +596,7 @@ Optionally add an "Enhance with AI" button + "AI Enhanced" badge in `MediaDetail
 ### 9.6 Admin settings page — `/admin/settings/enhancer`
 `pages/Admin/EnhancerSettingsPage.tsx`, added because `features.pictureEnhancement` was, before this page existed, the only one of the app's eight feature flags with no UI toggle anywhere — the sole way to turn the enhancer on was a hand-crafted `PATCH /api/system-settings`. Modeled on the sibling per-feature admin pages, three sections:
 1. **Global Settings** — the `features.pictureEnhancement` master toggle (`system_settings:write`, Admin).
-2. **Readiness panel** — consumes `GET /api/admin/ai/enhance/status` (§8.7, previously wired but never read by any UI) so an admin who enables the feature without configuring an image model sees the gap immediately instead of finding out from a user's failed 400.
+2. **Readiness panel** — consumes `GET /api/admin/memoriahub-ai/enhance/status` (§8.7, previously wired but never read by any UI) so an admin who enables the feature without configuring an image model sees the gap immediately instead of finding out from a user's failed 400.
 3. **Defaults & policy** — the seven `pictureEnhancement.*` settings (§7.1): `defaultQuality`, `defaultStrength`, `stampExif` (default reflected as **on**, matching the shipped server default), `allowReplace`, `blockReplaceOnDownscale`, `maxInputMegapixels`, `retentionHours`.
 
 Reachable from `/admin/settings` (Settings hub) and linked from `pages/Admin/AiSettingsPage.tsx`, which previously pointed users at a "Picture Enhancement feature toggle in System Settings" that did not exist.
@@ -627,10 +627,10 @@ Since epic #420, the Pending review tab also accepts a `?batchId=` URL param (§
 | `GET /api/media/:id/enhance[/:id]` | `media:read` | `viewer` | signed compare URLs |
 | `POST …/enhance/:id/apply` | `media:write` | `collaborator` | keep_both creates item; replace overwrites |
 | `POST …/enhance/:id/discard` | `media:write` | `collaborator` | |
-| `PUT /api/ai/features/enhance` | `ai_settings:write` | — (Admin) | model selection |
-| `GET /api/ai/models?capability=image` | `ai_settings:read` | — (Admin) | |
-| `GET /api/admin/ai/enhance/status` | `system_settings:read` | — (Admin) | Doctor + `/admin/settings/enhancer` readiness panel |
-| `GET /api/features` | *(none)* | — (any authenticated user) | §8.8; deliberately **not** gated by `media:*`/`ai_settings:*` — this is the least-privilege carrier that makes the trigger and drawer policy reachable for non-admin circle members |
+| `PUT /api/admin/memoriahub-ai/features/enhance` | `ai_config:write` | — (Admin) | model selection |
+| `GET /api/admin/memoriahub-ai/models?capability=image` | `ai_config:read` | — (Admin) | |
+| `GET /api/admin/memoriahub-ai/enhance/status` | `system_settings:read` | — (Admin) | Doctor + `/admin/settings/enhancer` readiness panel |
+| `GET /api/features` | *(none)* | — (any authenticated user) | §8.8; deliberately **not** gated by `media:*`/`ai_config:*` — this is the least-privilege carrier that makes the trigger and drawer policy reachable for non-admin circle members |
 | `POST /api/media/bulk/enhance[/by-filter]` | `media:write` | `collaborator` | §8.10/§8.11; batch cap enforced from `pictureEnhancement.maxBatchSize`, not a new permission |
 | `GET /api/enhancement-batches[/:id]` | `media:read` | `viewer` | §8.12/§8.13 |
 | `POST /api/enhancement-batches/:id/cancel` | `media:write` | `collaborator` | §8.14 |

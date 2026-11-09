@@ -76,7 +76,7 @@ The embedding feature is a separate AI feature setting stored in `system_setting
 }
 ```
 
-Set via `PUT /api/ai/features/embedding` (Admin, `ai_settings:write`). The same provider credential already stored via `PUT /api/ai/credentials/openai` is used — no separate credential is needed.
+Set via `PUT /api/admin/memoriahub-ai/features/embedding` (Admin, `ai_config:write`). The same provider credential already stored via `PUT /api/admin/ai/providers/openai/key` is used — no separate credential is needed.
 
 **Provider constraint:** only providers that implement `embedText` can be selected. Currently `openai` is the only supported provider; `anthropic` does not offer an embeddings API and throws if called. Attempting to configure a provider without `embedText` support will silently skip embedding at job time (the tagging step still succeeds).
 
@@ -89,7 +89,7 @@ Set via `PUT /api/ai/features/embedding` (Admin, `ai_settings:write`). The same 
 
 The `media_item_embedding` table is created with `vector(1536)` so only 1536-d models are usable without a schema change.
 
-**Admin UI — AI Description Search:** The AI Settings page exposes a dedicated "AI Description Search" section where an admin can enable the embedding feature, select the OpenAI model, and click "Test" to verify connectivity. The Test button calls `POST /api/ai/test/embedding` and surfaces a dimension-mismatch warning (dimensions != 1536) inline before the admin saves the configuration. Embeddings require OpenAI credentials (`PUT /api/ai/credentials/openai`) — no other provider supports `embedText`. The embedding model list is retrieved via `GET /api/ai/models?provider=openai&capability=embedding`.
+**Admin UI — AI Description Search:** The AI Settings page exposes a dedicated "AI Description Search" section where an admin can enable the embedding feature, select the OpenAI model, and click "Test" to verify connectivity. The Test button calls `POST /api/admin/memoriahub-ai/test/embedding` and surfaces a dimension-mismatch warning (dimensions != 1536) inline before the admin saves the configuration. Embeddings require OpenAI credentials (`PUT /api/admin/ai/providers/openai/key`) — no other provider supports `embedText`. The embedding model list is retrieved via `GET /api/admin/memoriahub-ai/models?provider=openai&capability=embedding`.
 
 ---
 
@@ -246,11 +246,11 @@ See [auto-tagging.md — People-Change Re-Enqueue](auto-tagging.md#people-change
 
 ## 9. API Reference
 
-### `PUT /api/ai/features/embedding`
+### `PUT /api/admin/memoriahub-ai/features/embedding`
 
 Set the active AI provider and model for text embedding.
 
-- **Auth**: Admin role + `ai_settings:write`
+- **Auth**: Admin role + `ai_config:write`
 - **Request body**:
   ```json
   { "provider": "openai", "model": "text-embedding-3-small" }
