@@ -116,6 +116,7 @@ import '../src/app-registrations/alerts';
 // Fills the user-data registries (categories, scopes, model hints, factory reset steps).
 import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
+import { API_SOURCE_ROOT, CRON_SOURCE_ROOTS } from './jobs/cron-source-roots';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 // Registers the exports slice's writers and sources (platform `user-data` / `org-data` plus
@@ -140,7 +141,7 @@ const PLATFORM_RAW_SQL_INDEX_NAMES: string[] = (
 ).indexes.map((index) => index.name);
 
 runPlatformConformance({
-  sourceRoots: [join(__dirname, '..', 'src')],
+  sourceRoots: [...CRON_SOURCE_ROOTS],
   suites: {
     // Identity (RETRO-B2, #611). The walk reads Nest metadata from AppModule; the
     // registries are the ones `permission-manifest.ts` filled.
@@ -175,22 +176,49 @@ runPlatformConformance({
     // `*Info` schema can carry a secret.
     credentials: { appOwners: [...APP_CREDENTIAL_OWNERS] },
 
-    // Jobs (RETRO-C1, #575).
-    // Both suites are wired and OPTED OUT with the reason, so the debt is visible in the run summary
-    // until the issue that pays it enables the suite (with `exempt` for the three platform
-    // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
-    // files (the db-backup one is gone since RETRO-D4: the platform task only enqueues; insights, memories, node-backup, node-prune, notification-reconcile,
-    // share-expiring, storage-processing-recovery and workflow crons; storage-cleanup is gone since
-    // RETRO-D1, the platform's stale-upload cron only enqueues) and one listener download (the old
-    // object-processing listener, gone since RETRO-D1: `onEventNoIo` is on below).
+    // Jobs (RETRO-C1, #575; both suites ON since RETRO-C9, #612).
+    // `cron-enqueue-only`: every `@Cron` body enqueues (`enqueueHousekeepingJob` or
+    // `JobsService.enqueue`) and does no work inline. RETRO-C9 moved the last inline
+    // bodies into jobs (`workflows.schedule_tick`, `workflows.micro_run_finalize`,
+    // `notifications.review_queue_reconcile`, `shares.expiring_sweep`,
+    // `node_backup.stale_sweep`; test/jobs/cron-tasks.conformance.spec.ts). The three
+    // permanent platform exemptions are not listed: the installed package ships no
+    // `.ts` sources to scan (test/jobs/cron-source-roots.ts). The two exemptions below
+    // are TEMPORARY, each with a local-exceptions row and the issue that removes it.
     cronEnqueueOnly: {
-      skip:
-        'RETRO-C9 (cron remediation) turns the crons that still work inline into enqueue-only ones; ' +
-        'until then 13 cron files fail this suite. The queue they enqueue into is the platform\'s since RETRO-C1.',
+      exempt: [
+        {
+          file: 'nodes/node-stale-offline.task.ts',
+          root: API_SOURCE_ROOT,
+          why:
+            'TEMPORARY until RETRO-C2 (#581): the legacy worker-node staleness sweep (inline updateMany) is ' +
+            'replaced by the platform nodes slice fleet sweep, which only enqueues; no app job type is invented for it.',
+        },
+        {
+          file: 'nodes/node-offline-prune.task.ts',
+          root: API_SOURCE_ROOT,
+          why:
+            'TEMPORARY until RETRO-C2 (#581): the legacy offline worker-node prune (inline deleteMany) is ' +
+            'replaced by the platform nodes slice fleet prune, which only enqueues; no app job type is invented for it.',
+        },
+      ],
+      // 14 cron files in apps/api/src at RETRO-C9; the floor is a vacuity guard.
+      minCronFiles: 14,
     },
     // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
     // object-processing listener that downloaded bytes is gone.
-    onEventNoIo: { minListenerFiles: 7 }, // 7 since RETRO-D3 removed the broadcast-failure listener
+    // RETRO-C9 (#612): the listeners the issue names are pinned with `mustScan`, so a move cannot
+    // drop one out of the scan silently.
+    onEventNoIo: {
+      minListenerFiles: 7, // 7 since RETRO-D3 removed the broadcast-failure listener
+      mustScan: [
+        'media/sync/media-metadata-sync.service.ts',
+        'media/enrichment/media-enrichment-enqueue.listener.ts',
+        'workflows/runs/workflow-trigger.listener.ts',
+        'notification-producers/enrichment-failure-notification.listener.ts',
+        'media-processing/media-object-processing.service.ts',
+      ],
+    },
 
     // Every MemoriaHub writer's key prefix is registered (platform/storage/storage-key-prefix.manifest.ts).
     storage: { requiredPrefixIds: [...MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS] },

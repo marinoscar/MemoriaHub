@@ -132,7 +132,7 @@ describe('MemoryDigestTask', () => {
   // -------------------------------------------------------------------------
 
   it('enqueues one job for a due circle, with skipDedup', async () => {
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.enqueued).toBe(1);
     expect(enrichment.enqueue).toHaveBeenCalledWith(
@@ -162,7 +162,7 @@ describe('MemoryDigestTask', () => {
   it('features.memories off ⇒ no circle paging, no jobs, no emails', async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ memoriesEnabled: false }));
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('feature_disabled');
     expect(result.enqueued).toBe(0);
@@ -172,7 +172,7 @@ describe('MemoryDigestTask', () => {
   it('memories.digest.enabled=false is the admin global kill', async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ digestEnabled: false }));
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('digest_disabled');
     expect(prisma.circle.findMany).not.toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe('MemoryDigestTask', () => {
   it("frequency 'off' produces nothing", async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ frequency: 'off' }));
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('frequency_off');
     expect(enrichment.enqueue).not.toHaveBeenCalled();
@@ -190,7 +190,7 @@ describe('MemoryDigestTask', () => {
   it('email unconfigured ⇒ the task no-ops (in-app memories unaffected)', async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ emailEnabled: false }));
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('email_unconfigured');
     expect(prisma.circle.findMany).not.toHaveBeenCalled();
@@ -200,7 +200,7 @@ describe('MemoryDigestTask', () => {
   it('holds off until the configured send hour', async () => {
     const beforeHour = new Date('2026-08-09T03:00:00.000Z');
 
-    const result = await task.sweep(beforeHour);
+    const result = await task.handleScheduledDigest(beforeHour);
 
     expect(result.gate).toBe('before_send_hour');
     expect(enrichment.enqueue).not.toHaveBeenCalled();
@@ -209,8 +209,8 @@ describe('MemoryDigestTask', () => {
   it('honours a non-default send hour', async () => {
     settings.getSettings.mockResolvedValue(settingsWith({ sendHourUtc: 14 }));
 
-    expect((await task.sweep(new Date('2026-08-09T13:00:00.000Z'))).enqueued).toBe(0);
-    expect((await task.sweep(new Date('2026-08-09T14:00:00.000Z'))).enqueued).toBe(1);
+    expect((await task.handleScheduledDigest(new Date('2026-08-09T13:00:00.000Z'))).enqueued).toBe(0);
+    expect((await task.handleScheduledDigest(new Date('2026-08-09T14:00:00.000Z'))).enqueued).toBe(1);
   });
 
   // -------------------------------------------------------------------------
@@ -220,7 +220,7 @@ describe('MemoryDigestTask', () => {
   it('skips a circle whose digest job is already pending or running', async () => {
     prisma.job.findMany.mockResolvedValue([{ subjectId: 'circle-1' }]);
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.skipped).toBe(1);
     expect(result.enqueued).toBe(0);
@@ -235,7 +235,7 @@ describe('MemoryDigestTask', () => {
       },
     ]);
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.skipped).toBe(1);
     expect(enrichment.enqueue).not.toHaveBeenCalled();
@@ -249,7 +249,7 @@ describe('MemoryDigestTask', () => {
       },
     ]);
 
-    expect((await task.sweep(AFTER_SEND_HOUR)).enqueued).toBe(1);
+    expect((await task.handleScheduledDigest(AFTER_SEND_HOUR)).enqueued).toBe(1);
   });
 
   it('a weekly cadence is not due after one day', async () => {
@@ -261,13 +261,13 @@ describe('MemoryDigestTask', () => {
       },
     ]);
 
-    expect((await task.sweep(AFTER_SEND_HOUR)).enqueued).toBe(0);
+    expect((await task.handleScheduledDigest(AFTER_SEND_HOUR)).enqueued).toBe(0);
   });
 
   it('a circle that has never had a digest is always past the window', async () => {
     prisma.job.groupBy.mockResolvedValue([]);
 
-    expect((await task.sweep(AFTER_SEND_HOUR)).enqueued).toBe(1);
+    expect((await task.handleScheduledDigest(AFTER_SEND_HOUR)).enqueued).toBe(1);
   });
 
   it('the one-tick tolerance keeps a daily digest pinned to its hour', async () => {
@@ -280,7 +280,7 @@ describe('MemoryDigestTask', () => {
       },
     ]);
 
-    expect((await task.sweep(AFTER_SEND_HOUR)).enqueued).toBe(1);
+    expect((await task.handleScheduledDigest(AFTER_SEND_HOUR)).enqueued).toBe(1);
   });
 
   // -------------------------------------------------------------------------
@@ -290,7 +290,7 @@ describe('MemoryDigestTask', () => {
   it('NEVER enqueues when there is no new content since the watermark', async () => {
     loadCandidates.mockResolvedValue([]);
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.skipped).toBe(1);
     expect(result.enqueued).toBe(0);
@@ -303,7 +303,7 @@ describe('MemoryDigestTask', () => {
       { subjectId: 'circle-1', _max: { finishedAt: watermark } },
     ]);
 
-    await task.sweep(AFTER_SEND_HOUR);
+    await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(loadCandidates).toHaveBeenCalledWith('circle-1', watermark);
   });
@@ -318,7 +318,7 @@ describe('MemoryDigestTask', () => {
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ id: 'job-2' });
 
-    const result = await task.sweep(AFTER_SEND_HOUR);
+    const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.errors).toBe(1);
     expect(result.enqueued).toBe(1);
@@ -328,7 +328,7 @@ describe('MemoryDigestTask', () => {
   it('the cron never throws, even when the sweep blows up', async () => {
     settings.getSettings.mockRejectedValue(new Error('db down'));
 
-    await expect(task.handleScheduledDigest()).resolves.toBeUndefined();
+    await expect(task.handleScheduledDigest()).resolves.toMatchObject({ enqueued: 0 });
   });
 
   it('the overlap guard skips a tick while a sweep is in flight', async () => {
@@ -351,7 +351,7 @@ describe('MemoryDigestTask', () => {
 
   describe('JobStatus filters', () => {
     it('reads in-flight and watermark rows with the right statuses', async () => {
-      await task.sweep(AFTER_SEND_HOUR);
+      await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
       expect(prisma.job.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

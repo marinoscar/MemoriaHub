@@ -118,7 +118,7 @@ describe('MemoriesGenerationTask', () => {
     it('treats an absent features.memories key as off', async () => {
       settings.getSettings.mockResolvedValue({ features: {} } as any);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result.enqueued).toBe(0);
       expect(prisma.circle.findMany).not.toHaveBeenCalled();
@@ -128,8 +128,8 @@ describe('MemoriesGenerationTask', () => {
       process.env['MEMORIES_ENABLED'] = 'false';
       settings.getSettings.mockResolvedValue(settingsWith({ enabled: true }));
 
-      // sweep() re-checks via isMemoriesEnabled, so even the direct call is safe.
-      const result = await task.sweep();
+      // The env kill-switch wins over the flag.
+      const result = await task.handleScheduledGeneration();
 
       expect(result.enqueued).toBe(0);
       expect(enrichment.enqueue).not.toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe('MemoriesGenerationTask', () => {
         { id: 'circle-b' },
       ]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ circles: 2, enqueued: 2, skipped: 0, errors: 0 });
       expect(enrichment.enqueue).toHaveBeenCalledTimes(2);
@@ -169,7 +169,7 @@ describe('MemoriesGenerationTask', () => {
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
       prisma.job.groupBy.mockResolvedValue([]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result.enqueued).toBe(1);
     });
@@ -181,7 +181,7 @@ describe('MemoriesGenerationTask', () => {
       ]);
       prisma.job.findMany.mockResolvedValue([{ subjectId: 'circle-a' }]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ enqueued: 1, skipped: 1 });
       expect(enrichment.enqueue).toHaveBeenCalledWith(
@@ -206,7 +206,7 @@ describe('MemoriesGenerationTask', () => {
         .mockRejectedValueOnce(new Error('db down'))
         .mockResolvedValueOnce({ id: 'job-2' });
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ circles: 2, enqueued: 1, errors: 1 });
     });
@@ -214,7 +214,7 @@ describe('MemoriesGenerationTask', () => {
     it('never throws out of the cron even when the sweep blows up', async () => {
       prisma.circle.findMany.mockRejectedValue(new Error('connection reset'));
 
-      await expect(task.handleScheduledGeneration()).resolves.toBeUndefined();
+      await expect(task.handleScheduledGeneration()).resolves.toMatchObject({ enqueued: 0 });
     });
   });
 
@@ -232,7 +232,7 @@ describe('MemoriesGenerationTask', () => {
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(1) } },
       ]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ enqueued: 0, skipped: 1 });
       expect(enrichment.enqueue).not.toHaveBeenCalled();
@@ -247,7 +247,7 @@ describe('MemoriesGenerationTask', () => {
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(25) } },
       ]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result.enqueued).toBe(1);
     });
@@ -262,7 +262,7 @@ describe('MemoriesGenerationTask', () => {
       ]);
 
       // 2h since the last run > the 1h interval → eligible again.
-      expect((await task.sweep()).enqueued).toBe(1);
+      expect((await task.handleScheduledGeneration()).enqueued).toBe(1);
     });
 
     it('falls back to a 24h interval when the setting is absent', async () => {
@@ -272,13 +272,13 @@ describe('MemoriesGenerationTask', () => {
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(12) } },
       ]);
 
-      expect((await task.sweep()).enqueued).toBe(0);
+      expect((await task.handleScheduledGeneration()).enqueued).toBe(0);
     });
 
     it('only counts SUCCEEDED jobs toward the interval gate', async () => {
       prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       expect(prisma.job.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -302,7 +302,7 @@ describe('MemoriesGenerationTask', () => {
         .mockResolvedValueOnce(page1)
         .mockResolvedValueOnce(page2);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result.circles).toBe(101);
       expect(result.enqueued).toBe(101);
@@ -320,7 +320,7 @@ describe('MemoriesGenerationTask', () => {
     it('stops immediately when there are no circles at all (fresh install)', async () => {
       prisma.circle.findMany.mockResolvedValue([]);
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ circles: 0, enqueued: 0 });
       expect(prisma.circle.findMany).toHaveBeenCalledTimes(1);
@@ -334,7 +334,7 @@ describe('MemoriesGenerationTask', () => {
         { id: 'circle-c' },
       ]);
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       expect(prisma.job.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.job.groupBy).toHaveBeenCalledTimes(1);

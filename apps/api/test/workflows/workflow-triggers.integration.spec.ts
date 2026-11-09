@@ -9,8 +9,8 @@
  * Phase 4 adds two UNATTENDED trigger types on top of the Phase 2 evaluate +
  * execute machinery: on_media_enriched (settlement-driven, via
  * WorkflowTriggerListener + WorkflowEvaluateItemHandler + rolling micro-runs
- * finalized by WorkflowMicroRunFinalizeTask) and scheduled (cron-driven, via
- * WorkflowScheduleTask). Both start a run through
+ * finalized by the workflows.micro_run_finalize job) and scheduled (cron-driven, via the
+ * workflows.schedule_tick job). Both start a run through
  * WorkflowRunService.startUnattendedRun, which skips awaiting_approval
  * entirely (see workflow-run.service.ts's shouldBypassApproval docblock).
  *
@@ -40,8 +40,8 @@ import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-sys
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { WorkflowTriggerListener } from '../../src/workflows/runs/workflow-trigger.listener';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowMicroRunFinalizeTask } from '../../src/workflows/runs/workflow-micro-run-finalize.task';
-import { WorkflowScheduleTask } from '../../src/workflows/runs/workflow-schedule.task';
+import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
+import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
 import { ObjectProcessedEvent } from '../../src/media-processing/events/object-processed.event';
 import { EnrichmentJobSettledEvent } from '../../src/enrichment/events/enrichment-job-settled.event';
@@ -292,7 +292,7 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       );
 
       // -----------------------------------------------------------------------
-      // 3. WorkflowMicroRunFinalizeTask's tick claims the (now past-window)
+      // 3. The workflows.micro_run_finalize job claims the (now past-window)
       //    micro-run and enqueues its execute-batch job.
       // -----------------------------------------------------------------------
       context.prismaMock.workflowRun.findMany.mockResolvedValue([
@@ -311,8 +311,8 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       context.prismaMock.workflowRunItem.count.mockResolvedValue(1); // 1 matched item
       context.prismaMock.workflowRunItem.findMany.mockResolvedValue([{ mediaItemId }] as any);
 
-      const finalizeTask = context.module.get(WorkflowMicroRunFinalizeTask);
-      await finalizeTask.handleTick();
+      const finalizeTask = context.module.get(WorkflowMicroRunFinalizeHandler);
+      await finalizeTask.process();
 
       const executeCall = (context.prismaMock.job.create as jest.Mock).mock.calls.find(
         (c) => c[0].data.type === 'workflow_execute_batch',
@@ -448,8 +448,8 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       context.prismaMock.workflowRun.count.mockResolvedValueOnce(1); // overlap: active run exists
       context.prismaMock.workflow.update.mockResolvedValue({} as any);
 
-      const scheduleTask = context.module.get(WorkflowScheduleTask);
-      await scheduleTask.handleTick();
+      const scheduleTask = context.module.get(WorkflowScheduleTickHandler);
+      await scheduleTask.process();
 
       expect(context.prismaMock.workflowRun.create).not.toHaveBeenCalled();
       const updateCall = (context.prismaMock.workflow.update as jest.Mock).mock.calls.find(
@@ -468,8 +468,8 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
         .mockResolvedValueOnce(2); // app-wide concurrency check: at the cap
       context.prismaMock.workflow.update.mockResolvedValue({} as any);
 
-      const scheduleTask = context.module.get(WorkflowScheduleTask);
-      await scheduleTask.handleTick();
+      const scheduleTask = context.module.get(WorkflowScheduleTickHandler);
+      await scheduleTask.process();
 
       expect(context.prismaMock.workflowRun.create).not.toHaveBeenCalled();
       expect(context.prismaMock.workflow.update).toHaveBeenCalledWith(
@@ -490,8 +490,8 @@ describe('Workflow Triggers Integration — Phase 4 (DB-gated)', () => {
       } as any);
       context.prismaMock.workflow.update.mockResolvedValue({} as any);
 
-      const scheduleTask = context.module.get(WorkflowScheduleTask);
-      await scheduleTask.handleTick();
+      const scheduleTask = context.module.get(WorkflowScheduleTickHandler);
+      await scheduleTask.process();
 
       const runCreateCall = (context.prismaMock.workflowRun.create as jest.Mock).mock.calls[0];
       expect(runCreateCall[0].data).toMatchObject({

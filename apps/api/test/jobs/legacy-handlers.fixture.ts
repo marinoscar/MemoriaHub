@@ -41,6 +41,11 @@ import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evalu
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
+import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
+import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
+import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
+import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
+import { NodeBackupStaleHandler } from '../../src/nodes/node-backup-stale.handler';
 
 /**
  * Every handler class the app registers, one per job type.
@@ -92,9 +97,15 @@ export const ALL_HANDLER_CLASSES = [
   // RETRO-D1b (#567): the storage processing recovery and the admin bulk reprocess.
   StorageRecoveryHandler,
   StorageReprocessHandler,
+  // RETRO-C9 (#612): the work of the crons that now only enqueue.
+  WorkflowScheduleTickHandler,
+  WorkflowMicroRunFinalizeHandler,
+  ReviewQueueReconcileHandler,
+  ShareExpiringHandler,
+  NodeBackupStaleHandler,
 ];
 
-/** The 37 permanent type strings with an app handler (RETRO-D3 retired three more: see below; RETRO-D1b added the two `media.storage.*`). */
+/** The 42 permanent type strings with an app handler (RETRO-D3 retired three more: see below; RETRO-D1b added the two `media.storage.*`; RETRO-C9 the five cron job types). */
 export const EXPECTED_JOB_TYPES = [
   'auto_tagging',
   'burst_detection',
@@ -109,6 +120,11 @@ export const EXPECTED_JOB_TYPES = [
   'location_inference',
   'media.storage.recover_stuck',
   'media.storage.reprocess',
+  'node_backup.stale_sweep',
+  'notifications.review_queue_reconcile',
+  'shares.expiring_sweep',
+  'workflows.micro_run_finalize',
+  'workflows.schedule_tick',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
   'memory_digest',
