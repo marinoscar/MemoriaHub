@@ -12,7 +12,8 @@
  *   - `sharing.grants.prune` is a registered, server-only job type;
  *   - `groups.invitation` and `sharing.shared_with_you` are registered
  *     notification events bound to MemoriaHub-layout e-mail templates;
- *   - the slice runs in single-organization mode with the #562 options.
+ *   - the slice runs in single-organization mode with the #562 options (invite
+ *     auto-accept on since RETRO-I5).
  *
  * The real-database tier is not needed here: RETRO-I1 writes no data.
  */
@@ -134,7 +135,10 @@ describe('platform sharing slice mount (RETRO-I1)', () => {
 
     const options = context.module.get<ResolvedSharingModuleOptions>(SHARING_OPTIONS, { strict: false });
     expect(options.groups.inviteTtlDays).toBeNull();
-    expect(options.groups.autoAcceptInvitesOnSignup).toBe(false);
+    // RETRO-I5 (#583): the slice claims pending invites at sign-up and every sign-in, upgrade-only.
+    expect(options.groups.autoAcceptInvitesOnSignup).toBe(true);
+    expect(options.groups.autoAcceptInvitesOnSignIn).toBe(true);
+    expect(options.groups.inviteRoleMerge).toBe('upgrade-only');
     expect(options.links.defaultTtlDays).toBeNull();
     expect(options.links.maxTtlDays).toBeNull();
   });

@@ -20,8 +20,9 @@
 // RETRO-I1 mounted it; RETRO-I2 registered `media_item` / `album` and mirrored
 // circles into groups. Since RETRO-I4 (#578) public shares ARE link grants
 // (`public-links/`: the guarded public views, the 410 for the retired
-// `/api/public/shares/*`, the admin listing). Circles, circle members and circle
-// invites stay app-owned until RETRO-I3/I5. The mapping every issue implements is
+// `/api/public/shares/*`, the admin listing). Since RETRO-I5 (#583) circle invites
+// ARE group invites (`circles.service.ts` delegates to `GroupInvitesService`).
+// Circles and circle members stay app-owned until RETRO-I6. The mapping every issue implements is
 // `docs/platform-adoption/circles-to-groups.md`.
 //
 // Options (decisions of #562):
@@ -30,8 +31,14 @@
 //   groups.membershipCacheTtlSeconds  the principal cache's TTL
 //                                     (AUTH_PRINCIPAL_CACHE_TTL_SECONDS), so both
 //                                     caches expire together
-//   groups.autoAccept*                left OFF: the app's own sign-in claim of
-//                                     circle invites stays until RETRO-I5
+//   groups.autoAcceptInvitesOnSignup  ON (RETRO-I5, #583): a new user's pending
+//   groups.autoAcceptInvitesOnSignIn  invites are claimed at sign-up, and every
+//                                     later sign-in claims invites sent since
+//                                     (the former circle-invite claim). The
+//                                     slice's listener does it (EAB #1078,
+//                                     RETRO-SEAM-INVITE-AUTOCLAIM), upgrade-only
+//                                     (`inviteRoleMerge` default), for the
+//                                     provider-verified address only
 //   links.appUrl                      APP_URL (link URL `${APP_URL}/s#lnk_...`)
 //   links.defaultTtlDays/maxTtlDays   null: a MemoriaHub public link may be
 //                                     "forever" (`expiresAt` null), and the links
@@ -56,6 +63,8 @@ export const SHARING_MODULE_OPTIONS: SharingModuleOptions = {
   imports: [SharingHostModule],
   groups: {
     inviteTtlDays: null,
+    autoAcceptInvitesOnSignup: true,
+    autoAcceptInvitesOnSignIn: true,
     membershipCacheTtlSeconds: parsePrincipalCacheTtlSeconds(process.env.AUTH_PRINCIPAL_CACHE_TTL_SECONDS),
   },
   links: {

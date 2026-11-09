@@ -1,6 +1,10 @@
 import type { OnboardingFactDef } from '@marinoscar/platform-api/onboarding';
 import { StorageConfigService } from '@marinoscar/platform-api/storage';
 import { MediaSyncDeviceStatus } from '@prisma/client';
+import type { UserPrincipal } from '@marinoscar/platform-api/core';
+import { GroupInvitesService } from '@marinoscar/platform-api/sharing';
+
+import { DefaultOrgId } from '../../common/tenancy/default-org-id';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiDeploymentKeySource } from '../../ai-port/ai-deployment-key-source';
@@ -21,7 +25,8 @@ import { isMemoriesEnabled } from '../../settings/feature-gates';
 //   memoriahub.media_counts        one `count(... take: 1)` on media_items by added_by_id
 //   memoriahub.album_counts        one `count(... take: 1)` on albums by added_by_id
 //   memoriahub.circle_membership   the caller's collaborator+ memberships (at most 100 rows),
-//                                  then two `count(... take: 1)`: another member, a pending invite
+//                                  then one `count(... take: 1)` (another member) and, only when
+//                                  there is none, at most 5 one-row group-invite pages (RETRO-I5)
 //   memoriahub.people_named        one `count(... take: 1)` over named people in the caller's circles
 //   memoriahub.devices             two `count(... take: 1)`: an active Media Sync device, an active PAT
 //   memoriahub.feature_readiness   the cached system settings (5 s TTL) plus at most two
@@ -118,24 +123,55 @@ export const ALBUM_COUNTS_FACT: OnboardingFactDef<AlbumCountsFact> = {
 /** At most this many memberships are read (a user in more circles than this is not a first-run user). */
 export const MEMBERSHIP_READ_CAP = 100;
 
+/** At most this many administered circles are probed for a pending invite. */
+export const INVITE_PROBE_CAP = 5;
+
 export const CIRCLE_MEMBERSHIP_FACT: OnboardingFactDef<CircleMembershipFact> = {
   id: MEMORIAHUB_ONBOARDING_FACTS.CIRCLE_MEMBERSHIP,
   resolve: async (ctx) => {
     const prisma = ctx.get(PrismaService);
     const memberships = await prisma.circleMember.findMany({
       where: { userId: ctx.caller.id, role: { in: ['collaborator', 'circle_admin'] } },
-      select: { circleId: true },
+      select: { circleId: true, role: true, circle: { select: { isPersonal: true } } },
       take: MEMBERSHIP_READ_CAP,
     });
     const circleIds = memberships.map((m) => m.circleId);
     if (circleIds.length === 0) return { collaboratorCircles: 0, otherMembers: 0, pendingInvites: 0 };
-    const [otherMembers, pendingInvites] = await Promise.all([
-      prisma.circleMember.count({
-        where: { circleId: { in: circleIds }, userId: { not: ctx.caller.id } },
-        take: 1,
-      }),
-      prisma.circleInvite.count({ where: { circleId: { in: circleIds }, claimedAt: null }, take: 1 }),
-    ]);
+    const otherMembers = await prisma.circleMember.count({
+      where: { circleId: { in: circleIds }, userId: { not: ctx.caller.id } },
+      take: 1,
+    });
+    // Pending invites are platform group invites (RETRO-I5, #583), listed through the slice,
+    // which lists a group's invites to its admins only. Read only when nobody else is in yet
+    // (the step is done either way), for at most INVITE_PROBE_CAP administered shared circles.
+    let pendingInvites = 0;
+    if (otherMembers === 0) {
+      const administered = memberships
+        .filter((m) => m.role === 'circle_admin' && !m.circle.isPersonal)
+        .slice(0, INVITE_PROBE_CAP)
+        .map((m) => m.circleId);
+      if (administered.length > 0) {
+        const invites = ctx.get(GroupInvitesService);
+        const principal: UserPrincipal = {
+          kind: 'user',
+          userId: ctx.caller.id,
+          email: '',
+          credential: 'session',
+          roles: ctx.caller.roles,
+          permissions: ctx.caller.permissions,
+          activeOrgId: ctx.caller.activeOrgId ?? (await ctx.get(DefaultOrgId).get()),
+        };
+        for (const groupId of administered) {
+          const page = await invites
+            .list(principal, groupId, { status: 'pending', page: 1, pageSize: 1 })
+            .catch(() => null);
+          if (page && page.total > 0) {
+            pendingInvites = 1;
+            break;
+          }
+        }
+      }
+    }
     return { collaboratorCircles: circleIds.length, otherMembers, pendingInvites };
   },
 };

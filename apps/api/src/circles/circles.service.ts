@@ -4,11 +4,13 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
-  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
+import { LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE, OwnerAccessService } from '../platform/sharing/owner-scope';
+import { GroupInvitesService, SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
+import type { UserPrincipal } from '@marinoscar/platform-api/core';
+import type { GroupInviteDto } from '@marinoscar/platform-contract/sharing';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
@@ -29,6 +31,8 @@ export class CirclesService {
     private readonly prisma: PrismaService,
     private readonly membership: OwnerAccessService,
     private readonly notifications: NotificationsService,
+    private readonly groupInvites: GroupInvitesService,
+    private readonly defaultOrgId: DefaultOrgId,
   ) {}
 
   /** Base URL for building absolute links in emails. */
@@ -303,123 +307,118 @@ export class CirclesService {
   }
 
   // ----- Invites -----
+  //
+  // RETRO-I5 (#583): a circle invite IS a platform group invite (a shared
+  // circle's id is its group's id). These three methods keep the
+  // `/api/circles/:id/invites` routes and their legacy body shape for the web
+  // (until RETRO-I6 moves the page onto the sharing slice's own
+  // `/api/groups/:id/invites`), and delegate every read and write to
+  // `GroupInvitesService`: the slice checks the caller is the group's admin,
+  // stores the invite, audits it and sends `groups.invitation`; the notifier
+  // allowlists the invitee (`platform/sharing/invite-allowlist.service.ts`).
+  // Behaviour that changed with the move: a second invite to an address with a
+  // pending one is 409 `INVITE_PENDING` (it used to update the pending invite's
+  // role: revoke and re-invite instead), an address that is already a member is
+  // 409 `ALREADY_A_MEMBER`, revoking an answered invite is 409
+  // `INVITE_NOT_PENDING` (was 400), and `notes` is no longer stored.
 
   async listInvites(user: RequestUser, circleId: string) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
-    const items = await this.prisma.circleInvite.findMany({
-      where: { circleId },
-      orderBy: { addedAt: 'desc' },
-    });
+    if (await this.isPersonal(circleId)) return { items: [], total: 0 };
+    const principal = await this.invitePrincipal(user);
+    const items: LegacyCircleInvite[] = [];
+    for (let page = 1; page <= INVITE_LIST_MAX_PAGES; page++) {
+      const list = await this.groupInvites.list(principal, circleId, {
+        status: 'all',
+        page,
+        pageSize: INVITE_LIST_PAGE_SIZE,
+      });
+      for (const invite of list.items) {
+        // The former list held pending and claimed invites only: a revoked one was deleted.
+        if (invite.status === 'pending' || invite.status === 'accepted') items.push(toLegacyInvite(invite));
+      }
+      if (page >= list.totalPages) break;
+    }
     return { items, total: items.length };
   }
 
   async createInvite(user: RequestUser, circleId: string, dto: CreateInviteDto) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
-
-    const email = dto.email; // already lowercased by Zod transform
     await this.assertNotPersonal(circleId);
-
-    // Upsert into AllowedEmail so the invitee can log in
-    await this.prisma.allowedEmail.upsert({
-      where: { email },
-      update: {}, // already allowed, no update needed
-      create: {
-        email,
-        notes: dto.notes ?? `Invited to circle by user ${user.id}`,
-        addedById: user.id,
-      },
+    const invite = await this.groupInvites.create(await this.invitePrincipal(user), circleId, {
+      email: dto.email,
+      role: LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE[dto.role],
     });
-
-    // Check for existing invite
-    const existing = await this.prisma.circleInvite.findUnique({
-      where: { circleId_email: { circleId, email } },
-    });
-
-    if (existing) {
-      if (existing.claimedAt !== null) {
-        throw new ConflictException('Invite already claimed by this user');
-      }
-      // Update role on pending invite
-      const updated = await this.prisma.circleInvite.update({
-        where: { circleId_email: { circleId, email } },
-        data: { role: dto.role, notes: dto.notes },
-      });
-      // Only re-send on a GENUINE role change, not an idempotent repeat call.
-      if (existing.role !== dto.role) {
-        await this.sendInvitationEmail(circleId, email, user.id);
-      }
-      return updated;
-    }
-
-    const created = await this.prisma.circleInvite.create({
-      data: {
-        circleId,
-        email,
-        role: dto.role,
-        notes: dto.notes,
-        addedById: user.id,
-      },
-    });
-
-    // New invite — send the invitation email (fire-and-forget).
-    await this.sendInvitationEmail(circleId, email, user.id);
-
-    return created;
-  }
-
-  /**
-   * Best-effort circle-invitation email. Never blocks or fails the request path.
-   */
-  private async sendInvitationEmail(
-    circleId: string,
-    recipientEmail: string,
-    inviterUserId: string,
-  ): Promise<void> {
-    try {
-      const [circle, inviter] = await Promise.all([
-        this.prisma.circle.findUnique({
-          where: { id: circleId },
-          select: { name: true },
-        }),
-        this.prisma.user.findUnique({
-          where: { id: inviterUserId },
-          select: { displayName: true, providerDisplayName: true },
-        }),
-      ]);
-      if (!circle) return;
-
-      const inviterName =
-        inviter?.displayName ?? inviter?.providerDisplayName ?? undefined;
-      const acceptUrl = `${this.appUrl()}/activate?returnTo=${encodeURIComponent(
-        `/circles/${circleId}`,
-      )}`;
-
-      void this.notifications.notifyAddress(MEMORIAHUB_EMAIL_EVENT_KEYS.circleInvitation, recipientEmail, {
-        circleName: circle.name,
-        inviterName,
-        acceptUrl,
-        recipientEmail,
-      });
-    } catch (err) {
-      this.logger.warn(
-        `Failed to enqueue circle-invitation email: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    return toLegacyInvite(invite);
   }
 
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
-
-    const invite = await this.prisma.circleInvite.findUnique({ where: { id: inviteId } });
-    if (!invite) throw new NotFoundException(`Invite ${inviteId} not found`);
-    if (invite.circleId !== circleId) throw new NotFoundException(`Invite ${inviteId} not found`);
-    if (invite.claimedAt !== null) {
-      throw new BadRequestException('Cannot revoke an invite that has already been claimed');
-    }
-
-    await this.prisma.circleInvite.delete({ where: { id: inviteId } });
+    if (await this.isPersonal(circleId)) throw new NotFoundException(`Invite ${inviteId} not found`);
+    await this.groupInvites.revoke(await this.invitePrincipal(user), circleId, inviteId);
     this.logger.log(`Invite ${inviteId} revoked by user ${user.id}`);
   }
+
+  private async isPersonal(circleId: string): Promise<boolean> {
+    const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { isPersonal: true } });
+    return circle?.isPersonal === true;
+  }
+
+  /**
+   * The caller as the sharing slice sees it. MemoriaHub is single organization,
+   * so the active organization is the default one; `circles:manage_any` is the
+   * deprecated name of `groups:admin` (the slice's bypass), kept one release.
+   */
+  private async invitePrincipal(user: RequestUser): Promise<UserPrincipal> {
+    const permissions = user.permissions.includes(PERMISSIONS.CIRCLES_MANAGE_ANY)
+      ? [...user.permissions, SHARING_PERMISSIONS.GROUPS_ADMIN]
+      : user.permissions;
+    return {
+      kind: 'user',
+      userId: user.id,
+      email: user.email,
+      credential: 'session',
+      roles: user.roles,
+      permissions,
+      activeOrgId: user.activeOrgId ?? (await this.defaultOrgId.get()),
+    };
+  }
+}
+
+/** Pages read for one invite list (100 each): a circle with more than 1000 invites lists the newest 1000. */
+const INVITE_LIST_PAGE_SIZE = 100;
+const INVITE_LIST_MAX_PAGES = 10;
+
+/** Group role -> the circle role the web still shows. */
+const GROUP_ROLE_TO_CIRCLE_ROLE: Readonly<Record<string, CircleRole>> = Object.freeze({
+  admin: CircleRole.circle_admin,
+  editor: CircleRole.collaborator,
+  viewer: CircleRole.viewer,
+});
+
+/** The former `circle_invites` row shape the web reads (`apps/web/src/types/circles.ts`). */
+export interface LegacyCircleInvite {
+  id: string;
+  circleId: string;
+  email: string;
+  role: CircleRole;
+  notes: null;
+  addedById: string | null;
+  addedAt: string;
+  claimedById: null;
+  claimedAt: string | null;
+}
+
+export function toLegacyInvite(invite: GroupInviteDto): LegacyCircleInvite {
+  return {
+    id: invite.id,
+    circleId: invite.groupId,
+    email: invite.email,
+    role: GROUP_ROLE_TO_CIRCLE_ROLE[invite.role] ?? CircleRole.viewer,
+    notes: null,
+    addedById: invite.invitedById,
+    addedAt: invite.createdAt,
+    claimedById: null,
+    claimedAt: invite.acceptedAt,
+  };
 }

@@ -25,10 +25,17 @@ function build(appUrl: string | undefined = 'https://app.example.test/', zone: s
     }),
   };
 
+  const order: string[] = [];
+  notifications.notify.mockImplementation(async () => void order.push('notify'));
+  notifications.notifyAddress.mockImplementation(async () => void order.push('notify'));
+  const inviteAllowlist = { ensureAllowed: jest.fn(async () => void order.push('allowlist')) };
+
   return {
-    adapter: new SharingNotifierAdapter(notifications as never, config as never, settings as never),
+    adapter: new SharingNotifierAdapter(notifications as never, config as never, settings as never, inviteAllowlist as never),
     notifications,
     settings,
+    inviteAllowlist,
+    order,
   };
 }
 
@@ -88,5 +95,37 @@ describe('SharingNotifierAdapter', () => {
     const noActor = build(undefined, 'UTC');
     await noActor.adapter.notify(KEY, 'user-1', share(), { actorUserId: null });
     expect(noActor.settings.resolveUserTimeZone).not.toHaveBeenCalled();
+  });
+
+  // RETRO-I5 (#583): an invitation to a group allowlists the invitee, before the e-mail goes out.
+  describe('groups.invitation', () => {
+    const invitation = { recipientEmail: 'person-b@example.test', groupName: 'Circle Alpha', role: 'viewer' };
+
+    it('allowlists the address of an invitee without an account, then sends', async () => {
+      const { adapter, inviteAllowlist, notifications, order } = build();
+
+      await adapter.notifyAddress('groups.invitation', 'person-b@example.test', invitation, { actorUserId: 'admin-1' });
+
+      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', 'admin-1');
+      expect(notifications.notifyAddress).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(['allowlist', 'notify']);
+    });
+
+    it('allowlists an existing user invited by id too (the address is in the data)', async () => {
+      const { adapter, inviteAllowlist } = build();
+
+      await adapter.notify('groups.invitation', 'user-2', invitation, { actorUserId: null });
+
+      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', undefined);
+    });
+
+    it('allowlists nothing for any other event', async () => {
+      const { adapter, inviteAllowlist } = build();
+
+      await adapter.notify(KEY, 'user-1', share());
+      await adapter.notifyAddress(KEY, 'person-b@example.test', { recipientEmail: 'person-b@example.test' });
+
+      expect(inviteAllowlist.ensureAllowed).not.toHaveBeenCalled();
+    });
   });
 });

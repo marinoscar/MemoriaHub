@@ -166,7 +166,7 @@ export class CirclesController {
 
   @Get(':id/invites')
   @Auth({ permissions: [PERMISSIONS.CIRCLES_READ] })
-  @ApiOperation({ summary: 'List circle invites (circle_admin or super-admin)' })
+  @ApiOperation({ summary: 'List circle invites (circle_admin or super-admin)', description: 'Pending and accepted invites of the circle\'s group (RETRO-I5: circle invites are platform group invites), in the legacy circle-invite shape.' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Invite list envelope ({ items, total })' })
   async listInvites(
@@ -178,7 +178,8 @@ export class CirclesController {
 
   @Post(':id/invites')
   @Auth({ permissions: [PERMISSIONS.CIRCLES_WRITE] })
-  @ApiOperation({ summary: 'Create invite and upsert allowlist entry (circle_admin or super-admin)' })
+  @ApiOperation({ summary: 'Create invite and upsert allowlist entry (circle_admin or super-admin)', description: 'Creates a group invite through the sharing slice (e-mail `groups.invitation`; the invitee is allowlisted). 409 `INVITE_PENDING` or `ALREADY_A_MEMBER` in `details.reason`.' })
+  @ApiResponse({ status: 409, description: 'INVITE_PENDING or ALREADY_A_MEMBER' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 201, description: 'Invite created' })
   async createInvite(
@@ -196,7 +197,7 @@ export class CirclesController {
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiParam({ name: 'inviteId', type: String, format: 'uuid' })
   @ApiResponse({ status: 204, description: 'Invite revoked' })
-  @ApiResponse({ status: 400, description: 'Cannot revoke a claimed invite' })
+  @ApiResponse({ status: 409, description: 'INVITE_NOT_PENDING: the invite was already answered or revoked' })
   @ApiResponse({ status: 404, description: 'Invite not found' })
   async revokeInvite(
     @Param('id', ParseUUIDPipe) id: string,

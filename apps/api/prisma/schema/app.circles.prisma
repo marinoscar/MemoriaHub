@@ -23,7 +23,6 @@ model Circle {
   // Relations
   owner                   User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   members                 CircleMember[]
-  invites                 CircleInvite[]
   mediaItems              MediaItem[]
   albums                  Album[]
   tags                    Tag[]
@@ -83,24 +82,5 @@ model CircleMember {
   @@map("circle_members")
 }
 
-model CircleInvite {
-  id          String     @id @default(uuid()) @db.Uuid
-  circleId    String     @map("circle_id") @db.Uuid
-  email       String
-  role        CircleRole @default(viewer)
-  addedById   String?    @map("added_by_id") @db.Uuid
-  addedAt     DateTime   @default(now()) @map("added_at") @db.Timestamptz
-  claimedById String?    @map("claimed_by_id") @db.Uuid
-  claimedAt   DateTime?  @map("claimed_at") @db.Timestamptz
-  notes       String?
-
-  // Relations
-  circle    Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  addedBy   User?  @relation("CircleInviteAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
-  claimedBy User?  @relation("CircleInviteClaimedBy", fields: [claimedById], references: [id], onDelete: SetNull)
-
-  @@unique([circleId, email])
-  @@index([email])
-  @@index([circleId])
-  @@map("circle_invites")
-}
+// CircleInvite (`circle_invites`) is gone since RETRO-I5 (#583): pending circle
+// invites became platform `group_invites` (migration 20261109200000_i5_circle_invites_to_group_invites).

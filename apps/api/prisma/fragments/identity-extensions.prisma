@@ -14,8 +14,6 @@ extend model User {
   tags                           Tag[]                           @relation("TagAddedBy")
   ownedCircles                   Circle[]                        @relation("CircleOwner")
   circleMemberships              CircleMember[]
-  circleInvitesAdded             CircleInvite[]                  @relation("CircleInviteAddedBy")
-  circleInvitesClaimed           CircleInvite[]                  @relation("CircleInviteClaimedBy")
   aiCredentialsUpdated           AiProviderCredential[]          @relation("AiCredentialUpdater")
   faceCredentialsUpdated         FaceProviderCredential[]        @relation("FaceCredentialUpdater")
   storageCredentialsUpdated      StorageProviderCredential[]     @relation("StorageCredentialUpdater")

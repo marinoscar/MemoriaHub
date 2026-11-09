@@ -10,15 +10,36 @@ import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { GroupInvitesService, SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 import { notificationsForwardingTo } from '../../test/mocks/email-notifications.adapter';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+
+const ORG_ID = '00000000-0000-4000-8000-0000000000aa';
+
+const groupInvite = (overrides: Record<string, unknown> = {}) => ({
+  id: 'inv-1',
+  groupId: 'c1',
+  orgId: ORG_ID,
+  email: 'person-b@example.test',
+  role: 'editor',
+  status: 'pending',
+  invitedById: 'user-1',
+  expiresAt: null,
+  acceptedAt: null,
+  declinedAt: null,
+  revokedAt: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  ...overrides,
+});
 
 describe('CirclesService', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<OwnerAccessService>;
   let mockEmail: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
+  let mockInvites: { list: jest.Mock; create: jest.Mock; revoke: jest.Mock };
 
   const mockUser = {
     id: 'user-1',
@@ -36,6 +57,8 @@ describe('CirclesService', () => {
       invalidateMembers: jest.fn(),
     } as any;
 
+    mockInvites = { list: jest.fn(), create: jest.fn(), revoke: jest.fn().mockResolvedValue(undefined) };
+
     mockEmail = {
       sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
       sendEmailAsync: jest.fn(),
@@ -47,6 +70,8 @@ describe('CirclesService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: NotificationsService, useValue: notificationsForwardingTo(mockEmail) },
+        { provide: GroupInvitesService, useValue: mockInvites },
+        { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue(ORG_ID) } },
       ],
     }).compile();
 
@@ -342,150 +367,6 @@ describe('CirclesService', () => {
     });
   });
 
-  // ---- createInvite() ----
-
-  describe('createInvite()', () => {
-    it('should upsert allowedEmail and create a pending invite', async () => {
-      const mockInvite = {
-        id: 'invite-1',
-        circleId: 'c1',
-        email: 'test@example.com',
-        role: CircleRole.viewer,
-        claimedAt: null,
-        addedById: 'user-1',
-      };
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
-      mockPrisma.circleInvite.findUnique.mockResolvedValue(null);
-      mockPrisma.circleInvite.create.mockResolvedValue(mockInvite as any);
-
-      const result = await service.createInvite(mockUser, 'c1', {
-        email: 'test@example.com',
-        role: CircleRole.viewer,
-      });
-
-      expect(mockPrisma.allowedEmail.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { email: 'test@example.com' },
-        }),
-      );
-      expect(mockPrisma.circleInvite.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          circleId: 'c1',
-          email: 'test@example.com',
-          role: CircleRole.viewer,
-          addedById: 'user-1',
-        }),
-      });
-      expect(result).toEqual(mockInvite);
-    });
-
-    it('should update role on an existing pending invite', async () => {
-      const existingPendingInvite = {
-        id: 'invite-1',
-        circleId: 'c1',
-        email: 'test@example.com',
-        role: CircleRole.viewer,
-        claimedAt: null,
-      };
-      const updatedInvite = { ...existingPendingInvite, role: CircleRole.collaborator };
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
-      mockPrisma.circleInvite.findUnique.mockResolvedValue(existingPendingInvite as any);
-      mockPrisma.circleInvite.update.mockResolvedValue(updatedInvite as any);
-
-      const result = await service.createInvite(mockUser, 'c1', {
-        email: 'test@example.com',
-        role: CircleRole.collaborator,
-      });
-
-      expect(mockPrisma.circleInvite.create).not.toHaveBeenCalled();
-      expect(mockPrisma.circleInvite.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { circleId_email: { circleId: 'c1', email: 'test@example.com' } },
-          data: expect.objectContaining({ role: CircleRole.collaborator }),
-        }),
-      );
-      expect(result).toEqual(updatedInvite);
-    });
-
-    it('should throw ConflictException when invite is already claimed', async () => {
-      const claimedInvite = {
-        id: 'invite-1',
-        circleId: 'c1',
-        email: 'test@example.com',
-        role: CircleRole.viewer,
-        claimedAt: new Date(),
-      };
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
-      mockPrisma.circleInvite.findUnique.mockResolvedValue(claimedInvite as any);
-
-      await expect(
-        service.createInvite(mockUser, 'c1', {
-          email: 'test@example.com',
-          role: CircleRole.viewer,
-        }),
-      ).rejects.toThrow(ConflictException);
-      await expect(
-        service.createInvite(mockUser, 'c1', {
-          email: 'test@example.com',
-          role: CircleRole.viewer,
-        }),
-      ).rejects.toThrow('Invite already claimed by this user');
-    });
-
-    // ---- Email graceful degradation ----
-
-    it('should still create the invite even if the notification dispatch throws', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.allowedEmail.upsert.mockResolvedValue({} as any);
-      mockPrisma.circleInvite.findUnique.mockResolvedValue(null);
-      mockPrisma.circleInvite.create.mockResolvedValue({
-        id: 'invite-2',
-        circleId: 'c1',
-        email: 'fails@example.com',
-        role: CircleRole.viewer,
-        claimedAt: null,
-        addedById: 'user-1',
-      } as any);
-      // sendInvitationEmail only calls sendEmailAsync if the circle lookup succeeds.
-      mockPrisma.circle.findUnique.mockResolvedValue({ name: 'Test Circle' } as any);
-      mockPrisma.user.findUnique.mockResolvedValue({
-        displayName: 'Inviter',
-        providerDisplayName: null,
-      } as any);
-      mockEmail.sendEmailAsync.mockImplementation(() => {
-        throw new Error('email provider exploded');
-      });
-
-      const result = await service.createInvite(mockUser, 'c1', {
-        email: 'fails@example.com',
-        role: CircleRole.viewer,
-      });
-
-      expect(result).toEqual(
-        expect.objectContaining({ id: 'invite-2', email: 'fails@example.com' }),
-      );
-      expect(mockEmail.sendEmailAsync).toHaveBeenCalled();
-    });
-  });
-
   // ---- addMember() ----
 
   describe('addMember()', () => {
@@ -580,75 +461,6 @@ describe('CirclesService', () => {
     });
   });
 
-  // ---- revokeInvite() ----
-
-  describe('revokeInvite()', () => {
-    it('should throw BadRequestException when revoking an already-claimed invite', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleInvite.findUnique.mockResolvedValue({
-        id: 'inv-1',
-        circleId: 'c1',
-        claimedAt: new Date(),
-      } as any);
-
-      await expect(service.revokeInvite(mockUser, 'c1', 'inv-1')).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(service.revokeInvite(mockUser, 'c1', 'inv-1')).rejects.toThrow(
-        'Cannot revoke an invite that has already been claimed',
-      );
-      expect(mockPrisma.circleInvite.delete).not.toHaveBeenCalled();
-    });
-
-    it('should delete a pending invite successfully', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleInvite.findUnique.mockResolvedValue({
-        id: 'inv-1',
-        circleId: 'c1',
-        claimedAt: null,
-      } as any);
-      mockPrisma.circleInvite.delete.mockResolvedValue({} as any);
-
-      await service.revokeInvite(mockUser, 'c1', 'inv-1');
-
-      expect(mockPrisma.circleInvite.delete).toHaveBeenCalledWith({
-        where: { id: 'inv-1' },
-      });
-    });
-
-    it('should throw NotFoundException when invite does not exist', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleInvite.findUnique.mockResolvedValue(null);
-
-      await expect(service.revokeInvite(mockUser, 'c1', 'non-existent')).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it('should throw NotFoundException when invite belongs to a different circle', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleInvite.findUnique.mockResolvedValue({
-        id: 'inv-1',
-        circleId: 'different-circle',
-        claimedAt: null,
-      } as any);
-
-      await expect(service.revokeInvite(mockUser, 'c1', 'inv-1')).rejects.toThrow(NotFoundException);
-    });
-  });
-
   // ---- list() ----
 
   describe('list()', () => {
@@ -723,34 +535,6 @@ describe('CirclesService', () => {
     });
   });
 
-  // ---- listInvites() ----
-
-  describe('listInvites()', () => {
-    it('should return invite envelope for circle_admin', async () => {
-      const mockInvites = [
-        { id: 'inv-1', circleId: 'c1', email: 'a@test.com', claimedAt: null },
-        { id: 'inv-2', circleId: 'c1', email: 'b@test.com', claimedAt: new Date() },
-      ];
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleInvite.findMany.mockResolvedValue(mockInvites as any);
-
-      const result = await service.listInvites(mockUser, 'c1');
-
-      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
-        'user-1',
-        'c1',
-        [],
-        'admin',
-      );
-      expect(result.items).toEqual(mockInvites);
-      expect(result.total).toBe(2);
-    });
-  });
-
   // ---- listMembers() ----
 
   describe('listMembers()', () => {
@@ -779,4 +563,125 @@ describe('CirclesService', () => {
     });
   });
 
+
+  // ---- invites (RETRO-I5: group invites through the sharing slice) ----
+
+  describe('invites', () => {
+    beforeEach(() => {
+      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: false } as any);
+    });
+
+    it('createInvite creates a group invite with the mapped role and answers the legacy shape', async () => {
+      mockInvites.create.mockResolvedValue(groupInvite());
+
+      const result = await service.createInvite(mockUser, 'c1', {
+        email: 'person-b@example.test',
+        role: CircleRole.collaborator,
+      } as any);
+
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith('user-1', 'c1', [], 'admin');
+      expect(mockInvites.create).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'user', userId: 'user-1', email: 'user@example.com', activeOrgId: ORG_ID }),
+        'c1',
+        { email: 'person-b@example.test', role: 'editor' },
+      );
+      expect(result).toEqual({
+        id: 'inv-1',
+        circleId: 'c1',
+        email: 'person-b@example.test',
+        role: CircleRole.collaborator,
+        notes: null,
+        addedById: 'user-1',
+        addedAt: '2026-01-01T00:00:00.000Z',
+        claimedById: null,
+        claimedAt: null,
+      });
+      // The invite no longer writes the allowlist or mails the invitee itself: the slice and its notifier do.
+      expect(mockPrisma.allowedEmail.upsert).not.toHaveBeenCalled();
+      expect(mockEmail.sendEmailAsync).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [CircleRole.circle_admin, 'admin'],
+      [CircleRole.viewer, 'viewer'],
+    ])('maps %s to the group role %s', async (circleRole, groupRole) => {
+      mockInvites.create.mockResolvedValue(groupInvite({ role: groupRole }));
+
+      const result = await service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: circleRole } as any);
+
+      expect(mockInvites.create.mock.calls[0][2]).toEqual({ email: 'x@example.test', role: groupRole });
+      expect(result.role).toBe(circleRole);
+    });
+
+    it('createInvite refuses a personal circle before reaching the slice', async () => {
+      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+
+      await expect(
+        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockInvites.create).not.toHaveBeenCalled();
+    });
+
+    it('createInvite surfaces the slice refusal (409 INVITE_PENDING) unchanged', async () => {
+      mockInvites.create.mockRejectedValue(new ConflictException({ message: 'pending', details: { reason: 'INVITE_PENDING' } }));
+
+      await expect(
+        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('a circles:manage_any caller acts as groups:admin in the slice', async () => {
+      mockInvites.create.mockResolvedValue(groupInvite());
+      const superAdmin = { ...mockUser, permissions: ['circles:manage_any'] };
+
+      await service.createInvite(superAdmin, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any);
+
+      expect(mockInvites.create.mock.calls[0][0].permissions).toContain(SHARING_PERMISSIONS.GROUPS_ADMIN);
+    });
+
+    it('listInvites lists pending and accepted invites, not revoked or declined ones, across pages', async () => {
+      mockInvites.list
+        .mockResolvedValueOnce({
+          items: [groupInvite({ id: 'a' }), groupInvite({ id: 'b', status: 'revoked' })],
+          total: 4,
+          page: 1,
+          pageSize: 100,
+          totalPages: 2,
+        })
+        .mockResolvedValueOnce({
+          items: [groupInvite({ id: 'c', status: 'accepted', acceptedAt: '2026-01-02T00:00:00.000Z' }), groupInvite({ id: 'd', status: 'declined' })],
+          total: 4,
+          page: 2,
+          pageSize: 100,
+          totalPages: 2,
+        });
+
+      const result = await service.listInvites(mockUser, 'c1');
+
+      expect(mockInvites.list).toHaveBeenNthCalledWith(1, expect.anything(), 'c1', { status: 'all', page: 1, pageSize: 100 });
+      expect(result.items.map((i) => i.id)).toEqual(['a', 'c']);
+      expect(result.items[1].claimedAt).toBe('2026-01-02T00:00:00.000Z');
+      expect(result.total).toBe(2);
+    });
+
+    it('listInvites answers an empty list for a personal circle (it has no group)', async () => {
+      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+
+      expect(await service.listInvites(mockUser, 'c1')).toEqual({ items: [], total: 0 });
+      expect(mockInvites.list).not.toHaveBeenCalled();
+    });
+
+    it('revokeInvite revokes through the slice', async () => {
+      await service.revokeInvite(mockUser, 'c1', 'inv-1');
+
+      expect(mockInvites.revoke).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1' }), 'c1', 'inv-1');
+    });
+
+    it('revokeInvite is a 404 for a personal circle', async () => {
+      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+
+      await expect(service.revokeInvite(mockUser, 'c1', 'inv-1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockInvites.revoke).not.toHaveBeenCalled();
+    });
+  });
 });

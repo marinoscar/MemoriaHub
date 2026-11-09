@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import type { NotifyOptions } from '@marinoscar/platform-api/notifications';
 import { SettingsResolver } from '@marinoscar/platform-api/settings';
-import type { SharingNotifier, SharingNotifyHint } from '@marinoscar/platform-api/sharing';
+import { GROUPS_INVITATION_EVENT_KEY, type SharingNotifier, type SharingNotifyHint } from '@marinoscar/platform-api/sharing';
+
+import { InviteAllowlistService } from './invite-allowlist.service';
 
 // =============================================================================
 // SHARING_NOTIFIER -> the platform dispatcher (RETRO-I1, #562)
@@ -19,7 +21,10 @@ import type { SharingNotifier, SharingNotifyHint } from '@marinoscar/platform-ap
 //   - the acting user's time zone as `NotifyOptions.timeZone`, the render zone
 //     for a recipient with none of their own (the slice cannot read settings).
 //
-// Nothing reaches it in RETRO-I1: no group or grant exists until RETRO-I2..I5.
+//   - for `groups.invitation`, the invitee's allowlist entry BEFORE the e-mail
+//     goes out (RETRO-I5, #583: an invite implies the address may sign in;
+//     `invite-allowlist.service.ts`), whichever branch the slice takes (an
+//     address without an account, or an existing user).
 // =============================================================================
 
 @Injectable()
@@ -28,14 +33,24 @@ export class SharingNotifierAdapter implements SharingNotifier {
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
     private readonly settings: SettingsResolver,
+    private readonly inviteAllowlist: InviteAllowlistService,
   ) {}
 
   async notify(eventKey: string, userId: string, data: unknown, hint?: SharingNotifyHint): Promise<void> {
+    await this.allowlistInvitee(eventKey, data, hint);
     await this.notifications.notify(eventKey, userId, this.withUrls(data), await this.zoneHint(hint));
   }
 
   async notifyAddress(eventKey: string, email: string, data: unknown, hint?: SharingNotifyHint): Promise<void> {
+    await this.allowlistInvitee(eventKey, data, hint);
     await this.notifications.notifyAddress(eventKey, email, this.withUrls(data), await this.zoneHint(hint));
+  }
+
+  /** An invitation's recipient (`data.recipientEmail`) may sign in. Never throws. */
+  private async allowlistInvitee(eventKey: string, data: unknown, hint?: SharingNotifyHint): Promise<void> {
+    if (eventKey !== GROUPS_INVITATION_EVENT_KEY || data === null || typeof data !== 'object') return;
+    const email = (data as { recipientEmail?: unknown }).recipientEmail;
+    if (typeof email === 'string') await this.inviteAllowlist.ensureAllowed(email, hint?.actorUserId ?? undefined);
   }
 
   /** The actor's zone, or nothing (no actor, no zone, or a failed read). */

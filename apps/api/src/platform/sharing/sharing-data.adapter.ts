@@ -20,9 +20,8 @@ import { PrismaSystemService } from '../../prisma/prisma-system.service';
 //                transaction whose FIRST statement is the transaction-local
 //                `set_config('app.rls_bypass', 'on', true)`, for the slice's five
 //                named reasons only (`purge`, `doctor`, `retention`,
-//                `link-resolution`, `invite-claim`; the last one is used only
-//                when an invite auto-accept option is on, which MemoriaHub
-//                leaves off until RETRO-I5).
+//                `link-resolution`, `invite-claim`; the last one is the invite
+//                auto-accept at sign-up and sign-in, on since RETRO-I5).
 // =============================================================================
 
 @Injectable()

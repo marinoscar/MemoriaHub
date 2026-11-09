@@ -2,26 +2,15 @@
 // MemoriaHub email template data (RETRO-D2, #570)
 // =============================================================================
 //
-// The payload each of this app's three templates renders from. The names of
-// the templates are PERMANENT (`circle-invitation`, `membership-confirmation`,
-// `memory-digest`): they are the keys of the platform template registry and of
+// The payload each of this app's two templates renders from. The names of
+// the templates are PERMANENT (`membership-confirmation`, `memory-digest`;
+// `circle-invitation` was retired by RETRO-I5): they are the keys of the platform template registry and of
 // `EmailTemplateDataMap`, augmented in `./index.ts`.
 //
 // A template is a pure function of this data plus the platform render context
 // (product name, URL, layout). It reads no configuration and no clock: every
 // absolute URL is built by the caller from `APP_URL`.
 // =============================================================================
-
-/** "You've been invited to a circle". */
-export interface CircleInvitationEmailData {
-  circleName: string;
-  inviterName?: string;
-  /** Absolute URL of the accept page. */
-  acceptUrl: string;
-  /** Absolute URL of the decline page, when there is one. */
-  declineUrl?: string;
-  recipientEmail: string;
-}
 
 /** "You've been added to a circle". */
 export interface MembershipConfirmationEmailData {
