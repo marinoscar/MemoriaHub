@@ -4,7 +4,7 @@
  * Migrated onto the shared DataTable in issue #259 (epic #238). This was the
  * worst-affected surface after the Job Queue: on a phone the checkbox column and
  * Preview were visible, Type and Items partially, and the Public URL plus the
- * ENTIRE per-row action column — revoke, set expiration, delete — were off
+ * ENTIRE per-row action column — revoke, set expiration — were off
  * screen. The one thing you open this page on a phone to do was the one thing
  * you could not reach.
  *
@@ -23,8 +23,12 @@
  *
  * ## Permissions
  *
- * Unchanged: the page is Admin-gated (`shares:manage_any` is what the API
- * enforces for `scope=all` and for the bulk endpoint).
+ * Since RETRO-I4 (#578) public shares are the sharing slice's link grants: the
+ * page lists `GET /api/admin/links` and is gated on `sharing:admin` (the string
+ * that route enforces); revoke and re-date go through the slice's
+ * `DELETE` / `PATCH /api/grants/:id`, one call per selected link. The bulk hard
+ * delete is gone (open decision 2 of #578): the slice revokes, and its
+ * `sharing.grants.prune` job deletes revoked and expired grants after retention.
  */
 
 import { useState, useCallback, useMemo } from 'react';
@@ -51,7 +55,6 @@ import {
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import RevokeIcon from '@mui/icons-material/Block';
-import DeleteIcon from '@mui/icons-material/Delete';
 import PublicIcon from '@mui/icons-material/Public';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -273,7 +276,6 @@ function PublicSharesPageContent() {
   const [editShare, setEditShare] = useState<MediaShare | null>(null);
   const [showBulkRevokeConfirm, setShowBulkRevokeConfirm] = useState(false);
   const [showBulkExpiration, setShowBulkExpiration] = useState(false);
-  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   // Snackbar
   const [snack, setSnack] = useState<{ message: string; severity: 'success' | 'error' } | null>(null);
@@ -283,7 +285,6 @@ function PublicSharesPageContent() {
 
   const hookParams = useMemo(
     () => ({
-      scope: 'all' as const,
       status: query.status,
       targetType: query.targetType,
       page: page + 1, // the API is 1-based, the table 0-based
@@ -334,6 +335,10 @@ function PublicSharesPageContent() {
   // --- Mutations -------------------------------------------------------------
 
   const handleCopy = useCallback(async (share: MediaShare) => {
+    if (!share.publicUrl) {
+      setSnack({ message: 'This link cannot be copied', severity: 'error' });
+      return;
+    }
     try {
       await navigator.clipboard.writeText(share.publicUrl);
       setSnack({ message: 'Link copied to clipboard', severity: 'success' });
@@ -383,16 +388,6 @@ function PublicSharesPageContent() {
     }
   }, [bulkAction, selectedIds]);
 
-  const handleBulkDelete = useCallback(async () => {
-    try {
-      const result = await bulkAction({ ids: Array.from(selectedIds), action: 'delete' });
-      setSelectedIds(new Set());
-      setSnack({ message: `${result.affected} shares deleted`, severity: 'success' });
-    } catch {
-      setSnack({ message: 'Failed to delete shares', severity: 'error' });
-      throw new Error('Failed');
-    }
-  }, [bulkAction, selectedIds]);
 
   // --- Columns / actions -----------------------------------------------------
 
@@ -443,13 +438,6 @@ function PublicSharesPageContent() {
         icon: <EditIcon fontSize="small" />,
         onClick: () => setShowBulkExpiration(true),
       },
-      {
-        id: 'delete',
-        label: 'Delete',
-        icon: <DeleteIcon fontSize="small" />,
-        destructive: true,
-        onClick: () => setShowBulkDeleteConfirm(true),
-      },
     ],
     [],
   );
@@ -466,7 +454,7 @@ function PublicSharesPageContent() {
             Public Sharing
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            View and manage all public share links across the application.
+            View and manage every public link of the organization.
           </Typography>
         </Box>
         <Tooltip title="Refresh">
@@ -535,34 +523,6 @@ function PublicSharesPageContent() {
         onConfirm={handleBulkRevoke}
         count={selectedIds.size}
       />
-
-      {/* Bulk delete confirm */}
-      <Dialog
-        open={showBulkDeleteConfirm}
-        onClose={() => setShowBulkDeleteConfirm(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Delete {selectedIds.size} shares?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            This will permanently delete {selectedIds.size} share records. This action cannot be undone.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowBulkDeleteConfirm(false)}>Cancel</Button>
-          <Button
-            color="error"
-            variant="contained"
-            onClick={async () => {
-              await handleBulkDelete();
-              setShowBulkDeleteConfirm(false);
-            }}
-          >
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <BulkExpirationDialog
         open={showBulkExpiration}

@@ -47,7 +47,7 @@ import type { MediaItem } from '../../types/media';
 import { BatchEnhanceDialog } from '../../components/media/BatchEnhanceDialog';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import { MediaLightbox } from '../../components/media/MediaLightbox';
-import { ShareDialog } from '../../components/share/ShareDialog';
+import { MediaShareDialog } from '../../platform/sharing/MediaShareDialog';
 import { AlbumMapDialog } from '../../components/album/AlbumMapDialog';
 import { AlbumPeopleDialog } from '../../components/album/AlbumPeopleDialog';
 import { SelectAlbumCoverDialog } from '../../components/album/SelectAlbumCoverDialog';
@@ -437,7 +437,7 @@ export default function AlbumPage() {
       />
 
       {/* Share dialog */}
-      <ShareDialog
+      <MediaShareDialog
         open={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
         target={{ type: 'album', id: albumId }}

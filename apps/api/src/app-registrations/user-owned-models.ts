@@ -74,14 +74,6 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
     rationale: "The user's own seen, hidden and favourite marks on a memory.",
   },
   {
-    model: 'MediaShare',
-    ownerField: 'createdById',
-    purge: 'delete',
-    export: 'include',
-    exportOmit: ['token'],
-    rationale: 'A public link the user created; revoking it with the user is the safe end. The link token is a bearer capability and never leaves the server.',
-  },
-  {
     model: 'MhLegacyNodeCredential',
     ownerField: 'userId',
     purge: 'delete',

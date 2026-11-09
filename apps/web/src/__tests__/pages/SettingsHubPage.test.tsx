@@ -402,7 +402,7 @@ describe('SettingsHubPage', () => {
       'storage_config:read',
       'jobs:read',
       'db_backup:read',
-      'shares:manage_any',
+      'sharing:admin',
     ];
 
     beforeEach(() => {

@@ -108,16 +108,16 @@ export const mockPermissions = {
     name: 'media:delete_any',
     description: 'Delete any media item',
   },
-  // Sharing permissions
-  sharesManage: {
+  // Sharing permissions (the sharing slice's since RETRO-I4)
+  sharingWrite: {
     id: randomUUID(),
-    name: 'shares:manage',
-    description: 'Create, list, update, and revoke own shares',
+    name: 'sharing:write',
+    description: 'Share records you may share, and change or revoke those shares',
   },
-  sharesManageAny: {
+  sharingAdmin: {
     id: randomUUID(),
-    name: 'shares:manage_any',
-    description: 'Admin: manage any user\'s shares',
+    name: 'sharing:admin',
+    description: 'Manage the shares of every record of the organization',
   },
 };
 
@@ -427,8 +427,8 @@ export const rolePermissionsMap = {
     mockPermissions.mediaReadAny,
     mockPermissions.mediaWriteAny,
     mockPermissions.mediaDeleteAny,
-    mockPermissions.sharesManage,
-    mockPermissions.sharesManageAny,
+    mockPermissions.sharingWrite,
+    mockPermissions.sharingAdmin,
   ],
   contributor: [
     mockPermissions.userSettingsRead,
@@ -438,7 +438,7 @@ export const rolePermissionsMap = {
     mockPermissions.mediaRead,
     mockPermissions.mediaWrite,
     mockPermissions.mediaDelete,
-    mockPermissions.sharesManage,
+    mockPermissions.sharingWrite,
   ],
   viewer: [
     mockPermissions.userSettingsRead,
@@ -447,7 +447,7 @@ export const rolePermissionsMap = {
     // RETRO-D1: viewers upload (the objects API was a bare @Auth() before the storage slice).
     mockPermissions.storageWrite,
     mockPermissions.mediaRead,
-    // Note: viewer does NOT have shares:manage — intentional
+    // Note: viewer does NOT have sharing:write — intentional
   ],
 };
 

@@ -1,5 +1,11 @@
+/**
+ * The public viewer of a shared photo, video or album (RETRO-I4, #578): the pre-platform
+ * `PublicSharePage` views, ported to presigned URLs. The link renderers
+ * (`MediaItemLinkRenderer`, `AlbumLinkRenderer`) fetch the view with the `X-Link-Token`
+ * header and render these; every `src` is a short-lived presigned URL that carries no link
+ * token, so the token never reaches a media request or its logs.
+ */
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
 import {
   Box,
   CircularProgress,
@@ -12,8 +18,34 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined';
-import { getPublicShare, publicMediaUrl } from '../../services/publicApi';
-import type { PublicShareResponse, PublicShareMediaItem } from '../../types/sharing';
+
+/** One shared item as `GET /api/public/links/{media,album}` returns it (metadata-stripped). */
+export interface PublicLinkMedia {
+  mediaType: 'photo' | 'video';
+  width: number | null;
+  height: number | null;
+  /** Presigned GET of the original (inline), or `null` when it could not be signed. */
+  url: string | null;
+  /** Presigned GET of the thumbnail, or `null`. */
+  thumbnailUrl: string | null;
+}
+
+/** `GET /api/public/links/media`. */
+export interface PublicMediaLinkView {
+  type: 'media_item';
+  expiresAt: string | null;
+  media: PublicLinkMedia;
+}
+
+/** `GET /api/public/links/album`. */
+export interface PublicAlbumLinkView {
+  type: 'album';
+  expiresAt: string | null;
+  itemCount: number;
+  items: PublicLinkMedia[];
+}
+
+type PublicShareMediaItem = PublicLinkMedia;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,7 +59,7 @@ function isVideo(item: PublicShareMediaItem): boolean {
 // Loading state
 // ---------------------------------------------------------------------------
 
-function CenteredSpinner() {
+export function CenteredSpinner() {
   return (
     <Box
       sx={{
@@ -48,7 +80,7 @@ function CenteredSpinner() {
 // Error / not-found state
 // ---------------------------------------------------------------------------
 
-function UnavailableMessage() {
+export function UnavailableMessage() {
   return (
     <Box
       sx={{
@@ -64,7 +96,7 @@ function UnavailableMessage() {
         variant="body1"
         sx={{ color: 'rgba(255,255,255,0.5)', userSelect: 'none' }}
       >
-        This link is no longer available.
+        This link is not available
       </Typography>
     </Box>
   );
@@ -75,11 +107,10 @@ function UnavailableMessage() {
 // ---------------------------------------------------------------------------
 
 interface SingleMediaViewerProps {
-  token: string;
   item: PublicShareMediaItem;
 }
 
-function SingleMediaViewer({ token, item }: SingleMediaViewerProps) {
+export function SingleMediaViewer({ item }: SingleMediaViewerProps) {
   if (isVideo(item)) {
     return (
       <Box
@@ -94,7 +125,7 @@ function SingleMediaViewer({ token, item }: SingleMediaViewerProps) {
       >
         <Box
           component="video"
-          src={publicMediaUrl(token, 0)}
+          src={item.url ?? undefined}
           controls
           controlsList="nodownload noplaybackrate"
           disablePictureInPicture
@@ -121,7 +152,8 @@ function SingleMediaViewer({ token, item }: SingleMediaViewerProps) {
     >
       <Box
         component="img"
-        src={publicMediaUrl(token, 0)}
+        src={item.url ?? undefined}
+          referrerPolicy="no-referrer"
         alt=""
         draggable={false}
         onContextMenu={(e: React.MouseEvent) => e.preventDefault()}
@@ -142,7 +174,6 @@ function SingleMediaViewer({ token, item }: SingleMediaViewerProps) {
 // ---------------------------------------------------------------------------
 
 interface AlbumLightboxProps {
-  token: string;
   items: PublicShareMediaItem[];
   index: number;
   onClose: () => void;
@@ -150,7 +181,7 @@ interface AlbumLightboxProps {
   onNext: () => void;
 }
 
-function AlbumLightbox({ token, items, index, onClose, onPrev, onNext }: AlbumLightboxProps) {
+function AlbumLightbox({ items, index, onClose, onPrev, onNext }: AlbumLightboxProps) {
   const item = items[index];
   const hasPrev = index > 0;
   const hasNext = index < items.length - 1;
@@ -258,7 +289,7 @@ function AlbumLightbox({ token, items, index, onClose, onPrev, onNext }: AlbumLi
           <Box
             component="video"
             key={index}
-            src={publicMediaUrl(token, index)}
+            src={item.url ?? undefined}
             controls
             controlsList="nodownload noplaybackrate"
             disablePictureInPicture
@@ -273,7 +304,8 @@ function AlbumLightbox({ token, items, index, onClose, onPrev, onNext }: AlbumLi
           <Box
             component="img"
             key={index}
-            src={publicMediaUrl(token, index)}
+            src={item.url ?? undefined}
+            referrerPolicy="no-referrer"
             alt=""
             draggable={false}
             onContextMenu={(e: React.MouseEvent) => e.preventDefault()}
@@ -311,13 +343,12 @@ function AlbumLightbox({ token, items, index, onClose, onPrev, onNext }: AlbumLi
 // ---------------------------------------------------------------------------
 
 interface AlbumTileProps {
-  token: string;
   item: PublicShareMediaItem;
   index: number;
   onClick: (index: number) => void;
 }
 
-function AlbumTile({ token, item, index, onClick }: AlbumTileProps) {
+function AlbumTile({ item, index, onClick }: AlbumTileProps) {
   return (
     <Box
       onClick={() => onClick(index)}
@@ -333,9 +364,20 @@ function AlbumTile({ token, item, index, onClick }: AlbumTileProps) {
     >
       {isVideo(item) ? (
         <>
+          {item.thumbnailUrl ? (
+            <Box
+              component="img"
+              src={item.thumbnailUrl}
+              referrerPolicy="no-referrer"
+              alt=""
+              loading="lazy"
+              draggable={false}
+              sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none' }}
+            />
+          ) : (
           <Box
             component="video"
-            src={publicMediaUrl(token, index)}
+            src={item.url ?? undefined}
             muted
             preload="metadata"
             sx={{
@@ -346,6 +388,7 @@ function AlbumTile({ token, item, index, onClick }: AlbumTileProps) {
               pointerEvents: 'none',
             }}
           />
+          )}
           <Box
             sx={{
               position: 'absolute',
@@ -368,7 +411,8 @@ function AlbumTile({ token, item, index, onClick }: AlbumTileProps) {
       ) : (
         <Box
           component="img"
-          src={publicMediaUrl(token, index)}
+          src={item.thumbnailUrl ?? item.url ?? undefined}
+          referrerPolicy="no-referrer"
           alt=""
           loading="lazy"
           draggable={false}
@@ -391,12 +435,11 @@ function AlbumTile({ token, item, index, onClick }: AlbumTileProps) {
 // ---------------------------------------------------------------------------
 
 interface AlbumViewerProps {
-  token: string;
   itemCount: number;
   items: PublicShareMediaItem[];
 }
 
-function AlbumViewer({ token, itemCount, items }: AlbumViewerProps) {
+export function AlbumViewer({ itemCount, items }: AlbumViewerProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const handleClose = useCallback(() => setLightboxIndex(null), []);
@@ -459,7 +502,6 @@ function AlbumViewer({ token, itemCount, items }: AlbumViewerProps) {
         {items.map((item, idx) => (
           <AlbumTile
             key={idx}
-            token={token}
             item={item}
             index={idx}
             onClick={setLightboxIndex}
@@ -470,7 +512,6 @@ function AlbumViewer({ token, itemCount, items }: AlbumViewerProps) {
       {/* Lightbox */}
       {lightboxIndex !== null && (
         <AlbumLightbox
-          token={token}
           items={items}
           index={lightboxIndex}
           onClose={handleClose}
@@ -479,63 +520,5 @@ function AlbumViewer({ token, itemCount, items }: AlbumViewerProps) {
         />
       )}
     </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// PublicSharePage — main export
-// ---------------------------------------------------------------------------
-
-export default function PublicSharePage() {
-  const { token = '' } = useParams<{ token: string }>();
-
-  const [status, setStatus] = useState<'loading' | 'error' | 'success'>('loading');
-  const [share, setShare] = useState<PublicShareResponse | null>(null);
-
-  useEffect(() => {
-    document.title = 'Shared media';
-  }, []);
-
-  useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      return;
-    }
-
-    let cancelled = false;
-
-    getPublicShare(token)
-      .then((data) => {
-        if (!cancelled) {
-          setShare(data);
-          setStatus('success');
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus('error');
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
-
-  if (status === 'loading') {
-    return <CenteredSpinner />;
-  }
-
-  if (status === 'error' || share === null) {
-    return <UnavailableMessage />;
-  }
-
-  if (share.type === 'media_item') {
-    return <SingleMediaViewer token={token} item={share.media} />;
-  }
-
-  // share.type === 'album'
-  return (
-    <AlbumViewer token={token} itemCount={share.itemCount} items={share.items} />
   );
 }

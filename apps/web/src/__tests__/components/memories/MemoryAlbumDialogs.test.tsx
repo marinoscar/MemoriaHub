@@ -18,10 +18,11 @@ vi.mock('../../../services/memories', () => ({
   saveMemoryAsAlbum: vi.fn(),
 }));
 
-vi.mock('../../../services/shareService', () => ({
-  createShare: vi.fn(),
-  updateShare: vi.fn(),
-  revokeShare: vi.fn(),
+// The sharing slice's dialog (RETRO-I4): its contents are the platform's; what matters here is
+// that the saved album id reaches it.
+vi.mock('@marinoscar/platform-web/sharing/ui', () => ({
+  ShareDialog: ({ open, resource }: { open: boolean; resource: { type: string; id: string } }) =>
+    open ? <div role="dialog" aria-label="Share">{`share ${resource.type} ${resource.id}`}</div> : null,
 }));
 
 import { MemoryAlbumDialogs } from '../../../components/memories/MemoryAlbumDialogs';
@@ -107,8 +108,8 @@ describe('MemoryAlbumDialogs — share via album', () => {
     ).toBeInTheDocument();
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledWith('mem-1', 'Trip to Guanacaste'));
-    // The existing album share dialog takes over from here.
-    expect(await screen.findByText('Share publicly')).toBeInTheDocument();
+    // The album share dialog takes over from here, on the saved album.
+    expect(await screen.findByText('share album album-9')).toBeInTheDocument();
   });
 
   it('creates exactly one album even across re-renders', async () => {

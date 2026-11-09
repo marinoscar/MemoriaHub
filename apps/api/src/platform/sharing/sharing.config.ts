@@ -17,11 +17,12 @@
 // SINGLE-ORGANIZATION MODE (`SHARING_TENANCY.mode() === 'single'`): circles become
 // sharing groups INSIDE the default organization, never tenants (EAB D6).
 //
-// RETRO-I1 MOUNTS ONLY. The routes are live and empty: no resource type is
-// registered and no circle has been mapped to a group (RETRO-I2). Circles,
-// circle members, circle invites and `MediaShare` stay app-owned and keep
-// deciding access (`circles/`, `share/`) until RETRO-I3..I5. The mapping every
-// later issue implements is `docs/platform-adoption/circles-to-groups.md`.
+// RETRO-I1 mounted it; RETRO-I2 registered `media_item` / `album` and mirrored
+// circles into groups. Since RETRO-I4 (#578) public shares ARE link grants
+// (`public-links/`: the guarded public views, the 410 for the retired
+// `/api/public/shares/*`, the admin listing). Circles, circle members and circle
+// invites stay app-owned until RETRO-I3/I5. The mapping every issue implements is
+// `docs/platform-adoption/circles-to-groups.md`.
 //
 // Options (decisions of #562):
 //   groups.inviteTtlDays: null        circle invites never expired; the imported
@@ -32,9 +33,9 @@
 //   groups.autoAccept*                left OFF: the app's own sign-in claim of
 //                                     circle invites stays until RETRO-I5
 //   links.appUrl                      APP_URL (link URL `${APP_URL}/s#lnk_...`)
-//   links.defaultTtlDays/maxTtlDays   null: a MemoriaHub public share may be
-//                                     "forever" (`expiresAt` null), and imported
-//                                     links (RETRO-I4) keep that semantics
+//   links.defaultTtlDays/maxTtlDays   null: a MemoriaHub public link may be
+//                                     "forever" (`expiresAt` null), and the links
+//                                     imported from `media_shares` (RETRO-I4) keep it
 //
 // Imported ONCE by `app.module.ts`, and by any feature module that later
 // injects `AccessPolicy` or `GrantsService` (the module is not global).

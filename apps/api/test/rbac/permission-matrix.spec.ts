@@ -130,9 +130,8 @@ const NEW_PLATFORM_PERMISSIONS = [
   'system_webhooks:write',
   'webhooks:read',
   'webhooks:write',
-  'sharing:admin',
+  // sharing:admin and sharing:write replace shares:manage_any / shares:manage (RETRO_I4 below).
   'sharing:read',
-  'sharing:write',
 ];
 
 /**
@@ -160,11 +159,19 @@ const RETIRED_BY_SLICE: Record<string, string> = {
   // RETRO-D1 (#563): /api/admin/storage-config checks storage_config:read|write.
   'storage_settings:read': 'storage_config:read',
   'storage_settings:write': 'storage_config:write',
+  // RETRO-I4 (#578): public shares are the sharing slice's link grants.
+  'shares:manage': 'sharing:write',
+  'shares:manage_any': 'sharing:admin',
   // RETRO-E4 (#607): the AI admin surface is the AI slice's (/api/admin/ai/*), and MemoriaHub's
   // feature selections (/api/admin/memoriahub-ai/*) and tag vocabulary check ai_config:read|write.
   'ai_settings:read': 'ai_config:read',
   'ai_settings:write': 'ai_config:write',
 };
+
+/** A role's old row, each retired permission replaced by its successor. */
+function migrated(role: 'contributor' | 'viewer'): string[] {
+  return OLD_MATRIX[role].map((permission) => RETIRED_BY_SLICE[permission] ?? permission);
+}
 
 /** A role's permissions: the declared defaults plus the explicit grants (`platformGrants`, RETRO-D1). */
 function grants(role: string): string[] {
@@ -181,11 +188,11 @@ function grants(role: string): string[] {
 
 describe('role permission matrix', () => {
   it('contributor is exactly what it was, plus the slice grants', () => {
-    expect(grants('contributor')).toEqual([...OLD_MATRIX.contributor, ...(GAINED_BY_SLICE.contributor ?? [])].sort());
+    expect(grants('contributor')).toEqual([...new Set([...migrated('contributor'), ...(GAINED_BY_SLICE.contributor ?? [])])].sort());
   });
 
   it('viewer is exactly what it was, plus the slice grants', () => {
-    expect(grants('viewer')).toEqual([...OLD_MATRIX.viewer, ...(GAINED_BY_SLICE.viewer ?? [])].sort());
+    expect(grants('viewer')).toEqual([...new Set([...migrated('viewer'), ...(GAINED_BY_SLICE.viewer ?? [])])].sort());
   });
 
   it('an administrator (admin + org_admin) keeps every permission and gains only the new platform ones', () => {

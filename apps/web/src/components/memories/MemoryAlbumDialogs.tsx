@@ -8,7 +8,7 @@
 // and a new unauthenticated read path. The epic defers all of that to v2 and
 // ships the CAPABILITY today by chaining what already exists — save the memory
 // as an album (`POST /api/memories/:id/save-album`), then hand that album id to
-// the very same `ShareDialog`/`SharePanel` the album page uses. The user lands
+// the very same `MediaShareDialog` (the sharing slice's `ShareDialog`) the album page uses. The user lands
 // directly on the copy-public-link step, and nothing about the sharing
 // subsystem had to change.
 //
@@ -39,7 +39,7 @@ import {
   TextField,
 } from '@mui/material';
 
-import { ShareDialog } from '../share/ShareDialog';
+import { MediaShareDialog } from '../../platform/sharing/MediaShareDialog';
 import { saveMemoryAsAlbum } from '../../services/memories';
 
 /** Which flow the owner asked for. `null` means neither dialog is open. */
@@ -228,7 +228,7 @@ export function MemoryAlbumDialogs({
 
       {/* Share, step 2: the existing album share flow, unmodified. */}
       {shareAlbumId && (
-        <ShareDialog
+        <MediaShareDialog
           open={mode === 'share'}
           onClose={onClose}
           target={{ type: 'album', id: shareAlbumId }}

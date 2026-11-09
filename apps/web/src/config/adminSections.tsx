@@ -302,10 +302,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       ...dbBackupAdminSections.operations,
       {
         title: 'Public Sharing',
-        description: 'View and manage all public share links; revoke or set expirations in bulk.',
+        description: 'View and manage every public link; revoke them or change when they expire.',
         Icon: PublicIcon,
         path: '/admin/settings/sharing',
-        permission: 'shares:manage_any',
+        // RETRO-I4 (#578): `GET /api/admin/links` enforces the sharing slice's org-wide override.
+        permission: 'sharing:admin',
       },
       {
         title: 'Workflow Automation',

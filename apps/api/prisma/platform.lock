@@ -83,7 +83,8 @@
     "20261108030000_move_user_avatar_off_users",
     "20261108040000_cutover_enrichment_jobs_to_jobs",
     "20261108160000_rename_legacy_storage_migration_tables",
-    "20261108200000_i2_circles_to_groups_ownership"
+    "20261108200000_i2_circles_to_groups_ownership",
+    "20261109100000_i4_media_shares_to_link_grants"
   ],
   "deviations": [
     {
@@ -189,7 +190,6 @@
         "CREATE TYPE \"ReviewRunItemStatus\" AS ENUM ('matched', 'processing', 'applied', 'failed', 'skipped');",
         "CREATE TYPE \"ReviewRunStatus\" AS ENUM ('evaluating', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled');",
         "CREATE TYPE \"ReviewRunSubject\" AS ENUM ('burst_group', 'duplicate_group', 'location_suggestion');",
-        "CREATE TYPE \"ShareTargetType\" AS ENUM ('media_item', 'album');",
         "CREATE TYPE \"TrashEmptyRunItemStatus\" AS ENUM ('matched', 'deleted', 'failed', 'skipped');",
         "CREATE TYPE \"TrashEmptyRunStatus\" AS ENUM ('evaluating', 'running', 'completed', 'completed_with_errors', 'failed', 'cancelled');",
         "CREATE TYPE \"UserAvatarSource\" AS ENUM ('oauth', 'upload', 'person');",
@@ -219,7 +219,6 @@
         "CREATE TABLE \"media_item_embedding\" ( \"media_item_id\" UUID NOT NULL, \"circle_id\" UUID NOT NULL, \"embedding\" vector(1536) NOT NULL, \"model\" TEXT NOT NULL, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"media_item_embedding_pkey\" PRIMARY KEY (\"media_item_id\") );",
         "CREATE TABLE \"media_items\" ( \"id\" UUID NOT NULL DEFAULT uuid_generate_v4(), \"storage_object_id\" UUID NOT NULL, \"added_by_id\" UUID NOT NULL, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, \"type\" \"MediaType\" NOT NULL, \"captured_at\" TIMESTAMPTZ(6), \"captured_at_offset\" INTEGER, \"imported_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"source\" \"MediaSource\" NOT NULL, \"content_hash\" TEXT, \"width\" INTEGER, \"height\" INTEGER, \"duration_ms\" INTEGER, \"orientation\" INTEGER, \"camera_make\" TEXT, \"camera_model\" TEXT, \"original_filename\" TEXT NOT NULL, \"metadata\" JSONB, \"description\" TEXT, \"favorite\" BOOLEAN NOT NULL DEFAULT false, \"deleted_at\" TIMESTAMPTZ(6), \"original_created_at\" TIMESTAMPTZ(6), \"source_path\" TEXT, \"source_device_id\" TEXT, \"source_device_name\" TEXT, \"taken_lat\" DOUBLE PRECISION, \"taken_lng\" DOUBLE PRECISION, \"taken_altitude\" DOUBLE PRECISION, \"geo_country\" TEXT, \"geo_country_code\" TEXT, \"geo_admin1\" TEXT, \"geo_admin2\" TEXT, \"geo_locality\" TEXT, \"geo_place_name\" TEXT, \"geo_source\" TEXT, \"geocoded_at\" TIMESTAMPTZ(6), \"circle_id\" UUID NOT NULL, \"perceptual_hash\" TEXT, \"sharpness_score\" DOUBLE PRECISION, \"burst_uuid\" TEXT, \"burst_score\" DOUBLE PRECISION, \"burst_group_id\" UUID, \"archived_at\" TIMESTAMPTZ(6), \"duplicate_group_id\" UUID, \"coord_source\" TEXT, \"social_media_source\" TEXT, \"geo_canonical_country\" TEXT, \"geo_canonical_admin1\" TEXT, \"geo_canonical_locality\" TEXT, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"media_items_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"media_metadata_status\" ( \"id\" UUID NOT NULL, \"media_item_id\" UUID NOT NULL, \"circle_id\" UUID NOT NULL, \"status\" \"MediaMetadataStatusType\" NOT NULL DEFAULT 'not_processed', \"processed_at\" TIMESTAMPTZ(6), \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"media_metadata_status_pkey\" PRIMARY KEY (\"id\") );",
-        "CREATE TABLE \"media_shares\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"token\" TEXT NOT NULL, \"target_type\" \"ShareTargetType\" NOT NULL, \"media_item_id\" UUID, \"album_id\" UUID, \"circle_id\" UUID NOT NULL, \"created_by_id\" UUID NOT NULL, \"expires_at\" TIMESTAMPTZ(6), \"revoked_at\" TIMESTAMPTZ(6), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"media_shares_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"media_social_status\" ( \"id\" UUID NOT NULL, \"media_item_id\" UUID NOT NULL, \"status\" \"MediaSocialStatusType\" NOT NULL DEFAULT 'not_processed', \"is_social_media\" BOOLEAN NOT NULL DEFAULT false, \"platform\" TEXT, \"detection_method\" TEXT, \"confidence\" DOUBLE PRECISION, \"matched_rule\" TEXT, \"processed_at\" TIMESTAMPTZ(6), \"last_error\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"media_social_status_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"media_sync_devices\" ( \"id\" UUID NOT NULL, \"user_id\" UUID NOT NULL, \"installation_id\" UUID NOT NULL, \"name\" VARCHAR(100) NOT NULL, \"manufacturer\" TEXT, \"model\" TEXT, \"android_version\" TEXT, \"sdk_int\" INTEGER, \"app_version\" TEXT, \"app_version_code\" INTEGER, \"package_name\" TEXT, \"signing_sha256\" TEXT, \"timezone\" TEXT, \"pat_id\" UUID, \"status\" \"MediaSyncDeviceStatus\" NOT NULL DEFAULT 'active', \"config\" JSONB NOT NULL, \"config_version\" INTEGER NOT NULL DEFAULT 1, \"applied_config_version\" INTEGER NOT NULL DEFAULT 0, \"inventory\" JSONB, \"stats\" JSONB, \"permission\" TEXT, \"network_state\" TEXT, \"battery_optimized\" BOOLEAN, \"last_seen_at\" TIMESTAMPTZ(6), \"last_sync_at\" TIMESTAMPTZ(6), \"last_sync_status\" \"MediaSyncRunStatus\", \"last_error\" VARCHAR(1000), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, CONSTRAINT \"media_sync_devices_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"media_sync_diagnostic_reports\" ( \"id\" UUID NOT NULL, \"device_id\" UUID NOT NULL, \"summary\" VARCHAR(500), \"report\" JSONB NOT NULL, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"media_sync_diagnostic_reports_pkey\" PRIMARY KEY (\"id\") );",
@@ -341,11 +340,6 @@
         "CREATE INDEX \"media_metadata_status_owner_group_id_idx\" ON \"media_metadata_status\"(\"owner_group_id\" ASC);",
         "CREATE INDEX \"media_metadata_status_owner_user_id_idx\" ON \"media_metadata_status\"(\"owner_user_id\" ASC);",
         "CREATE INDEX \"media_metadata_status_status_idx\" ON \"media_metadata_status\"(\"status\" ASC);",
-        "CREATE INDEX \"media_shares_album_id_idx\" ON \"media_shares\"(\"album_id\" ASC);",
-        "CREATE INDEX \"media_shares_circle_id_idx\" ON \"media_shares\"(\"circle_id\" ASC);",
-        "CREATE INDEX \"media_shares_created_by_id_idx\" ON \"media_shares\"(\"created_by_id\" ASC);",
-        "CREATE INDEX \"media_shares_media_item_id_idx\" ON \"media_shares\"(\"media_item_id\" ASC);",
-        "CREATE UNIQUE INDEX \"media_shares_token_key\" ON \"media_shares\"(\"token\" ASC);",
         "CREATE UNIQUE INDEX \"media_social_status_media_item_id_key\" ON \"media_social_status\"(\"media_item_id\" ASC);",
         "CREATE INDEX \"media_social_status_status_idx\" ON \"media_social_status\"(\"status\" ASC);",
         "CREATE INDEX \"media_sync_devices_last_seen_at_idx\" ON \"media_sync_devices\"(\"last_seen_at\" ASC);",
@@ -506,10 +500,6 @@
         "ALTER TABLE \"media_metadata_status\" ADD CONSTRAINT \"media_metadata_status_org_id_fkey\" FOREIGN KEY (\"org_id\") REFERENCES \"organizations\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
         "ALTER TABLE \"media_metadata_status\" ADD CONSTRAINT \"media_metadata_status_owner_group_id_org_id_fkey\" FOREIGN KEY (\"owner_group_id\", \"org_id\") REFERENCES \"groups\"(\"id\", \"org_id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
         "ALTER TABLE \"media_metadata_status\" ADD CONSTRAINT \"media_metadata_status_owner_user_id_fkey\" FOREIGN KEY (\"owner_user_id\") REFERENCES \"users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
-        "ALTER TABLE \"media_shares\" ADD CONSTRAINT \"media_shares_album_id_fkey\" FOREIGN KEY (\"album_id\") REFERENCES \"albums\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
-        "ALTER TABLE \"media_shares\" ADD CONSTRAINT \"media_shares_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
-        "ALTER TABLE \"media_shares\" ADD CONSTRAINT \"media_shares_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
-        "ALTER TABLE \"media_shares\" ADD CONSTRAINT \"media_shares_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"media_social_status\" ADD CONSTRAINT \"media_social_status_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
         "ALTER TABLE \"media_sync_devices\" ADD CONSTRAINT \"media_sync_devices_pat_id_fkey\" FOREIGN KEY (\"pat_id\") REFERENCES \"personal_access_tokens\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
         "ALTER TABLE \"media_sync_devices\" ADD CONSTRAINT \"media_sync_devices_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",

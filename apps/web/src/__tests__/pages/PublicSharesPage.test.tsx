@@ -14,7 +14,7 @@
  *     including that the status column is absent from the generic filter picker,
  *   - the public URL column: truncated, never in full, and NOT exportable,
  *   - every mutation: copy, edit expiration, single revoke, bulk revoke /
- *     set-expiration / delete,
+ *     set-expiration (no hard delete since RETRO-I4: the sharing slice revokes),
  *   - permission gating,
  *   - the phone layout actually reaching the row actions that used to be off
  *     screen (the bug the issue was filed for).
@@ -81,8 +81,7 @@ function makeShare(overrides: Partial<MediaShare> = {}): MediaShare {
   const id = overrides.id ?? 'share-1';
   return {
     id,
-    token: `tok-${id}`,
-    publicUrl: `https://app.example.com/s/tok-${id}`,
+    publicUrl: `https://app.example.com/s#lnk_tok-${id}`,
     targetType: 'media_item',
     status: 'active',
     expiresAt: null,
@@ -103,8 +102,7 @@ function makeHook(
     isLoading: false,
     error: null,
     refetch: vi.fn().mockResolvedValue(undefined),
-    createShare: vi.fn(),
-    updateShare: vi.fn().mockResolvedValue(makeShare()),
+    updateShare: vi.fn().mockResolvedValue(undefined),
     revokeShare: vi.fn().mockResolvedValue(undefined),
     bulkAction: vi.fn().mockResolvedValue({ affected: 0 }),
     ...overrides,
@@ -398,7 +396,7 @@ describe('PublicSharesPage', () => {
 
       await waitFor(() => {
         expect(mockUseMediaShares).toHaveBeenCalledWith(
-          expect.objectContaining({ scope: 'all', status: 'revoked', page: 1 }),
+          expect.objectContaining({ status: 'revoked', page: 1 }),
         );
       });
       expect(await screen.findByText('Status is Revoked')).toBeInTheDocument();
@@ -649,24 +647,15 @@ describe('PublicSharesPage', () => {
       });
     });
 
-    it('bulk delete confirms, then calls bulkAction with delete', async () => {
-      const hook = setupWithShares();
-      hook.bulkAction = vi.fn().mockResolvedValue({ affected: 2 });
+    it('offers no bulk delete: links are revoked, never hard-deleted (RETRO-I4)', async () => {
+      setupWithShares();
       const user = userEvent.setup();
 
       renderPage();
       await user.click(await screen.findByRole('checkbox', { name: /select all rows/i }));
-      await user.click(await screen.findByRole('button', { name: /^delete$/i }));
 
-      const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).getByText(/delete 2 shares\?/i)).toBeInTheDocument();
-      await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
-
-      await waitFor(() => {
-        expect(hook.bulkAction).toHaveBeenCalledWith(
-          expect.objectContaining({ action: 'delete' }),
-        );
-      });
+      expect(await screen.findByRole('button', { name: /^revoke$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument();
     });
   });
 
@@ -718,7 +707,7 @@ describe('PublicSharesPage', () => {
       });
       expect(screen.getByRole('button', { name: /^revoke$/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /set expiration/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument();
     });
 
     it('contains its own width — nothing forces the document sideways', async () => {

@@ -39,8 +39,8 @@ import './factory-reset.steps';
 //
 // The planner decides OWNER models: a user-owned registry entry with an
 // `ownerField` (`app-registrations/user-owned-models.ts`). MemoriaHub's are
-// `UserProfile`, `CircleMember`, `MediaSyncDevice`, `MemoryUserState`,
-// `MediaShare` and the legacy node and notification tables, plus the platform's
+// `UserProfile`, `CircleMember`, `MediaSyncDevice`, `MemoryUserState` and the
+// legacy node and notification tables, plus the platform's
 // `StorageObject` (owner `uploaded_by_id`, SetNull). Circles (`owner_id`) and
 // media, albums, tags and people (`added_by_id`) are ACTOR models whose key is
 // `Restrict`: the registry refuses `ownerField` with `purge: 'retain'` ("a
@@ -80,16 +80,21 @@ import './factory-reset.steps';
 // would otherwise `deleteMany` the table under `media_items.storage_object_id`;
 // the reset's `memoriahub.storage` step owns it).
 //
-// `MemoryUserState` (seen / hidden / favourite marks), `MediaShare` (public
-// links) and the two legacy notification tables are deleted inline.
+// `MemoryUserState` (seen / hidden / favourite marks) and the two legacy
+// notification tables are deleted inline.
+//
+// PUBLIC LINKS (RETRO-I4, #578) are platform link grants. The sharing slice
+// decides them: a link belongs to the RECORD's owner, not to who created it
+// (`grants.granted_by_id` is only recorded, SetNull), so a data reset no longer
+// revokes the links a user created, and the `shares` category and scope are
+// retired (a deliberate behaviour difference, docs/platform-adoption/local-exceptions.md).
 //
 // WHAT EACH SCOPE DELETES
 //
 //   library     files            the personal circle emptied, with its files
-//   shares      shares           every public link the user created
 //   devices     devices          paired phones and their tokens
-//   content     every `content: true` category: library, memory marks, public
-//               links, notifications, AI history and "other"
+//   content     every `content: true` category: library, memory marks,
+//               notifications, AI history and "other"
 //   everything  every category: content plus devices, access tokens,
 //               credentials, settings and the profile picture
 //
@@ -121,13 +126,6 @@ registerUserDataCategory({
   order: 6,
 });
 registerUserDataCategory({
-  id: 'shares',
-  label: 'Public links',
-  description: 'Public links you created. Anyone holding one loses access.',
-  content: true,
-  order: 7,
-});
-registerUserDataCategory({
   id: 'devices',
   label: 'Paired Android devices',
   description: 'Phones paired for Media Sync, with their sync history and sign-in tokens. They stop syncing.',
@@ -144,15 +142,6 @@ registerUserDataScope({
   confirmation: 'LIBRARY',
   layer: 'specific',
   order: 10,
-});
-registerUserDataScope({
-  id: 'shares',
-  label: 'Public links',
-  description: 'Every public link you created.',
-  categories: ['shares'],
-  confirmation: 'SHARES',
-  layer: 'specific',
-  order: 20,
 });
 registerUserDataScope({
   id: 'devices',
@@ -176,7 +165,6 @@ export const MEMORIAHUB_USER_DATA_MODELS: readonly UserDataModelHint<Prisma.Mode
 
   // ---- the user's own rows ---------------------------------------------------
   { model: 'MemoryUserState', category: 'memories' },
-  { model: 'MediaShare', category: 'shares' },
   { model: 'MediaSyncDevice', category: 'devices', delegate: delegate(MEMORIAHUB_PURGE_JOB_TYPES.DEVICES) },
   { model: 'UserProfile', category: 'settings', delegate: delegate(MEMORIAHUB_PURGE_JOB_TYPES.PROFILE) },
   // Legacy notification tables (RETRO-D3 moves the data to the platform's).

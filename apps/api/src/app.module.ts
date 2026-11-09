@@ -27,7 +27,7 @@ import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
 import { emailModule } from './platform/email/email.config';
-import { ShareModule } from './share/share.module';
+import { PublicLinksModule } from './public-links/public-links.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
 import { NodesModule } from './nodes/nodes.module';
@@ -160,7 +160,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
     // Sends go through the notifications slice's email channel (RETRO-D3).
     emailModule,
-    ShareModule,
+    // Public links (RETRO-I4, #578): the guarded public views of `media_item` / `album`
+    // link grants (presigned URLs, never bytes), the 410 for the retired
+    // `/api/public/shares/*`, and the admin listing `GET /api/admin/links`.
+    PublicLinksModule,
     SocialMediaModule,
     EnhancementModule,
     NodesModule,
@@ -206,9 +209,9 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // events and the global `MemoriaHubWebhooks` its write paths raise them through.
     MemoriaHubWebhooksModule,
     // Sharing (RETRO-I1, #562): @marinoscar/platform-api/sharing, single-organization mode.
-    // `/api/groups`, `/api/grants`, `/api/grants/links` and the public `/api/public/links/current`
-    // are live and empty: circles and public shares keep deciding access until RETRO-I2..I5
-    // (mapping: docs/platform-adoption/circles-to-groups.md). Binding: `platform/sharing/`.
+    // `/api/groups`, `/api/grants`, `/api/grants/links` and the public `/api/public/links/current`.
+    // Public shares are link grants since RETRO-I4; circles keep deciding the rest of access
+    // until RETRO-I3/I5 (mapping: docs/platform-adoption/circles-to-groups.md). Binding: `platform/sharing/`.
     sharingModule,
     // Data export (RETRO-H2, #596): @marinoscar/platform-api/exports. "Download your data"
     // (`/api/exports`, the `export.run` / `export.purge` jobs, the daily expiry cron): the

@@ -64,7 +64,8 @@ describe('MemoriaHub user-data registrations', () => {
 
   it('declares the narrow scopes with their phrases, and keeps the built-in ones', () => {
     expect(findUserDataScope('library')).toMatchObject({ categories: ['files'], confirmation: 'LIBRARY' });
-    expect(findUserDataScope('shares')).toMatchObject({ categories: ['shares'], confirmation: 'SHARES' });
+    // `shares` is retired with `media_shares` (RETRO-I4): public links are link grants the sharing slice owns.
+    expect(findUserDataScope('shares')).toBeUndefined();
     expect(findUserDataScope('devices')).toMatchObject({ categories: ['devices'], confirmation: 'DEVICES' });
     expect(findUserDataScope('everything')).toBeDefined();
     expect(findUserDataScope('content')).toBeDefined();
