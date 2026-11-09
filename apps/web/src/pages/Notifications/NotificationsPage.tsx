@@ -59,7 +59,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import { useNotifications } from '@marinoscar/platform-web/notifications/headless';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useNotificationList } from '../../hooks/useNotificationList';
 import { listNotifications } from '../../services/notifications';
 import { isInternalLink } from '../../utils/internalLink';
@@ -113,7 +113,7 @@ const EMPTY_STATE_TEXT: Record<NotificationsTab, string> = {
 // ---------------------------------------------------------------------------
 
 export default function NotificationsPage() {
-  const { circles } = useCircle();
+  const { circles } = useOwnerScope();
   const navigate = useNavigate();
   const store = useNotifications();
   const unreadCount = store?.unreadCount ?? 0;

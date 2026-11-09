@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ReviewCountsResponse } from '../types/media';
 import { getReviewCounts } from '../services/media';
-import { useCircle } from './useCircle';
+import { useOwnerScope } from './useOwnerScope';
 import { useIsMounted } from './useIsMounted';
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ export function useReviewCounts(
   options: UseReviewCountsOptions = {},
 ): UseReviewCountsResult {
   const { enabled = true } = options;
-  const { activeCircleId } = useCircle();
+  const { activeCircleId } = useOwnerScope();
   const [data, setData] = useState<ReviewCountsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

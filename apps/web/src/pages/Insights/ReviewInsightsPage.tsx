@@ -14,7 +14,7 @@ import PendingIcon from '@mui/icons-material/HourglassEmpty';
 import ResolvedIcon from '@mui/icons-material/CheckCircle';
 import DismissedIcon from '@mui/icons-material/Cancel';
 import IdentifiedIcon from '@mui/icons-material/PhotoLibrary';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useReviewInsights } from '../../hooks/useReviewInsights';
 import { KpiCard } from '../../components/insights/KpiCard';
 import { KpiSkeleton } from '../../components/insights/KpiSkeleton';
@@ -170,7 +170,7 @@ function QueueSection({ title, icon, accentColor, metrics }: QueueSectionProps) 
 }
 
 export default function ReviewInsightsPage() {
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { data, loading, error } = useReviewInsights(activeCircleId ?? null);
 
   if (!activeCircle) {

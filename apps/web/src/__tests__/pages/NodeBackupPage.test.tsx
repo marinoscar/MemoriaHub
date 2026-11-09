@@ -31,8 +31,8 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../services/nodeBackup', () => ({
@@ -51,7 +51,7 @@ import NodeBackupPage, {
   deriveSchedulePreset,
 } from '../../pages/Admin/NodeBackupPage';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import {
   getNodeBackupConfig,
   getNodeBackupRuns,
@@ -63,7 +63,7 @@ import type {
 } from '../../services/nodeBackup';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseCircles = vi.mocked(useCircle);
+const mockUseCircles = vi.mocked(useOwnerScope);
 const mockGetConfig = vi.mocked(getNodeBackupConfig);
 const mockUpdateConfig = vi.mocked(updateNodeBackupConfig);
 const mockGetRuns = vi.mocked(getNodeBackupRuns);
@@ -152,7 +152,7 @@ function makeCirclesHook() {
   return {
     circles: circleFixtures,
     loading: false,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function renderPage() {

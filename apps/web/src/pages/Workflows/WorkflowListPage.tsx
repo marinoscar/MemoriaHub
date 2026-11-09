@@ -17,7 +17,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflows } from '../../hooks/useWorkflows';
 import { useWorkflowMutations } from '../../hooks/useWorkflowMutations';
@@ -28,7 +28,7 @@ import type { Workflow } from '../../types/workflows';
 
 export default function WorkflowListPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
   const { hasPermission } = usePermissions();
   const { workflows, isLoading, error, fetchWorkflows } = useWorkflows();
   const { runWorkflow, duplicateWorkflow, deleteWorkflow, setEnabled } =

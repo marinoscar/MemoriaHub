@@ -1,7 +1,7 @@
 /**
  * Tests for OwnerScopeChip (issue #389, epic #388, spec §3.3/§4.1).
  *
- * The active-circle switcher promoted into the top bar. `useCircle` is
+ * The active-circle switcher promoted into the top bar. `useOwnerScope` is
  * mocked directly (the same pattern AppBar.test.tsx and the former
  * UserMenu.test.tsx circle-section tests use) so a real multi-circle menu can
  * be exercised deterministically.
@@ -17,8 +17,8 @@ import type { Circle } from '../../../types/circles';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 const mockNavigate = vi.fn();
@@ -30,9 +30,9 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -80,7 +80,7 @@ function makeCircleDefaults(overrides: Record<string, unknown> = {}) {
 describe('OwnerScopeChip', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(makeCircleDefaults());
+    mockUseOwnerScope.mockReturnValue(makeCircleDefaults());
   });
 
   // =========================================================================
@@ -89,7 +89,7 @@ describe('OwnerScopeChip', () => {
 
   describe('no active circle', () => {
     it('renders null when there is no active circle', () => {
-      mockUseCircle.mockReturnValue(makeCircleDefaults({ activeCircle: null, activeCircleId: null }));
+      mockUseOwnerScope.mockReturnValue(makeCircleDefaults({ activeCircle: null, activeCircleId: null }));
 
       const { container } = render(<OwnerScopeChip />);
 
@@ -127,7 +127,7 @@ describe('OwnerScopeChip', () => {
       const { rerender } = render(<OwnerScopeChip />);
       expect(screen.getByRole('button', { name: /Active library: Personal Library/ })).toBeInTheDocument();
 
-      mockUseCircle.mockReturnValue(makeCircleDefaults({ activeCircle: mockCircle2, activeCircleId: 'circle-2' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleDefaults({ activeCircle: mockCircle2, activeCircleId: 'circle-2' }));
       rerender(<OwnerScopeChip />);
 
       expect(screen.getByRole('button', { name: /Active library: Family Circle/ })).toBeInTheDocument();
@@ -195,7 +195,7 @@ describe('OwnerScopeChip', () => {
   describe('selecting a circle', () => {
     it('calls setActiveCircle with the clicked circle id', async () => {
       const setActiveCircle = vi.fn().mockResolvedValue(undefined);
-      mockUseCircle.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
+      mockUseOwnerScope.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
 
       const user = userEvent.setup();
       render(<OwnerScopeChip />);
@@ -256,7 +256,7 @@ describe('OwnerScopeChip', () => {
 
     it('does NOT call setActiveCircle when only "Manage groups" is clicked', async () => {
       const setActiveCircle = vi.fn().mockResolvedValue(undefined);
-      mockUseCircle.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
+      mockUseOwnerScope.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
 
       const user = userEvent.setup();
       render(<OwnerScopeChip />);
@@ -276,7 +276,7 @@ describe('OwnerScopeChip', () => {
 
   describe('long circle name truncation', () => {
     it('caps the label with a maxWidth and keeps ellipsis truncation styling regardless of name length', () => {
-      mockUseCircle.mockReturnValue(
+      mockUseOwnerScope.mockReturnValue(
         makeCircleDefaults({ activeCircle: LONG_NAME_CIRCLE, activeCircleId: LONG_NAME_CIRCLE.id }),
       );
 
@@ -296,7 +296,7 @@ describe('OwnerScopeChip', () => {
     });
 
     it('still renders the FULL name in the accessible name even though it is visually truncated', () => {
-      mockUseCircle.mockReturnValue(
+      mockUseOwnerScope.mockReturnValue(
         makeCircleDefaults({ activeCircle: LONG_NAME_CIRCLE, activeCircleId: LONG_NAME_CIRCLE.id }),
       );
 

@@ -28,8 +28,8 @@ vi.mock('../../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 // A realistic minimal SearchRequest fixture used by the stubbed SearchPanel's
@@ -57,10 +57,10 @@ vi.mock('../../../components/search/SearchPanel', () => ({
 
 import { PageSearchBar, PageSearchBarSection } from '../../../components/search/PageSearchBar';
 import { useSearch } from '../../../contexts/SearchContext';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 
 const mockUseSearch = vi.mocked(useSearch);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,7 +100,7 @@ describe('PageSearchBar', () => {
     vi.clearAllMocks();
     searchPanelSpy.mockClear();
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
   });
 
   // -------------------------------------------------------------------------
@@ -177,7 +177,7 @@ describe('PageSearchBar', () => {
   // -------------------------------------------------------------------------
   describe('no active circle', () => {
     it('disables the text input', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -189,7 +189,7 @@ describe('PageSearchBar', () => {
     });
 
     it('disables the Advanced search button', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -202,7 +202,7 @@ describe('PageSearchBar', () => {
 
     it('typing and pressing Enter does not call runAgentSearch', async () => {
       const runAgentSearch = vi.fn();
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -223,7 +223,7 @@ describe('PageSearchBar', () => {
     });
 
     it('does not mount SearchPanel at all (no circleId to load facets with)', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -322,7 +322,7 @@ describe('PageSearchBarSection', () => {
     vi.clearAllMocks();
     searchPanelSpy.mockClear();
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
   });
 
   it('renders the same input and advanced-search trigger as PageSearchBar', () => {

@@ -24,7 +24,7 @@ import { Box, IconButton, InputBase, Paper, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import TuneIcon from '@mui/icons-material/Tune';
 import ClearIcon from '@mui/icons-material/Close';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useSearch } from '../../contexts/SearchContext';
 import { SearchPanel } from './SearchPanel';
 
@@ -40,7 +40,7 @@ export function PageSearchBar({
   initialQuery = '',
   autoFocus = false,
 }: PageSearchBarProps) {
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { runAgentSearch, runDeterministicSearch } = useSearch();
 
   const [input, setInput] = useState(initialQuery);

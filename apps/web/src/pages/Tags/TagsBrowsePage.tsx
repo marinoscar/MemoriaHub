@@ -7,7 +7,7 @@ import {
   Skeleton,
 } from '@mui/material';
 import TagIcon from '@mui/icons-material/LocalOffer';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { getExploreTags } from '../../services/media';
 import type { ExploreItem } from '../../services/media';
 
@@ -23,7 +23,7 @@ const TILE_SIZE = 96;
 
 export default function TagsBrowsePage() {
   const navigate = useNavigate();
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
 
   const [tags, setTags] = useState<ExploreItem[]>([]);
   const [loading, setLoading] = useState(false);

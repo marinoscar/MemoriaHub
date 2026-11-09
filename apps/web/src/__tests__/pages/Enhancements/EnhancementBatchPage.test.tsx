@@ -31,8 +31,8 @@ import { installLayoutStubs, resetContainerWidth } from '@marinoscar/platform-we
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../hooks/useEnhancementBatch', () => ({
@@ -62,12 +62,12 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import EnhancementBatchPage from '../../../pages/Enhancements/EnhancementBatchPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useEnhancementBatch } from '../../../hooks/useEnhancementBatch';
 import { cancelEnhancementBatch, listEnhancements } from '../../../services/enhance';
 import type { EnhancementBatch } from '../../../services/enhance';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseEnhancementBatch = vi.mocked(useEnhancementBatch);
 const mockCancel = vi.mocked(cancelEnhancementBatch);
 const mockListEnhancements = vi.mocked(listEnhancements);
@@ -76,7 +76,7 @@ const mockListEnhancements = vi.mocked(listEnhancements);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}) {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}) {
   return {
     activeCircle: {
       id: 'circle-1',
@@ -94,7 +94,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makeBatch(overrides: Partial<EnhancementBatch> = {}): EnhancementBatch {
@@ -144,7 +144,7 @@ describe('EnhancementBatchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContainerWidth(1400);
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockCancel.mockResolvedValue({ batchId: 'batch-1', status: 'running', cancelled: 3 });
     mockListEnhancements.mockResolvedValue({
       items: [],
@@ -214,7 +214,7 @@ describe('EnhancementBatchPage', () => {
   // -------------------------------------------------------------------------
   describe('cancel gating', () => {
     it('shows "Cancel remaining" for a collaborator on a non-terminal batch', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
       mockUseEnhancementBatch.mockReturnValue(makeBatchHook({ batch: makeBatch({ status: 'running' }) }));
 
       render(<EnhancementBatchPage />);
@@ -223,7 +223,7 @@ describe('EnhancementBatchPage', () => {
     });
 
     it('shows the cancel button for a circle_admin too', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'circle_admin' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'circle_admin' }));
       mockUseEnhancementBatch.mockReturnValue(makeBatchHook({ batch: makeBatch({ status: 'running' }) }));
 
       render(<EnhancementBatchPage />);
@@ -232,7 +232,7 @@ describe('EnhancementBatchPage', () => {
     });
 
     it('hides the cancel button for a viewer', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'viewer' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'viewer' }));
       mockUseEnhancementBatch.mockReturnValue(makeBatchHook({ batch: makeBatch({ status: 'running' }) }));
 
       render(<EnhancementBatchPage />);
@@ -241,7 +241,7 @@ describe('EnhancementBatchPage', () => {
     });
 
     it('hides the cancel button once the batch is terminal, even for a collaborator', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
       mockUseEnhancementBatch.mockReturnValue(
         makeBatchHook({ batch: makeBatch({ status: 'completed', succeededCount: 10 }) }),
       );

@@ -1,11 +1,11 @@
 import { Box, Typography } from '@mui/material';
 import ArchiveIcon from '@mui/icons-material/Archive';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import { listArchived } from '../../services/media';
 
 export default function ArchivePage() {
-  const { activeCircleId, activeCircleRole } = useCircle();
+  const { activeCircleId, activeCircleRole } = useOwnerScope();
 
   if (!activeCircleId) {
     return (

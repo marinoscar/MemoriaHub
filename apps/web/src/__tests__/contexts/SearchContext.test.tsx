@@ -26,9 +26,9 @@ vi.mock('../../services/searchAgentStream', () => ({
   streamAgent: vi.fn(),
 }));
 
-// useCircle is used inside SearchProvider to react to circle changes.
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+// useOwnerScope is used inside SearchProvider to react to circle changes.
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -37,11 +37,11 @@ vi.mock('../../hooks/useCircle', () => ({
 
 import { SearchProvider, useSearch } from '../../contexts/SearchContext';
 import { streamAgent } from '../../services/searchAgentStream';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import type { MediaItem, MediaListMeta } from '../../types/media';
 
 const mockStreamAgent = vi.mocked(streamAgent);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,7 +92,7 @@ function renderSearchHook(initialPath = '/') {
 describe('SearchContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     // Default: streamAgent resolves immediately (no-op)
     mockStreamAgent.mockResolvedValue(undefined);
   });
@@ -383,8 +383,8 @@ describe('SearchContext', () => {
       });
       await waitFor(() => expect(result.current.results).not.toBeNull());
 
-      // Switch to circle-2 — update the useCircle mock and re-render
-      mockUseCircle.mockReturnValue(defaultCircleMock('circle-2') as any);
+      // Switch to circle-2 — update the useOwnerScope mock and re-render
+      mockUseOwnerScope.mockReturnValue(defaultCircleMock('circle-2') as any);
       rerender();
 
       await waitFor(() => {

@@ -34,8 +34,8 @@ vi.mock('../../components/insights/CompositionDonut', () => ({
   ),
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/useReviewInsights', () => ({
@@ -47,11 +47,11 @@ vi.mock('../../hooks/useReviewInsights', () => ({
 // ---------------------------------------------------------------------------
 
 import ReviewInsightsPage from '../../pages/Insights/ReviewInsightsPage';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useReviewInsights } from '../../hooks/useReviewInsights';
 import type { ReviewInsights } from '../../services/reviewInsights';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseReviewInsights = vi.mocked(useReviewInsights);
 
 // ---------------------------------------------------------------------------
@@ -73,8 +73,8 @@ function makeCircle(id = CIRCLE_ID) {
 }
 
 function makeCircleContext(
-  overrides: Partial<ReturnType<typeof useCircle>> = {},
-): ReturnType<typeof useCircle> {
+  overrides: Partial<ReturnType<typeof useOwnerScope>> = {},
+): ReturnType<typeof useOwnerScope> {
   return {
     activeCircle: makeCircle(),
     activeCircleId: CIRCLE_ID,
@@ -84,7 +84,7 @@ function makeCircleContext(
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 const emptyMetrics = {
@@ -150,13 +150,13 @@ function makeHookReturn(
 describe('ReviewInsightsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseReviewInsights.mockReturnValue(makeHookReturn());
   });
 
   describe('no active circle', () => {
     it('shows a select-a-circle alert and does not render KPI content', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
 
       render(<ReviewInsightsPage />);
 

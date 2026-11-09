@@ -21,7 +21,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ClearIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTheme } from '@mui/material/styles';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useSearch } from '../../contexts/SearchContext';
 import { SearchPanel } from './SearchPanel';
 
@@ -29,7 +29,7 @@ export function TopbarSearch() {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { runAgentSearch, runDeterministicSearch } = useSearch();
 
   const [input, setInput] = useState('');

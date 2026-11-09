@@ -10,7 +10,7 @@
  * a slow-network bug report.
  *
  * Mocks the SERVICE layer (services/media, services/face, services/memories)
- * plus the two small hooks (`useCircle`, `useMemoriesEnabled`) the hook reads
+ * plus the two small hooks (`useOwnerScope`, `useMemoriesEnabled`) the hook reads
  * directly, rather than mocking `useCollectionSummaries` itself — mirrors
  * `Sidebar.test.tsx` / `ReviewHubPage.test.tsx`, so each case can assert what
  * was actually requested.
@@ -37,8 +37,8 @@ vi.mock('../../services/memories', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../services/memories')>()),
   listMemories: vi.fn(),
 }));
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 vi.mock('../../hooks/useMemoriesEnabled', () => ({
   useMemoriesEnabled: vi.fn(),
@@ -47,14 +47,14 @@ vi.mock('../../hooks/useMemoriesEnabled', () => ({
 import { listAlbums, getExploreLocations } from '../../services/media';
 import { listPeople } from '../../services/face';
 import { listMemories } from '../../services/memories';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 
 const mockListAlbums = vi.mocked(listAlbums);
 const mockListPeople = vi.mocked(listPeople);
 const mockGetExploreLocations = vi.mocked(getExploreLocations);
 const mockListMemories = vi.mocked(listMemories);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseMemoriesEnabled = vi.mocked(useMemoriesEnabled);
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ function circleState(activeCircleId: string | null) {
 describe('useCollectionSummaries', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(circleState('circle-1'));
+    mockUseOwnerScope.mockReturnValue(circleState('circle-1'));
     mockUseMemoriesEnabled.mockReturnValue(true);
     mockListAlbums.mockResolvedValue(albumsResponse());
     mockListPeople.mockResolvedValue(peopleResponse());
@@ -341,7 +341,7 @@ describe('useCollectionSummaries', () => {
 
   describe('no active circle', () => {
     it('issues no request to any of the four sources', async () => {
-      mockUseCircle.mockReturnValue(circleState(null));
+      mockUseOwnerScope.mockReturnValue(circleState(null));
 
       renderHook(() => useCollectionSummaries());
 
@@ -356,7 +356,7 @@ describe('useCollectionSummaries', () => {
     });
 
     it('resolves every summary to ready/no-count rather than leaving them stuck loading', () => {
-      mockUseCircle.mockReturnValue(circleState(null));
+      mockUseOwnerScope.mockReturnValue(circleState(null));
 
       const { result } = renderHook(() => useCollectionSummaries());
 
@@ -382,7 +382,7 @@ describe('useCollectionSummaries', () => {
     await waitFor(() => expect(mockListAlbums).toHaveBeenCalledTimes(1));
     expect(mockListAlbums).toHaveBeenCalledWith(expect.objectContaining({ circleId: 'circle-1' }));
 
-    mockUseCircle.mockReturnValue(circleState('circle-2'));
+    mockUseOwnerScope.mockReturnValue(circleState('circle-2'));
     rerender();
 
     await waitFor(() => expect(mockListAlbums).toHaveBeenCalledTimes(2));
@@ -417,7 +417,7 @@ describe('useCollectionSummaries', () => {
     expect(result.current.summaries.albums.status).toBe('loading');
 
     // Switch circles before the stale promise resolves.
-    mockUseCircle.mockReturnValue(circleState('circle-2'));
+    mockUseOwnerScope.mockReturnValue(circleState('circle-2'));
     rerender();
 
     await waitFor(() =>

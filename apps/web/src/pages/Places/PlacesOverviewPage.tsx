@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Alert } from '@mui/material';
 import PlaceIcon from '@mui/icons-material/Place';
 import PublicIcon from '@mui/icons-material/Public';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { getExploreLocations } from '../../services/media';
 import type { ExploreLocations } from '../../services/media';
 import { ExploreCarousel } from '../../components/search/ExploreCarousel';
@@ -20,7 +20,7 @@ import type { ExploreLocationItem } from '../../services/media';
 
 export default function PlacesOverviewPage() {
   const navigate = useNavigate();
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
 
   const [locations, setLocations] = useState<ExploreLocations>({
     countries: [],

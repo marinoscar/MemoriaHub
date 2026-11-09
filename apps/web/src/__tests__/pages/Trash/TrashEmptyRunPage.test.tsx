@@ -37,8 +37,8 @@ import { api } from '../../../services/api';
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../hooks/useTrashEmptyRun', () => ({
@@ -68,12 +68,12 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import TrashEmptyRunPage from '../../../pages/Trash/TrashEmptyRunPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useTrashEmptyRun } from '../../../hooks/useTrashEmptyRun';
 import { useTrashEmptyRunItems } from '../../../hooks/useTrashEmptyRunItems';
 import type { TrashEmptyRunDetail } from '../../../types/trashEmptyRuns';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseTrashEmptyRun = vi.mocked(useTrashEmptyRun);
 const mockUseTrashEmptyRunItems = vi.mocked(useTrashEmptyRunItems);
 
@@ -81,7 +81,7 @@ const mockUseTrashEmptyRunItems = vi.mocked(useTrashEmptyRunItems);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}) {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}) {
   return {
     activeCircle: {
       id: 'circle-1',
@@ -99,7 +99,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makeRun(overrides: Partial<TrashEmptyRunDetail> = {}): TrashEmptyRunDetail {
@@ -156,7 +156,7 @@ describe('TrashEmptyRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContainerWidth(1400); // desktop layout unless a test says otherwise
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook());
     // The table's layout-persistence hook reads/writes `/user-settings` (§15).
     vi.spyOn(api, 'get').mockResolvedValue({} as never);
@@ -241,7 +241,7 @@ describe('TrashEmptyRunPage', () => {
     });
 
     it('hides the Cancel run button for a non-circle_admin', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
       const run = makeRun({ status: 'running', matchedCount: 10, processedCount: 1 });
       mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run }));
 

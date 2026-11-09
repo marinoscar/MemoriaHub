@@ -13,7 +13,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useAlbums } from '../../hooks/useAlbums';
 import { CreateAlbumDialog } from '../../components/album/CreateAlbumDialog';
 import type { Album } from '../../types/media';
@@ -89,7 +89,7 @@ function AlbumCard({ album, onOpen }: { album: Album; onOpen: () => void }) {
 
 export default function AlbumsPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
   const { albums, isLoading, error, fetchAlbums } = useAlbums();
   const [createOpen, setCreateOpen] = useState(false);
 

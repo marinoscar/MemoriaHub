@@ -23,8 +23,8 @@ vi.mock('../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/usePeople', () => ({
@@ -56,11 +56,11 @@ vi.mock('../../components/search/SearchPanel', () => ({
 
 import SearchPage from '../../pages/SearchPage';
 import { useSearch } from '../../contexts/SearchContext';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePeople } from '../../hooks/usePeople';
 
 const mockUseSearch = vi.mocked(useSearch);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUsePeople = vi.mocked(usePeople);
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ describe('SearchPage — extended coverage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
     mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
   });

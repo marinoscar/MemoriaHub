@@ -3,7 +3,7 @@
  *
  * Mocking strategy:
  *   - useParams is overridden to supply albumId without a real router match.
- *   - useCircle is mocked to supply an active circle and per-circle role.
+ *   - useOwnerScope is mocked to supply an active circle and per-circle role.
  *   - getAlbum / updateAlbum / deleteAlbum service functions are mocked so no
  *     real HTTP calls are made.
  *   - MediaGallery is stubbed to a lightweight placeholder — album-gallery
@@ -39,8 +39,8 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -60,11 +60,11 @@ vi.mock('../../../components/media/MediaGallery', () => ({
 
 import AlbumPage from '../AlbumPage';
 import { useParams } from 'react-router-dom';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../../services/media';
 
 const mockUseParams = vi.mocked(useParams);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetAlbum = vi.mocked(getAlbum);
 const mockUpdateAlbum = vi.mocked(updateAlbum);
 const mockDeleteAlbum = vi.mocked(deleteAlbum);
@@ -97,7 +97,7 @@ const defaultAlbumDetail = {
 function setupDefaults(overrides: { role?: string } = {}) {
   mockUseParams.mockReturnValue({ albumId: 'album-1' });
 
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [defaultActiveCircle],
     activeCircle: defaultActiveCircle,
     activeCircleId: 'circle-1',
@@ -350,7 +350,7 @@ describe('AlbumPage', () => {
   describe('No active circle', () => {
     it('shows an info Alert when no circle is active', () => {
       mockUseParams.mockReturnValue({ albumId: 'album-1' });
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         circles: [],
         activeCircle: null,
         activeCircleId: null,
@@ -368,7 +368,7 @@ describe('AlbumPage', () => {
 
     it('shows an error Alert when albumId is missing', () => {
       mockUseParams.mockReturnValue({});
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         circles: [defaultActiveCircle],
         activeCircle: defaultActiveCircle,
         activeCircleId: 'circle-1',

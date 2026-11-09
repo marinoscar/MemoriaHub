@@ -59,7 +59,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
 import { usePeople } from '../../hooks/usePeople';
 import { PersonAvatar } from '../people/PersonAvatar';
@@ -106,7 +106,7 @@ export function MemoriesSettings({
   disabled = false,
 }: MemoriesSettingsProps) {
   const enabled = useMemoriesEnabled();
-  const { activeCircleId } = useCircle();
+  const { activeCircleId } = useOwnerScope();
 
   // The flag is threaded INTO the hook, not wrapped around the component: with
   // memories off this section renders nothing AND fires no people request.

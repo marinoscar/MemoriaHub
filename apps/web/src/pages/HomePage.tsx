@@ -27,13 +27,13 @@ import { useMemo } from 'react';
 import { Box, Alert, Link, Typography } from '@mui/material';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { Link as RouterLink } from 'react-router-dom';
-import { useCircle } from '../hooks/useCircle';
+import { useOwnerScope } from '../hooks/useOwnerScope';
 import { MediaGallery } from '../components/media/MediaGallery';
 import { MemoriesCarousel } from '../components/memories/MemoriesCarousel';
 import { HomeGroupInvites } from '../components/sharing/HomeGroupInvites';
 
 export default function HomePage() {
-  const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useCircle();
+  const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useOwnerScope();
 
   // Memoized query params — stable reference when circleId unchanged
   const mediaParams = useMemo(

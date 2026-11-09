@@ -43,7 +43,7 @@ import SelectAllIcon from '@mui/icons-material/SelectAll';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
 import type { Area } from 'react-easy-crop';
-import { useCircleContext } from '../../contexts/CircleContext';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePeople, usePerson } from '../../hooks/usePeople';
 import { PersonGrid } from '../../components/people/PersonGrid';
 import { UnknownFacesReview } from '../../components/people/UnknownFacesReview';
@@ -1448,7 +1448,7 @@ function HiddenPeopleView({
 // ---------------------------------------------------------------------------
 
 export default function PeoplePage() {
-  const { activeCircleId, activeCircleRole } = useCircleContext();
+  const { activeCircleId, activeCircleRole } = useOwnerScope();
   const navigate = useNavigate();
   const [selectedPerson, setSelectedPerson] = useState<PersonListItem | null>(null);
 

@@ -31,7 +31,7 @@ import type { PersonListItem } from '../services/face';
 import { listMemories } from '../services/memories';
 import { COLLECTIONS } from '../config/collections';
 import type { CollectionDef, CollectionFlag, CollectionSource } from '../config/collections';
-import { useCircle } from './useCircle';
+import { useOwnerScope } from './useOwnerScope';
 import { useIsMounted } from './useIsMounted';
 import { useMemoriesEnabled } from './useMemoriesEnabled';
 
@@ -237,7 +237,7 @@ const LOADERS: Record<CollectionSummarySource, (circleId: string) => Promise<Col
 };
 
 export function useCollectionSummaries(): UseCollectionSummariesResult {
-  const { activeCircleId } = useCircle();
+  const { activeCircleId } = useOwnerScope();
   const memoriesEnabled = useMemoriesEnabled();
   const isMounted = useIsMounted();
 

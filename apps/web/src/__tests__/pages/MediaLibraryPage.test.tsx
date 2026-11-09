@@ -18,7 +18,7 @@
  *     a visible grid.
  *
  * Mocking strategy:
- *   - useMedia, useAlbums, useCircle are module-mocked via vi.mock so no
+ *   - useMedia, useAlbums, useOwnerScope are module-mocked via vi.mock so no
  *     real API calls are made.
  *   - listTags / exportMedia (services/media) are mocked.
  *   - <MediaGallery> is mocked to a lightweight stub that stashes the
@@ -53,8 +53,8 @@ vi.mock('../../services/media', () => ({
   exportMedia: vi.fn(),
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../components/media/MediaGallery', () => ({
@@ -72,12 +72,12 @@ vi.mock('../../components/media/MediaGallery', () => ({
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
 import { listTags } from '../../services/media';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 
 const mockUseMedia = vi.mocked(useMedia);
 const mockUseAlbums = vi.mocked(useAlbums);
 const mockListTags = vi.mocked(listTags);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 const mockActiveCircle = {
   id: 'circle-1',
@@ -226,7 +226,7 @@ describe('MediaLibraryPage', () => {
     mockUseMedia.mockReturnValue(makeUseMediaDefaults());
     mockUseAlbums.mockReturnValue(makeUseAlbumsDefaults());
     mockListTags.mockResolvedValue([]);
-    mockUseCircle.mockReturnValue(makeUseCircleDefaults());
+    mockUseOwnerScope.mockReturnValue(makeUseCircleDefaults());
   });
 
   // -------------------------------------------------------------------------
@@ -288,14 +288,14 @@ describe('MediaLibraryPage', () => {
 
   describe('circle scoping', () => {
     it('should show "Select a circle" message when no active circle', () => {
-      mockUseCircle.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
+      mockUseOwnerScope.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
       render(<MediaLibraryPage />);
       expect(screen.getByRole('alert')).toBeInTheDocument();
       expect(screen.getByText(/select a circle/i)).toBeInTheDocument();
     });
 
     it('should not render MediaGallery when no active circle', () => {
-      mockUseCircle.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
+      mockUseOwnerScope.mockReturnValue(makeUseCircleDefaults({ activeCircle: null }));
       render(<MediaLibraryPage />);
       expect(screen.queryByTestId('media-gallery')).not.toBeInTheDocument();
     });
