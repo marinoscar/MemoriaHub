@@ -122,3 +122,47 @@ Rollback: **before step 4**, revert the release; `media_shares` is intact. Delet
 | A client calling `/api/public/shares/...` gets 410 `LEGACY_SHARE_ROUTE` | The retired API route | Use the web link; the API log counts these hits (no token logged) |
 
 Rehearsal: on a restored production backup, record the dry-run counts, the import output and the three sampled old URLs here before release. The real-Postgres proof of the procedure is `apps/api/test/sharing/media-shares-import.db.spec.ts` (five shares: active media, active album, expired, revoked, never-expiring; migration refused before the import, idempotent import, migration and replay after it).
+
+## 8. Circle invites to group invites (RETRO-I5)
+
+Release #583 makes every circle invite a platform group invite. The code no longer reads `circle_invites`: the invite routes under `/api/circles/:id/invites` delegate to the sharing slice's `GroupInvitesService`, the slice sends `groups.invitation` (the notifier allowlists the invitee first), and the slice claims pending invites itself at sign-up and at every sign-in (`groups.autoAcceptInvitesOnSignup` / `autoAcceptInvitesOnSignIn`, upgrade-only). There is **no separate import script**: migration `20261109200000_i5_circle_invites_to_group_invites` copies the pending invites and drops `circle_invites` in ONE transaction, so no invite can be lost between the two, and an invitee who signs up after the deploy still joins the circle (proved by `apps/api/test/sharing/invites-autoclaim.db.spec.ts`). `circles`, `circle_members` and `CircleRole` stay until RETRO-I6.
+
+What the migration imports: every unclaimed invite of a shared circle, as a pending invite of the circle's group with the same id, role `circle_admin`/`collaborator`/`viewer` -> `admin`/`editor`/`viewer`, `invited_by_id = added_by_id`, `created_at = added_at`, no expiry. Skipped: claimed invites (their member rows exist), invites of a personal circle (it has no group), invites to an address that is already a member with an equal or higher role (accepting would change nothing; an invite that outranks the member's role IS imported and upgrades at the next sign-in), and an address that already has a pending group invite. The counts are printed as a `NOTICE`.
+
+Prerequisites: RETRO-I2 applied (shared circles are groups), RETRO-I4's migration applied or applied in the same run (it is earlier in the history), a fresh, verified database backup.
+
+```bash
+# 0. Backup (admin Database Backup page, or POST /api/admin/db-backup/runs), completed AND verified.
+# 1. Dry run (read-only, any time before the deploy): what the migration will import and skip.
+#      SELECT count(*) FILTER (WHERE ci.claimed_at IS NOT NULL)                        AS claimed_dropped,
+#             count(*) FILTER (WHERE ci.claimed_at IS NULL AND c.is_personal)          AS personal_skipped,
+#             count(*) FILTER (WHERE ci.claimed_at IS NULL AND NOT c.is_personal)      AS pending_shared
+#      FROM circle_invites ci JOIN circles c ON c.id = ci.circle_id;
+#      SELECT ci.role, count(*) FROM circle_invites ci JOIN circles c ON c.id = ci.circle_id
+#      WHERE ci.claimed_at IS NULL AND NOT c.is_personal GROUP BY ci.role;
+#    pending_shared minus the "already a member" skips is the number of pending group invites to expect.
+# 2. Deploy the release and apply the migrations in the same window (the deploy flow's migrate step):
+npm run prisma:migrate --workspace=api
+#    The log shows: NOTICE RETRO-I5: circle_invites T (claimed C dropped; personal-circle P skipped;
+#    already a member M skipped); imported N pending group invite(s)
+# 3. Verify (as the table owner, RLS bypassed):
+#      BEGIN; SELECT set_config('app.rls_bypass','on',true);
+#      SELECT role, count(*) FROM group_invites WHERE accepted_at IS NULL AND declined_at IS NULL AND revoked_at IS NULL GROUP BY role;
+#      COMMIT;
+#    The counts match step 1 by role (circle_admin = admin, collaborator = editor, viewer = viewer).
+# 4. Smoke: invite a test address from a circle's Invites tab (it is allowlisted and receives the
+#    group invitation); sign in as a test account with a pending invite and land in the circle.
+```
+
+Expected time: seconds (one row per pending invite).
+
+Between the code deploy and the migration (keep it short), a new user whose only invite is still in `circle_invites` signs up without joining; their next sign-in after the migration claims it (`autoAcceptInvitesOnSignIn`), or they accept it from the pending list.
+
+Rollback: the migration is the point of no return for `circle_invites`. Before it, revert the release. After it, restore the backup taken in step 0 and revert; or, to keep the data written since, revert the release and recreate the table from `group_invites` by hand (the ids are the same).
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Inviting returns 409 `INVITE_PENDING` | The address already has a pending invite to the group (it used to update the role) | Revoke it, then invite again with the new role |
+| Inviting returns 409 `ALREADY_A_MEMBER` | The address belongs to a member | Change the member's role instead |
+| An invitee signed in but is not in the circle list | The circle list reads `circle_members`, mirrored from the group a moment after the claim (`GroupMemberMirrorListener`) | Reload; if it persists, check the API log for "Mirroring the membership of group ... failed" |
+| An invitee cannot sign in ("not authorized") | The allowlist upsert failed when the invite was sent (logged "Allowlisting an invited address failed") | Add the address on the Allowlist tab |

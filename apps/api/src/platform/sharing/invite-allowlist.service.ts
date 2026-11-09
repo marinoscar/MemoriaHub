@@ -22,7 +22,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 // entry with 409 (and the identity module does not export it to the app), so
 // this upserts the entry itself (an existing one is left untouched), exactly as
 // the former circle invite did. Seam
-// request: an idempotent, silent allowlist entry (docs/platform-adoption/local-
+// request: marinoscar/EnterpriseAppBase#1138, an idempotent, silent allowlist entry (docs/platform-adoption/local-
 // exceptions.md). Never throws: a failed upsert is logged and the e-mail is
 // still sent (an administrator can allowlist the address by hand).
 // =============================================================================
