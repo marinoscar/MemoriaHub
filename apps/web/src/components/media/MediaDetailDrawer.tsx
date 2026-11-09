@@ -41,7 +41,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { SharePanel } from '../share/SharePanel';
+import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
@@ -660,10 +660,7 @@ export function MediaDetailDrawer({
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Share publicly
           </Typography>
-          <SharePanel
-            target={{ type: 'media_item', id: item.id }}
-            onRequestClose={() => setSharePanelOpen(false)}
-          />
+          <LinkSharePanel target={{ type: 'media_item', id: item.id }} />
         </Box>
       </Collapse>
 

@@ -18,6 +18,12 @@ import { Route, Routes } from 'react-router-dom';
 import { render, mockUser } from '../utils/test-utils';
 import type { MemoryDetail } from '../../types/memories';
 
+// The sharing slice's dialog (RETRO-I4): what matters here is that the saved album id reaches it.
+vi.mock('@marinoscar/platform-web/sharing/ui', () => ({
+  ShareDialog: ({ open, resource }: { open: boolean; resource: { type: string; id: string } }) =>
+    open ? <div role="dialog" aria-label="Share">{`share ${resource.type} ${resource.id}`}</div> : null,
+}));
+
 vi.mock('../../hooks/useFeatureFlags', () => ({
   useFeatureFlags: vi.fn(),
 }));
@@ -203,6 +209,6 @@ describe('MemoryDetailPage — save as album and share', () => {
     await waitFor(() =>
       expect(mockSaveAlbum).toHaveBeenCalledWith('mem-1', 'Trip to Guanacaste'),
     );
-    expect(await screen.findByText('Share publicly')).toBeInTheDocument();
+    expect(await screen.findByText('share album album-9')).toBeInTheDocument();
   });
 });

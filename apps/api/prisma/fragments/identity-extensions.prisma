@@ -23,7 +23,6 @@ extend model User {
   resolvedBursts                 BurstGroup[]                    @relation("BurstGroupResolvedBy")
   resolvedDuplicates             DuplicateGroup[]                @relation("DuplicateGroupResolvedBy")
   geoCredentialsUpdated          GeoProviderCredential[]         @relation("GeoCredentialUpdater")
-  mediaShares                    MediaShare[]                    @relation("MediaShareCreatedBy")
   resolvedLocationSuggestions    LocationSuggestion[]            @relation("LocationSuggestionResolvedBy")
   mhLegacyWorkerNodes            MhLegacyWorkerNode[]
   mhLegacyNodeCredentials        MhLegacyNodeCredential[]        @relation("UserNodeCredentials")

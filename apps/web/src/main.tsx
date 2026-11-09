@@ -4,12 +4,17 @@ import { BrowserRouter } from 'react-router-dom';
 import { CssBaseline } from '@mui/material';
 import App from './App';
 import { captureTwaLaunch } from './platform/android-app/twa';
+import { registerAppLinkRenderers } from './platform/linkRenderers';
 import { registerImportProgressPanelView } from './platform-extensions/telemetry/ImportProgressPanelView';
 
 // Before the first render, so the launch parameters (`?source=twa&appVersion=…`)
 // are remembered for the session and stripped from the address before any
 // route reads them (issue #515).
 captureTwaLaunch();
+
+// The public `/s` page's renderers for `media_item` and `album` links (RETRO-I4, #578),
+// registered and frozen before the first render.
+registerAppLinkRenderers();
 
 // MemoriaHub's Telemetry Dashboard card "Bulk import progress" (RETRO-T3, #628).
 registerImportProgressPanelView();

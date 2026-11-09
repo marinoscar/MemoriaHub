@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { MediaModule } from '../media/media.module';
+import { LinkGrantDirectory } from '../public-links/link-grant-directory.service';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
 import { EnrichmentFailureNotificationListener } from './enrichment-failure-notification.listener';
 import { NotificationReconcileTask } from './notification-reconcile.task';
@@ -18,6 +19,8 @@ import { ShareExpiringHandler } from './share-expiring.handler';
     NotificationReconcileTask,
     ShareExpiringService,
     ShareExpiringTask,
+    // RETRO-I4: the share sweep reads link grants (stateless; PrismaService + DefaultOrgId).
+    LinkGrantDirectory,
     EnrichmentFailureNotificationListener,
     // RETRO-C9 (#612): the two crons only enqueue; these do the work.
     ReviewQueueReconcileHandler,

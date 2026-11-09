@@ -7,7 +7,7 @@ Decided by RETRO-I1 ([#562](https://github.com/marinoscar/MemoriaHub/issues/562)
 | RETRO-I1 (#562) | Mounts `SharingModule.forRoot` in single-organization mode, binds the six host ports, registers the permissions, metrics, notifications and e-mail templates. Writes no data. This page. |
 | RETRO-I2 (#569) | The data: circles to groups, members to group members, `circle_id` to `org_id` + `owner_group_id` / `owner_user_id`, the resource types and the group-owned registrations (§2-§5). |
 | RETRO-I3 (#573) | `CircleMemberGuard` / `assertCircleAccess` to `AccessPolicy` and the list helpers (§6, §7, §8). |
-| RETRO-I4 (#578) | `MediaShare` to link grants (§9). |
+| RETRO-I4 (#578) | `MediaShare` to link grants (§9). **Done**: see [public-sharing.md](../specs/public-sharing.md) and the [runbook §7](../runbooks/circles-to-groups.md#7-public-shares-to-link-grants-retro-i4). |
 | RETRO-I5 (#583) | `CircleInvite` to `GroupInvite`, and the sign-in claim (§10). |
 | RETRO-I6 (#588) | The web, CLI, TUI and Android "circle" UX on platform groups. |
 
@@ -168,6 +168,8 @@ A new hit of the grep belongs in this table, with a case in the db spec when it 
 ## 9. Public shares (`MediaShare`) to link grants (I4)
 
 `MediaShare` (`apps/api/prisma/fragments/media.prisma`; `apps/api/src/share/`) becomes link grants through `importLegacyToken`: `targetType` picks `media_item` or `album`, `resource_id` the matching id, `role: 'viewer'`, `expires_at`, `revoked_at`, `granted_by_id = created_by_id`, `created_at` kept; then the clear `token` column is dropped. Old URLs `/s/<token>` carry the token in the PATH: the SPA redirects `/s/:token` to `/s#lnk_:token`. The public routes change shape: `apps/api/src/share/public-share.controller.ts` reads `public/shares/:token` and PROXIES bytes (`:token/media/:idx`, with Range); the slice's pattern reads `X-Link-Token` only and returns presigned download URLs. `/api/shares` (`shares:manage`) becomes `/api/grants/links` (`sharing:write` + `share_link`). Links need `SECRETS_ENCRYPTION_KEY` (503 `LINKS_UNAVAILABLE` otherwise; every MemoriaHub deployment already sets it).
+
+**Implemented (RETRO-I4).** As planned, with: the import is an operator script run between the deploy and the contract migration (`npm run sharing:import-media-shares`), which drops the whole `media_shares` table rather than only its token column; the old API routes answer 410 `LEGACY_SHARE_ROUTE`; the admin page lists links through an app shim (`LinkGrantDirectory`, the slice has no organization-wide listing) and lost its hard delete; `bypassPermissions.share_link: 'sharing:admin'` lets an administrator revoke any link.
 
 ## 10. Invites (I5)
 

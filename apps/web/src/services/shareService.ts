@@ -1,16 +1,14 @@
+/**
+ * The admin public-links page's calls (RETRO-I4, #578).
+ *
+ *   list     GET    /api/admin/links      (MemoriaHub, sharing:admin)
+ *   re-date  PATCH  /api/grants/:id       (the sharing slice; sharing:admin may, see the API's
+ *   revoke   DELETE /api/grants/:id        `share_link` bypass on the media resource types)
+ *
+ * Creating a link is the sharing slice's (`MediaShareDialog`, `LinkSharePanel`).
+ */
 import { api } from './api';
-import type {
-  MediaShare,
-  ShareStatus,
-  ShareTargetType,
-  CreateShareRequest,
-  UpdateShareRequest,
-  BulkShareRequest,
-} from '../types/sharing';
-
-// ---------------------------------------------------------------------------
-// Response shapes
-// ---------------------------------------------------------------------------
+import type { BulkShareRequest, MediaShare, ShareStatus, ShareTargetType, UpdateShareRequest } from '../types/sharing';
 
 export interface ShareListMeta {
   page: number;
@@ -24,41 +22,72 @@ export interface ShareListResponse {
   meta: ShareListMeta;
 }
 
-// ---------------------------------------------------------------------------
-// Share service functions
-// ---------------------------------------------------------------------------
+/** One row of `GET /api/admin/links`. */
+interface AdminLinkDto {
+  id: string;
+  resourceType: ShareTargetType;
+  url: string | null;
+  status: ShareStatus;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  grantedBy: { id: string; email: string; displayName: string | null } | null;
+  preview: { type: ShareTargetType; title: string | null; thumbnailUrl: string | null; itemCount?: number } | null;
+}
 
-export async function createShare(req: CreateShareRequest): Promise<MediaShare> {
-  return api.post<MediaShare>('/shares', req);
+export function toMediaShare(link: AdminLinkDto): MediaShare {
+  return {
+    id: link.id,
+    publicUrl: link.url,
+    targetType: link.resourceType,
+    status: link.status,
+    expiresAt: link.expiresAt,
+    revokedAt: link.revokedAt,
+    createdAt: link.createdAt,
+    createdBy: link.grantedBy,
+    ...(link.preview?.itemCount !== undefined ? { itemCount: link.preview.itemCount } : {}),
+    preview: {
+      thumbnailUrl: link.preview?.thumbnailUrl ?? null,
+      albumName: link.resourceType === 'album' ? link.preview?.title ?? null : null,
+    },
+  };
 }
 
 export async function listShares(params?: {
-  scope?: 'mine' | 'all';
   status?: ShareStatus;
   targetType?: ShareTargetType;
   page?: number;
   pageSize?: number;
 }): Promise<ShareListResponse> {
   const searchParams = new URLSearchParams();
-
-  if (params?.scope) searchParams.set('scope', params.scope);
   if (params?.status) searchParams.set('status', params.status);
-  if (params?.targetType) searchParams.set('targetType', params.targetType);
+  if (params?.targetType) searchParams.set('resourceType', params.targetType);
   if (params?.page) searchParams.set('page', String(params.page));
   if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
-
   const qs = searchParams.toString();
-  return api.get<ShareListResponse>(`/shares${qs ? `?${qs}` : ''}`);
+  const page = await api.get<{ items: AdminLinkDto[]; meta: ShareListMeta }>(`/admin/links${qs ? `?${qs}` : ''}`);
+  return { items: page.items.map(toMediaShare), meta: page.meta };
 }
 
-export async function updateShare(id: string, req: UpdateShareRequest): Promise<MediaShare> {
-  return api.patch<MediaShare>(`/shares/${id}`, req);
+export async function updateShare(id: string, req: UpdateShareRequest): Promise<void> {
+  await api.patch<unknown>(`/grants/${id}`, { expiresAt: req.expiresAt });
 }
 
 export async function revokeShare(id: string): Promise<void> {
-  await api.delete<void>(`/shares/${id}/revoke`);
+  await api.delete<void>(`/grants/${id}`);
 }
 
+/** Applies one action to every selected link; returns how many succeeded. */
 export async function bulkShares(req: BulkShareRequest): Promise<{ affected: number }> {
-  return api.post<{ affected: number }>('/shares/bulk', req);
+  let affected = 0;
+  for (const id of req.ids) {
+    try {
+      if (req.action === 'revoke') await revokeShare(id);
+      else await updateShare(id, { expiresAt: req.expiresAt ?? null });
+      affected += 1;
+    } catch {
+      // One link that fails (already revoked, gone) does not stop the rest; the count says so.
+    }
+  }
+  return { affected };
 }

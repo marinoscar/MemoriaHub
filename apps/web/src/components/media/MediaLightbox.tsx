@@ -55,7 +55,7 @@ import { rerunMediaFaces } from '../../services/face';
 import { rerunThumbnail } from '../../services/thumbnail';
 import { useMediaTags } from '../../hooks/useMediaTags';
 import { useMediaMetadata } from '../../hooks/useMediaMetadata';
-import { SharePanel } from '../share/SharePanel';
+import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
 import { MediaOrientationEditor } from './MediaOrientationEditor';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
@@ -867,10 +867,7 @@ export function MediaLightbox({
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Share publicly
           </Typography>
-          <SharePanel
-            target={{ type: 'media_item', id: displayItem.id }}
-            onRequestClose={() => setShareAnchor(null)}
-          />
+          <LinkSharePanel target={{ type: 'media_item', id: displayItem.id }} />
         </Box>
       </Popover>
 
