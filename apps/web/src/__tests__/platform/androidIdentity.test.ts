@@ -1,7 +1,7 @@
 /**
- * `utils/androidIdentity.ts` mirrors `apps/android/identity.properties`
- * (issue #515, spec §2). The web build cannot read the properties file, so
- * the values are copies; this suite reads the file and fails when they drift.
+ * `platform/android-app/identity.ts` reads `packages/shared/identity.json` (RETRO-D5, #586).
+ * The Gradle build still reads `apps/android/identity.properties` (issue #515, spec §2), so
+ * this suite fails when the web identity drifts from EITHER file.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -14,7 +14,8 @@ import {
   MEDIA_SYNC_DEEP_LINK,
   androidApkFileName,
   mediaSyncDeepLink,
-} from '../../utils/androidIdentity';
+  TWA_KEY_PREFIX,
+} from '../../platform/android-app/identity';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROPERTIES_PATH = resolve(HERE, '../../../../android/identity.properties');
@@ -58,5 +59,23 @@ describe('mediaSyncDeepLink', () => {
     expect(mediaSyncDeepLink('diagnostics', 'sync')).toBe(
       'memoriahub://media-sync/diagnostics?action=sync',
     );
+  });
+});
+
+describe('the web identity is identity.json (RETRO-D5, #586)', () => {
+  const identityJson = JSON.parse(readFileSync(resolve(HERE, '../../../../../packages/shared/identity.json'), 'utf-8')) as {
+    android: { applicationId: string; storagePrefix: string; deepLinkScheme: string; apkStem: string };
+  };
+
+  it('takes every Android value from the android block', () => {
+    expect(ANDROID_PACKAGE_NAME).toBe(identityJson.android.applicationId);
+    expect(ANDROID_DEEP_LINK_SCHEME).toBe(identityJson.android.deepLinkScheme);
+    expect(ANDROID_APK_STEM).toBe(identityJson.android.apkStem);
+    expect(TWA_KEY_PREFIX).toBe(identityJson.android.storagePrefix);
+  });
+
+  it('agrees with identity.properties on the storage prefix (TWA keys, on-device files)', () => {
+    expect(TWA_KEY_PREFIX).toBe(props.storagePrefix);
+    expect(TWA_KEY_PREFIX).toBe('memoriahub');
   });
 });

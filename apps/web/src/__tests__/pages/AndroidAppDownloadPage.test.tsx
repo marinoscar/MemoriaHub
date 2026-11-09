@@ -8,8 +8,9 @@ import { render, mockUser, mockAdminUser, flushPendingAsyncWork } from '../utils
 import AndroidAppDownloadPage, { NO_RELEASE_MESSAGE } from '../../pages/AndroidAppDownloadPage';
 import { DownloadApkButton } from '../../components/settings/androidApp/DownloadApkButton';
 import { downloadNavigator } from '../../services/androidApp';
-import { captureTwaLaunch } from '../../utils/twa';
+import { captureTwaLaunch } from '../../platform/android-app/twa';
 import { makeRelease } from '../fixtures/mediaSync';
+import { withAppHost } from '../utils/app-host';
 
 const release = makeRelease();
 
@@ -39,7 +40,7 @@ describe('DownloadApkButton', () => {
     const assign = vi.spyOn(downloadNavigator, 'assign').mockImplementation(() => undefined);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
-    render(<DownloadApkButton release={release} />);
+    render(withAppHost(<DownloadApkButton release={release} />));
     await userEvent.click(screen.getByRole('button', { name: /download apk 2\.1\.0/i }));
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/api/android-app/download/tok123'));
@@ -55,7 +56,7 @@ describe('DownloadApkButton', () => {
     );
     const assign = vi.spyOn(downloadNavigator, 'assign').mockImplementation(() => undefined);
 
-    render(<DownloadApkButton release={release} />);
+    render(withAppHost(<DownloadApkButton release={release} />));
     await userEvent.click(screen.getByRole('button', { name: /download apk/i }));
 
     expect(await screen.findByText('Release not found')).toBeInTheDocument();
@@ -65,20 +66,20 @@ describe('DownloadApkButton', () => {
 
 describe('AndroidAppDownloadPage', () => {
   it('shows the no-release state without an admin link for a regular user', async () => {
-    render(<AndroidAppDownloadPage />, { wrapperOptions: { user: mockUser } });
+    render(withAppHost(<AndroidAppDownloadPage />), { wrapperOptions: { user: mockUser } });
     expect(await screen.findByTestId('no-release')).toHaveTextContent(NO_RELEASE_MESSAGE);
     expect(screen.queryByRole('link', { name: /publish a release/i })).not.toBeInTheDocument();
   });
 
   it('links admins to the releases admin page when nothing is published', async () => {
-    render(<AndroidAppDownloadPage />, { wrapperOptions: { user: mockAdminUser } });
+    render(withAppHost(<AndroidAppDownloadPage />), { wrapperOptions: { user: mockAdminUser } });
     const link = await screen.findByRole('link', { name: /publish a release/i });
     expect(link).toHaveAttribute('href', '/admin/settings/android');
   });
 
   it('shows the release, checksum, install steps and the legacy-app note', async () => {
     serveRelease();
-    render(<AndroidAppDownloadPage />);
+    render(withAppHost(<AndroidAppDownloadPage />));
 
     expect(await screen.findByRole('heading', { name: 'Version 2.1.0' })).toBeInTheDocument();
     expect(screen.getByText(/15\.0 MB · build 110/)).toBeInTheDocument();
@@ -95,14 +96,14 @@ describe('AndroidAppDownloadPage', () => {
   it("says \"You're up to date\" inside the TWA when the installed build is current", async () => {
     serveRelease();
     captureTwaLaunch('?source=twa&appVersion=2.1.0&appVersionCode=110');
-    render(<AndroidAppDownloadPage />);
+    render(withAppHost(<AndroidAppDownloadPage />));
     expect(await screen.findByTestId('installed-up-to-date')).toHaveTextContent("You're up to date (2.1.0)");
   });
 
   it('says "Update available" inside the TWA when the installed build is older', async () => {
     serveRelease();
     captureTwaLaunch('?source=twa&appVersion=2.0.0&appVersionCode=100');
-    render(<AndroidAppDownloadPage />);
+    render(withAppHost(<AndroidAppDownloadPage />));
     expect(await screen.findByTestId('installed-update-available')).toHaveTextContent(/Update available: 2\.1\.0/);
   });
 });

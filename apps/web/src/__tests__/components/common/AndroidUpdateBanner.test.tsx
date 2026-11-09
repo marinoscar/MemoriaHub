@@ -1,4 +1,7 @@
-/** AndroidUpdateBanner (issue #515): TWA-only, compares versionCodes, per-release dismissal. */
+/**
+ * AndroidUpdateBanner (issue #515; the platform's banner bound to MemoriaHub since RETRO-D5, #586):
+ * TWA-only, compares versionCodes, per-release dismissal under the same storage key.
+ */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
@@ -9,8 +12,9 @@ import {
   ANDROID_UPDATE_DISMISSED_KEY,
   AndroidUpdateBanner,
 } from '../../../components/common/AndroidUpdateBanner';
-import { captureTwaLaunch } from '../../../utils/twa';
+import { captureTwaLaunch } from '../../../platform/android-app/twa';
 import { makeRelease } from '../../fixtures/mediaSync';
+import { withAppHost } from '../../utils/app-host';
 
 const release = makeRelease(); // versionCode 110, versionName 2.1.0
 
@@ -44,7 +48,7 @@ afterEach(async () => {
 describe('AndroidUpdateBanner', () => {
   it('renders nothing and asks nothing of the API in an ordinary browser tab', async () => {
     const calls = serveRelease();
-    const { container } = render(<AndroidUpdateBanner />);
+    const { container } = render(withAppHost(<AndroidUpdateBanner />));
     await flushPendingAsyncWork();
     expect(container).toBeEmptyDOMElement();
     expect(calls.count).toBe(0);
@@ -53,17 +57,19 @@ describe('AndroidUpdateBanner', () => {
   it('shows the update banner when the installed build is older than the release', async () => {
     launchFromApp(100);
     serveRelease();
-    render(<AndroidUpdateBanner />);
+    render(withAppHost(<AndroidUpdateBanner />));
 
     const banner = await screen.findByTestId('android-update-banner');
     expect(banner).toHaveTextContent('2.1.0');
-    expect(screen.getByRole('link', { name: 'Update' })).toHaveAttribute('href', '/settings/android-app');
+    // The platform banner (RETRO-D5) downloads in place and links the details page.
+    expect(screen.getByRole('button', { name: 'Download 2.1.0' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Details' })).toHaveAttribute('href', '/settings/android-app');
   });
 
   it('stays hidden when the installed build is current', async () => {
     launchFromApp(110, '2.1.0');
     const calls = serveRelease();
-    render(<AndroidUpdateBanner />);
+    render(withAppHost(<AndroidUpdateBanner />));
     await waitFor(() => expect(calls.count).toBe(1));
     expect(screen.queryByTestId('android-update-banner')).not.toBeInTheDocument();
   });
@@ -71,7 +77,7 @@ describe('AndroidUpdateBanner', () => {
   it('stays hidden when no release is published (404 NO_RELEASE)', async () => {
     launchFromApp(100);
     // The default handler answers 404 NO_RELEASE.
-    const { container } = render(<AndroidUpdateBanner />);
+    const { container } = render(withAppHost(<AndroidUpdateBanner />));
     await flushPendingAsyncWork();
     expect(container).toBeEmptyDOMElement();
   });
@@ -79,7 +85,7 @@ describe('AndroidUpdateBanner', () => {
   it('is not shown on the Android app page itself', async () => {
     launchFromApp(100);
     const calls = serveRelease();
-    render(<AndroidUpdateBanner />, { wrapperOptions: { route: '/settings/android-app' } });
+    render(withAppHost(<AndroidUpdateBanner />), { wrapperOptions: { route: '/settings/android-app' } });
     await waitFor(() => expect(calls.count).toBe(1));
     expect(screen.queryByTestId('android-update-banner')).not.toBeInTheDocument();
   });
@@ -87,7 +93,7 @@ describe('AndroidUpdateBanner', () => {
   it('remembers a dismissal for that release only', async () => {
     launchFromApp(100);
     serveRelease();
-    const first = render(<AndroidUpdateBanner />);
+    const first = render(withAppHost(<AndroidUpdateBanner />));
 
     await userEvent.click(await screen.findByRole('button', { name: 'Dismiss update notice' }));
     expect(screen.queryByTestId('android-update-banner')).not.toBeInTheDocument();
@@ -96,14 +102,14 @@ describe('AndroidUpdateBanner', () => {
 
     // Same release on the next launch: still dismissed.
     const calls = serveRelease();
-    const second = render(<AndroidUpdateBanner />);
+    const second = render(withAppHost(<AndroidUpdateBanner />));
     await waitFor(() => expect(calls.count).toBe(1));
     expect(screen.queryByTestId('android-update-banner')).not.toBeInTheDocument();
     second.unmount();
 
     // A newer release raises it again.
     serveRelease(makeRelease({ versionCode: 120, versionName: '2.2.0' }));
-    render(<AndroidUpdateBanner />);
+    render(withAppHost(<AndroidUpdateBanner />));
     expect(await screen.findByTestId('android-update-banner')).toHaveTextContent('2.2.0');
   });
 });

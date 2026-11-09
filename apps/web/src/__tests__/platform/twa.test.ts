@@ -1,14 +1,19 @@
-/** `utils/twa.ts` (issue #515): TWA launch capture, URL cleanup and detection. */
+/**
+ * `platform/android-app/twa.ts` (issue #515; the platform helpers since RETRO-D5, #586): TWA launch
+ * capture under the SAME `memoriahub.*` session keys, URL cleanup and detection.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  TWA_APP_VERSION_CODE_KEY,
-  TWA_APP_VERSION_KEY,
-  TWA_SESSION_KEY,
+  TWA_SESSION_KEYS,
   captureTwaLaunch,
   getInstalledAppVersion,
   isRunningInTwa,
-} from '../../utils/twa';
-import { ANDROID_PACKAGE_NAME } from '../../utils/androidIdentity';
+} from '../../platform/android-app/twa';
+import { ANDROID_PACKAGE_NAME } from '../../platform/android-app/identity';
+
+const TWA_SESSION_KEY = TWA_SESSION_KEYS.launched;
+const TWA_APP_VERSION_KEY = TWA_SESSION_KEYS.versionName;
+const TWA_APP_VERSION_CODE_KEY = TWA_SESSION_KEYS.versionCode;
 
 function setReferrer(value: string) {
   Object.defineProperty(document, 'referrer', { value, configurable: true });
