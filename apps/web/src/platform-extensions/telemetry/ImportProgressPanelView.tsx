@@ -55,7 +55,7 @@ function StageRow({ stage }: { stage: ImportProgressPayload['stages'][number] })
         : `About ${formatMinutes(stage.etaMinutes)} left`;
   return (
     <Box data-testid={`import-stage-${stage.stage}`}>
-      <Stack direction="row" justifyContent="space-between" alignItems="baseline" spacing={1} sx={{ minWidth: 0 }}>
+      <Stack direction="row" spacing={1} sx={{ minWidth: 0, justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
           {label}
         </Typography>
