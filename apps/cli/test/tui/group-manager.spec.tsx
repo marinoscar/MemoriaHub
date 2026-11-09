@@ -77,7 +77,7 @@ describe('GroupManager — set active circle', () => {
     stdin.write('\r');
     await waitForCalls(mockSaveConfig);
 
-    const expected = { ...BASE_CONFIG, activeCircleId: 'circle-1' };
+    const expected = { ...BASE_CONFIG, activeOwnerScope: { kind: 'me' }, activeCircleId: 'circle-1' };
     expect(mockSaveConfig).toHaveBeenCalledWith(expected);
     expect(onConfigChange).toHaveBeenCalledWith(expected);
   });
@@ -112,7 +112,7 @@ describe('GroupManager — set active circle', () => {
     stdin.write('\r');
     await waitForCalls(mockSaveConfig);
 
-    const expected = { ...BASE_CONFIG, activeCircleId: 'circle-2' };
+    const expected = { ...BASE_CONFIG, activeOwnerScope: { kind: 'group', groupId: 'circle-2' }, activeCircleId: 'circle-2' };
     expect(mockSaveConfig).toHaveBeenCalledWith(expected);
     expect(onConfigChange).toHaveBeenCalledWith(expected);
   });
@@ -130,6 +130,7 @@ describe('GroupManager — set active circle', () => {
 
     expect(mockSaveConfig).toHaveBeenCalledWith({
       ...BASE_CONFIG,
+      activeOwnerScope: { kind: 'me' },
       activeCircleId: 'circle-1',
     });
   });

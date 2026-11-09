@@ -6,15 +6,17 @@
  *   groups list            — "My library" and your groups; marks the active one
  *   groups use <id|me>     — set the library uploads go to (validated against the server)
  *
- * Shared libraries are platform groups; a group's id is the former circle's id, and
- * `activeCircleId` in the config keeps holding the scope id, so a folder synced before
- * this release keeps uploading to the same owner. Both subcommands require login.
+ * Shared libraries are platform groups; a group's id is the former circle's id. The
+ * choice is saved as `activeOwnerScope` (`{ kind: 'me' }` or `{ kind: 'group', groupId }`,
+ * 1.5.3) together with the resolved scope id in the legacy `activeCircleId`, so a folder
+ * synced before this release, and an older CLI reading the same file, keep uploading to the
+ * same owner. Both subcommands require login.
  */
 
 import { Command } from 'commander';
 import Table from 'cli-table3';
 import chalk from 'chalk';
-import { requireConfig, saveConfig } from '../config.js';
+import { ownerScopeFields, requireConfig, saveConfig } from '../config.js';
 import { ApiClient, type Circle } from '../api.js';
 import { ui, isTTY } from '../ui.js';
 
@@ -110,7 +112,7 @@ function useCmd(): Command {
       process.exit(1);
     }
 
-    saveConfig({ ...cfg, activeCircleId: found.id });
+    saveConfig({ ...cfg, ...ownerScopeFields(found) });
     ui.success(`Active library set to: ${found.name} (${found.id})`);
   });
 
