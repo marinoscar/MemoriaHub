@@ -43,8 +43,16 @@ export function mirroredGroupMemberDelegate(prisma: any) {
   };
 }
 
-/** A `SHARING_DATA` port over the mock, with `groupMember` mirrored from the circle mocks. */
-export function mirroredSharingData(prisma: any) {
+/**
+ * A `SHARING_DATA` port over the mock, with `groupMember` mirrored from the
+ * circle mocks. `runAsSystem` goes through `system` (the suite's
+ * PrismaSystemService) when given, so a suite that seeds the bypass pool keeps
+ * seeing its data.
+ */
+export function mirroredSharingData(
+  prisma: any,
+  system?: { runAsSystem: (reason: string, fn: (tx: unknown) => unknown) => unknown },
+) {
   const tx = new Proxy(prisma, {
     get(target, key) {
       if (key === 'groupMember') return mirroredGroupMemberDelegate(prisma);
@@ -53,6 +61,7 @@ export function mirroredSharingData(prisma: any) {
   });
   return {
     runInOrg: (_scope: unknown, fn: (tx: unknown) => unknown) => fn(tx),
-    runAsSystem: (_reason: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
+    runAsSystem: (reason: string, fn: (tx: unknown) => unknown) =>
+      system ? system.runAsSystem(reason, fn) : fn(prisma),
   };
 }
