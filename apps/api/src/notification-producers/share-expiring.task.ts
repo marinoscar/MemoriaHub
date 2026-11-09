@@ -1,67 +1,44 @@
 // =============================================================================
-// Expiring-Share Notification Scheduled Task (epic #240, issue #247)
+// Expiring-Share Notification Scheduled Task (epic #240, issue #247;
+// enqueue-only since RETRO-C9, #612)
 // =============================================================================
 //
-// Daily 9am cron driving ShareExpiringService.sweep(). Same shape as
-// NotificationReconcileTask / TrashPurgeTask / ThumbnailRepairTask: a `@Cron`,
-// an env kill-switch, an in-process overlap guard, and a handler that never
-// throws.
+// Daily 9 AM cron that ENQUEUES `shares.expiring_sweep`
+// (`ShareExpiringHandler`, which runs `ShareExpiringService.sweep()`). Root
+// rule: every long-running activity is a queue job (`cron-enqueue-only`
+// conformance suite).
 //
-// Like #246's reconcile — and unlike TrashPurgeTask — the work is done IN
-// PROCESS rather than by enqueuing an `enrichment_jobs` row: the sweep is a
-// bounded set of small reads and inserts, and a new job type would need a
-// schema change for no benefit.
+// `NOTIFICATIONS_SHARE_EXPIRING_ENABLED=false` stops the enqueue. The old
+// in-process overlap guard is gone: `enqueueHousekeepingJob` skips the tick
+// while a sweep is pending or running. Never throws.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { JobsService, enqueueHousekeepingJob } from '@marinoscar/platform-api/jobs';
 
-import { ShareExpiringService } from './share-expiring.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { SHARE_EXPIRING_SWEEP_TYPE } from './notification-cron-jobs.constants';
 
 @Injectable()
 export class ShareExpiringTask {
   private readonly logger = new Logger(ShareExpiringTask.name);
 
-  /**
-   * In-process overlap guard, single-process only and sufficient for the same
-   * reason #246's is: the `data.notifiedFor` stamp makes the sweep idempotent,
-   * so two concurrent sweeps duplicate effort, never rows.
-   */
-  private sweepInFlight = false;
-
-  constructor(private readonly shareExpiring: ShareExpiringService) {}
+  constructor(
+    private readonly jobs: JobsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async handleScheduledSweep(): Promise<void> {
     // Environment kill-switch (mirrors NOTIFICATIONS_RECONCILE_ENABLED).
-    if (process.env['NOTIFICATIONS_SHARE_EXPIRING_ENABLED'] === 'false') {
-      return;
-    }
-
-    if (this.sweepInFlight) {
-      this.logger.debug('Share-expiring sweep already in flight; skipping tick');
-      return;
-    }
-    this.sweepInFlight = true;
-
-    try {
-      const startedAt = Date.now();
-      const result = await this.shareExpiring.sweep();
-
-      // Quiet on a no-op tick — most deployments have no share expiring today,
-      // and a daily log line saying so is noise.
-      if (result.emitted > 0 || result.errors > 0) {
-        this.logger.log(
-          `Share-expiring notifications swept ${result.candidates} share(s) in ` +
-            `${Date.now() - startedAt}ms: ${result.emitted} emitted, ` +
-            `${result.skipped} already notified` +
-            (result.errors > 0 ? `, ${result.errors} failed` : ''),
-        );
-      }
-    } catch (err) {
-      this.logger.error('Share-expiring notification sweep failed', err as Error);
-    } finally {
-      this.sweepInFlight = false;
-    }
+    if (process.env['NOTIFICATIONS_SHARE_EXPIRING_ENABLED'] === 'false') return;
+    await enqueueHousekeepingJob({
+      jobs: this.jobs,
+      prisma: this.prisma,
+      logger: this.logger,
+      type: SHARE_EXPIRING_SWEEP_TYPE,
+      what: 'expiring-share notification sweep',
+    });
   }
 }

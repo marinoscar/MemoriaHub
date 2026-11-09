@@ -3,8 +3,8 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import {
   getAiSettings,
-  putAiCredentials,
-  deleteAiCredentials,
+  putAiFeature,
+  getAiModelsFor,
   testAiProvider,
   getAiModels,
   putAiSearchFeature,
@@ -34,10 +34,6 @@ const mockAiSettings = {
   features: {
     search: { provider: 'openai', model: 'gpt-4o' },
   },
-  conversations: {
-    archiveAfterDays: 30,
-    deleteAfterArchiveDays: 30,
-  },
 };
 
 // ---------------------------------------------------------------------------
@@ -47,7 +43,7 @@ const mockAiSettings = {
 describe('getAiSettings', () => {
   it('returns the AI settings data on success', async () => {
     server.use(
-      http.get('*/api/ai/settings', () => {
+      http.get('*/api/admin/memoriahub-ai/features', () => {
         return HttpResponse.json({ data: mockAiSettings });
       }),
     );
@@ -57,11 +53,11 @@ describe('getAiSettings', () => {
     expect(result).toEqual(mockAiSettings);
   });
 
-  it('sends the request to /ai/settings', async () => {
+  it('sends the request to /admin/memoriahub-ai/features', async () => {
     let capturedPath = '';
 
     server.use(
-      http.get('*/api/ai/settings', ({ request }) => {
+      http.get('*/api/admin/memoriahub-ai/features', ({ request }) => {
         capturedPath = new URL(request.url).pathname;
         return HttpResponse.json({ data: mockAiSettings });
       }),
@@ -69,14 +65,14 @@ describe('getAiSettings', () => {
 
     await getAiSettings();
 
-    expect(capturedPath).toContain('/ai/settings');
+    expect(capturedPath).toContain('/admin/memoriahub-ai/features');
   });
 
   it('includes authorization header', async () => {
     let authHeader: string | null = null;
 
     server.use(
-      http.get('*/api/ai/settings', ({ request }) => {
+      http.get('*/api/admin/memoriahub-ai/features', ({ request }) => {
         authHeader = request.headers.get('Authorization');
         return HttpResponse.json({ data: mockAiSettings });
       }),
@@ -89,7 +85,7 @@ describe('getAiSettings', () => {
 
   it('propagates ApiError on 403', async () => {
     server.use(
-      http.get('*/api/ai/settings', () => {
+      http.get('*/api/admin/memoriahub-ai/features', () => {
         return HttpResponse.json({ message: 'Forbidden', code: 'FORBIDDEN' }, { status: 403 });
       }),
     );
@@ -99,7 +95,7 @@ describe('getAiSettings', () => {
 
   it('propagates ApiError on 500', async () => {
     server.use(
-      http.get('*/api/ai/settings', () => {
+      http.get('*/api/admin/memoriahub-ai/features', () => {
         return new HttpResponse(null, { status: 500 });
       }),
     );
@@ -109,120 +105,15 @@ describe('getAiSettings', () => {
 });
 
 // ---------------------------------------------------------------------------
-// putAiCredentials
-// ---------------------------------------------------------------------------
-
-describe('putAiCredentials', () => {
-  it('sends PUT to /ai/credentials/:provider with the correct body', async () => {
-    let capturedBody: unknown = null;
-    let capturedUrl = '';
-
-    server.use(
-      http.put('*/api/ai/credentials/:provider', async ({ request }) => {
-        capturedBody = await request.json();
-        capturedUrl = request.url;
-        return new HttpResponse(null, { status: 204 });
-      }),
-    );
-
-    await putAiCredentials('openai', { apiKey: 'sk-test', baseUrl: 'https://api.openai.com', enabled: true });
-
-    expect(capturedUrl).toContain('/ai/credentials/openai');
-    expect(capturedBody).toEqual({ apiKey: 'sk-test', baseUrl: 'https://api.openai.com', enabled: true });
-  });
-
-  it('works without optional fields (baseUrl / enabled)', async () => {
-    let capturedBody: unknown = null;
-
-    server.use(
-      http.put('*/api/ai/credentials/:provider', async ({ request }) => {
-        capturedBody = await request.json();
-        return new HttpResponse(null, { status: 204 });
-      }),
-    );
-
-    await putAiCredentials('anthropic', { apiKey: 'test-key' });
-
-    expect(capturedBody).toEqual({ apiKey: 'test-key' });
-  });
-
-  it('resolves to undefined (void) on 200', async () => {
-    server.use(
-      http.put('*/api/ai/credentials/:provider', () => {
-        return HttpResponse.json({ data: {} });
-      }),
-    );
-
-    const result = await putAiCredentials('openai', { apiKey: 'key' });
-
-    // void return — no meaningful value asserted, just confirm no throw
-    expect(result).toBeUndefined();
-  });
-
-  it('propagates ApiError on 400', async () => {
-    server.use(
-      http.put('*/api/ai/credentials/:provider', () => {
-        return HttpResponse.json({ message: 'Bad Request', code: 'BAD_REQUEST' }, { status: 400 });
-      }),
-    );
-
-    await expect(putAiCredentials('openai', { apiKey: '' })).rejects.toThrow(ApiError);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// deleteAiCredentials
-// ---------------------------------------------------------------------------
-
-describe('deleteAiCredentials', () => {
-  it('sends DELETE to /ai/credentials/:provider', async () => {
-    let capturedUrl = '';
-
-    server.use(
-      http.delete('*/api/ai/credentials/:provider', ({ request }) => {
-        capturedUrl = request.url;
-        return new HttpResponse(null, { status: 204 });
-      }),
-    );
-
-    await deleteAiCredentials('openai');
-
-    expect(capturedUrl).toContain('/ai/credentials/openai');
-  });
-
-  it('resolves to undefined (void) on success', async () => {
-    server.use(
-      http.delete('*/api/ai/credentials/:provider', () => {
-        return new HttpResponse(null, { status: 204 });
-      }),
-    );
-
-    const result = await deleteAiCredentials('anthropic');
-
-    expect(result).toBeUndefined();
-  });
-
-  it('propagates ApiError on 404', async () => {
-    server.use(
-      http.delete('*/api/ai/credentials/:provider', () => {
-        return HttpResponse.json({ message: 'Not found', code: 'NOT_FOUND' }, { status: 404 });
-      }),
-    );
-
-    await expect(deleteAiCredentials('nonexistent')).rejects.toThrow(ApiError);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // testAiProvider
 // ---------------------------------------------------------------------------
 
 describe('testAiProvider', () => {
-  it('sends POST to /ai/test with provider and model', async () => {
+  it('sends POST to /admin/memoriahub-ai/test with provider and model', async () => {
     let capturedBody: unknown = null;
 
     server.use(
-      http.post('*/api/ai/test', async ({ request }) => {
+      http.post('*/api/admin/memoriahub-ai/test', async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json({ data: { ok: true } });
       }),
@@ -235,7 +126,7 @@ describe('testAiProvider', () => {
 
   it('returns ok:true when test passes', async () => {
     server.use(
-      http.post('*/api/ai/test', () => {
+      http.post('*/api/admin/memoriahub-ai/test', () => {
         return HttpResponse.json({ data: { ok: true } });
       }),
     );
@@ -247,7 +138,7 @@ describe('testAiProvider', () => {
 
   it('returns ok:false with error message when test fails', async () => {
     server.use(
-      http.post('*/api/ai/test', () => {
+      http.post('*/api/admin/memoriahub-ai/test', () => {
         return HttpResponse.json({ data: { ok: false, error: 'Invalid API key' } });
       }),
     );
@@ -260,7 +151,7 @@ describe('testAiProvider', () => {
 
   it('propagates ApiError on 403', async () => {
     server.use(
-      http.post('*/api/ai/test', () => {
+      http.post('*/api/admin/memoriahub-ai/test', () => {
         return HttpResponse.json({ message: 'Forbidden', code: 'FORBIDDEN' }, { status: 403 });
       }),
     );
@@ -274,11 +165,11 @@ describe('testAiProvider', () => {
 // ---------------------------------------------------------------------------
 
 describe('getAiModels', () => {
-  it('sends GET to /ai/settings/models with provider query param', async () => {
+  it('sends GET to /admin/memoriahub-ai/models with provider query param', async () => {
     let capturedUrl = '';
 
     server.use(
-      http.get('*/api/ai/settings/models', ({ request }) => {
+      http.get('*/api/admin/memoriahub-ai/models', ({ request }) => {
         capturedUrl = request.url;
         return HttpResponse.json({ data: ['gpt-4o', 'gpt-4'] });
       }),
@@ -286,13 +177,13 @@ describe('getAiModels', () => {
 
     await getAiModels('openai');
 
-    expect(capturedUrl).toContain('/ai/settings/models');
+    expect(capturedUrl).toContain('/admin/memoriahub-ai/models');
     expect(capturedUrl).toContain('provider=openai');
   });
 
   it('returns the array of model names', async () => {
     server.use(
-      http.get('*/api/ai/settings/models', () => {
+      http.get('*/api/admin/memoriahub-ai/models', () => {
         return HttpResponse.json({ data: ['gpt-4o', 'gpt-4', 'gpt-3.5-turbo'] });
       }),
     );
@@ -306,7 +197,7 @@ describe('getAiModels', () => {
     let capturedUrl = '';
 
     server.use(
-      http.get('*/api/ai/settings/models', ({ request }) => {
+      http.get('*/api/admin/memoriahub-ai/models', ({ request }) => {
         capturedUrl = request.url;
         return HttpResponse.json({ data: [] });
       }),
@@ -319,7 +210,7 @@ describe('getAiModels', () => {
 
   it('returns an empty array when no models available', async () => {
     server.use(
-      http.get('*/api/ai/settings/models', () => {
+      http.get('*/api/admin/memoriahub-ai/models', () => {
         return HttpResponse.json({ data: [] });
       }),
     );
@@ -331,7 +222,7 @@ describe('getAiModels', () => {
 
   it('propagates ApiError on 401', async () => {
     server.use(
-      http.get('*/api/ai/settings/models', () => {
+      http.get('*/api/admin/memoriahub-ai/models', () => {
         return HttpResponse.json({ message: 'Unauthorized', code: 'UNAUTHORIZED' }, { status: 401 });
       }),
     );
@@ -348,12 +239,12 @@ describe('getAiModels', () => {
 // ---------------------------------------------------------------------------
 
 describe('putAiSearchFeature', () => {
-  it('sends PUT to /ai/features/search with provider and model', async () => {
+  it('sends PUT to /admin/memoriahub-ai/features/search with provider and model', async () => {
     let capturedBody: unknown = null;
     let capturedUrl = '';
 
     server.use(
-      http.put('*/api/ai/features/search', async ({ request }) => {
+      http.put('*/api/admin/memoriahub-ai/features/search', async ({ request }) => {
         capturedBody = await request.json();
         capturedUrl = request.url;
         return new HttpResponse(null, { status: 204 });
@@ -362,13 +253,13 @@ describe('putAiSearchFeature', () => {
 
     await putAiSearchFeature({ provider: 'openai', model: 'gpt-4o' });
 
-    expect(capturedUrl).toContain('/ai/features/search');
+    expect(capturedUrl).toContain('/admin/memoriahub-ai/features/search');
     expect(capturedBody).toEqual({ provider: 'openai', model: 'gpt-4o' });
   });
 
   it('resolves to undefined (void) on success', async () => {
     server.use(
-      http.put('*/api/ai/features/search', () => {
+      http.put('*/api/admin/memoriahub-ai/features/search', () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );
@@ -380,11 +271,60 @@ describe('putAiSearchFeature', () => {
 
   it('propagates ApiError on 400', async () => {
     server.use(
-      http.put('*/api/ai/features/search', () => {
+      http.put('*/api/admin/memoriahub-ai/features/search', () => {
         return HttpResponse.json({ message: 'Provider not configured', code: 'BAD_REQUEST' }, { status: 400 });
       }),
     );
 
     await expect(putAiSearchFeature({ provider: 'openai', model: '' })).rejects.toThrow(ApiError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RETRO-E4 (#607): the generic feature and model calls
+// ---------------------------------------------------------------------------
+
+describe('putAiFeature', () => {
+  it('PUTs one feature under /admin/memoriahub-ai/features/:feature, nulls included', async () => {
+    let capturedUrl = '';
+    let capturedBody: unknown = null;
+    server.use(
+      http.put('*/api/admin/memoriahub-ai/features/:feature', async ({ request }) => {
+        capturedUrl = request.url;
+        capturedBody = await request.json();
+        return HttpResponse.json({ data: null });
+      }),
+    );
+
+    await putAiFeature('transcription', { provider: null, model: null });
+
+    expect(capturedUrl).toContain('/admin/memoriahub-ai/features/transcription');
+    expect(capturedBody).toEqual({ provider: null, model: null });
+  });
+});
+
+describe('getAiModelsFor', () => {
+  it('asks for the capability the feature needs', async () => {
+    let capturedUrl = '';
+    server.use(
+      http.get('*/api/admin/memoriahub-ai/models', ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ data: ['gpt-image-1'] });
+      }),
+    );
+
+    const models = await getAiModelsFor('openai', 'image');
+
+    expect(models).toEqual(['gpt-image-1']);
+    expect(capturedUrl).toContain('provider=openai');
+    expect(capturedUrl).toContain('capability=image');
+  });
+});
+
+describe('the retired routes', () => {
+  it('no longer exports a key write (keys are the platform provider cards\' job)', async () => {
+    const mod = (await import('../../services/ai')) as Record<string, unknown>;
+    expect(mod.putAiCredentials).toBeUndefined();
+    expect(mod.deleteAiCredentials).toBeUndefined();
   });
 });

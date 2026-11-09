@@ -92,10 +92,9 @@ const OLD_MATRIX: Record<'admin' | 'contributor' | 'viewer', string[]> = {
 };
 
 const NEW_PLATFORM_PERMISSIONS = [
-  // The AI slice (RETRO-E1, #595): ai_config:* for admin, ai:use and org_ai_config:* for org_admin.
+  // The AI slice (RETRO-E1, #595): ai:use and org_ai_config:* for org_admin. (ai_config:* for admin
+  // replaced the old AI settings pair in RETRO-E4, #607: see RETIRED_BY_SLICE.)
   'ai:use',
-  'ai_config:read',
-  'ai_config:write',
   // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
   'alerts:read',
   'alerts:write',
@@ -161,6 +160,10 @@ const RETIRED_BY_SLICE: Record<string, string> = {
   // RETRO-D1 (#563): /api/admin/storage-config checks storage_config:read|write.
   'storage_settings:read': 'storage_config:read',
   'storage_settings:write': 'storage_config:write',
+  // RETRO-E4 (#607): the AI admin surface is the AI slice's (/api/admin/ai/*), and MemoriaHub's
+  // feature selections (/api/admin/memoriahub-ai/*) and tag vocabulary check ai_config:read|write.
+  'ai_settings:read': 'ai_config:read',
+  'ai_settings:write': 'ai_config:write',
 };
 
 /** A role's permissions: the declared defaults plus the explicit grants (`platformGrants`, RETRO-D1). */

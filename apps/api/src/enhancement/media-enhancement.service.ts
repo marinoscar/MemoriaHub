@@ -83,7 +83,7 @@ export class MediaEnhancementService {
   ) {}
 
   // ---------------------------------------------------------------------------
-  // GET /api/admin/ai/enhance/status
+  // GET /api/admin/memoriahub-ai/enhance/status (was /api/admin/ai/enhance/status; RETRO-E4 moved it off the AI slice's prefix)
   // ---------------------------------------------------------------------------
 
   async getAdminStatus() {

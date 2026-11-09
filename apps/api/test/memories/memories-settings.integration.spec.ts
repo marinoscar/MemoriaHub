@@ -6,8 +6,8 @@
  *      rejects out-of-bounds values with a 400.
  *   2. GET /api/features exposes `memories` to any authenticated user (it is the
  *      least-privilege path non-admin clients read gated affordances from).
- *   3. PUT /api/ai/features/memories persists the provider/model pair, refuses a
- *      provider with no enabled credential, and is Admin + ai_settings:write.
+ *   3. PUT /api/admin/memoriahub-ai/features/memories persists the provider/model pair, refuses a
+ *      provider with no enabled credential, and is Admin + ai_config:write.
  *
  * Runs against the mocked Prisma client, so the assertion for a persisted value
  * is made against the argument handed to `systemSettings.update` — that is the
@@ -51,9 +51,9 @@ describe('Memories settings integration (issue #302)', () => {
   });
 
   /**
-   * Layers `ai_settings:read` + `ai_settings:write` onto the JWT-resolved user
-   * row. The shared `mockPermissions` fixture has no ai_settings entries, so an
-   * admin created by `createMockAdminUser` cannot reach /api/ai/*; this grants
+   * Layers `ai_config:read` + `ai_config:write` onto the JWT-resolved user
+   * row. The shared `mockPermissions` fixture has no ai_config entries, so an
+   * admin created by `createMockAdminUser` cannot reach the AI admin routes; this grants
    * them per-test without mutating the shared fixture. Same technique as
    * `grantNodePermissions` in workflow-node-execution.integration.spec.ts.
    */
@@ -70,8 +70,8 @@ describe('Memories settings integration (issue #302)', () => {
             ...ur.role,
             rolePermissions: [
               ...ur.role.rolePermissions,
-              { permission: { id: 'perm-ai-read', name: 'ai_settings:read' } },
-              { permission: { id: 'perm-ai-write', name: 'ai_settings:write' } },
+              { permission: { id: 'perm-ai-read', name: 'ai_config:read' } },
+              { permission: { id: 'perm-ai-write', name: 'ai_config:write' } },
             ],
           },
         })),
@@ -308,24 +308,24 @@ describe('Memories settings integration (issue #302)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 3. PUT /api/ai/features/memories
+  // 3. PUT /api/admin/memoriahub-ai/features/memories
   // -------------------------------------------------------------------------
 
-  describe('PUT /api/ai/features/memories', () => {
+  describe('PUT /api/admin/memoriahub-ai/features/memories', () => {
     beforeEach(() => stubSettingsRow());
 
     it('returns 401 without auth', async () => {
       await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .send({ provider: 'openai', model: 'gpt-4o-mini' })
         .expect(401);
     });
 
-    it('returns 403 without ai_settings:write', async () => {
+    it('returns 403 without ai_config:write', async () => {
       const viewer = await createMockViewerUser(context);
 
       await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .set(authHeader(viewer.accessToken))
         .send({ provider: 'openai', model: 'gpt-4o-mini' })
         .expect(403);
@@ -339,7 +339,7 @@ describe('Memories settings integration (issue #302)', () => {
       } as any);
 
       const response = await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .set(authHeader(admin.accessToken))
         .send({ provider: 'openai', model: 'gpt-4o-mini' })
         .expect(200);
@@ -362,7 +362,7 @@ describe('Memories settings integration (issue #302)', () => {
       context.prismaMock.aiProviderCredential.findUnique.mockResolvedValue(null);
 
       await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .set(authHeader(admin.accessToken))
         .send({ provider: 'openai', model: 'gpt-4o-mini' })
         .expect(400);
@@ -378,7 +378,7 @@ describe('Memories settings integration (issue #302)', () => {
       } as any);
 
       await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .set(authHeader(admin.accessToken))
         .send({ provider: 'openai', model: 'gpt-4o-mini' })
         .expect(400);
@@ -389,7 +389,7 @@ describe('Memories settings integration (issue #302)', () => {
       grantAiSettingsPermissions(admin.id);
 
       const response = await request(context.app.getHttpServer())
-        .put('/api/ai/features/memories')
+        .put('/api/admin/memoriahub-ai/features/memories')
         .set(authHeader(admin.accessToken))
         .send({ provider: null, model: null })
         .expect(200);
@@ -399,7 +399,7 @@ describe('Memories settings integration (issue #302)', () => {
       expect((call?.[0] as any).data.value.ai.features.memories).toBeNull();
     });
 
-    it('surfaces the configured pair in GET /api/ai/settings', async () => {
+    it('surfaces the configured pair in GET /api/admin/memoriahub-ai/features', async () => {
       stubSettingsRow({
         ...DEFAULT_SYSTEM_SETTINGS,
         ai: {
@@ -416,7 +416,7 @@ describe('Memories settings integration (issue #302)', () => {
       context.prismaMock.credential.findMany.mockResolvedValue([]);
 
       const response = await request(context.app.getHttpServer())
-        .get('/api/ai/settings')
+        .get('/api/admin/memoriahub-ai/features')
         .set(authHeader(admin.accessToken))
         .expect(200);
 

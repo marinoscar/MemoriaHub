@@ -48,7 +48,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaTagSource, MemoryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AiSettingsService } from '../../ai/ai-settings.service';
+import { AiSettingsService } from '../../ai-port/ai-settings.service';
 import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
 import type { ChatStreamEvent } from '../../ai-port/legacy-ai-provider.types';
 import { classifyRateLimit } from '../../enrichment/rate-limit.error';

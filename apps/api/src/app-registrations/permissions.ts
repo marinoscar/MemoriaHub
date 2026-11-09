@@ -13,8 +13,8 @@
 //                 grants as MemoriaHub's former declarations: system scope, admin only)
 //   - `ai`        ai_config:read, ai_config:write (system, admin), ai:use (org: org_admin and
 //                 contributor, the platform's grants), org_ai_config:read|write (org, org_admin)
-//                 (RETRO-E1, #595). MemoriaHub's own ai_settings:* stay until RETRO-E4 retires the
-//                 old /api/ai/* admin routes; an administrator holds both pairs.
+//                 (RETRO-E1, #595). Since RETRO-E4 (#607) ai_config:* is the only AI admin pair:
+//                 MemoriaHub's old AI settings pair is retired with its /api/ai/* admin routes.
 //   - `telemetry` telemetry:read, telemetry:write, telemetry:query (system, admin) (RETRO-T2, #625)
 //   - `notifications` push:*, broadcasts:* (system, admin), org_broadcasts:* (org, org_admin) (RETRO-D3)
 //   - `alerts`    alerts:read, alerts:write (system, admin) (RETRO-H5, #609)

@@ -68,6 +68,10 @@ The worked example throughout this document is `face_detection`. See **[docs/spe
 
 ---
 
+### Crons only enqueue (RETRO-C9, #612)
+
+Every `@Cron` in `apps/api/src` only decides whether work is due (env and feature gates, cheap indexed reads) and enqueues it: `enqueueHousekeepingJob` for a global sweep (system job, priority 100, skipped while one is pending or running, never throws) or `JobsService.enqueue` (the two every-minute workflow ticks at priority 20; the per-circle memories jobs through the facade). The work is a registered `JobHandler` with a `label` and a `profile`. RETRO-C9 moved the last inline bodies into five server-only job types: `workflows.schedule_tick`, `workflows.micro_run_finalize`, `notifications.review_queue_reconcile`, `shares.expiring_sweep` and `node_backup.stale_sweep`. An `@OnEvent` body never does storage I/O. The `cron-enqueue-only` and `on-event-no-io` conformance suites (`apps/api/test/conformance.spec.ts`) enforce both; the only app exemptions are temporary and listed in `docs/platform-adoption/local-exceptions.md`.
+
 ## 2. Data Model
 
 ### enrichment_jobs table

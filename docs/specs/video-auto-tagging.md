@@ -292,8 +292,8 @@ No new endpoints for the tagging itself — the existing per-item and bulk rerun
 
 | Endpoint | Change |
 |---|---|
-| `PUT /api/ai/features/transcription` | **New.** `{ provider, model } \| null`; validated against the credential store up front (400 for an unconfigured or disabled provider). `ai_settings:write` |
-| `GET /api/ai/models?capability=transcription` | **New branch.** Curated OpenAI transcription models; other providers return empty. `ai_settings:read` |
+| `PUT /api/admin/memoriahub-ai/features/transcription` | **New.** `{ provider, model } \| null`; validated against the credential store up front (400 for an unconfigured or disabled provider). `ai_config:write` |
+| `GET /api/admin/memoriahub-ai/models?capability=transcription` | **New branch.** Curated OpenAI transcription models; other providers return empty. `ai_config:read` |
 | `POST /api/admin/tagging/backfill` | **New param** `mediaTypes?: ('photo'\|'video')[]`, defaulting to `['photo']`. `system_settings:write` |
 | `POST /api/media/:id/tags/rerun` | Routes videos to `video_auto_tagging` |
 | `POST /api/media/bulk/tags/rerun` | Routes per item (bug fix) |
@@ -346,7 +346,7 @@ Reporting a transcription gap as an `error` would send an admin chasing a creden
 
 ## 14. RBAC
 
-**No new permission.** Video tagging is the same operation on a different media type, so it reuses `media:read` / `media:write` plus the per-circle `viewer` / `collaborator` roles, and the admin surfaces reuse `system_settings:*` / `ai_settings:*` exactly as photo tagging does. Node registration and claiming reuse the owner's `jobs:write`.
+**No new permission.** Video tagging is the same operation on a different media type, so it reuses `media:read` / `media:write` plus the per-circle `viewer` / `collaborator` roles, and the admin surfaces reuse `system_settings:*` / `ai_config:*` exactly as photo tagging does. Node registration and claiming reuse the owner's `jobs:write`.
 
 ---
 

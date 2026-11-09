@@ -4,12 +4,18 @@
 //
 // Interval-gated cron scheduler that enqueues a storage_insights enrichment
 // job once the configured refresh interval has elapsed since the last
-// computation. The enrichment worker performs the actual computation.
+// computation. The `storage_insights` handler performs the actual computation.
+//
+// Enqueue-only (RETRO-C9, #612): the interval check reads, then
+// `enqueueHousekeepingJob` queues the global system job at the housekeeping
+// priority (100, as before) unless one is already pending or running, and never
+// throws.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason } from '@prisma/client';
+import { JobsService, enqueueHousekeepingJob } from '@marinoscar/platform-api/jobs';
+import { PrismaService } from '../prisma/prisma.service';
 import { InsightsService } from './insights.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -20,6 +26,8 @@ export class InsightsRefreshTask {
   constructor(
     private readonly insights: InsightsService,
     private readonly systemSettings: AppSystemSettingsService,
+    private readonly jobs: JobsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
@@ -46,8 +54,13 @@ export class InsightsRefreshTask {
         return;
       }
 
-      await this.insights.enqueueRefresh(JobReason.backfill, 100); // low priority
-      this.logger.log('Storage insights refresh enqueued (scheduled)');
+      await enqueueHousekeepingJob({
+        jobs: this.jobs,
+        prisma: this.prisma,
+        logger: this.logger,
+        type: 'storage_insights',
+        what: 'storage insights refresh',
+      });
     } catch (err) {
       this.logger.error('Storage insights schedule check failed', err as Error);
     }

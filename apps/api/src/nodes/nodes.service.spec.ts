@@ -54,7 +54,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiSettingsService } from '../ai-port/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';

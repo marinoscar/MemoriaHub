@@ -52,10 +52,15 @@ runPlatformWebConformance({
         'MemoriaHub is a server host: the shell reads permissions from the signed-in AuthProvider and the ' +
         'rail preference from /user-settings; there is no local (no-API) host to prove.',
     },
+    // RETRO-E4 (#607): the admin AI cards are the platform's (AI, AI Models, AI Usage on
+    // ai_config:read, `feature: 'ai'` except the AI card). The suite also requires at least one
+    // per-user AI card (`ai:use`, the AI Keys page), which MemoriaHub deliberately does not ship.
     'settings-ai-cards': {
       skip:
-        'MemoriaHub AI is not on the platform AI slice yet (RETRO-E4): the admin AI cards gate on the ' +
-        'app permissions the app AI controllers enforce (ai_settings:read), not ai_config:*.',
+        'Requires a per-user AI card (ai:use, the AI Keys page): MemoriaHub uses deployment keys only, with no ' +
+        'user BYOK and no Playground (RETRO-E1 decision; EnterpriseAppBase #1132 requests a deployment-only key ' +
+        'policy). The admin half of the suite (permission in the catalog, feature gating, the AI card ungated, ' +
+        'no AI card without ai_config:*) runs in __tests__/platform/ai/aiAdminCards.test.ts.',
     },
   },
 });

@@ -21,7 +21,7 @@
 
 import { Module } from '@nestjs/common';
 
-import { AiModule } from '../ai/ai.module';
+import { LegacyAiModule } from '../ai-port/legacy-ai.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
@@ -103,7 +103,7 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
 @Module({
   imports: [
     
-    AiModule,
+    LegacyAiModule,
     FaceModule,
     GeoModule,
     MediaProcessingModule,

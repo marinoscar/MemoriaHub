@@ -168,7 +168,7 @@ Stored as a nested path in the `system_settings` JSONB column under the key `glo
 }
 ```
 
-Set via `PUT /api/ai/features/tagging`. Read by `AutoTaggingService` at job-processing time.
+Set via `PUT /api/admin/memoriahub-ai/features/tagging`. Read by `AutoTaggingService` at job-processing time.
 
 ### Tag Storage
 
@@ -347,11 +347,11 @@ All endpoints require JWT Bearer authentication unless stated otherwise.
 
 ### AI Settings — Tagging Feature (Admin only)
 
-#### `PUT /api/ai/features/tagging`
+#### `PUT /api/admin/memoriahub-ai/features/tagging`
 
 Set the active AI provider and model for the tagging feature.
 
-- **Auth**: Admin role + `ai_settings:write`
+- **Auth**: Admin role + `ai_config:write`
 - **Request body**:
   ```json
   { "provider": "anthropic", "model": "claude-opus-4-5" }
@@ -370,7 +370,7 @@ Set the active AI provider and model for the tagging feature.
 
 List all tag labels (enabled and disabled).
 
-- **Auth**: `ai_settings:read`
+- **Auth**: `ai_config:read`
 - **Response** `200`:
   ```json
   {
@@ -384,7 +384,7 @@ List all tag labels (enabled and disabled).
 
 Create a new tag label.
 
-- **Auth**: `ai_settings:write`
+- **Auth**: `ai_config:write`
 - **Request body**:
   ```json
   { "name": "beach" }
@@ -396,7 +396,7 @@ Create a new tag label.
 
 Update an existing tag label.
 
-- **Auth**: `ai_settings:write`
+- **Auth**: `ai_config:write`
 - **Request body** (all fields optional):
   ```json
   { "name": "beach", "enabled": false }
@@ -409,7 +409,7 @@ Update an existing tag label.
 
 Delete a tag label. Removes all AI-applied `MediaTag` instances for the label name (case-insensitive) across all circles and cleans up now-empty `Tag` rows. Manual tag instances of the same name are preserved.
 
-- **Auth**: `ai_settings:write`
+- **Auth**: `ai_config:write`
 - **Response** `204`: No content.
 - **Response** `404`: Label not found.
 
@@ -417,7 +417,7 @@ Delete a tag label. Removes all AI-applied `MediaTag` instances for the label na
 
 Export all tag labels as a UTF-8 CSV file, ordered by name.
 
-- **Auth**: `ai_settings:read`
+- **Auth**: `ai_config:read`
 - **Response** `200`: `Content-Type: text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="tag-labels.csv"`.
 - **CSV columns**: `id,name` (header row always present).
 
@@ -427,7 +427,7 @@ This endpoint is intended for bulk download before editing and re-importing.
 
 Import tag labels in bulk from a multipart CSV upload. All successful mutations in the batch commit atomically; per-row errors are collected without aborting the rest.
 
-- **Auth**: `ai_settings:write`
+- **Auth**: `ai_config:write`
 - **Content-Type**: `multipart/form-data` with a `file` field containing the CSV.
 - **CSV columns** (header row required): `id`, `name`, `delete`.
   - `id` blank / absent → **create** with `name` (name required).

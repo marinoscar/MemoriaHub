@@ -105,13 +105,13 @@ Agentic search is **stateless on the server**. No conversation rows, message row
 │                                 │                                           │
 │  ┌──────────────────────────────┼──────────────────────────────────────┐   │
 │  │                              ▼                                       │   │
-│  │  AiSettingsController   AI settings + credentials management        │   │
-│  │  PUT  /ai/credentials/:provider   (Admin — ai_settings:write)       │   │
-│  │  DELETE /ai/credentials/:provider (Admin — ai_settings:write)       │   │
-│  │  GET  /ai/settings                (Admin — ai_settings:read)        │   │
-│  │  POST /ai/test                    (Admin — ai_settings:read)        │   │
-│  │  GET  /ai/models                  (Admin — ai_settings:read)        │   │
-│  │  PUT  /ai/features/search         (Admin — ai_settings:write)       │   │
+│  │  Platform /api/admin/ai/* + MemoriaHubAiFeaturesController (E4)  │   │
+│  │  PUT  /admin/ai/providers/:p/key   (Admin — ai_config:write)       │   │
+│  │  DELETE /admin/ai/providers/:p/key (Admin — ai_config:write)      │   │
+│  │  GET  /admin/memoriahub-ai/features (Admin — ai_config:read)     │   │
+│  │  POST /admin/memoriahub-ai/test   (Admin — ai_config:write)       │   │
+│  │  GET  /admin/memoriahub-ai/models (Admin — ai_config:read)        │   │
+│  │  PUT  /admin/memoriahub-ai/features/search         (Admin — ai_config:write)       │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -355,7 +355,7 @@ Generate the key:
 openssl rand -base64 32
 ```
 
-**The raw API key is never stored, never logged, and never returned by any endpoint.** The `GET /ai/settings` response returns only `last4` (the final four characters) plus `baseUrl` and `enabled`. The ciphertext column is excluded from all Prisma `select` calls in the service layer.
+**The raw API key is never stored, never logged, and never returned by any endpoint.** The `GET /admin/memoriahub-ai/features` response returns only `last4` (the final four characters) plus `baseUrl` and `enabled`. The ciphertext column is excluded from all Prisma `select` calls in the service layer.
 
 ### Circle-Scoped Agent Authorization
 
@@ -369,8 +369,8 @@ Before any search executes, `SearchService.runSearch` calls `CircleMembershipSer
 
 | Resource | Permission | Granted To |
 |----------|------------|------------|
-| AI settings (read) | `ai_settings:read` | Admin only |
-| AI settings (write) | `ai_settings:write` | Admin only |
+| AI settings (read) | `ai_config:read` | Admin only |
+| AI settings (write) | `ai_config:write` | Admin only |
 | Search (all) | `search:use` | All roles (Admin, Contributor, Viewer) |
 
 ### Encryption Key Rotation
@@ -486,7 +486,7 @@ private readonly providers = new Map<string, AiProvider>([
 ]);
 ```
 
-3. The new provider key becomes valid for `PUT /ai/credentials/myprovider` and `PUT /ai/features/search { provider: "myprovider", model: "..." }`.
+3. The new provider key becomes valid for `PUT /admin/ai/providers/myprovider/key` and `PUT /admin/memoriahub-ai/features/search { provider: "myprovider", model: "..." }`.
 
 ### OpenAI-Compatible Provider (config only — no new code)
 
@@ -496,14 +496,15 @@ Many inference providers expose an OpenAI-compatible API (same `/chat/completion
 
 ```bash
 # Admin stores a credential via the API:
-PUT /api/ai/credentials/openai
+# (since RETRO-E4: the endpoint is the provider slot's baseUrl on /admin/settings/ai, PUT /api/admin/ai/config;
+#  the key goes on its own, write-only)
+PUT /api/admin/ai/providers/openai/key
 {
-  "apiKey": "sk-moonshot-...",
-  "baseUrl": "https://api.moonshot.cn/v1"
+  "apiKey": "sk-moonshot-..."
 }
 
 # Admin selects the model:
-PUT /api/ai/features/search
+PUT /api/admin/memoriahub-ai/features/search
 {
   "provider": "openai",
   "model": "moonshot-v1-8k"
@@ -528,12 +529,12 @@ All endpoints in this group require `ROLES.ADMIN` plus the listed permission. Th
 
 | Method | Path | Permission | Body / Query | Description |
 |--------|------|------------|--------------|-------------|
-| `GET` | `/api/ai/settings` | `ai_settings:read` | — | Returns all configured providers (masked `last4`, no ciphertext), known unconfigured providers, and active search feature config |
-| `PUT` | `/api/ai/credentials/:provider` | `ai_settings:write` | `{ apiKey, baseUrl?, enabled? }` | Upsert provider credentials. Key is encrypted at rest. Returns masked summary. |
-| `DELETE` | `/api/ai/credentials/:provider` | `ai_settings:write` | — | Remove provider credentials. Returns `{ deleted: true, provider }`. |
-| `POST` | `/api/ai/test` | `ai_settings:read` | `{ provider, model, apiKey?, baseUrl? }` | Test provider connectivity. Returns `{ ok: boolean, error? }`. |
-| `GET` | `/api/ai/models` | `ai_settings:read` | `?provider=<key>` | List available models for a provider using stored credentials. Returns `{ provider, models: string[] }`. |
-| `PUT` | `/api/ai/features/search` | `ai_settings:write` | `{ provider, model }` | Set the active AI provider and model for the search feature. Stored in system settings under `ai.features.search`. |
+| `GET` | `/api/admin/memoriahub-ai/features` | `ai_config:read` | — | Returns all configured providers (masked `last4`, no ciphertext), known unconfigured providers, and active search feature config |
+| `PUT` | `/api/admin/ai/providers/:provider/key` | `ai_config:write` | `{ apiKey }` | The platform AI slice (RETRO-E4): verify, then store the deployment key in the credential store. Returns masked summary. |
+| `DELETE` | `/api/admin/ai/providers/:provider/key` | `ai_config:write` | — | Remove provider credentials. Returns `{ deleted: true, provider }`. |
+| `POST` | `/api/admin/memoriahub-ai/test` | `ai_config:write` | `{ provider, model }` | Test provider connectivity. Returns `{ ok: boolean, error? }`. |
+| `GET` | `/api/ai/models` | `ai_config:read` | `?provider=<key>` | List available models for a provider using stored credentials. Returns `{ provider, models: string[] }`. |
+| `PUT` | `/api/admin/memoriahub-ai/features/search` | `ai_config:write` | `{ provider, model }` | Set the active AI provider and model for the search feature. Stored in system settings under `ai.features.search`. |
 
 ### Deterministic Search (`/api/search`)
 
@@ -552,8 +553,8 @@ All endpoints in this group require `ROLES.ADMIN` plus the listed permission. Th
 
 | Permission | Granted To | Purpose |
 |------------|------------|---------|
-| `ai_settings:read` | Admin | View AI provider config, test connectivity, list models |
-| `ai_settings:write` | Admin | Configure provider credentials, set active search model |
+| `ai_config:read` | Admin | View AI provider config, test connectivity, list models |
+| `ai_config:write` | Admin | Configure provider credentials, set active search model |
 | `search:use` | Admin, Contributor, Viewer | Use deterministic search and agentic search |
 
 ---

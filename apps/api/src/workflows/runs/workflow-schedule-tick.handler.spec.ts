@@ -1,6 +1,8 @@
 /**
- * Unit tests for WorkflowScheduleTask (Media Workflow Automation Phase 4,
- * issue #142).
+ * Unit tests for WorkflowScheduleTickHandler, the `workflows.schedule_tick` job
+ * (Media Workflow Automation Phase 4, issue #142; the cron body moved here in
+ * RETRO-C9, #612 — the every-minute cron itself only enqueues, see
+ * test/jobs/cron-tasks.conformance.spec.ts).
  *
  * Covers:
  *   - master switches: features.workflows off, workflows.triggers.scheduled
@@ -21,7 +23,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { WorkflowScheduleTask } from './workflow-schedule.task';
+import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
+import { WorkflowScheduleTickHandler } from './workflow-schedule-tick.handler';
 import { WorkflowRunService } from './workflow-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
@@ -62,8 +65,8 @@ function makeDueWorkflow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('WorkflowScheduleTask', () => {
-  let task: WorkflowScheduleTask;
+describe('WorkflowScheduleTickHandler', () => {
+  let task: WorkflowScheduleTickHandler;
   let prisma: MockPrismaService;
   let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
   let runService: jest.Mocked<Pick<WorkflowRunService, 'startUnattendedRun'>>;
@@ -79,14 +82,15 @@ describe('WorkflowScheduleTask', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        WorkflowScheduleTask,
+        WorkflowScheduleTickHandler,
+        { provide: JobHandlerRegistry, useValue: new JobHandlerRegistry() },
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: systemSettings },
         { provide: WorkflowRunService, useValue: runService },
       ],
     }).compile();
 
-    task = module.get(WorkflowScheduleTask);
+    task = module.get(WorkflowScheduleTickHandler);
 
     // Default: no runs active anywhere (overlap + concurrency both clear).
     prisma.workflowRun.count.mockResolvedValue(0);
@@ -104,7 +108,7 @@ describe('WorkflowScheduleTask', () => {
         features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: false },
       } as any);
 
-      await task.handleTick();
+      await task.process();
 
       expect(prisma.workflow.findMany).not.toHaveBeenCalled();
       expect(runService.startUnattendedRun).not.toHaveBeenCalled();
@@ -115,7 +119,7 @@ describe('WorkflowScheduleTask', () => {
         settingsWithWorkflows({ triggers: { onEnrichment: true, scheduled: false } }) as any,
       );
 
-      await task.handleTick();
+      await task.process();
 
       expect(prisma.workflow.findMany).not.toHaveBeenCalled();
       expect(runService.startUnattendedRun).not.toHaveBeenCalled();
@@ -130,7 +134,7 @@ describe('WorkflowScheduleTask', () => {
     it('does nothing further when there are no due workflows', async () => {
       prisma.workflow.findMany.mockResolvedValue([] as any);
 
-      await task.handleTick();
+      await task.process();
 
       expect(runService.startUnattendedRun).not.toHaveBeenCalled();
       expect(prisma.workflow.update).not.toHaveBeenCalled();
@@ -140,7 +144,7 @@ describe('WorkflowScheduleTask', () => {
       const workflow = makeDueWorkflow();
       prisma.workflow.findMany.mockResolvedValue([workflow] as any);
 
-      await task.handleTick();
+      await task.process();
 
       expect(runService.startUnattendedRun).toHaveBeenCalledWith(
         workflow,
@@ -160,7 +164,7 @@ describe('WorkflowScheduleTask', () => {
     it('queries only enabled + scheduled workflows whose nextRunAt has elapsed', async () => {
       prisma.workflow.findMany.mockResolvedValue([] as any);
 
-      await task.handleTick();
+      await task.process();
 
       expect(prisma.workflow.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -185,7 +189,7 @@ describe('WorkflowScheduleTask', () => {
       // First count() call inside processDueWorkflow is the per-workflow overlap check.
       prisma.workflowRun.count.mockResolvedValueOnce(1); // overlapping active run exists
 
-      await task.handleTick();
+      await task.process();
 
       expect(runService.startUnattendedRun).not.toHaveBeenCalled();
       expect(prisma.workflow.update).toHaveBeenCalledWith(
@@ -201,7 +205,7 @@ describe('WorkflowScheduleTask', () => {
       prisma.workflow.findMany.mockResolvedValue([workflow] as any);
       prisma.workflowRun.count.mockResolvedValueOnce(0);
 
-      await task.handleTick();
+      await task.process();
 
       const overlapCall = (prisma.workflowRun.count as jest.Mock).mock.calls[0][0];
       expect(overlapCall.where.workflowId).toBe(WORKFLOW_ID);
@@ -230,7 +234,7 @@ describe('WorkflowScheduleTask', () => {
         .mockResolvedValueOnce(0) // overlap check: clear for this workflow
         .mockResolvedValueOnce(2); // app-wide concurrency check: at the cap
 
-      await task.handleTick();
+      await task.process();
 
       expect(runService.startUnattendedRun).not.toHaveBeenCalled();
       expect(prisma.workflow.update).toHaveBeenCalledWith(
@@ -248,7 +252,7 @@ describe('WorkflowScheduleTask', () => {
         .mockResolvedValueOnce(0) // overlap check
         .mockResolvedValueOnce(1); // below the cap of 2
 
-      await task.handleTick();
+      await task.process();
 
       expect(runService.startUnattendedRun).toHaveBeenCalledWith(
         workflow,
@@ -271,7 +275,7 @@ describe('WorkflowScheduleTask', () => {
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValueOnce({ runId: randomUUID() });
 
-      await expect(task.handleTick()).resolves.not.toThrow();
+      await expect(task.process()).resolves.not.toThrow();
 
       expect(runService.startUnattendedRun).toHaveBeenCalledTimes(2);
       // Both workflows' nextRunAt should have been rolled forward (failing one
@@ -282,10 +286,10 @@ describe('WorkflowScheduleTask', () => {
       expect(updatedIds).toEqual(expect.arrayContaining([failing.id, healthy.id]));
     });
 
-    it('never throws even when the settings lookup itself fails', async () => {
+    it('throws (so the queue records and retries the job) when the settings lookup itself fails', async () => {
       systemSettings.getSettings.mockRejectedValue(new Error('settings unavailable'));
 
-      await expect(task.handleTick()).resolves.not.toThrow();
+      await expect(task.process()).rejects.toThrow('settings unavailable');
       expect(prisma.workflow.findMany).not.toHaveBeenCalled();
     });
   });

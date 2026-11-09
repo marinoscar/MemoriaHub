@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
-import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
+import { AiProviderRegistry } from './legacy-ai-provider.registry';
+import { AiDeploymentKeySource } from './ai-deployment-key-source';
 import {
   TestAiProviderDto,
   SetSearchFeatureDto,

@@ -1,100 +1,56 @@
+// =============================================================================
+// WorkflowMicroRunFinalizeTask: the every-minute micro-run window closer
+// (issue #142; enqueue-only since RETRO-C9, #612)
+// =============================================================================
+//
+// Decides only that an `on_media_enriched` micro-run's collection window has
+// closed and ENQUEUES the `workflows.micro_run_finalize` job (root rule: every
+// long-running activity is a queue job; `cron-enqueue-only` conformance suite).
+// The race-safe claim (`approvedAt`) and the execute-batch fan-out are
+// `WorkflowMicroRunFinalizeHandler`'s.
+//
+// Runs regardless of the feature toggle (as before), so a mid-window feature
+// flip never strands a collecting micro-run. One indexed `findFirst` decides; a
+// GLOBAL job, so the queue's dedup keeps at most one pending/running pass.
+// Never throws.
+// =============================================================================
+
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { WorkflowRun, WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
+import { JobsService } from '@marinoscar/platform-api/jobs';
+
 import { PrismaService } from '../../prisma/prisma.service';
-import { WorkflowDefinition } from '../definition/workflow-definition.schema';
-import { WorkflowRunService } from './workflow-run.service';
-import { MICRO_RUN_WINDOW_MINUTES } from './workflow-evaluate-item.handler';
-import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { WORKFLOW_MICRO_RUN_FINALIZE_TYPE, WORKFLOW_TICK_PRIORITY } from './workflow-cron-jobs.constants';
+import { dueMicroRunsWhere } from './workflow-micro-run-finalize.handler';
 
-/** Cap on micro-runs finalized per tick. */
-const MAX_PER_TICK = 100;
-
-/**
- * Media Workflow Automation — micro-run window closer (issue #142).
- *
- * Every minute, finds on_media_enriched micro-runs whose collection window has
- * elapsed (`status='running' AND approvedAt IS NULL AND startedAt <= now -
- * MICRO_RUN_WINDOW_MINUTES`) and dispatches each: it race-safely claims the run
- * by stamping `approvedAt` (only the winner proceeds), then enqueues the run's
- * execute-batch jobs via WorkflowRunService.enqueueExecuteBatches — after which
- * the existing workflow_execute_batch drain + maybeFinalizeRun terminates it.
- * A micro-run with 0 matched items at dispatch is finalized straight to
- * completed. Runs regardless of the feature toggle so a mid-window feature flip
- * never strands a collecting micro-run. Never throws.
- */
 @Injectable()
 export class WorkflowMicroRunFinalizeTask {
   private readonly logger = new Logger(WorkflowMicroRunFinalizeTask.name);
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
-    private readonly runService: WorkflowRunService,
+    private readonly jobs: JobsService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleTick(): Promise<void> {
     try {
-      const deadline = new Date(Date.now() - MICRO_RUN_WINDOW_MINUTES * 60_000);
-      const due = await this.prisma.workflowRun.findMany({
-        where: {
-          triggerType: WorkflowTrigger.on_media_enriched,
-          status: WorkflowRunStatus.running,
-          approvedAt: null,
-          startedAt: { lte: deadline },
-        },
-        orderBy: { startedAt: 'asc' },
-        take: MAX_PER_TICK,
+      const due = await this.prisma.workflowRun.findFirst({
+        where: dueMicroRunsWhere(new Date()),
+        select: { id: true },
       });
-      if (due.length === 0) return;
+      if (!due) return;
 
-      // Loaded once — enqueueExecuteBatches only needs batchSize.
-      const settings = await this.systemSettings.getSettings();
-
-      for (const run of due) {
-        try {
-          await this.dispatch(run, settings);
-        } catch (err) {
-          this.logger.error(
-            `Micro-run finalize failed for run ${run.id}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
-      }
+      await this.jobs.enqueue({
+        type: WORKFLOW_MICRO_RUN_FINALIZE_TYPE,
+        reason: 'backfill',
+        orgId: null,
+        priority: WORKFLOW_TICK_PRIORITY,
+      });
     } catch (err) {
       this.logger.error(
-        `WorkflowMicroRunFinalizeTask tick failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Workflow micro-run finalize enqueue failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-  }
-
-  private async dispatch(
-    run: WorkflowRun,
-    settings: Awaited<ReturnType<AppSystemSettingsService['getSettings']>>,
-  ): Promise<void> {
-    // Race-safe claim: stamp approvedAt so only ONE finalize attempt dispatches.
-    const claimed = await this.prisma.workflowRun.updateMany({
-      where: { id: run.id, status: WorkflowRunStatus.running, approvedAt: null },
-      data: { approvedAt: new Date() },
-    });
-    if (claimed.count === 0) return; // lost the race
-
-    // 0-matched edge case (shouldn't happen — we only open on a match): finalize
-    // straight to completed.
-    const matched = await this.prisma.workflowRunItem.count({
-      where: { runId: run.id, status: WorkflowRunItemStatus.matched },
-    });
-    if (matched === 0) {
-      await this.prisma.workflowRun.updateMany({
-        where: { id: run.id, status: WorkflowRunStatus.running },
-        data: { status: WorkflowRunStatus.completed, finishedAt: new Date() },
-      });
-      return;
-    }
-
-    const definition = run.definitionSnapshot as unknown as WorkflowDefinition;
-    await this.runService.enqueueExecuteBatches(run, definition, settings);
   }
 }

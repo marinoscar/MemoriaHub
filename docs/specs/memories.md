@@ -1347,11 +1347,11 @@ Five things about it are load-bearing rather than cosmetic:
 
 **The feature toggle merge-spreads.** `features` is one open `Record<string, boolean>` holding every flag in the deployment, so `updateSettings({ features: { memories: checked } })` would clear auto-tagging, face recognition and the rest. The page writes `{ ...(settings?.features ?? {}), memories: checked }`, and a test asserts the two unrelated flags survive — this is the documented footgun of the settings shape, not a hypothetical.
 
-**One Save for the whole `memories` namespace.** Per-section saves would let an admin persist a `minItems` above `maxItemsPerMemory` in two steps without ever seeing them side by side. A single `updateSettings({ memories: { … } })` writes the namespace as one consistent document, matching how the curators read it (§4.14). The AI model is the one exception — it is not in this namespace at all, and saves separately through `PUT /api/ai/features/memories`.
+**One Save for the whole `memories` namespace.** Per-section saves would let an admin persist a `minItems` above `maxItemsPerMemory` in two steps without ever seeing them side by side. A single `updateSettings({ memories: { … } })` writes the namespace as one consistent document, matching how the curators read it (§4.14). The AI model is the one exception — it is not in this namespace at all, and saves separately through `PUT /api/admin/memoriahub-ai/features/memories`.
 
 **Every bound is duplicated from the zod schema, on purpose.** The `BOUNDS` table at the top of the file mirrors §9.2 so a number field rejects out-of-range input in the browser instead of surfacing an opaque 400. That makes the page a **fourth** hand-maintained copy of this namespace on top of the three §9.3 already warns about — the tradeoff was taken because the alternative is a form that lets an admin type a value the API silently refuses, but a bound changed on the server has to be changed here too.
 
-**The credential warning exists because the failure is invisible.** Selecting a provider with no enabled credential is not an error anywhere: titling just returns `null` and every memory gets a template title (§5.1), which is *correct* behaviour and therefore indistinguishable from working. The page cross-checks the selection against `GET /api/ai/settings`'s provider list and says so out loud, linking to `/admin/settings/ai` — the same reasoning behind `EnhancerSettingsPage`'s readiness panel. The same logic drives the digest section's "Email not configured" chip: `digest.enabled` with no email provider is a switch that does nothing.
+**The credential warning exists because the failure is invisible.** Selecting a provider with no enabled credential is not an error anywhere: titling just returns `null` and every memory gets a template title (§5.1), which is *correct* behaviour and therefore indistinguishable from working. The page cross-checks the selection against `GET /api/admin/memoriahub-ai/features`'s provider list and says so out loud, linking to `/admin/settings/ai` — the same reasoning behind `EnhancerSettingsPage`'s readiness panel. The same logic drives the digest section's "Email not configured" chip: `digest.enabled` with no email provider is a switch that does nothing.
 
 **The backfill button is gated on the feature flag client-side and the API 400s anyway.** Both, deliberately: the client gate is the affordance (with a caption saying why it is disabled), the server gate is the guarantee — and only the server sees `MEMORIES_ENABLED`. On success the alert reports `enqueued`/`skipped` and links to `/admin/settings/jobs?type=memory_generation`, because a backfill's real progress lives in the job queue, not on this page; the caption states up front that it is idempotent, background-priority, and AI-title-capped, so nobody has to read §3.5 to know it is safe to press twice.
 
@@ -1407,9 +1407,9 @@ The `memories.*` namespace is declared once, in `apps/api/src/settings/registry/
 
 Lives under `ai.features.*`, not `features.*`. Shape is `{ provider, model } | null`, default `null` — the same nullable-object contract as `ai.features.enhance`, chosen because a half-filled provider/model pair is not a usable selection, so clearing either field clears the whole thing.
 
-- `PUT /api/ai/features/memories` — body `{ provider, model }`, Admin + `ai_settings:write`. Mirrors `PUT /api/ai/features/tagging`.
-- Surfaced (masked, like its siblings) by `GET /api/ai/settings`.
-- Model candidates come from the existing `GET /api/ai/models?provider=&capability=chat` — memories generate titles/subtitles/narratives, which is a **chat** capability. No new capability value was added.
+- `PUT /api/admin/memoriahub-ai/features/memories` — body `{ provider, model }`, Admin + `ai_config:write`. Mirrors `PUT /api/admin/memoriahub-ai/features/tagging`.
+- Surfaced (masked, like its siblings) by `GET /api/admin/memoriahub-ai/features`.
+- Model candidates come from the existing `GET /api/admin/memoriahub-ai/models?provider=&capability=chat` — memories generate titles/subtitles/narratives, which is a **chat** capability. No new capability value was added.
 - `AiSettingsService.resolveMemoriesConfig()` returns the pair or `null`; `null` means memory titles fall back to deterministic templates (#306), never an error.
 
 One deliberate divergence from the older `search`/`tagging`/`embedding` setters: a non-null selection is **validated against the credential store up front** and rejected with a `400` when the provider has no configured, *enabled* credential. Those older setters accept anything, which is tolerable for a feature whose next call is an interactive request the admin will see fail — but a bad Memories selection would only ever surface inside a background `memory_generation` job, where nobody is watching.
@@ -1418,7 +1418,7 @@ Consumed by `MemoryTitleService` in [#306](https://github.com/marinoscar/Memoria
 
 ## 10. RBAC
 
-Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) for the user-facing API. The admin surface — `/admin/settings/memories` and the library backfill ([#315](https://github.com/marinoscar/MemoriaHub/issues/315)) — reuses `system_settings:read`/`system_settings:write` like every other admin settings page, and the AI model picker on that page reuses `ai_settings:write` because it writes `ai.features.memories` through the existing `PUT /api/ai/features/memories`.
+Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) for the user-facing API. The admin surface — `/admin/settings/memories` and the library backfill ([#315](https://github.com/marinoscar/MemoriaHub/issues/315)) — reuses `system_settings:read`/`system_settings:write` like every other admin settings page, and the AI model picker on that page reuses `ai_config:write` because it writes `ai.features.memories` through the existing `PUT /api/admin/memoriahub-ai/features/memories`.
 
 **No new permission was introduced, and none should be.** A memory is a *derived view* over media the caller can already see — it grants access to nothing they could not reach through `GET /api/media`. `media:read` / `media:write` plus the per-circle roles express the intent exactly, so a `memories:*` permission would add a second thing to keep in sync with the media permissions for zero additional expressiveness. That was the epic's explicit decision, and it follows the precedent set by Workflows (which reuses `media:read`/`media:write`/`media:delete` + per-circle roles) and Notifications (authentication only, because every route is already user-scoped).
 
@@ -1430,7 +1430,7 @@ Filled in by issue [#307](https://github.com/marinoscar/MemoriaHub/issues/307) f
 | Delete (tombstone) | `media:write` | **collaborator** | Mutates circle content for every member; a viewer's equivalent is the personal hide |
 | View / edit `/admin/settings/memories` | `system_settings:read` / `system_settings:write` (+ **Admin** role) | — | Not circle-scoped: these are deployment-wide settings |
 | Run the library backfill | `system_settings:write` (+ **Admin** role) | — | Same guard as `POST /api/admin/bursts/backfill` and every other global backfill |
-| Choose the memory-titling model | `ai_settings:write` (+ **Admin** role) | — | Written through the existing `PUT /api/ai/features/memories`; the page adds no endpoint of its own |
+| Choose the memory-titling model | `ai_config:write` (+ **Admin** role) | — | Written through the existing `PUT /api/admin/memoriahub-ai/features/memories`; the page adds no endpoint of its own |
 
 **Super-admin bypass.** A user holding `circles:manage_any`, `media:write_any` or `media:read_any` bypasses the per-circle role check entirely, exactly as `CircleMembershipService.assertCircleAccess` does elsewhere — `loadAccessibleMemory` reproduces that bypass rather than inventing a second policy. This is what lets a system Admin moderate a circle they do not belong to.
 

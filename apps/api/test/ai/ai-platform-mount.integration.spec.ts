@@ -8,8 +8,8 @@
  *   - `/api/admin/ai/*` requires `ai_config:read` (403 without it) and is NOT
  *     behind the kill switch;
  *   - a consumer route is refused while the kill switch is off;
- *   - MemoriaHub's legacy model listing moved from `GET /api/ai/models` (now the
- *     platform's route) to `GET /api/ai/settings/models`, same answer.
+ *   - MemoriaHub's model listing lives at `GET /api/admin/memoriahub-ai/models`
+ *     (`ai_config:read`, RETRO-E4), and the old `/api/ai/settings` is gone.
  */
 
 import request from 'supertest';
@@ -95,16 +95,31 @@ describe('platform AI slice mount (RETRO-E1)', () => {
     expect(JSON.stringify(res.body)).toContain('AI_DISABLED');
   });
 
-  it('serves the legacy model listing at /api/ai/settings/models', async () => {
-    const admin = await createMockAdminUser(context);
-    grant(admin.id, ['ai_settings:read']);
+  it('serves the MemoriaHub model listing at /api/admin/memoriahub-ai/models behind ai_config:read', async () => {
     (context.prismaMock.aiProviderCredential.findUnique as jest.Mock).mockResolvedValue(null);
 
+    const viewer = await createMockViewerUser(context);
+    const denied = await request(context.app.getHttpServer())
+      .get('/api/admin/memoriahub-ai/models?provider=openai&capability=transcription')
+      .set(authHeader(viewer.accessToken));
+    expect(denied.status).toBe(403);
+
+    const admin = await createMockAdminUser(context);
+    grant(admin.id, ['ai_config:read']);
     const res = await request(context.app.getHttpServer())
-      .get('/api/ai/settings/models?provider=openai&capability=transcription')
+      .get('/api/admin/memoriahub-ai/models?provider=openai&capability=transcription')
       .set(authHeader(admin.accessToken));
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual(['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1']);
+  });
+
+  it('retired the old AI admin routes (RETRO-E4): /api/ai/settings is not routed', async () => {
+    const admin = await createMockAdminUser(context);
+    grant(admin.id, ['ai_config:read']);
+    const res = await request(context.app.getHttpServer())
+      .get('/api/ai/settings')
+      .set(authHeader(admin.accessToken));
+    expect(res.status).toBe(404);
   });
 });
