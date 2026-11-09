@@ -23,6 +23,8 @@
 import './settingsFeatures';
 import AdminIcon from '@mui/icons-material/AdminPanelSettings';
 import AiIcon from '@mui/icons-material/SmartToy';
+import ModelTrainingOutlinedIcon from '@mui/icons-material/ModelTrainingOutlined';
+import QueryStatsOutlinedIcon from '@mui/icons-material/QueryStatsOutlined';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import FaceIcon from '@mui/icons-material/Face';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
@@ -146,18 +148,28 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
     label: 'AI & Enrichment',
     cards: [
       {
-        title: 'AI Providers',
-        description: 'Configure AI provider credentials and set the active model for search and tagging.',
+        // RETRO-E4 (#607): the platform's `AiConfigPage` (`platform/ai/AiConfigRoute.tsx`), with
+        // MemoriaHub's per-feature model selections in its `Sections` slot. `ai_config:read` is the
+        // exact string the AI slice's `ai-admin.controller` enforces on `GET /api/admin/ai/config`
+        // (`ai_config:write` on the writes, which the page gates by disabling its controls).
+        // ⚠ NO `feature` ON THIS CARD (AI rule 5): this is where AI is switched on, so it stays
+        // reachable while AI is off.
+        title: 'AI',
+        description:
+          'Switch AI on, set the key policy, save the provider keys, and pick the model for each MemoriaHub feature.',
         Icon: AiIcon,
         path: '/admin/settings/ai',
-        permission: 'ai_settings:read',
+        permission: 'ai_config:read',
       },
       {
+        // `ai_config:read`: what the tag vocabulary routes (`/api/tag-labels`) enforce since
+        // RETRO-E4. Not an AI-slice card (no `ai` path segment, no `feature`): the flags it edits
+        // govern MemoriaHub's own call path, which the platform switch does not.
         title: 'Tagging & Descriptions',
         description: 'Manage the tag vocabulary and configure automatic photo tagging behavior.',
         Icon: LocalOfferIcon,
         path: '/admin/settings/tagging',
-        permission: 'ai_settings:read',
+        permission: 'ai_config:read',
       },
       {
         title: 'Face Recognition',
@@ -201,6 +213,25 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
         Icon: MovieIcon,
         path: '/admin/settings/social-media',
         permission: 'system_settings:read',
+      },
+      // RETRO-E4 (#607): the platform's model catalogue and usage report. Both gate on the
+      // `ai_config:read` the AI slice's `ai-admin.controller` enforces on `GET /api/admin/ai/models`
+      // and `GET /api/admin/ai/usage`, and carry `feature: 'ai'`: hidden while AI is off.
+      {
+        title: 'AI Models',
+        description: 'The model catalogue of the configured providers: refresh it and enable or disable models.',
+        Icon: ModelTrainingOutlinedIcon,
+        path: '/admin/settings/ai/models',
+        permission: 'ai_config:read',
+        feature: 'ai',
+      },
+      {
+        title: 'AI Usage',
+        description: 'Calls, tokens and cost of the platform AI routes, by user, model, provider and key source.',
+        Icon: QueryStatsOutlinedIcon,
+        path: '/admin/settings/ai/usage',
+        permission: 'ai_config:read',
+        feature: 'ai',
       },
     ],
   },

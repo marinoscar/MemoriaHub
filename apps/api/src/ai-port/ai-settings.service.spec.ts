@@ -8,13 +8,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AiSettingsService } from './ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import { AiProviderRegistry } from './legacy-ai-provider.registry';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { composePatchSystemSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../settings/registry';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
+import { AiDeploymentKeySource } from './ai-deployment-key-source';
 import { CredentialsService } from '@marinoscar/platform-api/credentials';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';

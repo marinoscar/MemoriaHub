@@ -4,10 +4,10 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { CircleRole, MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
+import { MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
 import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -34,7 +34,7 @@ export interface OrientationEditResult {
  * photo's ORIGINAL stored bytes. Mirrors the guard/role model of the
  * "Retry thumbnail" action (MediaThumbnailRerunController): media:write
  * permission + per-circle collaborator role, resolved via
- * CircleMembershipService.assertCircleAccess.
+ * OwnerAccessService.requireOwnerRole.
  *
  * Flow:
  *   1. Load + authorize the MediaItem (with its StorageObject).
@@ -62,7 +62,7 @@ export class MediaOrientationEditService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly resolver: StorageProviderResolver,
     private readonly recoveryService: ObjectReprocessService,
     private readonly metadataSync: MediaMetadataSyncService,
@@ -92,11 +92,11 @@ export class MediaOrientationEditService {
     }
 
     // Mirror thumbnail-rerun: collaborator role (or super-admin bypass) required.
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const storageObject = mediaItem.storageObject;

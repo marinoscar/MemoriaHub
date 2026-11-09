@@ -454,7 +454,7 @@ function MemoriesSettingsContent() {
               Memory titles will keep using templates until an enabled credential exists. Add
               one under{' '}
               <Link component={RouterLink} to="/admin/settings/ai" underline="hover">
-                AI Providers
+                AI &rarr; provider keys
               </Link>
               .
             </Alert>

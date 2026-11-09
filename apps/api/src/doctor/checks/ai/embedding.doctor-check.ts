@@ -5,7 +5,7 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { AiSettingsService } from '../../../ai/ai-settings.service';
+import { AiSettingsService } from '../../../ai-port/ai-settings.service';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 

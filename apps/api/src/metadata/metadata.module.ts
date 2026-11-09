@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { MediaModule } from '../media/media.module';
 import { MetadataExtractionHandler } from './metadata.handler';
@@ -16,7 +16,7 @@ import { AdminMetadataController } from './admin-metadata.controller';
     EnrichmentModule,
     MediaProcessingModule,
     PrismaModule,
-    CirclesModule,
+    OwnerAccessModule,
     GeoLocationModule,
     MediaModule, // provides MediaMetadataSyncService (now exported)
   ],

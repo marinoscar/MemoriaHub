@@ -1,6 +1,6 @@
 import type { OnboardingFactDef } from '@marinoscar/platform-api/onboarding';
 import { StorageConfigService } from '@marinoscar/platform-api/storage';
-import { CircleRole, MediaSyncDeviceStatus } from '@prisma/client';
+import { MediaSyncDeviceStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiDeploymentKeySource } from '../../ai-port/ai-deployment-key-source';
@@ -123,7 +123,7 @@ export const CIRCLE_MEMBERSHIP_FACT: OnboardingFactDef<CircleMembershipFact> = {
   resolve: async (ctx) => {
     const prisma = ctx.get(PrismaService);
     const memberships = await prisma.circleMember.findMany({
-      where: { userId: ctx.caller.id, role: { in: [CircleRole.collaborator, CircleRole.circle_admin] } },
+      where: { userId: ctx.caller.id, role: { in: ['collaborator', 'circle_admin'] } },
       select: { circleId: true },
       take: MEMBERSHIP_READ_CAP,
     });

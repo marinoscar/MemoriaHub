@@ -3,7 +3,7 @@
  *
  * Pure delegation/metadata test — auth guard enforcement is tested in
  * integration tests, not here (mirrors enrichment-admin.controller.spec.ts).
- * Per-circle RBAC (assertCircleAccess) is a service-layer concern tested in
+ * Per-circle RBAC (requireOwnerRole) is a service-layer concern tested in
  * location-suggestion.service.spec.ts.
  */
 

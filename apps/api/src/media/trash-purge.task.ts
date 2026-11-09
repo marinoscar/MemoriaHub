@@ -1,15 +1,18 @@
 // =============================================================================
-// Trash Purge Scheduled Task
+// Trash Purge Scheduled Task (enqueue-only; `enqueueHousekeepingJob` since
+// RETRO-C9, #612)
 // =============================================================================
 //
-// Hourly cron that enqueues a trash_purge enrichment job when no job is already
-// pending or running. Mirrors InsightsRefreshTask.
+// Hourly cron that enqueues the global `trash_purge` job (`TrashPurgeHandler`)
+// when none is already pending or running. `enqueueHousekeepingJob` does that
+// check, queues a system job (`orgId: null`) at the housekeeping priority (100,
+// the same low priority as before) and never throws.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobReason } from '@prisma/client';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { JobsService, enqueueHousekeepingJob } from '@marinoscar/platform-api/jobs';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -17,39 +20,18 @@ export class TrashPurgeTask {
   private readonly logger = new Logger(TrashPurgeTask.name);
 
   constructor(
-    private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly jobs: JobsService,
     private readonly prisma: PrismaService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledPurge(): Promise<void> {
-    try {
-      // Skip if a trash_purge job is already pending or running
-      const existing = await this.prisma.job.findFirst({
-        where: {
-          type: 'trash_purge',
-          status: { in: ['pending', 'running'] },
-        },
-      });
-
-      if (existing) {
-        this.logger.debug(
-          `trash_purge job already ${existing.status}; skipping schedule check`,
-        );
-        return;
-      }
-
-      await this.enrichmentJobService.enqueue({
-        type: 'trash_purge',
-        mediaItemId: null,
-        circleId: null,
-        reason: JobReason.backfill,
-        priority: 100, // low priority — background purge
-      });
-
-      this.logger.log('trash_purge job enqueued (scheduled)');
-    } catch (err) {
-      this.logger.error('trash_purge schedule check failed', err as Error);
-    }
+    await enqueueHousekeepingJob({
+      jobs: this.jobs,
+      prisma: this.prisma,
+      logger: this.logger,
+      type: 'trash_purge',
+      what: 'trash purge',
+    });
   }
 }

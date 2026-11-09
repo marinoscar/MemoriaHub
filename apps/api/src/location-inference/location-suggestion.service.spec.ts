@@ -20,7 +20,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CircleRole, JobReason, LocationSuggestionStatus, MediaType } from '@prisma/client';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -71,7 +71,7 @@ function makeSuggestion(overrides: Partial<Record<string, unknown>> = {}) {
 describe('LocationSuggestionService', () => {
   let service: LocationSuggestionService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
@@ -80,7 +80,7 @@ describe('LocationSuggestionService', () => {
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }) };
     mockStorageProvider = {
@@ -105,7 +105,7 @@ describe('LocationSuggestionService', () => {
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
@@ -141,11 +141,11 @@ describe('LocationSuggestionService', () => {
 
       await service.listSuggestions(makeQuery(), USER_ID, PERMS);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -341,11 +341,11 @@ describe('LocationSuggestionService', () => {
 
       await service.acceptSuggestion(SUGGESTION_ID, makeDto(), USER_ID, PERMS);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -539,14 +539,14 @@ describe('LocationSuggestionService', () => {
         type: MediaType.video, // would also fail the type check
       });
       const forbiddenError = new Error('membership check ran first');
-      mockMembership.assertCircleAccess.mockRejectedValueOnce(forbiddenError);
+      mockMembership.requireOwnerRole.mockRejectedValueOnce(forbiddenError);
 
       await expect(service.inferLocation(MEDIA_ID, USER_ID, PERMS)).rejects.toThrow(forbiddenError);
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 

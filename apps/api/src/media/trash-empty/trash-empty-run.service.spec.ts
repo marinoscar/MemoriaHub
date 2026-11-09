@@ -14,7 +14,7 @@
  *   - enqueueExecuteBatches: chunking by BATCH_SIZE (200); no-op when there
  *     are no matched items.
  *
- * No database required — PrismaService, CircleMembershipService,
+ * No database required — PrismaService, OwnerAccessService,
  * EnrichmentJobService, and MediaThumbnailService are all mocked.
  */
 
@@ -23,7 +23,7 @@ import { CircleRole, TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prism
 import { randomUUID } from 'crypto';
 import { TrashEmptyRunService } from './trash-empty-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
@@ -55,21 +55,21 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 describe('TrashEmptyRunService', () => {
   let service: TrashEmptyRunService;
   let prisma: MockPrismaService;
-  let circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
+  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>>;
 
   beforeEach(() => {
     prisma = createMockPrismaService();
     circleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'circle_admin', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'circle_admin', isSuperAdmin: false }),
     };
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
     thumbnails = { attachThumbnailUrls: jest.fn().mockResolvedValue([]) };
 
     service = new TrashEmptyRunService(
       prisma as unknown as PrismaService,
-      circleMembership as unknown as CircleMembershipService,
+      circleMembership as unknown as OwnerAccessService,
       enrichmentJobs as unknown as EnrichmentJobService,
       thumbnails as unknown as MediaThumbnailService,
     );
@@ -92,17 +92,17 @@ describe('TrashEmptyRunService', () => {
 
       await service.createRun(CIRCLE_ID, USER_ID, ['media:delete']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:delete'],
-        CircleRole.circle_admin,
+        'admin',
       );
     });
 
     it('propagates the ForbiddenException from a failed circle-admin check without creating a run', async () => {
       const { ForbiddenException } = await import('@nestjs/common');
-      circleMembership.assertCircleAccess.mockRejectedValue(
+      circleMembership.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('not a circle_admin'),
       );
 
@@ -242,11 +242,11 @@ describe('TrashEmptyRunService', () => {
 
       await service.cancelRun(RUN_ID, USER_ID, ['media:delete']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:delete'],
-        CircleRole.circle_admin,
+        'admin',
       );
     });
   });
@@ -270,11 +270,11 @@ describe('TrashEmptyRunService', () => {
 
       await service.getRunDetail(RUN_ID, USER_ID, ['media:read']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:read'],
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -317,11 +317,11 @@ describe('TrashEmptyRunService', () => {
 
       await service.listRunItems(RUN_ID, query, USER_ID, ['media:read']);
 
-      expect(circleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(circleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['media:read'],
-        CircleRole.viewer,
+        'viewer',
       );
     });
 

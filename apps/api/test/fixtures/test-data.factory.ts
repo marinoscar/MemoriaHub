@@ -154,6 +154,11 @@ export interface CreateMockUserOptions {
   roleName?: 'admin' | 'contributor' | 'viewer';
   createdAt?: Date;
   updatedAt?: Date;
+  /**
+   * Replaces the role's mock grant list with exactly these permission names (the platform AI
+   * conformance fixture mints users with the seeded catalog grants, RETRO-E4 #607).
+   */
+  permissionNames?: string[];
 }
 
 export function createMockUser(options: CreateMockUserOptions = {}): any {
@@ -496,8 +501,10 @@ export function createMockUserWithRelations(
   const roleName = options.roleName || 'viewer';
   const role = mockRoles[roleName];
 
-  // Get permissions for this role
-  const permissions = rolePermissionsMap[roleName] || [];
+  // Get permissions for this role (or exactly the names a caller passed)
+  const permissions = options.permissionNames
+    ? options.permissionNames.map((name) => ({ id: `perm-${name}`, name, description: name }))
+    : rolePermissionsMap[roleName] || [];
 
   // Build the full nested structure matching AuthenticatedUser type
   const roleWithPermissions = {

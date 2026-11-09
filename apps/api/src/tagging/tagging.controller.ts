@@ -13,12 +13,12 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { CircleRole, JobReason, MediaTagStatusType, MediaType } from '@prisma/client';
+import { JobReason, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ export class TaggingController {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
 
@@ -53,7 +53,7 @@ export class TaggingController {
     const mediaItem = await this.assertMediaItemAccess(
       mediaItemId,
       user,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Route by media type (epic #452, issue #458). This endpoint previously
@@ -103,7 +103,7 @@ export class TaggingController {
     @Param('id') mediaItemId: string,
     @CurrentUser() user: RequestUser,
   ) {
-    await this.assertMediaItemAccess(mediaItemId, user, 'viewer' as CircleRole);
+    await this.assertMediaItemAccess(mediaItemId, user, 'viewer');
 
     const status = await this.prisma.mediaTagStatus.findUnique({
       where: { mediaItemId },
@@ -132,7 +132,7 @@ export class TaggingController {
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
-    requiredRole: CircleRole = 'viewer' as CircleRole,
+    requiredRole: OwnerRole = 'viewer',
   ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -143,7 +143,7 @@ export class TaggingController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,

@@ -191,7 +191,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     expect(plan.storage).toBeUndefined();
     expect(plan.delegated.map((step) => step.model).sort()).toEqual(['MediaSyncDevice', 'StorageObject', 'UserProfile']);
     expect(plan.steps.map((step) => step.model)).toEqual(
-      expect.arrayContaining(['MemoryUserState', 'MediaShare', 'MhLegacyNotification']),
+      expect.arrayContaining(['MemoryUserState', 'MhLegacyNotification']),
     );
   });
 
@@ -208,16 +208,12 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     await prisma.tag.create({ data: { circleId: personal, addedById: alpha, name: 'tag-alpha' } });
     await prisma.person.create({ data: { circleId: personal, addedById: alpha, name: 'Person C' } });
     const sharedAlbum = await prisma.album.create({ data: { circleId: shared, addedById: alpha, name: 'Album Beta' } });
-    await prisma.mediaShare.create({
-      data: { targetType: 'media_item', mediaItemId: contributed.item.id, circleId: shared, createdById: alpha, token: randomUUID() },
-    } as never);
 
     const { runner } = platform();
     const job = await jobRow('user.data.purge', { userId: alpha, scope: 'everything' });
     await runner.runJob(job as never, { userId: alpha, scope: 'everything' });
 
-    // Inline: the public link is gone with the user's other own rows.
-    expect(await prisma.mediaShare.count({ where: { createdById: alpha } })).toBe(0);
+    // Public links are link grants since RETRO-I4: they belong to the record's owner and are kept.
     // Delegated, once each.
     expect(enqueued.map((input) => input.type).sort()).toEqual(
       [MEMORIAHUB_PURGE_JOB_TYPES.DEVICES, MEMORIAHUB_PURGE_JOB_TYPES.CIRCLE, MEMORIAHUB_PURGE_JOB_TYPES.PROFILE].sort(),

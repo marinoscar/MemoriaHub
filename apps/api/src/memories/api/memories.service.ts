@@ -41,10 +41,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, MemoryType, Prisma } from '@prisma/client';
+import { MemoryType, Prisma } from '@prisma/client';
+import { groupRoleAtLeast } from '@marinoscar/platform-api/sharing';
 
-import { CircleMembershipService } from '../../circles/circle-membership.service';
-import { PERMISSIONS } from '../../common/constants/roles.constants';
+import { OwnerAccessService, hasOwnerBypass, type OwnerRole } from '../../platform/sharing/owner-scope';
 import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
@@ -120,7 +120,7 @@ export class MemoriesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaService: MediaService,
@@ -157,7 +157,7 @@ export class MemoriesService {
   /**
    * Load one memory by id and prove the caller may act on it at `required` rank.
    *
-   * Deliberately NOT `assertCircleAccess`: a non-member must get **404, not
+   * Deliberately its own check (not `requireOwnerRole`): a non-member must get **404, not
    * 403**, so a stranger cannot use the status code to confirm that a memory id
    * exists (the same enumeration-resistant policy as the notifications `:id`
    * routes and public shares). A member who simply lacks the RANK — a viewer
@@ -168,7 +168,7 @@ export class MemoriesService {
     id: string,
     userId: string,
     permissions: string[],
-    required: CircleRole,
+    required: OwnerRole,
   ) {
     const memory = await this.prisma.memory.findFirst({
       where: {
@@ -181,25 +181,16 @@ export class MemoriesService {
       throw new NotFoundException(`Memory ${id} not found`);
     }
 
-    // Super-admins moderate any circle without being a member — the same bypass
-    // CircleMembershipService.assertCircleAccess applies.
-    const isSuperAdmin =
-      permissions.includes(PERMISSIONS.CIRCLES_MANAGE_ANY) ||
-      permissions.includes(PERMISSIONS.MEDIA_WRITE_ANY) ||
-      permissions.includes(PERMISSIONS.MEDIA_READ_ANY);
-    if (isSuperAdmin) return memory;
+    // Super-admins moderate any owner scope without being a member — the same
+    // bypass OwnerAccessService.requireOwnerRole applies.
+    if (hasOwnerBypass(permissions)) return memory;
 
-    const role = await this.circleMembership.resolveRole(userId, memory.circleId);
+    const role = await this.circleMembership.roleIn(userId, memory.circleId);
     if (role === null) {
       // Not a member: indistinguishable from "no such memory".
       throw new NotFoundException(`Memory ${id} not found`);
     }
-    const rank: Record<CircleRole, number> = {
-      viewer: 1,
-      collaborator: 2,
-      circle_admin: 3,
-    };
-    if (rank[role] < rank[required]) {
+    if (!groupRoleAtLeast(role, required)) {
       throw new ForbiddenException(`This action requires ${required} role or higher`);
     }
     return memory;
@@ -246,11 +237,11 @@ export class MemoriesService {
       return { items: [], meta: { pageSize, nextCursor: null, hasMore: false } };
     }
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       circleId,
       permissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const where: Prisma.MemoryWhereInput = {
@@ -339,11 +330,11 @@ export class MemoriesService {
       return { items: [] };
     }
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       circleId,
       permissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const notHidden: Prisma.MemoryWhereInput = {
@@ -442,7 +433,7 @@ export class MemoriesService {
       throw new NotFoundException(`Memory ${id} not found`);
     }
 
-    await this.loadAccessibleMemory(id, userId, permissions, 'viewer' as CircleRole);
+    await this.loadAccessibleMemory(id, userId, permissions, 'viewer');
 
     const memory = await this.prisma.memory.findFirst({
       where: { id, deletedAt: null },
@@ -570,7 +561,7 @@ export class MemoriesService {
     if (!(await this.featureEnabled())) {
       throw new NotFoundException(`Memory ${id} not found`);
     }
-    return this.loadAccessibleMemory(id, userId, permissions, 'viewer' as CircleRole);
+    return this.loadAccessibleMemory(id, userId, permissions, 'viewer');
   }
 
   /**
@@ -639,7 +630,7 @@ export class MemoriesService {
       id,
       userId,
       permissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     await this.prisma.memory.update({
@@ -701,7 +692,7 @@ export class MemoriesService {
       id,
       userId,
       permissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const memoryItems = await this.prisma.memoryItem.findMany({

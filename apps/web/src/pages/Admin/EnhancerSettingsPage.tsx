@@ -310,7 +310,7 @@ function EnhancerSettingsContent() {
                       <li>
                         No image model is selected. Pick one under{' '}
                         <Link component={RouterLink} to="/admin/settings/ai" underline="hover">
-                          AI Providers &rarr; AI Picture Enhancer
+                          AI &rarr; MemoriaHub AI features &rarr; AI Picture Enhancer
                         </Link>
                         .
                       </li>
@@ -321,7 +321,7 @@ function EnhancerSettingsContent() {
                         {status.provider ? <strong>{status.provider}</strong> : 'the image provider'}
                         . Add or enable it under{' '}
                         <Link component={RouterLink} to="/admin/settings/ai" underline="hover">
-                          AI Providers
+                          AI &rarr; provider keys
                         </Link>
                         .
                       </li>

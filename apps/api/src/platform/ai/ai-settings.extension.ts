@@ -20,7 +20,7 @@
 // STORED NAMES AND SHAPES ARE THE OLD ONES, field for field: the `ai` key of the
 // `global` row is the same row before and after, nothing is rewritten.
 //
-// MERGE. `/api/ai/features/*` writes ONE selection at a time
+// MERGE. `/api/admin/memoriahub-ai/features/*` (was `/api/ai/features/*`) writes ONE selection at a time
 // (`{ features: { search: {...} } }`), so the merge is per selection, never a
 // wholesale replace of `features`; and for `search`, `tagging` and `embedding`
 // an explicit `null` provider or model KEEPS the stored value (the old `??`

@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { DeepMockProxy, mockDeep } from 'jest-mock-extended';
 
 import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CheckinInput, MediaSyncConfig } from './dto/media-sync.dto';
 import { defaultConfig } from './media-sync-config';
@@ -108,14 +108,14 @@ function refusalOf(error: unknown): { status: number; reason?: string; details?:
 
 describe('MediaSyncService', () => {
   let prisma: DeepMockProxy<PrismaClient>;
-  let circles: { assertCircleAccess: jest.Mock };
+  let circles: { requireOwnerRole: jest.Mock };
   let service: MediaSyncService;
   let devices: DeviceRow[];
 
   beforeEach(() => {
     prisma = mockDeep<PrismaClient>();
-    circles = { assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }) };
-    service = new MediaSyncService(prisma as unknown as PrismaService, circles as unknown as CircleMembershipService);
+    circles = { requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }) };
+    service = new MediaSyncService(prisma as unknown as PrismaService, circles as unknown as OwnerAccessService);
     devices = [deviceRow(), deviceRow({ id: DEVICE_B, installationId: 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1', patId: PAT_B })];
 
     (prisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
@@ -339,7 +339,7 @@ describe('MediaSyncService', () => {
     });
 
     it('refuses a target circle the caller cannot write with 403 TARGET_CIRCLE_FORBIDDEN', async () => {
-      circles.assertCircleAccess.mockRejectedValue(new ForbiddenException('nope'));
+      circles.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
 
       const error = await service.updateConfig(web, DEVICE_A, { targetCircleId: OTHER_CIRCLE }, JWT).catch((e) => e);
 
@@ -348,7 +348,7 @@ describe('MediaSyncService', () => {
         reason: 'TARGET_CIRCLE_FORBIDDEN',
         details: { reason: 'TARGET_CIRCLE_FORBIDDEN', circleId: OTHER_CIRCLE },
       });
-      expect(circles.assertCircleAccess).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'collaborator');
+      expect(circles.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
       expect(devices[0].configVersion).toBe(1);
     });
 

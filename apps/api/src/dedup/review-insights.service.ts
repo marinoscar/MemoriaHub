@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { CircleRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 
 /** Per-domain review stats returned for both bursts and duplicates. */
 export interface ReviewDomainStats {
@@ -33,11 +32,11 @@ interface ActionGroupRow {
 export class ReviewInsightsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
   ) {}
 
   async getReviewInsights(circleId: string, userId: string, perms: string[]) {
-    await this.membership.assertCircleAccess(userId, circleId, perms, CircleRole.viewer);
+    await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     const [
       burstStatusGroups,

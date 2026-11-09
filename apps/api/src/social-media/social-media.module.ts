@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { SocialMediaDetectorService } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
@@ -35,7 +35,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     
     FaceModule,
     MediaModule,
-    CirclesModule,
+    OwnerAccessModule,
     MediaProcessingModule,
   ],
   controllers: [SocialMediaMediaController, AdminSocialMediaController],

@@ -4524,148 +4524,61 @@ Bulk-enqueue **one** `location_inference` sweep job (`mediaItemId: null`, `paylo
 
 ## AI Settings
 
-All endpoints in this group require the Admin system role plus the listed permission.
+Since RETRO-E4 (#607) the AI administration is the platform AI slice's: `/api/admin/ai/*` (`ai_config:read` / `ai_config:write`: the kill switch and key policy at `GET|PUT /api/admin/ai/config`, a provider's write-only deployment key at `PUT|DELETE /api/admin/ai/providers/:provider/key`, its test at `POST /api/admin/ai/providers/:provider/test`, the model catalogue and usage). Those routes are documented by the generated reference at `/api/docs`. MemoriaHub's old `/api/ai/settings`, `/api/ai/credentials/:provider`, `/api/ai/test`, `/api/ai/test/embedding`, `/api/ai/settings/models` and `/api/ai/features/*` routes and the `ai_settings:*` permissions are removed.
 
-### GET /ai/settings
+What the platform has no word for, which provider and model serve each MemoriaHub feature, is under `/api/admin/memoriahub-ai/*` (not behind the kill switch, like every admin route). Keys never go through these routes.
 
-**Permission:** `ai_settings:read`
+### GET /admin/memoriahub-ai/features
 
-Returns configured and known (unconfigured) AI providers and the active search feature configuration. The raw API key is never returned — only `last4`.
+**Permission:** `ai_config:read`
+
+The feature selections and each known provider's key status (from the platform deployment key store, else the legacy row until it is dropped). Never a key: only `last4`.
 
 **Response:**
 ```json
 {
   "providers": [
-    {
-      "provider": "anthropic",
-      "configured": true,
-      "enabled": true,
-      "last4": "Ab1Z",
-      "baseUrl": null,
-      "updatedAt": "2026-06-15T12:00:00.000Z"
-    }
+    { "provider": "openai", "configured": true, "enabled": true, "last4": "Ab1Z", "baseUrl": null, "updatedAt": "2026-06-15T12:00:00.000Z" }
   ],
   "knownProviders": [
-    { "provider": "openai", "configured": false, "enabled": false, "last4": null, "baseUrl": null }
+    { "provider": "anthropic", "configured": false, "enabled": false, "last4": null, "baseUrl": null }
   ],
   "features": {
-    "search": { "provider": "anthropic", "model": "claude-opus-4-8" }
+    "search": { "provider": "openai", "model": "model-a" },
+    "tagging": { "provider": "openai", "model": "model-a" },
+    "embedding": { "provider": "openai", "model": "text-embedding-3-small" },
+    "enhance": null,
+    "memories": null,
+    "transcription": null
   }
 }
 ```
 
 ---
 
-### PUT /ai/credentials/:provider
+### GET /admin/memoriahub-ai/models
 
-**Permission:** `ai_settings:write`
+**Permission:** `ai_config:read`
 
-Upsert credentials for the given provider key (`anthropic` or `openai`). The API key is encrypted at rest with AES-256-GCM; the plaintext is never stored or returned.
+**Query Parameters:** `provider` (required), `capability` (`chat` default, `embedding`, `image`, `transcription`).
 
-**Path Parameter:** `provider` — `anthropic` | `openai`
-
-**Request Body:**
-```json
-{
-  "apiKey": "sk-...",
-  "baseUrl": "https://api.moonshot.cn/v1",
-  "enabled": true
-}
-```
-
-`baseUrl` is optional and enables OpenAI-compatible providers (see [Agentic Search spec](specs/agentic-search.md#10-how-to-add-a-new-ai-provider)).
-
-**Response:**
-```json
-{
-  "provider": "openai",
-  "configured": true,
-  "enabled": true,
-  "last4": "Ab1Z",
-  "baseUrl": "https://api.moonshot.cn/v1"
-}
-```
+**Response:** an array of model ids (empty when the provider lacks the capability).
 
 ---
 
-### DELETE /ai/credentials/:provider
+### POST /admin/memoriahub-ai/test and POST /admin/memoriahub-ai/test/embedding
 
-**Permission:** `ai_settings:write`
+**Permission:** `ai_config:write`
 
-Remove stored credentials for the given provider. Returns 404 if no credential exists.
-
-**Response:**
-```json
-{ "deleted": true, "provider": "anthropic" }
-```
+`{ provider, model }` (embedding: both optional, defaulting to the saved selection). Response `{ ok: true }` or `{ ok: false, error }`; the embedding test adds `dimensions` and a `warning` when the vector is not 1536-d.
 
 ---
 
-### POST /ai/test
+### PUT /admin/memoriahub-ai/features/:feature
 
-**Permission:** `ai_settings:read`
+**Permission:** `ai_config:write`
 
-Test provider connectivity by issuing a minimal chat completion request.
-
-**Request Body:**
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-opus-4-8"
-}
-```
-
-**Response:**
-```json
-{ "ok": true }
-```
-
-On failure:
-```json
-{ "ok": false, "error": "Invalid API key" }
-```
-
----
-
-### GET /ai/models
-
-**Permission:** `ai_settings:read`
-
-List available models for a configured provider using its stored credentials.
-
-**Query Parameters:** `provider` (required) — provider key
-
-**Response:**
-```json
-{
-  "provider": "anthropic",
-  "models": ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
-}
-```
-
----
-
-### PUT /ai/features/search
-
-**Permission:** `ai_settings:write`
-
-Set the active AI provider and model used by the conversational search feature. Stored in system settings under `ai.features.search`.
-
-**Request Body:**
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-opus-4-8"
-}
-```
-
-**Response:**
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-opus-4-8"
-}
-```
+`:feature` is `search`, `tagging`, `embedding`, `enhance`, `memories` or `transcription`; body `{ provider, model }`. For `search`, `tagging` and `embedding` a null field keeps the stored value; for the other three a null field clears the selection. `memories` and `transcription` answer 400 when the provider has no configured, enabled key.
 
 ---
 
@@ -5080,9 +4993,9 @@ Enqueue the sharded `memory_generation` backfill plan — 18 background-priority
 - 400 — Memories is disabled globally
 - 404 — the named circle does not exist
 
-### AI titling model — PUT /ai/features/memories
+### AI titling model — PUT /admin/memoriahub-ai/features/memories
 
-**Permissions:** Admin + `ai_settings:write`
+**Permissions:** Admin + `ai_config:write`
 
 Set the active chat-capable provider/model used to write memory titles, subtitles, and narratives (`ai.features.memories`). List candidates with `GET /ai/models?capability=chat`. Passing a null provider or model clears the selection, in which case memories fall back to deterministic template titles — never an error.
 

@@ -24,6 +24,10 @@
 // pending job would swallow the enqueue for the whole deployment. The
 // per-circle pending/running check below is this task's own, correctly-scoped
 // replacement. Precedent: `face_auto_archive_sweep`, `memory_generation`.
+//
+// ENQUEUE-ONLY (RETRO-C9, #612): the tick reads (circles, the queue, the
+// new-content check) and enqueues; it never renders or sends. The send is
+// `MemoryDigestHandler`'s.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -71,22 +75,157 @@ export class MemoryDigestTask {
     private readonly digest: MemoryDigestService,
   ) {}
 
+  /**
+   * The hourly tick: decides which circles are due and enqueues one
+   * `memory_digest` job per due circle (RETRO-C9, #612: a `@Cron` only decides
+   * and enqueues; rendering and sending is `MemoryDigestHandler`'s). Reads only,
+   * plus the per-circle enqueues. Returns the tally for tests and NEVER throws:
+   * a throw out of a `@Cron` is an unhandled rejection.
+   *
+   * `at` is for tests only. The scheduler may pass its own argument to a cron
+   * callback, so anything that is not a `Date` means "now".
+   */
   @Cron(CronExpression.EVERY_HOUR)
-  async handleScheduledDigest(): Promise<void> {
+  async handleScheduledDigest(at?: unknown): Promise<MemoryDigestSweepResult> {
+    const now = at instanceof Date ? at : new Date();
+    const result: MemoryDigestSweepResult = {
+      circles: 0,
+      enqueued: 0,
+      skipped: 0,
+      errors: 0,
+    };
+
     // Gate 1 — env kill-switch, shared with generation. Checked before anything
     // else so a CI/test deployment pays not even a cached settings read.
     if (process.env['MEMORIES_ENABLED'] === 'false') {
-      return;
+      return result;
     }
 
     if (this.sweepInFlight) {
       this.logger.debug('Memory digest sweep already in flight; skipping tick');
-      return;
+      return result;
     }
     this.sweepInFlight = true;
 
     try {
-      const result = await this.sweep();
+      // Gates 2–5, read ONCE for the whole sweep through the cached getSettings()
+      // and evaluated by the same helper the handler uses, so the cron and the
+      // send can never disagree about whether the digest is live.
+      const settings = await this.systemSettings.getSettings();
+      const gate = this.digest.evaluateGlobalGate(settings, await this.digest.emailReady());
+      if (!gate.ok) {
+        result.gate = gate.reason;
+        return result;
+      }
+
+      // Gate 6 — send hour. `frequency` is narrowed by the gate above, which
+      // already rejected 'off'.
+      const frequency = gate.settings.digest.frequency as 'daily' | 'weekly' | 'monthly';
+      if (now.getUTCHours() < gate.settings.digest.sendHourUtc) {
+        result.gate = 'before_send_hour';
+        return result;
+      }
+
+      const cutoff = new Date(now.getTime() - this.digest.windowMs(frequency));
+
+      let cursor: string | undefined;
+      for (;;) {
+        const circles = await this.prisma.circle.findMany({
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: CIRCLE_PAGE_SIZE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (circles.length === 0) break;
+
+        const circleIds = circles.map((c) => c.id);
+
+        // Two batched reads per page instead of two per circle.
+        const [inFlight, lastSucceeded] = await Promise.all([
+          this.prisma.job.findMany({
+            where: {
+              type: MEMORY_DIGEST_JOB_TYPE,
+              subjectType: 'circle',
+              subjectId: { in: circleIds },
+              status: { in: ['pending', 'running'] },
+            },
+            select: { subjectId: true },
+          }),
+          this.prisma.job.groupBy({
+            by: ['subjectId'],
+            where: {
+              type: MEMORY_DIGEST_JOB_TYPE,
+              subjectType: 'circle',
+              subjectId: { in: circleIds },
+              status: 'succeeded',
+            },
+            _max: { finishedAt: true },
+          }),
+        ]);
+
+        const busy = new Set(
+          inFlight.map((j) => j.subjectId).filter((id): id is string => !!id),
+        );
+        const lastSuccessAt = new Map<string, Date | null>();
+        for (const row of lastSucceeded) {
+          if (row.subjectId) lastSuccessAt.set(row.subjectId, row._max.finishedAt);
+        }
+
+        for (const circleId of circleIds) {
+          result.circles += 1;
+
+          // A job for this circle is already queued or running.
+          if (busy.has(circleId)) {
+            result.skipped += 1;
+            continue;
+          }
+
+          // Gate 7 — frequency window. A circle that has never had a digest has
+          // no watermark and is always past the window.
+          const last = lastSuccessAt.get(circleId) ?? null;
+          if (last && last > cutoff) {
+            result.skipped += 1;
+            continue;
+          }
+
+          try {
+            // Gate 8 — NEW CONTENT, the epic's hard requirement. Checked BEFORE
+            // enqueueing rather than only inside the handler, so a quiet circle
+            // costs one bounded SELECT per period instead of a job row, a worker
+            // slot, and a red-herring entry in the job dashboard. The handler
+            // re-checks it anyway (a memory can be tombstoned in between).
+            const candidates = await this.digest.loadCandidates(circleId, last);
+            if (candidates.length === 0) {
+              result.skipped += 1;
+              continue;
+            }
+
+            await this.enrichmentJobService.enqueue({
+              type: MEMORY_DIGEST_JOB_TYPE,
+              mediaItemId: null,
+              circleId,
+              // The queue has no 'scheduled' reason; `backfill` is what every
+              // other cron-enqueued global job uses (trash_purge, thumbnail_repair,
+              // memory_generation).
+              reason: JobReason.backfill,
+              priority: MEMORY_DIGEST_PRIORITY,
+              // MANDATORY — see the header.
+              skipDedup: true,
+            });
+            result.enqueued += 1;
+          } catch (err) {
+            result.errors += 1;
+            this.logger.warn(
+              `memory_digest enqueue failed for circle ${circleId}: ` +
+                (err instanceof Error ? err.message : String(err)),
+            );
+          }
+        }
+
+        if (circles.length < CIRCLE_PAGE_SIZE) break;
+        cursor = circleIds[circleIds.length - 1]!;
+      }
+
       if (result.enqueued > 0 || result.errors > 0) {
         this.logger.log(
           `Memory digest: ${result.enqueued} job(s) enqueued across ` +
@@ -99,140 +238,6 @@ export class MemoryDigestTask {
     } finally {
       this.sweepInFlight = false;
     }
-  }
-
-  /**
-   * Enqueue a `memory_digest` job for every due circle.
-   *
-   * Exposed (rather than inlined into the cron body) so tests — and any future
-   * admin "send now" affordance — drive the same code path the cron does.
-   */
-  async sweep(now: Date = new Date()): Promise<MemoryDigestSweepResult> {
-    const result: MemoryDigestSweepResult = {
-      circles: 0,
-      enqueued: 0,
-      skipped: 0,
-      errors: 0,
-    };
-
-    // Gates 2–5, read ONCE for the whole sweep through the cached getSettings()
-    // and evaluated by the same helper the handler uses, so the cron and the
-    // send can never disagree about whether the digest is live.
-    const settings = await this.systemSettings.getSettings();
-    const gate = this.digest.evaluateGlobalGate(settings, await this.digest.emailReady());
-    if (!gate.ok) {
-      result.gate = gate.reason;
-      return result;
-    }
-
-    // Gate 6 — send hour. `frequency` is narrowed by the gate above, which
-    // already rejected 'off'.
-    const frequency = gate.settings.digest.frequency as 'daily' | 'weekly' | 'monthly';
-    if (now.getUTCHours() < gate.settings.digest.sendHourUtc) {
-      result.gate = 'before_send_hour';
-      return result;
-    }
-
-    const cutoff = new Date(now.getTime() - this.digest.windowMs(frequency));
-
-    let cursor: string | undefined;
-    for (;;) {
-      const circles = await this.prisma.circle.findMany({
-        select: { id: true },
-        orderBy: { id: 'asc' },
-        take: CIRCLE_PAGE_SIZE,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      });
-      if (circles.length === 0) break;
-
-      const circleIds = circles.map((c) => c.id);
-
-      // Two batched reads per page instead of two per circle.
-      const [inFlight, lastSucceeded] = await Promise.all([
-        this.prisma.job.findMany({
-          where: {
-            type: MEMORY_DIGEST_JOB_TYPE,
-            subjectType: 'circle',
-            subjectId: { in: circleIds },
-            status: { in: ['pending', 'running'] },
-          },
-          select: { subjectId: true },
-        }),
-        this.prisma.job.groupBy({
-          by: ['subjectId'],
-          where: {
-            type: MEMORY_DIGEST_JOB_TYPE,
-            subjectType: 'circle',
-            subjectId: { in: circleIds },
-            status: 'succeeded',
-          },
-          _max: { finishedAt: true },
-        }),
-      ]);
-
-      const busy = new Set(
-        inFlight.map((j) => j.subjectId).filter((id): id is string => !!id),
-      );
-      const lastSuccessAt = new Map<string, Date | null>();
-      for (const row of lastSucceeded) {
-        if (row.subjectId) lastSuccessAt.set(row.subjectId, row._max.finishedAt);
-      }
-
-      for (const circleId of circleIds) {
-        result.circles += 1;
-
-        // A job for this circle is already queued or running.
-        if (busy.has(circleId)) {
-          result.skipped += 1;
-          continue;
-        }
-
-        // Gate 7 — frequency window. A circle that has never had a digest has
-        // no watermark and is always past the window.
-        const last = lastSuccessAt.get(circleId) ?? null;
-        if (last && last > cutoff) {
-          result.skipped += 1;
-          continue;
-        }
-
-        try {
-          // Gate 8 — NEW CONTENT, the epic's hard requirement. Checked BEFORE
-          // enqueueing rather than only inside the handler, so a quiet circle
-          // costs one bounded SELECT per period instead of a job row, a worker
-          // slot, and a red-herring entry in the job dashboard. The handler
-          // re-checks it anyway (a memory can be tombstoned in between).
-          const candidates = await this.digest.loadCandidates(circleId, last);
-          if (candidates.length === 0) {
-            result.skipped += 1;
-            continue;
-          }
-
-          await this.enrichmentJobService.enqueue({
-            type: MEMORY_DIGEST_JOB_TYPE,
-            mediaItemId: null,
-            circleId,
-            // The queue has no 'scheduled' reason; `backfill` is what every
-            // other cron-enqueued global job uses (trash_purge, thumbnail_repair,
-            // memory_generation).
-            reason: JobReason.backfill,
-            priority: MEMORY_DIGEST_PRIORITY,
-            // MANDATORY — see the header.
-            skipDedup: true,
-          });
-          result.enqueued += 1;
-        } catch (err) {
-          result.errors += 1;
-          this.logger.warn(
-            `memory_digest enqueue failed for circle ${circleId}: ` +
-              (err instanceof Error ? err.message : String(err)),
-          );
-        }
-      }
-
-      if (circles.length < CIRCLE_PAGE_SIZE) break;
-      cursor = circleIds[circleIds.length - 1]!;
-    }
-
     return result;
   }
 }

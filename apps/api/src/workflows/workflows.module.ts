@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { FaceModule } from '../face/face.module';
 import { BurstModule } from '../burst/burst.module';
@@ -21,6 +21,8 @@ import { WorkflowRunsRetentionHandler } from './runs/workflow-runs-retention.han
 import { WorkflowScheduleTask } from './runs/workflow-schedule.task';
 import { WorkflowEvaluateItemHandler } from './runs/workflow-evaluate-item.handler';
 import { WorkflowMicroRunFinalizeTask } from './runs/workflow-micro-run-finalize.task';
+import { WorkflowMicroRunFinalizeHandler } from './runs/workflow-micro-run-finalize.handler';
+import { WorkflowScheduleTickHandler } from './runs/workflow-schedule-tick.handler';
 import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
 import { WorkflowsAdminController } from './admin/workflows-admin.controller';
 import { WorkflowsAdminService } from './admin/workflows-admin.service';
@@ -40,7 +42,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
  *   - DedupModule            → DuplicateService
  *   - LocationInferenceModule → LocationSuggestionService
  *   - EnrichmentModule       → EnrichmentJobService
- *   - CirclesModule          → CircleMembershipService
+ *   - OwnerAccessModule          → OwnerAccessService
  * None of these import WorkflowsModule, so no forwardRef is required.
  *
  * NotificationProducersModule (epic #240, issue #247; RETRO-D3) supplies
@@ -53,7 +55,7 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
   imports: [
     PrismaModule,
     
-    CirclesModule,
+    OwnerAccessModule,
     MediaModule,
     FaceModule,
     BurstModule,
@@ -76,6 +78,9 @@ import { WorkflowsAdminService } from './admin/workflows-admin.service';
     WorkflowScheduleTask,
     WorkflowEvaluateItemHandler,
     WorkflowMicroRunFinalizeTask,
+    // RETRO-C9 (#612): the two every-minute crons only enqueue; these do the work.
+    WorkflowScheduleTickHandler,
+    WorkflowMicroRunFinalizeHandler,
     WorkflowTriggerListener,
   ],
   exports: [WorkflowDefinitionValidator, WorkflowConditionCompiler, WorkflowActionExecutor],

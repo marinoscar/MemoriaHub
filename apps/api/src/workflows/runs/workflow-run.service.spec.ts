@@ -29,7 +29,7 @@ import { WorkflowRunStatus, WorkflowRunItemStatus, WorkflowTrigger } from '@pris
 import { randomUUID } from 'crypto';
 import { WorkflowRunService } from './workflow-run.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../settings/registry/default-system-settings';
@@ -135,7 +135,7 @@ describe('WorkflowRunService', () => {
   let service: WorkflowRunService;
   let prisma: MockPrismaService;
   let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
-  let circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
+  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>>;
 
@@ -146,9 +146,9 @@ describe('WorkflowRunService', () => {
       getSettings: jest.fn().mockResolvedValue(settingsWithWorkflows()),
     };
     circleMembership = {
-      assertCircleAccess: jest
+      requireOwnerRole: jest
         .fn()
-        .mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+        .mockResolvedValue({ role: 'editor' as const, isSuperAdmin: false }),
     };
     enrichmentJobs = {
       enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }),
@@ -162,7 +162,7 @@ describe('WorkflowRunService', () => {
         WorkflowRunService,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: systemSettings },
-        { provide: CircleMembershipService, useValue: circleMembership },
+        { provide: OwnerAccessService, useValue: circleMembership },
         { provide: EnrichmentJobService, useValue: enrichmentJobs },
         { provide: MediaThumbnailService, useValue: thumbnails },
       ],
@@ -282,11 +282,11 @@ describe('WorkflowRunService', () => {
         }) as any,
       );
       prisma.workflowRun.count.mockResolvedValue(0);
-      circleMembership.assertCircleAccess.mockImplementation(async (_u, circleId) => {
+      circleMembership.requireOwnerRole.mockImplementation(async (_u, circleId) => {
         if (circleId === OTHER_CIRCLE_ID) {
           throw new ForbiddenException('You are not a member of this circle');
         }
-        return { role: 'collaborator', isSuperAdmin: false };
+        return { role: 'editor' as const, isSuperAdmin: false };
       });
 
       await expect(service.createRun(WORKFLOW_ID, {}, makeUser())).rejects.toThrow(

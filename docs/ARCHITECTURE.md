@@ -478,21 +478,16 @@ apps/api/src/storage/
 
 ### 5.5 Family Circles Module
 
-The `circles/` module provides the shared-library collaboration layer. It is the authorization root for all circle-scoped resources.
+The `circles/` module provides the shared-library routes (`/api/circles/*`: CRUD, members, invites) until RETRO-I5/I6 move them to the platform's `/api/groups`. Since RETRO-I3 (#573) it is no longer the authorization root: every circle-scoped check is `OwnerAccessService` (`apps/api/src/platform/sharing/owner-scope.ts`), deciding on the platform sharing groups the circles are mirrored into (RETRO-I2). Mapping: [docs/platform-adoption/circles-to-groups.md](platform-adoption/circles-to-groups.md) §0c.
 
 #### Module Structure
 
 ```
 apps/api/src/circles/
-├── circles.module.ts
+├── circles.module.ts              # imports OwnerAccessModule
 ├── circles.controller.ts          # CRUD + members + invites endpoints
-├── circles.service.ts             # Business logic (create, list, members, invites)
-├── circle-membership.service.ts   # resolveRole, assertCircleAccess (separate service
-│                                  # to avoid circular imports with MediaModule/StorageModule)
-├── guards/
-│   └── circle-member.guard.ts
-├── decorators/
-│   └── circle-role.decorator.ts
+├── circles.service.ts             # create, list, members, invites; invalidates cached memberships
+├── identity-listeners.ts          # personal circle at sign-up, invite claim at sign-in
 └── dto/
     ├── create-circle.dto.ts
     ├── update-circle.dto.ts
@@ -500,30 +495,36 @@ apps/api/src/circles/
     ├── add-member.dto.ts
     ├── update-member-role.dto.ts
     └── create-invite.dto.ts
+
+apps/api/src/platform/sharing/
+├── owner-scope.ts                 # OwnerAccessService: requireOwnerRole, roleIn, invalidateMembers
+└── owner-access.module.ts         # imported by every feature module that checks a scope
 ```
 
 #### Authorization Flow
 
 ```
-API request with circleId
+API request with circleId (the owner scope id)
         │
         ▼
-CircleMembershipService.assertCircleAccess(userId, circleId, permissions, required)
+OwnerAccessService.requireOwnerRole(userId, scopeId, permissions, 'viewer' | 'editor' | 'admin')
         │
-        ├── isSuperAdmin = permissions includes circles:manage_any
+        ├── bypass = permissions include groups:admin (or the deprecated circles:manage_any)
         │   OR media:read_any OR media:write_any
-        │   └── if true: bypass membership check, return { role, isSuperAdmin: true }
+        │   └── if true: no membership check, return { role, isSuperAdmin: true }
         │
-        ├── circle existence check (404 if not found)
+        ├── resolve the scope: personal circle -> its owner; shared circle -> the group of the same id
+        │   └── unknown -> 404
         │
-        ├── resolveRole(userId, circleId) → CircleRole | null
-        │   └── null → 403 "not a member of this circle"
+        ├── role: the owner of a personal library is 'admin'; otherwise the caller's group_members
+        │   role via the sharing slice's PrincipalGroupsProvider
+        │   └── none -> 404 (the same body as an unknown scope; was 403 before RETRO-I3)
         │
-        └── ROLE_RANK[role] >= ROLE_RANK[required]
-            └── if insufficient → 403 "requires <role> or higher"
+        └── groupRoleAtLeast(role, required)
+            └── if insufficient -> 403 "requires <role> or higher"
 ```
 
-Per-circle role ranking: `viewer (1) < collaborator (2) < circle_admin (3)`.
+Role ranking: `viewer (1) < editor (2) < admin (3)` (the circle roles `viewer`, `collaborator`, `circle_admin`).
 
 #### LocalDiskStorageProvider
 
@@ -1081,7 +1082,7 @@ Content-hash dedup is `(circle_id, content_hash)` (was `(owner_id, content_hash)
 
 ### 7.3 RBAC Model (Two-Layer Authorization)
 
-> **Roles and permissions after RETRO-B2 (issue #611).** The identity slice owns the tables and the guards. `admin` is a system role; `org_admin`, `contributor` and `viewer` are org roles on the default-organization membership. The permission strings are unchanged. System-scope (admin only): `users:*`, `allowlist:*`, `rbac:manage`, `system_settings:*`, `jobs:*`, `ai_settings:*`, `face_settings:*`, `geo_settings:*`, `storage_settings:*`, `push:*`, `broadcasts:*`, `db_backup:*`, `media:{read,write,delete}_any`, `storage:delete_any`, `circles:manage_any`, `shares:manage_any`. Org-scope: `user_settings:*`, `storage:{read,write}`, `media:{read,write,delete}`, `circles:{read,write}`, `search:use`, `shares:manage`, granted to `org_admin`, `contributor` and `viewer` exactly as the old matrix gave them to admin, contributor and viewer (`contributor` additionally holds `storage:write` and `shares:manage`; `viewer` has no `storage:write` or `shares:manage`). New platform capabilities (`organizations:*`, `org_members:*`, `org_invites:*`, `org_settings:*`) are held by administrators and hidden in single-organization mode. `email_settings:*` was retired by RETRO-D2 (#570): the platform email routes check `system_settings:*`. `shares:manage` and `shares:manage_any` were retired by RETRO-I4 (#578): public shares are the sharing slice's link grants, created and managed under `sharing:write` (contributor, org_admin) and listed organization-wide under `sharing:admin` (org_admin); see [public-sharing.md](specs/public-sharing.md). The source of truth is `apps/api/src/app-registrations/` (declarations) and `apps/api/prisma/catalog/permissions.json` (rendered); `apps/api/test/rbac/permission-matrix.spec.ts` pins the result against the pre-adoption matrix.
+> **Roles and permissions after RETRO-B2 (issue #611).** The identity slice owns the tables and the guards. `admin` is a system role; `org_admin`, `contributor` and `viewer` are org roles on the default-organization membership. The permission strings are unchanged. System-scope (admin only): `users:*`, `allowlist:*`, `rbac:manage`, `system_settings:*`, `jobs:*`, `ai_config:*`, `face_settings:*`, `geo_settings:*`, `storage_settings:*`, `push:*`, `broadcasts:*`, `db_backup:*`, `media:{read,write,delete}_any`, `storage:delete_any`, `circles:manage_any`, `shares:manage_any`. Org-scope: `user_settings:*`, `storage:{read,write}`, `media:{read,write,delete}`, `circles:{read,write}`, `search:use`, `shares:manage`, granted to `org_admin`, `contributor` and `viewer` exactly as the old matrix gave them to admin, contributor and viewer (`contributor` additionally holds `storage:write` and `shares:manage`; `viewer` has no `storage:write` or `shares:manage`). New platform capabilities (`organizations:*`, `org_members:*`, `org_invites:*`, `org_settings:*`) are held by administrators and hidden in single-organization mode. `email_settings:*` was retired by RETRO-D2 (#570): the platform email routes check `system_settings:*`. `shares:manage` and `shares:manage_any` were retired by RETRO-I4 (#578): public shares are the sharing slice's link grants, created and managed under `sharing:write` (contributor, org_admin) and listed organization-wide under `sharing:admin` (org_admin); see [public-sharing.md](specs/public-sharing.md). The source of truth is `apps/api/src/app-registrations/` (declarations) and `apps/api/prisma/catalog/permissions.json` (rendered); `apps/api/test/rbac/permission-matrix.spec.ts` pins the result against the pre-adoption matrix.
 
 > **Sharing permissions (RETRO-I1, #562).** The platform sharing slice adds six ORG-scope permissions: `groups:read` and `sharing:read` (`org_admin`, `contributor`, `viewer`), `groups:write` and `sharing:write` (`org_admin`, `contributor`), `groups:admin` and `sharing:admin` (`org_admin`; a system administrator holds them through its `org_admin` membership). They guard the slice's `/api/groups/**`, `/api/grants/**` and `/api/sharing/*` routes, which are mounted but empty until circles become groups (RETRO-I2..I5). Mapping to the circle permissions: [circles-to-groups.md §5](platform-adoption/circles-to-groups.md#5-permissions).
 

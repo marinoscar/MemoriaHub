@@ -1,5 +1,12 @@
 import { api } from './api';
 
+// MemoriaHub's AI feature selections (RETRO-E4, #607). The AI administration itself (the switch,
+// the key policy, the providers and their deployment keys) is the platform's `AiConfigPage` over
+// `/api/admin/ai/*`; what it has no word for, which provider and model serve each MemoriaHub
+// feature, is edited here, through `/api/admin/memoriahub-ai/*` (`ai_config:read|write`).
+// Keys never go through these calls.
+const BASE = '/admin/memoriahub-ai';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -22,12 +29,13 @@ export interface AiSettingsResponse {
     enhance?: { provider: string | null; model: string | null } | null;
     /** Memories title/subtitle/narrative model (epic #300). */
     memories?: { provider: string | null; model: string | null } | null;
-  };
-  conversations: {
-    archiveAfterDays: number;
-    deleteAfterArchiveDays: number;
+    /** Video tagging speech-to-text model (epic #452). */
+    transcription?: { provider: string | null; model: string | null } | null;
   };
 }
+
+/** The model lists a MemoriaHub feature picks from. */
+export type AiModelCapability = 'chat' | 'embedding' | 'image' | 'transcription';
 
 export interface AiTestResult {
   ok: boolean;
@@ -48,63 +56,65 @@ export interface AiEmbeddingTestResult {
 // ---------------------------------------------------------------------------
 
 export async function getAiSettings(): Promise<AiSettingsResponse> {
-  return api.get<AiSettingsResponse>('/ai/settings');
-}
-
-export async function putAiCredentials(
-  provider: string,
-  body: { apiKey: string; baseUrl?: string; enabled?: boolean },
-): Promise<void> {
-  await api.put<void>(`/ai/credentials/${provider}`, body);
-}
-
-export async function deleteAiCredentials(provider: string): Promise<void> {
-  await api.delete<void>(`/ai/credentials/${provider}`);
+  return api.get<AiSettingsResponse>(`${BASE}/features`);
 }
 
 export async function testAiProvider(body: {
   provider: string;
   model: string;
 }): Promise<AiTestResult> {
-  return api.post<AiTestResult>('/ai/test', body);
+  return api.post<AiTestResult>(`${BASE}/test`, body);
+}
+
+/** Model ids a provider offers for one kind of MemoriaHub feature (`chat` by default). */
+export async function getAiModelsFor(
+  provider: string,
+  capability: AiModelCapability = 'chat',
+): Promise<string[]> {
+  const query = `provider=${encodeURIComponent(provider)}&capability=${capability}`;
+  return api.get<string[]>(`${BASE}/models?${query}`);
 }
 
 export async function getAiModels(provider: string): Promise<string[]> {
-  return api.get<string[]>(`/ai/settings/models?provider=${encodeURIComponent(provider)}`);
+  return getAiModelsFor(provider, 'chat');
 }
 
-export async function putAiSearchFeature(body: {
-  provider: string;
-  model: string;
-}): Promise<void> {
-  await api.put<void>('/ai/features/search', body);
+export async function getAiEmbeddingModels(provider: string): Promise<string[]> {
+  return getAiModelsFor(provider, 'embedding');
 }
 
-export async function putAiTaggingFeature(body: {
-  provider: string;
-  model: string;
-}): Promise<void> {
-  await api.put<void>('/ai/features/tagging', body);
+export async function getAiImageModels(provider: string): Promise<string[]> {
+  return getAiModelsFor(provider, 'image');
+}
+
+/** The MemoriaHub features whose provider/model is selectable. */
+export type AiFeatureKey = 'search' | 'tagging' | 'embedding' | 'enhance' | 'memories' | 'transcription';
+
+/** Save one feature's selection; nulls clear it (the whole-or-null features). */
+export async function putAiFeature(
+  feature: AiFeatureKey,
+  body: { provider: string | null; model: string | null },
+): Promise<void> {
+  await api.put<void>(`${BASE}/features/${feature}`, body);
+}
+
+export async function putAiSearchFeature(body: { provider: string; model: string }): Promise<void> {
+  await putAiFeature('search', body);
+}
+
+export async function putAiTaggingFeature(body: { provider: string; model: string }): Promise<void> {
+  await putAiFeature('tagging', body);
 }
 
 export async function putAiEmbeddingFeature(body: {
   provider: string | null;
   model: string | null;
 }): Promise<void> {
-  await api.put<void>('/ai/features/embedding', body);
+  await putAiFeature('embedding', body);
 }
 
-export async function getAiEmbeddingModels(provider: string): Promise<string[]> {
-  return api.get<string[]>(
-    `/ai/settings/models?provider=${encodeURIComponent(provider)}&capability=embedding`,
-  );
-}
-
-export async function putAiEnhanceFeature(body: {
-  provider: string;
-  model: string;
-}): Promise<void> {
-  await api.put<void>('/ai/features/enhance', body);
+export async function putAiEnhanceFeature(body: { provider: string; model: string }): Promise<void> {
+  await putAiFeature('enhance', body);
 }
 
 /**
@@ -116,18 +126,12 @@ export async function putAiMemoriesFeature(body: {
   provider: string | null;
   model: string | null;
 }): Promise<void> {
-  await api.put<void>('/ai/features/memories', body);
-}
-
-export async function getAiImageModels(provider: string): Promise<string[]> {
-  return api.get<string[]>(
-    `/ai/settings/models?provider=${encodeURIComponent(provider)}&capability=image`,
-  );
+  await putAiFeature('memories', body);
 }
 
 export async function testAiEmbedding(body: {
   provider?: string;
   model?: string;
 }): Promise<AiEmbeddingTestResult> {
-  return api.post<AiEmbeddingTestResult>('/ai/test/embedding', body);
+  return api.post<AiEmbeddingTestResult>(`${BASE}/test/embedding`, body);
 }

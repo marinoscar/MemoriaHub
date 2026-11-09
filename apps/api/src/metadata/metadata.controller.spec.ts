@@ -2,7 +2,7 @@
  * Unit tests for MetadataController.
  *
  * Verifies that each handler:
- *   - delegates RBAC to CircleMembershipService
+ *   - delegates RBAC to OwnerAccessService
  *   - returns the expected response shape
  *   - throws NotFoundException when media item does not exist / is soft-deleted
  *   - does NOT perform a per-circle opt-in check (unlike auto-tagging)
@@ -15,7 +15,7 @@ import { NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { MetadataController } from './metadata.controller';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   createMockPrismaService,
@@ -28,8 +28,8 @@ import { RequestUser } from '@marinoscar/platform-api/identity';
 // Shared mock services
 // ---------------------------------------------------------------------------
 
-const mockCircleMembershipService = {
-  assertCircleAccess: jest.fn(),
+const mockOwnerAccessService = {
+  requireOwnerRole: jest.fn(),
 };
 
 const mockEnrichmentJobService = {
@@ -77,7 +77,7 @@ describe('MetadataController', () => {
     mockPrisma = createMockPrismaService();
 
     // Default: circle access granted
-    mockCircleMembershipService.assertCircleAccess.mockResolvedValue(undefined);
+    mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
 
     // Default: enqueue returns a minimal pending job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
@@ -89,7 +89,7 @@ describe('MetadataController', () => {
       controllers: [MetadataController],
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     })
@@ -152,18 +152,18 @@ describe('MetadataController', () => {
       );
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.mediaMetadataStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const user = makeUser();
       await controller.rerunMetadata('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -221,14 +221,14 @@ describe('MetadataController', () => {
       expect(result.data.lastError).toBeNull();
     });
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.mediaMetadataStatus.findUnique as jest.Mock).mockResolvedValue(null);
 
       const user = makeUser();
       await controller.getMetadataStatus('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,

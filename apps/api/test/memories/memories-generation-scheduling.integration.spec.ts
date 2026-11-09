@@ -135,7 +135,7 @@ describeMaybeDb(
     /**
      * Which of THIS SUITE'S circles came out of a tick with a pending job.
      *
-     * Assertions go through this rather than through `sweep()`'s `enqueued` /
+     * Assertions go through this rather than through the tick's's `enqueued` /
      * `skipped` counters, which are necessarily DEPLOYMENT-WIDE: the task sweeps
      * every circle in the database, so a circle belonging to another suite
      * running in a parallel Jest worker (the Trips curator suite creates two)
@@ -160,7 +160,7 @@ describeMaybeDb(
     // -----------------------------------------------------------------------
 
     it('creates exactly one pending job per circle (skipDedup verified against real rows)', async () => {
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       const jobs = await ourJobs();
       expect(jobs).toHaveLength(2);
@@ -177,8 +177,8 @@ describeMaybeDb(
     });
 
     it('a second tick adds nothing while the first tick\'s jobs are still pending', async () => {
-      await task.sweep();
-      await task.sweep();
+      await task.handleScheduledGeneration();
+      await task.handleScheduledGeneration();
 
       // Still exactly one row per circle: the second tick's gate saw the first
       // tick's pending jobs and enqueued nothing more.
@@ -202,7 +202,7 @@ describeMaybeDb(
         },
       });
 
-      const result = await task.sweep();
+      const result = await task.handleScheduledGeneration();
 
       // The sweep covers every circle in the database, so this is a floor.
       expect(result.circles).toBeGreaterThanOrEqual(2);
@@ -222,7 +222,7 @@ describeMaybeDb(
         },
       });
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       expect(await ourPendingCircleIds()).toEqual([circleAId, circleBId].sort());
     });
@@ -249,7 +249,7 @@ describeMaybeDb(
         ],
       });
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       // The 2h-old success wins over the 100h-old one → circle A stays gated.
       expect(await ourPendingCircleIds()).toEqual([circleBId]);
@@ -267,7 +267,7 @@ describeMaybeDb(
         },
       });
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       expect(await ourPendingCircleIds()).toEqual([circleAId, circleBId].sort());
     });
@@ -293,7 +293,7 @@ describeMaybeDb(
         ],
       });
 
-      await task.sweep();
+      await task.handleScheduledGeneration();
 
       // Circle A's in-flight job blocks it despite the 200h-old success.
       expect(await ourPendingCircleIds()).toEqual([circleBId]);

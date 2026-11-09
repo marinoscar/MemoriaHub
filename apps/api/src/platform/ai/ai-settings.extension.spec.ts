@@ -9,7 +9,7 @@ import {
 
 // The `ai` namespace is the platform's since RETRO-E1 (#595); MemoriaHub's per-feature
 // selections ride in it unchanged. These cases pin the merge and read rules the old
-// app namespace had, so `/api/ai/features/*` behaves exactly as before.
+// app namespace had, so the feature routes (`/api/admin/memoriahub-ai/features/*`) behave exactly as before.
 
 const SAVED = {
   search: { provider: 'openai', model: 'gpt-5.5' },

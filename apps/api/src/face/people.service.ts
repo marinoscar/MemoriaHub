@@ -10,9 +10,9 @@ import {
   Optional,
 } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { CircleRole, JobReason } from '@prisma/client';
+import { JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { FaceClusteringService } from './face-clustering.service';
 import { FaceMatchingService } from './face-matching.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -39,7 +39,7 @@ export class PeopleService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly clusteringService: FaceClusteringService,
     private readonly matchingService: FaceMatchingService,
     private readonly enrichmentJobService: EnrichmentJobService,
@@ -67,11 +67,11 @@ export class PeopleService {
     const { circleId, includeUnlabeled, hidden, albumId, page, pageSize } =
       query;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const skip = (page - 1) * pageSize;
@@ -195,11 +195,11 @@ export class PeopleService {
   ) {
     const { circleId, archived, page, pageSize } = query;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const skip = (page - 1) * pageSize;
@@ -301,11 +301,11 @@ export class PeopleService {
       throw new NotFoundException(`Person ${personId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       person.circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     return {
@@ -351,11 +351,11 @@ export class PeopleService {
     userId: string,
     userPermissions: string[],
   ) {
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       dto.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const person = await this.prisma.person.create({
@@ -416,11 +416,11 @@ export class PeopleService {
       throw new NotFoundException(`Person ${personId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       person.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // If coverFaceId is being set, verify the face belongs to this person
@@ -537,11 +537,11 @@ export class PeopleService {
       throw new NotFoundException(`Person ${personId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       person.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Verify each face exists in the same circle
@@ -593,11 +593,11 @@ export class PeopleService {
       throw new NotFoundException(`Person ${personId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       person.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const face = await this.prisma.face.findUnique({ where: { id: faceId } });
@@ -635,11 +635,11 @@ export class PeopleService {
     userId: string,
     userPermissions: string[],
   ) {
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'circle_admin' as CircleRole,
+      'admin',
     );
 
     if (!(await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION))) {
@@ -690,11 +690,11 @@ export class PeopleService {
 
     const circleId = source.circleId;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const now = new Date();
@@ -820,11 +820,11 @@ export class PeopleService {
       throw new NotFoundException(`Person ${personId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       person.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Capture affected media items BEFORE the transaction releases faces to the unknown pool
@@ -911,11 +911,11 @@ export class PeopleService {
   ): Promise<{ hidden: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const { count } = await this.prisma.person.updateMany({
@@ -959,11 +959,11 @@ export class PeopleService {
   ): Promise<{ unhidden: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const { count } = await this.prisma.person.updateMany({
@@ -1007,11 +1007,11 @@ export class PeopleService {
   ): Promise<{ deleted: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
@@ -1083,11 +1083,11 @@ export class PeopleService {
   ): Promise<{ hidden: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Manual hide: leave hiddenReason unset (null) so manual archives stay
@@ -1193,11 +1193,11 @@ export class PeopleService {
   ): Promise<{ unhidden: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const { count } = await this.prisma.face.updateMany({
@@ -1241,11 +1241,11 @@ export class PeopleService {
   ): Promise<{ deleted: number }> {
     const { circleId, ids } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
@@ -1313,11 +1313,11 @@ export class PeopleService {
   ): Promise<{ deleted: number }> {
     const { circleId } = dto;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Deliberately NO mediaItem: { deletedAt: null, archivedAt: null } sub-filter:
@@ -1395,11 +1395,11 @@ export class PeopleService {
     }
 
     // 2. Assert collaborator access
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       mediaItem.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // 3. Resolve person
@@ -1495,11 +1495,11 @@ export class PeopleService {
     }
 
     // 2. Assert collaborator access
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       mediaItem.circleId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // 3. Delete manual Face rows

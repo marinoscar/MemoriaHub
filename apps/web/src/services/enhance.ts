@@ -249,7 +249,7 @@ export interface ApplyEnhancementResult {
 
 /**
  * Admin readiness snapshot for the AI Picture Enhancer
- * (`GET /api/admin/ai/enhance/status`). `ready` is true only when the feature
+ * (`GET /api/admin/memoriahub-ai/enhance/status`; RETRO-E4 moved it off the AI slice's prefix). `ready` is true only when the feature
  * toggle is on AND a model is selected AND an enabled credential exists for the
  * resolved provider — the same three conditions the enhance endpoint enforces.
  */
@@ -267,7 +267,7 @@ export interface EnhancerAdminStatus {
 
 /** Admin: feature/provider readiness for the AI Picture Enhancer. */
 export async function getEnhancerAdminStatus(): Promise<EnhancerAdminStatus> {
-  return api.get<EnhancerAdminStatus>('/admin/ai/enhance/status');
+  return api.get<EnhancerAdminStatus>('/admin/memoriahub-ai/enhance/status');
 }
 
 /**

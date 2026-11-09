@@ -22,7 +22,7 @@ import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { WorkflowsService } from './workflows.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
@@ -87,8 +87,8 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
         features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
       }),
     };
-    const circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>> = {
-      assertCircleAccess: jest
+    const circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>> = {
+      requireOwnerRole: jest
         .fn()
         .mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
@@ -103,7 +103,7 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
         WorkflowConditionCompiler,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: systemSettings },
-        { provide: CircleMembershipService, useValue: circleMembership },
+        { provide: OwnerAccessService, useValue: circleMembership },
         { provide: MediaThumbnailService, useValue: thumbnails },
       ],
     }).compile();
@@ -277,8 +277,8 @@ describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', ()
         features: { ...DEFAULT_SYSTEM_SETTINGS.features, workflows: true },
       }),
     };
-    const circleMembership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>> = {
-      assertCircleAccess: jest
+    const circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>> = {
+      requireOwnerRole: jest
         .fn()
         .mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
@@ -293,7 +293,7 @@ describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', ()
         WorkflowConditionCompiler,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: systemSettings },
-        { provide: CircleMembershipService, useValue: circleMembership },
+        { provide: OwnerAccessService, useValue: circleMembership },
         { provide: MediaThumbnailService, useValue: thumbnails },
       ],
     }).compile();

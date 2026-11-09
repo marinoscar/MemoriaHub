@@ -359,16 +359,6 @@
       "scope": "org"
     },
     {
-      "name": "ai_settings:read",
-      "description": "Read AI provider settings and status",
-      "scope": "system"
-    },
-    {
-      "name": "ai_settings:write",
-      "description": "Configure AI provider credentials and settings",
-      "scope": "system"
-    },
-    {
       "name": "face_settings:read",
       "description": "Read face recognition provider settings and status",
       "scope": "system"
@@ -427,8 +417,6 @@
       "media:write_any",
       "media:delete_any",
       "circles:manage_any",
-      "ai_settings:read",
-      "ai_settings:write",
       "face_settings:read",
       "face_settings:write",
       "geo_settings:read",

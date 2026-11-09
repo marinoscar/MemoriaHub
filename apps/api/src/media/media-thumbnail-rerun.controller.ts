@@ -1,11 +1,10 @@
 import { Controller, Post, Param, NotFoundException, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { CircleRole } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 
 /**
@@ -28,7 +27,7 @@ export class MediaThumbnailRerunController {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly recoveryService: ObjectReprocessService,
   ) {}
 
@@ -50,11 +49,11 @@ export class MediaThumbnailRerunController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     await this.recoveryService.reprocessNow(mediaItem.storageObject);

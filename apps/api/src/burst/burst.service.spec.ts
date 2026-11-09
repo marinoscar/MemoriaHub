@@ -2,7 +2,7 @@
  * Unit tests for BurstService.
  *
  * Covers:
- *  - listBurstGroups: RBAC (assertCircleAccess called with viewer), response shape
+ *  - listBurstGroups: RBAC (requireOwnerRole called with viewer), response shape
  *    { items, meta }, only groups >= minGroupSize surfaced, perceptualHash never
  *    included in response
  *  - getBurstGroup: RBAC (viewer), 404, isSuggestedBest derived correctly,
@@ -17,7 +17,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { Test, TestingModule } from '@nestjs/testing';
 import { BurstService } from './burst.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -186,7 +186,7 @@ function makeDetailGroup(overrides: Partial<{
 describe('BurstService', () => {
   let service: BurstService;
   let mockPrisma: MockPrismaService;
-  let mockMembership: { assertCircleAccess: jest.Mock };
+  let mockMembership: { requireOwnerRole: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
@@ -196,7 +196,7 @@ describe('BurstService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockMembership = { assertCircleAccess: jest.fn().mockResolvedValue(undefined) };
+    mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
     mockEnrichmentJobService = { enqueue: jest.fn() };
     // Default: duplicateDetection feature disabled, so the re-enqueue helper
     // in resolve/dismiss is a no-op unless a test explicitly enables it.
@@ -254,7 +254,7 @@ describe('BurstService', () => {
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         MediaThumbnailService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockMembership },
+        { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
@@ -272,17 +272,17 @@ describe('BurstService', () => {
   // -------------------------------------------------------------------------
 
   describe('listBurstGroups', () => {
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.burstGroup.count as jest.Mock).mockResolvedValue(0);
 
       await service.listBurstGroups(makeQueryDto(), USER_ID, PERMS_MEDIA_READ);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_READ,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -479,16 +479,16 @@ describe('BurstService', () => {
       );
     });
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.burstGroup.findUnique as jest.Mock).mockResolvedValue(makeDetailGroup());
 
       await service.getBurstGroup(GROUP_ID, USER_ID, PERMS_MEDIA_READ);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_READ,
-        CircleRole.viewer,
+        'viewer',
       );
     });
 
@@ -543,16 +543,16 @@ describe('BurstService', () => {
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupGroup();
 
       await service.resolveBurstGroup(GROUP_ID, makeResolveDto(['media-1']), USER_ID, PERMS_MEDIA_DELETE);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_DELETE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -774,7 +774,7 @@ describe('BurstService', () => {
       (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       const group = makeBulkGroup();
       setupGroups([group]);
 
@@ -784,11 +784,11 @@ describe('BurstService', () => {
         PERMS_MEDIA_DELETE,
       );
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_DELETE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 
@@ -1074,7 +1074,7 @@ describe('BurstService', () => {
         PERMS_MEDIA_WRITE, // no media:delete — the run service is the gate now
       );
 
-      expect(mockMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockMembership.requireOwnerRole).not.toHaveBeenCalled();
       expect(mockReviewRuns.createRun).toHaveBeenCalledWith(
         expect.objectContaining({ perms: PERMS_MEDIA_WRITE }),
       );
@@ -1136,16 +1136,16 @@ describe('BurstService', () => {
       (mockPrisma.burstGroup.update as jest.Mock).mockResolvedValue({});
     }
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       setupGroupForDismiss();
 
       await service.dismissBurstGroup(GROUP_ID, USER_ID, PERMS_MEDIA_WRITE);
 
-      expect(mockMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         PERMS_MEDIA_WRITE,
-        CircleRole.collaborator,
+        'editor',
       );
     });
 

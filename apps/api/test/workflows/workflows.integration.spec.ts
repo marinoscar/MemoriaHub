@@ -261,7 +261,7 @@ describe('Workflows Integration (DB-gated)', () => {
       expect(response.body.data.dependencies).toEqual(['metadata']);
     });
 
-    it('returns 403 when the contributor is not a member of the circle (cross-circle denied)', async () => {
+    it('returns 404 when the contributor is not a member of the circle (cross-circle denied)', async () => {
       const contributor = await createMockContributorUser(context);
       context.prismaMock.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID });
       context.prismaMock.circleMember.findUnique.mockResolvedValue(null); // not a member
@@ -274,7 +274,7 @@ describe('Workflows Integration (DB-gated)', () => {
           name: 'x',
           definition: screenshotHeuristicDefinition,
         })
-        .expect(403);
+        .expect(404);
     });
 
     it('returns 404 when the circle does not exist', async () => {
@@ -395,7 +395,7 @@ describe('Workflows Integration (DB-gated)', () => {
       expect(response.body.data.meta).toMatchObject({ page: 1, pageSize: 20, totalItems: 1 });
     });
 
-    it('returns 403 when the viewer is not a member of the circle', async () => {
+    it('returns 404 when the viewer is not a member of the circle', async () => {
       const viewer = await createMockViewerUser(context);
       context.prismaMock.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID });
       context.prismaMock.circleMember.findUnique.mockResolvedValue(null);
@@ -403,7 +403,7 @@ describe('Workflows Integration (DB-gated)', () => {
       await request(context.app.getHttpServer())
         .get(`/api/workflows?circleId=${CIRCLE_ID}`)
         .set(authHeader(viewer.accessToken))
-        .expect(403);
+        .expect(404);
     });
   });
 
@@ -472,7 +472,7 @@ describe('Workflows Integration (DB-gated)', () => {
       expect(response.body.data.name).toBe('Renamed workflow');
     });
 
-    it('returns 403 for a contributor who is not a circle member (cross-circle denied)', async () => {
+    it('returns 404 for a contributor who is not a circle member (cross-circle denied)', async () => {
       const contributor = await createMockContributorUser(context);
       const row = makeWorkflowRow();
       context.prismaMock.workflow.findUnique.mockResolvedValue(row);
@@ -483,7 +483,7 @@ describe('Workflows Integration (DB-gated)', () => {
         .patch(`/api/workflows/${row.id}`)
         .set(authHeader(contributor.accessToken))
         .send({ name: 'Renamed' })
-        .expect(403);
+        .expect(404);
     });
 
     it('allows a super-admin to bypass the per-circle membership check', async () => {

@@ -41,8 +41,8 @@
 // `src/platform/notifications/notification.manifest.ts` (MemoriaHub's nine events).
 // `ai-*` (`@marinoscar/platform-api/ai/testing`, RETRO-E1): `ai-no-sdk-leak` (no provider SDK
 // imported in apps/api, apps/cli or apps/web, none declared by an app manifest) and
-// `ai-orchestration-boundary` (no orchestration library anywhere) run; the five suites that boot
-// the AI runtime against an app fixture are wired and opted out with their reasons (RETRO-E4).
+// `ai-orchestration-boundary` (no orchestration library anywhere) run here; the five suites that
+// boot the AI runtime run in test/ai-conformance.spec.ts over `AiConformanceFixture` (RETRO-E4).
 //
 // `alerts` (`@marinoscar/platform-api/alerts/testing`, RETRO-H5): the routes' permissions, the
 // starter rules, the open-incident index and the evaluation invariants (see the entry below).
@@ -116,6 +116,7 @@ import '../src/app-registrations/alerts';
 // Fills the user-data registries (categories, scopes, model hints, factory reset steps).
 import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
+import { API_SOURCE_ROOT, CRON_SOURCE_ROOTS } from './jobs/cron-source-roots';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
 // Registers the exports slice's writers and sources (platform `user-data` / `org-data` plus
@@ -140,7 +141,7 @@ const PLATFORM_RAW_SQL_INDEX_NAMES: string[] = (
 ).indexes.map((index) => index.name);
 
 runPlatformConformance({
-  sourceRoots: [join(__dirname, '..', 'src')],
+  sourceRoots: [...CRON_SOURCE_ROOTS],
   suites: {
     // Identity (RETRO-B2, #611). The walk reads Nest metadata from AppModule; the
     // registries are the ones `permission-manifest.ts` filled.
@@ -175,22 +176,49 @@ runPlatformConformance({
     // `*Info` schema can carry a secret.
     credentials: { appOwners: [...APP_CREDENTIAL_OWNERS] },
 
-    // Jobs (RETRO-C1, #575).
-    // Both suites are wired and OPTED OUT with the reason, so the debt is visible in the run summary
-    // until the issue that pays it enables the suite (with `exempt` for the three platform
-    // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
-    // files (the db-backup one is gone since RETRO-D4: the platform task only enqueues; insights, memories, node-backup, node-prune, notification-reconcile,
-    // share-expiring, storage-processing-recovery and workflow crons; storage-cleanup is gone since
-    // RETRO-D1, the platform's stale-upload cron only enqueues) and one listener download (the old
-    // object-processing listener, gone since RETRO-D1: `onEventNoIo` is on below).
+    // Jobs (RETRO-C1, #575; both suites ON since RETRO-C9, #612).
+    // `cron-enqueue-only`: every `@Cron` body enqueues (`enqueueHousekeepingJob` or
+    // `JobsService.enqueue`) and does no work inline. RETRO-C9 moved the last inline
+    // bodies into jobs (`workflows.schedule_tick`, `workflows.micro_run_finalize`,
+    // `notifications.review_queue_reconcile`, `shares.expiring_sweep`,
+    // `node_backup.stale_sweep`; test/jobs/cron-tasks.conformance.spec.ts). The three
+    // permanent platform exemptions are not listed: the installed package ships no
+    // `.ts` sources to scan (test/jobs/cron-source-roots.ts). The two exemptions below
+    // are TEMPORARY, each with a local-exceptions row and the issue that removes it.
     cronEnqueueOnly: {
-      skip:
-        'RETRO-C9 (cron remediation) turns the crons that still work inline into enqueue-only ones; ' +
-        'until then 13 cron files fail this suite. The queue they enqueue into is the platform\'s since RETRO-C1.',
+      exempt: [
+        {
+          file: 'nodes/node-stale-offline.task.ts',
+          root: API_SOURCE_ROOT,
+          why:
+            'TEMPORARY until RETRO-C2 (#581): the legacy worker-node staleness sweep (inline updateMany) is ' +
+            'replaced by the platform nodes slice fleet sweep, which only enqueues; no app job type is invented for it.',
+        },
+        {
+          file: 'nodes/node-offline-prune.task.ts',
+          root: API_SOURCE_ROOT,
+          why:
+            'TEMPORARY until RETRO-C2 (#581): the legacy offline worker-node prune (inline deleteMany) is ' +
+            'replaced by the platform nodes slice fleet prune, which only enqueues; no app job type is invented for it.',
+        },
+      ],
+      // 14 cron files in apps/api/src at RETRO-C9; the floor is a vacuity guard.
+      minCronFiles: 14,
     },
     // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
     // object-processing listener that downloaded bytes is gone.
-    onEventNoIo: { minListenerFiles: 7 }, // 7 since RETRO-D3 removed the broadcast-failure listener
+    // RETRO-C9 (#612): the listeners the issue names are pinned with `mustScan`, so a move cannot
+    // drop one out of the scan silently.
+    onEventNoIo: {
+      minListenerFiles: 7, // 7 since RETRO-D3 removed the broadcast-failure listener
+      mustScan: [
+        'media/sync/media-metadata-sync.service.ts',
+        'media/enrichment/media-enrichment-enqueue.listener.ts',
+        'workflows/runs/workflow-trigger.listener.ts',
+        'notification-producers/enrichment-failure-notification.listener.ts',
+        'media-processing/media-object-processing.service.ts',
+      ],
+    },
 
     // Every MemoriaHub writer's key prefix is registered (platform/storage/storage-key-prefix.manifest.ts).
     storage: { requiredPrefixIds: [...MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS] },
@@ -270,39 +298,10 @@ runPlatformConformance({
       ],
       allowedRoots: {},
     },
-    // The five suites that boot the AI runtime need an app fixture (`AiConformanceFixture`: an app
-    // with the fake provider registered, a user factory, the role-to-permission map). RETRO-E4
-    // builds it and turns them on, with every MemoriaHub AI call on `AiService` by then (E2).
-    aiKillSwitch: {
-      skip:
-        'RETRO-E4 builds the AiConformanceFixture these runtime suites boot. Until RETRO-E2 no MemoriaHub ' +
-        'feature calls the platform runtime, so the kill switch governs only the platform routes, which ' +
-        'test/ai/ai-platform-mount.integration.spec.ts checks (AI_DISABLED while off; admin routes not gated).',
-    },
-    aiRbacMatrix: {
-      skip:
-        'RETRO-E4 builds the AiConformanceFixture. The AI permissions are registered (permissions.ts, ' +
-        '`ai` slice) and test/ai/ai-platform-mount.integration.spec.ts checks ai_config:read on /api/admin/ai.',
-    },
-    aiSecretEgress: {
-      skip:
-        'RETRO-E4 builds the AiConformanceFixture. Known gap it would report: worker nodes still receive a ' +
-        'transient per-job provider key for auto_tagging, video_auto_tagging and geocode from ' +
-        'POST /api/nodes/:id/jobs/:jobId/credentials (PLATFORM-ADOPTION-SHIM(#1083): the platform node ' +
-        'credential delivery, EnterpriseAppBase #1083, is unreleased; RETRO-C4 decides server-only).',
-    },
-    aiKeyPolicy: {
-      skip:
-        'RETRO-E4 builds the AiConformanceFixture. Since RETRO-E3 release N the deployment keys live in the ' +
-        'platform store (`npm run ai:migrate-keys` imports ai_provider_credentials); the legacy adapter reads ' +
-        'them first and falls back to the legacy row until release N+1 drops the table.',
-    },
-    aiJobsServerOnly: {
-      skip:
-        'RETRO-E4 builds the AiConformanceFixture. MemoriaHub adds no ai.* job type (the platform ones are server-only); its node-claimable ' +
-        'AI types (auto_tagging, video_auto_tagging) keep their permanent non-ai.* type strings and the ' +
-        'brokered-key node path (PLATFORM-ADOPTION-SHIM(#1083), EnterpriseAppBase #1083 unreleased; RETRO-C4).',
-    },
+    // The five suites that boot the AI runtime (`ai-kill-switch`, `ai-rbac-matrix`,
+    // `ai-secret-egress`, `ai-key-policy`, `ai-jobs-server-only`) run in test/ai-conformance.spec.ts
+    // over `AiConformanceFixture` (test/conformance/ai-fixture.ts, RETRO-E4 #607): each boots the
+    // app, so they run in their own file, with no skip.
 
     // The onboarding slice (RETRO-H3, #599): the registries are well formed, every step's permission
     // is one this app registers, and one derivation, for a caller holding every permission against a

@@ -14,7 +14,7 @@ import { SearchAgentService } from './search-agent.service';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -49,7 +49,7 @@ export class SearchAgentController {
 
   constructor(
     private readonly searchAgentService: SearchAgentService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
   ) {}
 
   /**
@@ -78,7 +78,7 @@ export class SearchAgentController {
     @Res() reply: FastifyReply,
   ): Promise<void> {
     // Verify circle membership before opening SSE stream
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       dto.circleId,
       user.permissions,

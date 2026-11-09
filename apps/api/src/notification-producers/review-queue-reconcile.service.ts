@@ -34,7 +34,6 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { CircleRole } from '@prisma/client';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { FEATURE_KEYS, isPictureEnhancementEnabled } from '../settings/feature-gates';
@@ -47,7 +46,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 const CIRCLE_PAGE_SIZE = 100;
 
 /** Per-circle roles that can actually act on a review queue. See header. */
-const ELIGIBLE_ROLES: CircleRole[] = [CircleRole.circle_admin, CircleRole.collaborator];
+const ELIGIBLE_ROLES: Array<'collaborator' | 'circle_admin'> = ['circle_admin', 'collaborator'];
 
 /** The four integers computeReviewCounts() returns. */
 type ReviewCounts = Awaited<ReturnType<MediaService['computeReviewCounts']>>;

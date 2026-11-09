@@ -95,7 +95,7 @@ describe('SettingsHubPage', () => {
         adminPermissionsMock([
           'system_settings:read',
           'users:read',
-          'ai_settings:read',
+          'ai_config:read',
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
@@ -115,7 +115,7 @@ describe('SettingsHubPage', () => {
         adminPermissionsMock([
           'system_settings:read',
           'users:read',
-          'ai_settings:read',
+          'ai_config:read',
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
@@ -153,10 +153,10 @@ describe('SettingsHubPage', () => {
       expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
     });
 
-    it('renders AI Providers card', () => {
+    it('renders the AI card', () => {
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.getByText('AI Providers')).toBeInTheDocument();
+      expect(screen.getByText('AI')).toBeInTheDocument();
     });
 
     it('renders Face Recognition card', () => {
@@ -213,19 +213,19 @@ describe('SettingsHubPage', () => {
       expect(screen.queryByText('System')).not.toBeInTheDocument();
     });
 
-    it('hides AI Providers when user lacks ai_settings:read', () => {
+    it('hides AI when user lacks ai_config:read', () => {
       mockUsePermissions.mockReturnValue(
         adminPermissionsMock(['system_settings:read', 'users:read']) as any,
       );
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
+      expect(screen.queryByText('AI')).not.toBeInTheDocument();
     });
 
     it('hides Job Insights when user lacks jobs:read', () => {
       mockUsePermissions.mockReturnValue(
-        adminPermissionsMock(['system_settings:read', 'users:read', 'ai_settings:read']) as any,
+        adminPermissionsMock(['system_settings:read', 'users:read', 'ai_config:read']) as any,
       );
 
       render(<SettingsHubPage />, { wrapperOptions: { user: mockAdminUser } });
@@ -259,7 +259,7 @@ describe('SettingsHubPage', () => {
         adminPermissionsMock([
           'system_settings:read',
           'users:read',
-          'ai_settings:read',
+          'ai_config:read',
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
@@ -267,7 +267,7 @@ describe('SettingsHubPage', () => {
       );
     });
 
-    it('navigates to /admin/settings/ai when AI Providers card is clicked', async () => {
+    it('navigates to /admin/settings/ai when the AI card is clicked', async () => {
       const user = userEvent.setup();
       render(
         <>
@@ -278,7 +278,7 @@ describe('SettingsHubPage', () => {
       );
 
       // Click the card title — it is inside the CardActionArea which handles the click
-      await user.click(screen.getByText('AI Providers'));
+      await user.click(screen.getByText('AI'));
 
       await waitFor(() => {
         expect(screen.getByTestId('location')).toHaveTextContent('/admin/settings/ai');
@@ -396,7 +396,7 @@ describe('SettingsHubPage', () => {
     const FULL_PERMISSIONS = [
       'system_settings:read',
       'users:read',
-      'ai_settings:read',
+      'ai_config:read',
       'face_settings:read',
       'geo_settings:read',
       'storage_config:read',
@@ -423,7 +423,7 @@ describe('SettingsHubPage', () => {
 
       expect(screen.getByText('Jobs')).toBeInTheDocument();
       expect(screen.getByText('Job Insights')).toBeInTheDocument();
-      expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
+      expect(screen.queryByText('AI')).not.toBeInTheDocument();
       expect(screen.queryByText('System')).not.toBeInTheDocument();
     });
 
@@ -466,11 +466,11 @@ describe('SettingsHubPage', () => {
 
       const field = screen.getByLabelText('Search settings');
       await user.type(field, 'job');
-      expect(screen.queryByText('AI Providers')).not.toBeInTheDocument();
+      expect(screen.queryByText('AI')).not.toBeInTheDocument();
 
       await user.clear(field);
 
-      expect(screen.getByText('AI Providers')).toBeInTheDocument();
+      expect(screen.getByText('AI')).toBeInTheDocument();
       expect(screen.getByText('Jobs')).toBeInTheDocument();
       expect(screen.getByText('General')).toBeInTheDocument();
       expect(screen.getByText('Storage')).toBeInTheDocument();
@@ -484,7 +484,7 @@ describe('SettingsHubPage', () => {
       await user.click(screen.getByRole('button', { name: 'Clear settings search' }));
 
       expect(screen.getByLabelText('Search settings')).toHaveValue('');
-      expect(screen.getByText('AI Providers')).toBeInTheDocument();
+      expect(screen.getByText('AI')).toBeInTheDocument();
     });
 
     it('does not match on description text, only the card title', async () => {
@@ -559,7 +559,7 @@ describe('SettingsHubPage', () => {
 
     beforeEach(() => {
       mockUsePermissions.mockReturnValue(
-        adminPermissionsMock(['system_settings:read', 'users:read', 'ai_settings:read']) as any,
+        adminPermissionsMock(['system_settings:read', 'users:read', 'ai_config:read']) as any,
       );
     });
 

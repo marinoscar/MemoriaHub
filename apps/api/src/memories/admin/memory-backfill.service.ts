@@ -11,12 +11,12 @@
 // `payload.backfill`, so there is exactly one implementation of "what backfill
 // means" and this endpoint cannot drift from it.
 //
-// WHY IT IS NOT `MemoriesGenerationTask.sweep()`
+// WHY IT IS NOT `MemoriesGenerationTask.handleScheduledGeneration()`
 // ---------------------------------------------
 // The cron's sweep exists to enforce an INTERVAL ("has this circle generated in
 // the last N hours?"). A backfill is an explicit human instruction that must
 // run now regardless of when the circle last generated, and it enqueues a
-// sharded plan rather than one bare job. Reusing `sweep()` would have meant
+// sharded plan rather than one bare job. Reusing that tick would have meant
 // threading two mutually exclusive modes through it; the two share the circle
 // paging shape and the per-circle in-flight guard, which is where the real
 // logic is, and nothing else.

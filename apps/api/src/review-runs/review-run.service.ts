@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
-  CircleRole,
   JobReason,
   Prisma,
   ReviewRun,
@@ -18,7 +17,7 @@ import {
   ReviewRunSubject,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
@@ -86,7 +85,7 @@ export class ReviewRunService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly registry: ReviewRunSubjectRegistry,
@@ -124,11 +123,11 @@ export class ReviewRunService {
       );
     }
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       circleId,
       perms,
-      CircleRole.collaborator,
+      'editor',
     );
 
     // Trashing media is a strictly higher authority than archiving/dismissing —
@@ -197,11 +196,11 @@ export class ReviewRunService {
     const run = await this.prisma.reviewRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Review run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       run.circleId,
       perms,
-      CircleRole.collaborator,
+      'editor',
     );
 
     if (TERMINAL_RUN_STATUSES.includes(run.status)) {
@@ -235,7 +234,7 @@ export class ReviewRunService {
     const run = await this.prisma.reviewRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Review run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(userId, run.circleId, perms, CircleRole.viewer);
+    await this.circleMembership.requireOwnerRole(userId, run.circleId, perms, 'viewer');
 
     const statusGroups = await this.prisma.reviewRunItem.groupBy({
       by: ['status'],
@@ -258,7 +257,7 @@ export class ReviewRunService {
     const run = await this.prisma.reviewRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Review run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(userId, run.circleId, perms, CircleRole.viewer);
+    await this.circleMembership.requireOwnerRole(userId, run.circleId, perms, 'viewer');
 
     const { page, pageSize, status } = query;
     const where: Prisma.ReviewRunItemWhereInput = {

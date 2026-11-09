@@ -21,8 +21,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { AiModule } from '../ai/ai.module';
-import { CirclesModule } from '../circles/circles.module';
+import { LegacyAiModule } from '../ai-port/legacy-ai.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { emailModule } from '../platform/email/email.config';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
@@ -49,12 +49,12 @@ import { YearInReviewCurator } from './curators/year-in-review.curator';
 import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
-  // AiModule supplies AiSettingsService (ai.features.memories + the decrypted
+  // LegacyAiModule supplies AiSettingsService (ai.features.memories + the decrypted
   // credential) and AiProviderRegistry to MemoryTitleService (#306). The edge
-  // points one way only — AiModule imports SettingsModule and nothing else —
+  // points one way only — LegacyAiModule imports SettingsModule and nothing else —
   // so there is no cycle to break.
   //
-  // #307's API layer adds two edges: CirclesModule (CircleMembershipService,
+  // #307's API layer adds two edges: OwnerAccessModule (OwnerAccessService,
   // the per-circle role checks) and MediaModule (MediaThumbnailService for
   // batched signing, MediaService for the album path save-as-album reuses
   // rather than duplicating). Both point one way — neither imports
@@ -72,8 +72,8 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     PrismaModule,
     
     EnrichmentModule,
-    AiModule,
-    CirclesModule,
+    LegacyAiModule,
+    OwnerAccessModule,
     MediaModule,
     emailModule,
     MediaProcessingModule,

@@ -66,15 +66,17 @@ first** (with its slot's `enabled` and `baseUrl`), **then the legacy row** (logg
 provider per process: "served from the legacy ai_provider_credentials table"). So every AI feature
 (tagging, video tagging, search, embeddings, the enhancer, transcription, memory titles), the AI
 Doctor checks, the worker-node per-job credential for `auto_tagging` / `video_auto_tagging`
-(PLATFORM-ADOPTION-SHIM(#1083)) and `GET /api/ai/settings` work before the import, after it, and
+(PLATFORM-ADOPTION-SHIM(#1083)) and the provider status the admin page shows (`GET /api/ai/settings`;
+`GET /api/admin/memoriahub-ai/features` since RETRO-E4) work before the import, after it, and
 after a revert of release N.
 
 Keys are now changed only in the platform store: `PUT /api/ai/credentials/:provider` and
 `DELETE /api/ai/credentials/:provider` answer **410** (`details.reason: "AI_LEGACY_KEY_WRITES_GONE"`,
 `details.route` names the replacement). Use `PUT|DELETE /api/admin/ai/providers/:provider/key`
-(`ai_config:write`; the PUT verifies the key with the provider before storing it). Until RETRO-E4
-ships the platform admin AI pages, the Save and Remove buttons for keys on `/admin/settings/ai` show
-that 410; call the route from the API reference (`/api/docs`) or `curl` instead. A provider's on/off
+(`ai_config:write`; the PUT verifies the key with the provider before storing it). Since RETRO-E4
+(#607) those are the provider cards' Save key and Remove key on `/admin/settings/ai` (the platform page),
+and the two old routes are deleted (`404`). In a release between E3 and E4 the old page's key buttons
+show the 410; call the route from the API reference (`/api/docs`) or `curl` instead. A provider's on/off
 switch for a platform key is `ai.providers.<id>.enabled` (`PUT /api/admin/ai/config`).
 
 ## 3. Procedure

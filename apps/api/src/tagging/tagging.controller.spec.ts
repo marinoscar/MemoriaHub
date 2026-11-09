@@ -2,7 +2,7 @@
  * Unit tests for TaggingController.
  *
  * Verifies that each handler:
- *   - delegates RBAC to CircleMembershipService
+ *   - delegates RBAC to OwnerAccessService
  *   - returns the expected response shape
  *   - throws NotFoundException when media item does not exist / is soft-deleted
  *
@@ -14,7 +14,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import { TaggingController } from './tagging.controller';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   createMockPrismaService,
@@ -32,8 +32,8 @@ import { RequestUser } from '@marinoscar/platform-api/identity';
 // Shared mock services
 // ---------------------------------------------------------------------------
 
-const mockCircleMembershipService = {
-  assertCircleAccess: jest.fn(),
+const mockOwnerAccessService = {
+  requireOwnerRole: jest.fn(),
 };
 
 const mockEnrichmentJobService = {
@@ -83,7 +83,7 @@ describe('TaggingController', () => {
     mockPrisma = createMockPrismaService();
 
     // Default: circle access granted
-    mockCircleMembershipService.assertCircleAccess.mockResolvedValue(undefined);
+    mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
 
     // Default: enqueue returns a minimal pending job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
@@ -96,8 +96,8 @@ describe('TaggingController', () => {
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
         {
-          provide: CircleMembershipService,
-          useValue: mockCircleMembershipService,
+          provide: OwnerAccessService,
+          useValue: mockOwnerAccessService,
         },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
@@ -199,7 +199,7 @@ describe('TaggingController', () => {
       );
     });
 
-    it('calls assertCircleAccess with collaborator role', async () => {
+    it('calls requireOwnerRole with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem(),
       );
@@ -208,11 +208,11 @@ describe('TaggingController', () => {
       const user = makeUser();
       await controller.rerunTagging('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -280,7 +280,7 @@ describe('TaggingController', () => {
       expect(result.data.lastError).toBeNull();
     });
 
-    it('calls assertCircleAccess with viewer role', async () => {
+    it('calls requireOwnerRole with viewer role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem(),
       );
@@ -289,7 +289,7 @@ describe('TaggingController', () => {
       const user = makeUser();
       await controller.getTagStatus('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
