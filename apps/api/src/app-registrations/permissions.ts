@@ -44,6 +44,10 @@ export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
     grants: [],
     // RETRO-D1: every member uploads (the per-circle role decides where a media item may go), as
     // before the slice, when the objects API was a bare `@Auth()` and the default role is `viewer`.
-    platformGrants: { 'storage:write': ['viewer'] },
+    // RETRO-I3 (#573): `viewer` also gets `groups:write`, so a viewer can still create a shared
+    // library as they could always create a circle (`circles:write`, granted to every role);
+    // the platform grants it to contributor and org_admin only. Managing a group's members
+    // stays bound to the caller's group `admin` role, as before.
+    platformGrants: { 'storage:write': ['viewer'], 'groups:write': ['viewer'] },
   },
 };
