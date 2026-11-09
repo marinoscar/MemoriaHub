@@ -43,6 +43,15 @@ enum WorkflowRunItemStatus {
 model Workflow {
   id             String          @id @default(uuid()) @db.Uuid
   circleId       String          @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(#573): the FK owner_user_id -> users(id) ON DELETE RESTRICT exists in the
+  // database but is not modelled: the user-owned registry cannot mix a Restrict key with this
+  // model's SetNull actor keys (docs/platform-adoption/local-exceptions.md).
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   name           String
   description    String?
   subjectType    WorkflowSubject @map("subject_type")
@@ -60,8 +69,14 @@ model Workflow {
   createdBy User?         @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   runs      WorkflowRun[]
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("WorkflowOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("WorkflowOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+
   @@index([circleId, enabled])
   @@index([trigger, enabled, nextRunAt])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("workflows")
 }
 
@@ -75,6 +90,15 @@ model WorkflowRun {
   id                 String            @id @default(uuid()) @db.Uuid
   workflowId         String            @map("workflow_id") @db.Uuid
   circleId           String            @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  // PLATFORM-ADOPTION-SHIM(#573): the FK owner_user_id -> users(id) ON DELETE RESTRICT exists in the
+  // database but is not modelled: the user-owned registry cannot mix a Restrict key with this
+  // model's SetNull actor keys (docs/platform-adoption/local-exceptions.md).
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   status             WorkflowRunStatus
   triggerType        WorkflowTrigger   @map("trigger_type")
   definitionSnapshot Json              @map("definition_snapshot")
@@ -100,9 +124,15 @@ model WorkflowRun {
   approvedBy User?             @relation("WorkflowRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   items      WorkflowRunItem[]
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("WorkflowRunOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("WorkflowRunOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+
   @@index([workflowId, createdAt])
   @@index([circleId, status])
   @@index([status, updatedAt])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("workflow_runs")
 }
 

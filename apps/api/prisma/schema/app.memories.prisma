@@ -40,6 +40,12 @@ enum MemoryType {
 model Memory {
   id       String     @id @default(uuid()) @db.Uuid
   circleId String     @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   type     MemoryType
 
   // periodKey/subjectKey together form the idempotent-regeneration identity
@@ -93,12 +99,19 @@ model Memory {
   // THE idempotent-regeneration dedup key — spans live and tombstoned rows
   // (see model comment above), which is exactly what makes the tombstone
   // effective.
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MemoryOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MemoryOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("MemoryOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@unique([circleId, type, periodKey, subjectKey])
   // feed/list: active, non-expired memories newest-first
   @@index([circleId, deletedAt, expiresAt, generatedAt(sort: Desc)])
   @@index([circleId, type])
   @@index([personId])
   @@index([coverMediaItemId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("memories")
 }
 
