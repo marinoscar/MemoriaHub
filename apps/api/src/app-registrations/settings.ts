@@ -66,6 +66,10 @@ import {
 } from '../settings/registry/namespaces/user/memoriahub-notifications';
 import { SEARCH_USER_SETTINGS, type SearchPreferencesValue } from '../settings/registry/namespaces/user/search';
 import { TIMEZONE_USER_SETTINGS } from '../settings/registry/namespaces/user/timezone';
+import {
+  ACTIVE_OWNER_SCOPE_USER_SETTINGS,
+  type ActiveOwnerScopeValue,
+} from '../settings/registry/namespaces/user/active-owner-scope';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { MEMORIAHUB_AI_SETTINGS_EXTENSION } from '../platform/ai/ai-settings.extension';
 import { TELEMETRY_SYSTEM_SETTINGS } from '../platform/telemetry/telemetry.system-settings';
@@ -142,6 +146,8 @@ export const APP_USER_SETTINGS_NAMESPACES: readonly UserSettingsNamespace[] = [
   // by `MEMORIAHUB_ONBOARDING_SETTINGS_EXTENSION`. Its merge refuses a `skipped` id that is not a
   // registered, skippable step (`platform/onboarding/onboarding.manifest.ts`).
   ONBOARDING_USER_SETTINGS,
+  // RETRO-I6 (#588): the library the web app shows (`me` or a group). UX state only.
+  ACTIVE_OWNER_SCOPE_USER_SETTINGS,
 ] as unknown as readonly UserSettingsNamespace[];
 
 /** Fields this app stores in a platform-declared user namespace that the platform lacks. */
@@ -184,5 +190,6 @@ declare module '@marinoscar/platform-api/settings' {
     memories: MemoriesPreferencesValue;
     timezone: string;
     memoriahubNotifications: MemoriaHubNotificationsValue;
+    activeOwnerScope: ActiveOwnerScopeValue;
   }
 }
