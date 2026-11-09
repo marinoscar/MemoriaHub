@@ -5,6 +5,7 @@ import { NodeBackupQueryService } from './node-backup-query.service';
 import { NodeBackupService } from './node-backup.service';
 import { NodeBackupController } from './node-backup.controller';
 import { NodeBackupStaleTask } from './node-backup-stale.task';
+import { NodeBackupStaleHandler } from './node-backup-stale.handler';
 import { NodesController } from './nodes.controller';
 import { NodesAdminController } from './nodes-admin.controller';
 import { NodeCredentialsController } from './node-credentials.controller';
@@ -64,6 +65,8 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     NodeBackupQueryService,
     NodeBackupService,
     NodeBackupStaleTask,
+    // RETRO-C9 (#612): the cron only enqueues; this does the sweep.
+    NodeBackupStaleHandler,
   ],
   exports: [NodeBackupQueryService],
 })
