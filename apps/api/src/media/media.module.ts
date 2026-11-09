@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
@@ -38,7 +38,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * Imports MediaProcessingModule so that STORAGE_PROVIDER resolves inside
  * MediaService (used to sign fresh thumbnail and download URLs at read time).
  *
- * Imports CirclesModule so that CircleMembershipService resolves inside
+ * Imports OwnerAccessModule so that OwnerAccessService resolves inside
  * MediaService (used for circle-scoped access checks).
  *
  * Imports SettingsModule so TrashPurgeHandler can read storage.trash.retentionDays
@@ -79,7 +79,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
   imports: [
     PrismaModule,
     MediaProcessingModule,
-    CirclesModule,
+    OwnerAccessModule,
     GeoLocationModule,
     
     EnrichmentModule,

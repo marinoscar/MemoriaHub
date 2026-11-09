@@ -11,7 +11,7 @@
  * `media-bulk-dashboard.integration.spec.ts` as the reference for:
  *   - `setupCircleMocks(context, userId, circleId, role)`, which mocks
  *     `circle.findUnique` + `circleMember.findUnique` so
- *     `CircleMembershipService.assertCircleAccess` passes at a chosen role
+ *     `OwnerAccessService.requireOwnerRole` passes at a chosen role
  *   - factories that build `circleId` / `addedById`
  *   - `flattenWhere`, for asserting AND-composed filter predicates without
  *     depending on descriptor order (see docs/audits/search-audit.md)
@@ -54,7 +54,7 @@ const BASE_TAG_ID = '550e8400-e29b-41d4-a716-446655440003';
 // ---------------------------------------------------------------------------
 
 /**
- * Make `assertCircleAccess` resolve at `role` for `userId` in `circleId`.
+ * Make `requireOwnerRole` resolve at `role` for `userId` in `circleId`.
  * Roles rank viewer < collaborator < circle_admin, so a test asserting a write
  * is refused for a viewer sets `'viewer'` here and expects 403.
  */
@@ -74,8 +74,8 @@ function setupCircleMocks(
 }
 
 /**
- * The circle exists but the caller is not a member — `assertCircleAccess`
- * throws Forbidden at its membership step, on reads as well as writes.
+ * The circle exists but the caller is not a member — `requireOwnerRole`
+ * answers 404 at its membership step (RETRO-I3), on reads as well as writes.
  */
 function setupNonMemberMocks(context: TestContext, circleId: string): void {
   context.prismaMock.circle.findUnique.mockResolvedValue({ id: circleId });
@@ -378,7 +378,7 @@ describe('Media Integration (circle-scoped)', () => {
         .expect(400);
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
 
@@ -391,7 +391,7 @@ describe('Media Integration (circle-scoped)', () => {
         .post('/api/media')
         .set(authHeader(contributor.accessToken))
         .send(createMediaBody())
-        .expect(403);
+        .expect(404);
 
       expect(context.prismaMock.mediaItem.create).not.toHaveBeenCalled();
     });
@@ -429,14 +429,14 @@ describe('Media Integration (circle-scoped)', () => {
         .expect(400);
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
 
       await request(context.app.getHttpServer())
         .get(`/api/media?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
 
       expect(context.prismaMock.mediaItem.findMany).not.toHaveBeenCalled();
     });
@@ -630,7 +630,7 @@ describe('Media Integration (circle-scoped)', () => {
         .expect(404);
     });
 
-    it("returns 403 when the caller is not a member of the item's circle", async () => {
+    it("returns 404 when the caller is not a member of the item's circle", async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(
@@ -640,11 +640,11 @@ describe('Media Integration (circle-scoped)', () => {
       await request(context.app.getHttpServer())
         .get(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
     });
 
     it('lets an Admin holding media:read_any read an item in a circle they do not belong to', async () => {
-      // Super-admin bypass: assertCircleAccess short-circuits before the
+      // Super-admin bypass: requireOwnerRole short-circuits before the
       // membership lookup, so no circle mocks are set up here on purpose.
       const admin = await createMockAdminUser(context);
       context.prismaMock.circleMember.findUnique.mockResolvedValue(null);
@@ -707,7 +707,7 @@ describe('Media Integration (circle-scoped)', () => {
       expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(
@@ -718,7 +718,7 @@ describe('Media Integration (circle-scoped)', () => {
         .patch(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
         .send({ description: 'hack' })
-        .expect(403);
+        .expect(404);
 
       expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
     });
@@ -781,7 +781,7 @@ describe('Media Integration (circle-scoped)', () => {
       expect(context.prismaMock.mediaItem.update).not.toHaveBeenCalled();
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
       context.prismaMock.mediaItem.findUnique.mockResolvedValue(
@@ -791,7 +791,7 @@ describe('Media Integration (circle-scoped)', () => {
       await request(context.app.getHttpServer())
         .delete(`/api/media/${BASE_MEDIA_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
     });
 
     it('returns 404 when the item does not exist', async () => {
@@ -834,14 +834,14 @@ describe('Media Integration (circle-scoped)', () => {
       );
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
 
       await request(context.app.getHttpServer())
         .get(`/api/media/tags?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
     });
   });
 
@@ -1063,14 +1063,14 @@ describe('Media Integration (circle-scoped)', () => {
       });
     });
 
-    it('returns 403 when the caller is not a member of the circle', async () => {
+    it('returns 404 when the caller is not a member of the circle', async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
 
       await request(context.app.getHttpServer())
         .get(`/api/media/albums?circleId=${CIRCLE_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
     });
   });
 
@@ -1097,7 +1097,7 @@ describe('Media Integration (circle-scoped)', () => {
       });
     });
 
-    it("returns 403 when the caller is not a member of the album's circle", async () => {
+    it("returns 404 when the caller is not a member of the album's circle", async () => {
       const contributor = await createMockContributorUser(context);
       setupNonMemberMocks(context, CIRCLE_ID);
       context.prismaMock.album.findUnique.mockResolvedValue({
@@ -1108,7 +1108,7 @@ describe('Media Integration (circle-scoped)', () => {
       await request(context.app.getHttpServer())
         .get(`/api/media/albums/${BASE_ALBUM_ID}`)
         .set(authHeader(contributor.accessToken))
-        .expect(403);
+        .expect(404);
     });
 
     it('returns 404 when the album does not exist', async () => {

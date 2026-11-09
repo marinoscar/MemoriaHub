@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, Workflow, WorkflowSubject, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { isWorkflowsEnabled } from '../settings/feature-gates';
 import { RequestUser } from '@marinoscar/platform-api/identity';
@@ -34,7 +34,7 @@ export class WorkflowsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly thumbnails: MediaThumbnailService,
     private readonly validator: WorkflowDefinitionValidator,
     private readonly compiler: WorkflowConditionCompiler,
@@ -46,11 +46,11 @@ export class WorkflowsService {
 
   async createWorkflow(dto: CreateWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       dto.circleId,
       user.permissions,
-      'collaborator',
+      'editor',
     );
 
     // Registry-aware validation (subject + fields/ops/values + action types).
@@ -102,7 +102,7 @@ export class WorkflowsService {
 
   async listWorkflows(query: ListWorkflowsQueryDto, user: RequestUser) {
     await this.assertFeatureEnabled();
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       query.circleId,
       user.permissions,
@@ -134,7 +134,7 @@ export class WorkflowsService {
   async getWorkflow(id: string, user: RequestUser) {
     await this.assertFeatureEnabled();
     const workflow = await this.findWorkflowOrThrow(id);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       workflow.circleId,
       user.permissions,
@@ -146,11 +146,11 @@ export class WorkflowsService {
   async updateWorkflow(id: string, dto: UpdateWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
     const existing = await this.findWorkflowOrThrow(id);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       existing.circleId,
       user.permissions,
-      'collaborator',
+      'editor',
     );
 
     const data: Prisma.WorkflowUpdateInput = {};
@@ -211,11 +211,11 @@ export class WorkflowsService {
   async deleteWorkflow(id: string, user: RequestUser): Promise<void> {
     await this.assertFeatureEnabled();
     const existing = await this.findWorkflowOrThrow(id);
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       existing.circleId,
       user.permissions,
-      'collaborator',
+      'editor',
     );
 
     // DB cascade removes runs + run items.
@@ -231,7 +231,7 @@ export class WorkflowsService {
 
   async preview(dto: PreviewWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       user.id,
       dto.circleId,
       user.permissions,

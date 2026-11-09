@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { LegacyAiModule } from '../ai-port/legacy-ai.module';
 import { MediaModule } from '../media/media.module';
 import { MediaEnhancementController } from './media-enhancement.controller';
@@ -22,7 +22,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *   - EnrichmentModule: handler registration + EnrichmentJobService.enqueue.
  *   - MediaProcessingModule: StorageProviderResolver (per-object + active provider) and
  *     ObjectReprocessService.reprocessNow.
- *   - CirclesModule: CircleMembershipService.assertCircleAccess.
+ *   - OwnerAccessModule: OwnerAccessService.requireOwnerRole.
  *   - SettingsModule: AppSystemSettingsService.
  *   - LegacyAiModule: AiSettingsService + AiProviderRegistry (enhanceImage provider).
  *   - MediaModule: MediaMetadataSyncService + MediaEnrichmentService (keep_both path).
@@ -34,7 +34,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     PrismaModule,
     EnrichmentModule,
     MediaProcessingModule,
-    CirclesModule,
+    OwnerAccessModule,
     
     LegacyAiModule,
     MediaModule,

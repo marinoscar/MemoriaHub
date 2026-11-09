@@ -9,7 +9,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { SearchService } from './search.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { SemanticSearchService } from './semantic-search.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -69,14 +69,14 @@ const mockMediaItemWithThumb = { ...mockMediaItem, thumbnailUrl: null };
 describe('SearchService', () => {
   let service: SearchService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembership: { assertCircleAccess: jest.Mock };
+  let mockCircleMembership: { requireOwnerRole: jest.Mock };
   let mockSemanticSearch: { embedQuery: jest.Mock; knnMediaIds: jest.Mock };
   let mockMediaThumbnail: { attachThumbnailUrls: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockCircleMembership = {
-      assertCircleAccess: jest.fn(),
+      requireOwnerRole: jest.fn(),
     };
     mockSemanticSearch = {
       embedQuery: jest.fn().mockResolvedValue(null), // default: no embedding
@@ -93,7 +93,7 @@ describe('SearchService', () => {
       providers: [
         SearchService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: OwnerAccessService, useValue: mockCircleMembership },
         { provide: SemanticSearchService, useValue: mockSemanticSearch },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnail },
       ],
@@ -104,7 +104,7 @@ describe('SearchService', () => {
 
   describe('search (via DTO)', () => {
     it('throws ForbiddenException when user is not a member', async () => {
-      mockCircleMembership.assertCircleAccess.mockRejectedValue(
+      mockCircleMembership.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('You are not a member of this circle'),
       );
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
@@ -115,7 +115,7 @@ describe('SearchService', () => {
     });
 
     it('returns paginated result for a member', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -137,7 +137,7 @@ describe('SearchService', () => {
     });
 
     it('calculates totalPages correctly for multiple pages', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -158,7 +158,7 @@ describe('SearchService', () => {
 
   describe('runSearch', () => {
     it('always includes circleId from the parameter in the where clause', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -174,9 +174,9 @@ describe('SearchService', () => {
       });
     });
 
-    it('passes permissions to assertCircleAccess', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
-        role: 'circle_admin',
+    it('passes permissions to requireOwnerRole', async () => {
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
+        role: 'admin',
         isSuperAdmin: true,
       });
       mockPrisma.mediaItem.findMany.mockResolvedValue([]);
@@ -185,7 +185,7 @@ describe('SearchService', () => {
       const permissions = ['circles:manage_any'];
       await service.runSearch(USER_ID, CIRCLE_ID, permissions, {});
 
-      expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         permissions,
@@ -194,7 +194,7 @@ describe('SearchService', () => {
     });
 
     it('uses page=1 and pageSize=20 as defaults', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -208,7 +208,7 @@ describe('SearchService', () => {
     });
 
     it('uses provided paging parameters', async () => {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -237,7 +237,7 @@ describe('SearchService', () => {
 
   describe('runSearch — thumbnail enrichment via MediaThumbnailService', () => {
     function setupMember() {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });
@@ -344,7 +344,7 @@ describe('SearchService', () => {
     const vectorResult = [0.1, 0.2, 0.3];
 
     function setupMemberAccess() {
-      mockCircleMembership.assertCircleAccess.mockResolvedValue({
+      mockCircleMembership.requireOwnerRole.mockResolvedValue({
         role: 'viewer',
         isSuperAdmin: false,
       });

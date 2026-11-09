@@ -13,7 +13,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
@@ -64,13 +64,13 @@ function makeRow(
 describe('MediaService.exploreLocations / exploreLocationLevel', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
-  let mockCircleMembership: { assertCircleAccess: jest.Mock };
+  let mockCircleMembership: { requireOwnerRole: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockCircleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue(undefined),
+      requireOwnerRole: jest.fn().mockResolvedValue(undefined),
     };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue(null),
@@ -97,7 +97,7 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: {} },
-        { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: OwnerAccessService, useValue: mockCircleMembership },
         { provide: GEO_LOCATION_PROVIDER, useValue: {} },
         { provide: ForwardGeocodeService, useValue: {} },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
@@ -125,10 +125,10 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
   // ---------------------------------------------------------------------------
 
   describe('exploreLocations', () => {
-    it('calls assertCircleAccess with the supplied circleId, userId, permissions, and viewer role', async () => {
+    it('calls requireOwnerRole with the supplied circleId, userId, permissions, and viewer role', async () => {
       await service.exploreLocations(CIRCLE_ID, USER_ID, ['circles:read']);
 
-      expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
         USER_ID,
         CIRCLE_ID,
         ['circles:read'],
@@ -350,11 +350,11 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
 
   describe('exploreLocationLevel', () => {
     it.each(['countries', 'regions', 'cities'] as const)(
-      'calls assertCircleAccess with viewer role for a valid level (%s)',
+      'calls requireOwnerRole with viewer role for a valid level (%s)',
       async (level) => {
         await service.exploreLocationLevel(CIRCLE_ID, level, USER_ID, ['circles:read']);
 
-        expect(mockCircleMembership.assertCircleAccess).toHaveBeenCalledWith(
+        expect(mockCircleMembership.requireOwnerRole).toHaveBeenCalledWith(
           USER_ID,
           CIRCLE_ID,
           ['circles:read'],
@@ -369,12 +369,12 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('does NOT call assertCircleAccess when the level is invalid (validation runs first)', async () => {
+    it('does NOT call requireOwnerRole when the level is invalid (validation runs first)', async () => {
       await expect(
         service.exploreLocationLevel(CIRCLE_ID, 'planets', USER_ID, []),
       ).rejects.toThrow(BadRequestException);
 
-      expect(mockCircleMembership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(mockCircleMembership.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('does NOT hit the database when the level is invalid', async () => {

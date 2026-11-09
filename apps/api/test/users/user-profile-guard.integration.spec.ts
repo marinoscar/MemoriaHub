@@ -9,7 +9,7 @@
  * RAW `AuthenticatedUser` (no `.permissions` field at all). That raw object,
  * mistyped as `RequestUser`, flowed into
  * `UserAvatarService.updateProfile` -> `assertPersonLinkable` ->
- * `CircleMembershipService.assertCircleAccess(..., user.permissions, ...)`,
+ * `OwnerAccessService.requireOwnerRole(..., user.permissions, ...)`,
  * where `permissions.includes(...)` threw `TypeError: Cannot read properties
  * of undefined (reading 'includes')`. `assertPersonLinkable`'s own try/catch
  * (there to collapse a genuine ForbiddenException into an enumeration-resistant

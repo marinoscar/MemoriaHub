@@ -3,7 +3,7 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { LegacyAiModule } from '../ai-port/legacy-ai.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaTouchModule } from '../media/media-touch.module';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AutoTaggingHandler } from './auto-tagging.handler';
@@ -17,7 +17,7 @@ import { TaggingBackfillService } from './tagging-backfill.service';
 import { AdminTaggingController } from './admin-tagging.controller';
 
 @Module({
-  imports: [EnrichmentModule, LegacyAiModule, MediaProcessingModule, PrismaModule, CirclesModule, MediaTouchModule],
+  imports: [EnrichmentModule, LegacyAiModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaTouchModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
   providers: [
     AutoTaggingHandler,

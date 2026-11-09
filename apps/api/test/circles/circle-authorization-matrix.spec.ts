@@ -7,7 +7,7 @@ import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
-import { CircleMembershipService } from '../../src/circles/circle-membership.service';
+import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
@@ -132,7 +132,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     getBucket: jest.Mock;
   };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
-  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -151,8 +151,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
     // Default: collaborator member, not super-admin
-    mockCircleMembershipService = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator' as CircleRole, isSuperAdmin: false }),
+    mockOwnerAccessService = {
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'editor', isSuperAdmin: false }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -166,7 +166,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
         { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
         {
@@ -209,16 +209,16 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
       mockPrisma.storageObject.findUnique.mockResolvedValue(
         makeStorageObject({ id: item.storageObjectId }) as any,
       );
-      // assertCircleAccess resolves → USER_B is a viewer/member
-      mockCircleMembershipService.assertCircleAccess.mockResolvedValue({
-        role: 'viewer' as CircleRole,
+      // requireOwnerRole resolves → USER_B is a viewer/member
+      mockOwnerAccessService.requireOwnerRole.mockResolvedValue({
+        role: 'viewer',
         isSuperAdmin: false,
       });
 
       const result = await service.getMedia(item.id, USER_B, ownPerms);
 
       expect(result).toMatchObject({ id: item.id });
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_B,
         CIRCLE_A,
         ownPerms,
@@ -229,8 +229,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('non-member gets ForbiddenException when trying to read a circle item', async () => {
       const item = makeMediaItem({ addedById: USER_A, circleId: CIRCLE_A });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      // assertCircleAccess throws → non-member
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      // requireOwnerRole throws → non-member
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('You are not a member of this circle'),
       );
 
@@ -249,8 +249,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
       const storageObject = makeStorageObject({ uploadedById: USER_A });
       mockPrisma.storageObject.findUnique.mockResolvedValue(storageObject as any);
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
-      // assertCircleAccess throws because viewer < collaborator
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      // requireOwnerRole throws because viewer < collaborator
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('This action requires collaborator role or higher'),
       );
 
@@ -266,7 +266,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('updateMedia throws ForbiddenException for viewer', async () => {
       const item = makeMediaItem({ circleId: CIRCLE_A });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('This action requires collaborator role or higher'),
       );
 
@@ -278,7 +278,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('deleteMedia throws ForbiddenException for viewer', async () => {
       const item = makeMediaItem({ circleId: CIRCLE_A });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValue(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValue(
         new ForbiddenException('This action requires collaborator role or higher'),
       );
 
@@ -294,8 +294,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
   describe('Collaborator can perform write operations', () => {
     beforeEach(() => {
-      mockCircleMembershipService.assertCircleAccess.mockResolvedValue({
-        role: 'collaborator' as CircleRole,
+      mockOwnerAccessService.requireOwnerRole.mockResolvedValue({
+        role: 'editor',
         isSuperAdmin: false,
       });
     });
@@ -343,8 +343,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
   describe('Circle admin has at least collaborator-level access', () => {
     beforeEach(() => {
-      mockCircleMembershipService.assertCircleAccess.mockResolvedValue({
-        role: 'circle_admin' as CircleRole,
+      mockOwnerAccessService.requireOwnerRole.mockResolvedValue({
+        role: 'admin',
         isSuperAdmin: false,
       });
     });
@@ -383,13 +383,13 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('circle_admin of circle A cannot read media from circle B', async () => {
       const itemInB = makeMediaItem({ circleId: CIRCLE_B, addedById: USER_B });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(itemInB as any);
-      // assertCircleAccess is called with CIRCLE_B and throws for USER_A
-      mockCircleMembershipService.assertCircleAccess.mockImplementation(
+      // requireOwnerRole is called with CIRCLE_B and throws for USER_A
+      mockOwnerAccessService.requireOwnerRole.mockImplementation(
         async (userId, circleId) => {
           if (circleId === CIRCLE_B) {
             throw new ForbiddenException('You are not a member of this circle');
           }
-          return { role: 'circle_admin' as CircleRole, isSuperAdmin: false };
+          return { role: 'admin', isSuperAdmin: false };
         },
       );
 
@@ -399,12 +399,12 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
     it('circle_admin of circle A cannot delete media from circle B', async () => {
       const itemInB = makeMediaItem({ circleId: CIRCLE_B, addedById: USER_B });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(itemInB as any);
-      mockCircleMembershipService.assertCircleAccess.mockImplementation(
+      mockOwnerAccessService.requireOwnerRole.mockImplementation(
         async (userId, circleId) => {
           if (circleId === CIRCLE_B) {
             throw new ForbiddenException('You are not a member of this circle');
           }
-          return { role: 'circle_admin' as CircleRole, isSuperAdmin: false };
+          return { role: 'admin', isSuperAdmin: false };
         },
       );
 
@@ -418,8 +418,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
   describe('Super-admin (global media:read_any / write_any) bypasses circle membership', () => {
     beforeEach(() => {
-      mockCircleMembershipService.assertCircleAccess.mockResolvedValue({
-        role: 'circle_admin' as CircleRole,
+      mockOwnerAccessService.requireOwnerRole.mockResolvedValue({
+        role: 'admin',
         isSuperAdmin: true,
       });
     });
@@ -433,8 +433,8 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
       const result = await service.getMedia(item.id, USER_A, superAdminPerms);
       expect(result.id).toBe(item.id);
-      // assertCircleAccess should have been called (service still delegates, mock returns super-admin result)
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      // requireOwnerRole should have been called (service still delegates, mock returns super-admin result)
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         USER_A,
         CIRCLE_B,
         superAdminPerms,

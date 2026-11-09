@@ -24,7 +24,7 @@ import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
-import { CircleMembershipService } from '../../src/circles/circle-membership.service';
+import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -167,7 +167,7 @@ describe('MediaService.streamExport', () => {
   let service: MediaService;
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: any;
-  let mockCircleMembership: { assertCircleAccess: jest.Mock };
+  let mockCircleMembership: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
@@ -178,7 +178,7 @@ describe('MediaService.streamExport', () => {
 
     // Default: all callers are circle members (collaborator role)
     mockCircleMembership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -195,9 +195,9 @@ describe('MediaService.streamExport', () => {
         // MediaService constructor index [2]: syncFromStorageObject is not
         // exercised by export tests — a no-op mock satisfies the dependency.
         { provide: MediaMetadataSyncService, useValue: { syncFromStorageObject: jest.fn() } },
-        // MediaService constructor index [3]: CircleMembershipService; export
+        // MediaService constructor index [3]: OwnerAccessService; export
         // tests don't exercise circle-auth paths so a stub is sufficient.
-        { provide: CircleMembershipService, useValue: mockCircleMembership },
+        { provide: OwnerAccessService, useValue: mockCircleMembership },
         { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
         { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
         { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
@@ -455,11 +455,11 @@ describe('MediaService.streamExport', () => {
   const CIRCLE_ID = 'circle-export-test-0000-0001';
 
   describe('Circle-based access enforcement', () => {
-    it('should throw ForbiddenException when assertCircleAccess rejects (non-member)', async () => {
+    it('should throw ForbiddenException when requireOwnerRole rejects (non-member)', async () => {
       const { fakeRes, writeHead } = makeFakeReply();
 
-      // Simulate non-member: assertCircleAccess rejects
-      mockCircleMembership.assertCircleAccess.mockRejectedValueOnce(
+      // Simulate non-member: requireOwnerRole rejects
+      mockCircleMembership.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('You are not a member of this circle'),
       );
 
@@ -476,10 +476,10 @@ describe('MediaService.streamExport', () => {
       expect(writeHead).not.toHaveBeenCalled();
     });
 
-    it('should NOT call prisma.mediaItem.findMany when assertCircleAccess throws', async () => {
+    it('should NOT call prisma.mediaItem.findMany when requireOwnerRole throws', async () => {
       const { fakeRes } = makeFakeReply();
 
-      mockCircleMembership.assertCircleAccess.mockRejectedValueOnce(
+      mockCircleMembership.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('You are not a member of this circle'),
       );
 
@@ -510,7 +510,7 @@ describe('MediaService.streamExport', () => {
     });
 
     it('should allow a circle member to export circle media', async () => {
-      // Default mock in beforeEach: assertCircleAccess resolves → member
+      // Default mock in beforeEach: requireOwnerRole resolves → member
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       const { fakeRes, finished } = makeFakeReply();
@@ -528,8 +528,8 @@ describe('MediaService.streamExport', () => {
     });
 
     it('should allow super-admin (MEDIA_READ_ANY) to export any circle media', async () => {
-      // assertCircleAccess resolves with isSuperAdmin: true for admin with _any permissions
-      mockCircleMembership.assertCircleAccess.mockResolvedValueOnce({ role: 'circle_admin', isSuperAdmin: true });
+      // requireOwnerRole resolves with isSuperAdmin: true for admin with _any permissions
+      mockCircleMembership.requireOwnerRole.mockResolvedValueOnce({ role: 'admin', isSuperAdmin: true });
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValueOnce([]);
 
       const { fakeRes, finished } = makeFakeReply();

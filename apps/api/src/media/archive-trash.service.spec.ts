@@ -30,7 +30,7 @@ import {
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -140,7 +140,7 @@ describe('MediaService — archive & trash methods', () => {
     getBucket: jest.Mock;
   };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
-  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
@@ -167,8 +167,8 @@ describe('MediaService — archive & trash methods', () => {
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
-    mockCircleMembershipService = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    mockOwnerAccessService = {
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
     mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
@@ -185,7 +185,7 @@ describe('MediaService — archive & trash methods', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },

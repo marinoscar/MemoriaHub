@@ -3,7 +3,7 @@
  *
  * Covers the full action library. Every reused domain service (MediaService,
  * MediaEnrichmentService, PeopleService, BurstService, DuplicateService,
- * LocationSuggestionService, EnrichmentJobService, CircleMembershipService) is
+ * LocationSuggestionService, EnrichmentJobService, OwnerAccessService) is
  * a jest mock -- the executor's OWN logic (result-status mapping, group dedup
  * via ctx.handledGroups, the move_to_circle cross-circle cascade, the
  * album-name-cache, error->failed conversion) is what's under test, not the
@@ -25,7 +25,7 @@ import { BurstService } from '../../burst/burst.service';
 import { DuplicateService } from '../../dedup/duplicate.service';
 import { LocationSuggestionService } from '../../location-inference/location-suggestion.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { WorkflowAction, WorkflowActionContext } from './action-executor.types';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 
@@ -62,7 +62,7 @@ describe('WorkflowActionExecutor', () => {
   let duplicate: jest.Mocked<Pick<DuplicateService, 'resolveDuplicateGroup' | 'dismissDuplicateGroup'>>;
   let locationSuggestions: jest.Mocked<Pick<LocationSuggestionService, 'acceptSuggestion' | 'rejectSuggestion'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
-  let membership: jest.Mocked<Pick<CircleMembershipService, 'assertCircleAccess'>>;
+  let membership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
   let ctx: WorkflowActionContext;
 
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe('WorkflowActionExecutor', () => {
     };
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
     membership = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'editor' as const, isSuperAdmin: false }),
     };
 
     executor = new WorkflowActionExecutor(
@@ -118,7 +118,7 @@ describe('WorkflowActionExecutor', () => {
       duplicate as unknown as DuplicateService,
       locationSuggestions as unknown as LocationSuggestionService,
       enrichmentJobs as unknown as EnrichmentJobService,
-      membership as unknown as CircleMembershipService,
+      membership as unknown as OwnerAccessService,
     );
 
     ctx = {
@@ -571,7 +571,7 @@ describe('WorkflowActionExecutor', () => {
         ctx,
       );
       expect(outcome).toEqual({ status: 'skipped', reason: 'same_circle' });
-      expect(membership.assertCircleAccess).not.toHaveBeenCalled();
+      expect(membership.requireOwnerRole).not.toHaveBeenCalled();
     });
 
     it('re-checks collaborator access on BOTH source and target circles', async () => {
@@ -585,26 +585,26 @@ describe('WorkflowActionExecutor', () => {
 
       await executor.execute(action('move_to_circle', { targetCircleId: OTHER_CIRCLE_ID }), { id: ITEM_ID }, ctx);
 
-      expect(membership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(membership.requireOwnerRole).toHaveBeenCalledWith(
         ACTOR_ID,
         CIRCLE_ID,
         ctx.actorPermissions,
-        'collaborator',
+        'editor',
       );
-      expect(membership.assertCircleAccess).toHaveBeenCalledWith(
+      expect(membership.requireOwnerRole).toHaveBeenCalledWith(
         ACTOR_ID,
         OTHER_CIRCLE_ID,
         ctx.actorPermissions,
-        'collaborator',
+        'editor',
       );
     });
 
     it('fails when the actor lacks target-circle collaborator access', async () => {
-      membership.assertCircleAccess.mockImplementation(async (_u, circleId) => {
+      membership.requireOwnerRole.mockImplementation(async (_u, circleId) => {
         if (circleId === OTHER_CIRCLE_ID) {
           throw new BadRequestException('no target access');
         }
-        return { role: 'collaborator', isSuperAdmin: false };
+        return { role: 'editor' as const, isSuperAdmin: false };
       });
 
       const outcome = await executor.execute(

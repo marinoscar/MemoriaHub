@@ -4,7 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { CircleRole, JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
+import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
@@ -13,7 +13,7 @@ import { BurstService } from '../../burst/burst.service';
 import { DuplicateService } from '../../dedup/duplicate.service';
 import { LocationSuggestionService } from '../../location-inference/location-suggestion.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { BulkDeleteDto } from '../../media/dto/bulk-delete.dto';
 import { BulkArchiveDto } from '../../media/dto/bulk-archive.dto';
 import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
@@ -69,7 +69,7 @@ export class WorkflowActionExecutor {
     private readonly duplicate: DuplicateService,
     private readonly locationSuggestions: LocationSuggestionService,
     private readonly enrichmentJobs: EnrichmentJobService,
-    private readonly membership: CircleMembershipService,
+    private readonly membership: OwnerAccessService,
   ) {}
 
   /** Release a finished run's album-name cache (called by the run engine). */
@@ -381,7 +381,7 @@ export class WorkflowActionExecutor {
    * move_to_circle — the ONE action with cross-circle cascade semantics.
    *
    * Re-verifies collaborator access on BOTH the source (ctx.circleId) and the
-   * target circle at execute time (assertCircleAccess honors the super-admin
+   * target circle at execute time (requireOwnerRole honors the super-admin
    * bypass). Skips on a content-hash collision with an active item in the
    * target circle. Otherwise, in one transaction, reassigns circle_id, drops
    * the item's circle-scoped associations (album_items, faces, media_tags) and
@@ -397,8 +397,8 @@ export class WorkflowActionExecutor {
     if (targetCircleId === ctx.circleId) return { status: 'skipped', reason: 'same_circle' };
 
     // Both-circle collaborator + super-admin bypass re-check at execute time.
-    await this.membership.assertCircleAccess(ctx.actorUserId, ctx.circleId, ctx.actorPermissions, CircleRole.collaborator);
-    await this.membership.assertCircleAccess(ctx.actorUserId, targetCircleId, ctx.actorPermissions, CircleRole.collaborator);
+    await this.membership.requireOwnerRole(ctx.actorUserId, ctx.circleId, ctx.actorPermissions, 'editor');
+    await this.membership.requireOwnerRole(ctx.actorUserId, targetCircleId, ctx.actorPermissions, 'editor');
 
     const row = await this.prisma.mediaItem.findUnique({
       where: { id: item.id },

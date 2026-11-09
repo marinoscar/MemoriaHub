@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaModule } from '../media/media.module';
 import { BurstModule } from '../burst/burst.module';
@@ -35,7 +35,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 @Module({
   imports: [
     PrismaModule,
-    CirclesModule,
+    OwnerAccessModule,
     EnrichmentModule,
     MediaModule,
     

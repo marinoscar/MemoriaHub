@@ -19,7 +19,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { MediaService } from './media.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
@@ -102,8 +102,8 @@ describe('MediaService — Location Grouping read paths (issue #374)', () => {
         },
         { provide: MediaMetadataSyncService, useValue: {} },
         {
-          provide: CircleMembershipService,
-          useValue: { assertCircleAccess: jest.fn().mockResolvedValue(undefined) },
+          provide: OwnerAccessService,
+          useValue: { requireOwnerRole: jest.fn().mockResolvedValue(undefined) },
         },
         { provide: GEO_LOCATION_PROVIDER, useValue: {} },
         { provide: ForwardGeocodeService, useValue: {} },

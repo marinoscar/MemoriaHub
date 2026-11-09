@@ -2,7 +2,7 @@
  * Unit tests for FaceDetectionController.
  *
  * Verifies that each handler:
- *   - delegates RBAC enforcement to CircleMembershipService
+ *   - delegates RBAC enforcement to OwnerAccessService
  *   - returns the expected response shape
  *   - throws NotFoundException when the mediaItem does not exist
  *
@@ -13,7 +13,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { FaceDetectionController } from './face-detection.controller';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -25,8 +25,8 @@ import { RequestUser } from '@marinoscar/platform-api/identity';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockCircleMembershipService = {
-  assertCircleAccess: jest.fn(),
+const mockOwnerAccessService = {
+  requireOwnerRole: jest.fn(),
 };
 
 const mockEnrichmentJobService = {
@@ -84,8 +84,8 @@ describe('FaceDetectionController', () => {
     jest.clearAllMocks();
     mockPrisma = createMockPrismaService();
 
-    // Default: assertCircleAccess resolves (access granted)
-    mockCircleMembershipService.assertCircleAccess.mockResolvedValue(undefined);
+    // Default: requireOwnerRole resolves (access granted)
+    mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
 
     // Default: enqueue returns a minimal job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
@@ -100,7 +100,7 @@ describe('FaceDetectionController', () => {
       controllers: [FaceDetectionController],
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: PeopleService, useValue: mockPeopleService },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
@@ -153,14 +153,14 @@ describe('FaceDetectionController', () => {
       });
     });
 
-    it('calls circleMembershipService.assertCircleAccess with viewer role', async () => {
+    it('calls circleMembershipService.requireOwnerRole with viewer role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       (mockPrisma.face.findMany as jest.Mock).mockResolvedValue([]);
 
       const user = makeUser();
       await controller.listFaces('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
@@ -373,7 +373,7 @@ describe('FaceDetectionController', () => {
       );
     });
 
-    it('calls circleMembershipService.assertCircleAccess with collaborator role', async () => {
+    it('calls circleMembershipService.requireOwnerRole with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
       mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
@@ -381,11 +381,11 @@ describe('FaceDetectionController', () => {
       const user = makeUser();
       await controller.rerunFaceDetection('media-1', user);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         user.id,
         'circle-1',
         user.permissions,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -424,7 +424,7 @@ describe('FaceDetectionController', () => {
       await expect(controller.deleteAllBiometrics('', makeUser())).rejects.toThrow(BadRequestException);
     });
 
-    it('calls circleMembershipService.assertCircleAccess with circle_admin role', async () => {
+    it('calls circleMembershipService.requireOwnerRole with circle_admin role', async () => {
       const user = makeUser({ permissions: ['face_settings:write'] });
       (mockPrisma.$transaction as jest.Mock).mockImplementation(async (cb: any) => {
         (mockPrisma.face.count as jest.Mock).mockResolvedValue(5);
@@ -438,8 +438,8 @@ describe('FaceDetectionController', () => {
         return cb(mockPrisma);
       });
       await controller.deleteAllBiometrics('circle-1', user);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
-        user.id, 'circle-1', user.permissions, 'circle_admin'
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
+        user.id, 'circle-1', user.permissions, 'admin'
       );
     });
 

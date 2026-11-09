@@ -15,7 +15,7 @@ import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -204,7 +204,7 @@ describe('MediaService', () => {
     getBucket: jest.Mock;
   };
   let mockSyncService: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
-  let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
+  let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
   let mockGeoProvider: { reverseGeocode: jest.Mock };
   let mockForwardGeocodeService: { searchPlaces: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
@@ -240,8 +240,8 @@ describe('MediaService', () => {
     mockSyncService = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
     };
-    mockCircleMembershipService = {
-      assertCircleAccess: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+    mockOwnerAccessService = {
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
     mockGeoProvider = { reverseGeocode: jest.fn().mockResolvedValue(null) };
     mockForwardGeocodeService = { searchPlaces: jest.fn().mockResolvedValue([]) };
@@ -296,7 +296,7 @@ describe('MediaService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
         { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
         { provide: StorageProviderResolver, useValue: mockResolver },
@@ -1045,7 +1045,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException when non-owner without _any permission accesses', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue({ ...item, mediaTags: [] } as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.getMedia(item.id, 'user-1', ownPerms),
@@ -1097,7 +1097,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.updateMedia(item.id, { description: 'hack' }, 'user-1', ownPerms),
@@ -1173,7 +1173,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.deleteMedia(item.id, 'user-1', ownPerms),
@@ -1316,7 +1316,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.attachTags(item.id, { names: ['nature'] }, 'user-1', ownPerms),
@@ -1385,7 +1385,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const item = makeMediaItem({ addedById: 'other-user' });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(item as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.removeTag(item.id, randomUUID(), 'user-1', ownPerms),
@@ -1635,7 +1635,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const album = { ...makeAlbum({ addedById: 'other-user' }), items: [] };
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.getAlbum(album.id, 'user-1', ownPerms),
@@ -1685,7 +1685,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.updateAlbum(album.id, { name: 'hack' }, 'user-1', ownPerms),
@@ -1871,7 +1871,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.deleteAlbum(album.id, 'user-1', ownPerms),
@@ -2071,7 +2071,7 @@ describe('MediaService', () => {
     it('role enforcement: viewer role causes rejection and createMany is NOT called', async () => {
       const album = makeAlbum({ addedById: 'other-user', circleId: CIRCLE_ID });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('insufficient circle role'),
       );
 
@@ -2209,7 +2209,7 @@ describe('MediaService', () => {
     it('should throw ForbiddenException for non-owner without _any permission', async () => {
       const album = makeAlbum({ addedById: 'other-user' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(new ForbiddenException('forbidden'));
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(new ForbiddenException('forbidden'));
 
       await expect(
         service.removeAlbumItem(album.id, randomUUID(), 'user-1', ownPerms),
@@ -2480,9 +2480,9 @@ describe('MediaService', () => {
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValue([]);
     });
 
-    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+    it('calls requireOwnerRole with (userId, circleId, userPermissions, "viewer") before querying', async () => {
       await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         CIRCLE_ID,
         ownPerms,
@@ -2623,9 +2623,9 @@ describe('MediaService', () => {
     describe('mercator grid (zoom provided)', () => {
       const zoomQuery = { ...baseQuery, zoom: 5 } as any;
 
-      it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+      it('calls requireOwnerRole with (userId, circleId, userPermissions, "viewer") before querying', async () => {
         await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
-        expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+        expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
           'user-1',
           CIRCLE_ID,
           ownPerms,
@@ -2767,9 +2767,9 @@ describe('MediaService', () => {
       );
     });
 
-    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer") before querying', async () => {
+    it('calls requireOwnerRole with (userId, circleId, userPermissions, "viewer") before querying', async () => {
       await service.getLocationsExtent(baseQuery, 'user-1', ownPerms);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         CIRCLE_ID,
         ownPerms,
@@ -2916,10 +2916,10 @@ describe('MediaService', () => {
       (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     });
 
-    it('calls assertCircleAccess with (userId, circleId, userPermissions, "viewer")', async () => {
+    it('calls requireOwnerRole with (userId, circleId, userPermissions, "viewer")', async () => {
       const id = randomUUID();
       await service.getThumbnails(baseQuery([id]), 'user-1', ownPerms);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         CIRCLE_ID,
         ownPerms,
@@ -3189,9 +3189,9 @@ describe('MediaService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws ForbiddenException when assertCircleAccess rejects (collaborator gate)', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects (collaborator gate)', async () => {
       const dto = makeBulkUpdateDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -3397,9 +3397,9 @@ describe('MediaService', () => {
       };
     }
 
-    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects', async () => {
       const dto = makeBulkTagsDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -3595,9 +3595,9 @@ describe('MediaService', () => {
       };
     }
 
-    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects', async () => {
       const dto = makeBulkDeleteDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -3659,9 +3659,9 @@ describe('MediaService', () => {
       };
     }
 
-    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects and enqueues nothing', async () => {
       const dto = makeBulkRerunDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -3688,7 +3688,7 @@ describe('MediaService', () => {
       expect(mockMediaEnrichmentService.enqueueTagRerun).not.toHaveBeenCalled();
     });
 
-    it('calls assertCircleAccess with role "collaborator"', async () => {
+    it('calls requireOwnerRole with role "collaborator"', async () => {
       const ids = [randomUUID(), randomUUID()];
       const dto = makeBulkRerunDto({ ids });
       mockPrisma.mediaItem.findMany.mockResolvedValue(
@@ -3697,11 +3697,11 @@ describe('MediaService', () => {
 
       await service.bulkRerunTags(dto, 'user-1', ownPerms);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         CIRCLE_ID,
         ownPerms,
-        'collaborator',
+        'editor',
       );
     });
 
@@ -3765,9 +3765,9 @@ describe('MediaService', () => {
       };
     }
 
-    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects and enqueues nothing', async () => {
       const dto = makeBulkRerunDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -3870,9 +3870,9 @@ describe('MediaService', () => {
       };
     }
 
-    it('throws ForbiddenException when assertCircleAccess rejects and enqueues nothing', async () => {
+    it('throws ForbiddenException when requireOwnerRole rejects and enqueues nothing', async () => {
       const dto = makeBulkRerunDto();
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Insufficient circle role'),
       );
 
@@ -4070,8 +4070,8 @@ describe('MediaService', () => {
   describe('getDashboard', () => {
     const dashboardQuery = { circleId: CIRCLE_ID } as any;
 
-    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+    it('throws ForbiddenException when requireOwnerRole rejects', async () => {
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Not a circle member'),
       );
 
@@ -4303,8 +4303,8 @@ describe('MediaService', () => {
 
       await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
 
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledTimes(1);
-      expect(mockCircleMembershipService.assertCircleAccess).toHaveBeenCalledWith(
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledTimes(1);
+      expect(mockOwnerAccessService.requireOwnerRole).toHaveBeenCalledWith(
         'user-1',
         CIRCLE_ID,
         ownPerms,
@@ -4312,8 +4312,8 @@ describe('MediaService', () => {
       );
     });
 
-    it('throws ForbiddenException when assertCircleAccess rejects', async () => {
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+    it('throws ForbiddenException when requireOwnerRole rejects', async () => {
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Not a circle member'),
       );
 
@@ -4323,7 +4323,7 @@ describe('MediaService', () => {
     });
 
     it('does not run any count query when access is denied', async () => {
-      mockCircleMembershipService.assertCircleAccess.mockRejectedValueOnce(
+      mockOwnerAccessService.requireOwnerRole.mockRejectedValueOnce(
         new ForbiddenException('Not a circle member'),
       );
 

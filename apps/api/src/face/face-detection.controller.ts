@@ -22,12 +22,12 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { IsString, IsOptional, IsUUID } from 'class-validator';
-import { CircleRole, MediaType } from '@prisma/client';
+import { MediaType } from '@prisma/client';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import {
   JobReason,
   MediaFaceStatusType,
@@ -71,7 +71,7 @@ export class FaceDetectionController {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly peopleService: PeopleService,
     private readonly mediaThumbnailService: MediaThumbnailService,
@@ -199,7 +199,7 @@ export class FaceDetectionController {
     const mediaItem = await this.assertMediaItemAccess(
       mediaItemId,
       user,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Always create a new job on rerun — user intentionally requested it
@@ -266,11 +266,11 @@ export class FaceDetectionController {
     }
 
     // Require circle_admin (super-admin bypasses via isSuperAdmin)
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       circleId,
       user.permissions,
-      'circle_admin' as CircleRole,
+      'admin',
     );
 
     // Execute in a transaction
@@ -396,7 +396,7 @@ export class FaceDetectionController {
   private async assertMediaItemAccess(
     mediaItemId: string,
     user: RequestUser,
-    requiredRole: CircleRole = 'viewer' as CircleRole,
+    requiredRole: OwnerRole = 'viewer',
   ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -407,7 +407,7 @@ export class FaceDetectionController {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       user.id,
       mediaItem.circleId,
       user.permissions,

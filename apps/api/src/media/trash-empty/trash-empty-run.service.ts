@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
-  CircleRole,
   JobReason,
   Prisma,
   TrashEmptyRun,
@@ -16,7 +15,7 @@ import {
   TrashEmptyRunStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CircleMembershipService } from '../../circles/circle-membership.service';
+import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaThumbnailService } from '../media-thumbnail.service';
 
@@ -61,7 +60,7 @@ export class TrashEmptyRunService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly circleMembership: CircleMembershipService,
+    private readonly circleMembership: OwnerAccessService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,
     // App metrics (RETRO-T3, #628): `app.runs.finished{engine=trash_empty,outcome=cancelled}`. Optional for hand-built tests.
@@ -78,11 +77,11 @@ export class TrashEmptyRunService {
    * in-flight for the circle.
    */
   async createRun(circleId: string, userId: string, perms: string[]) {
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       circleId,
       perms,
-      CircleRole.circle_admin,
+      'admin',
     );
 
     // Per-circle concurrency guard (served by the (circle_id, status) index).
@@ -132,11 +131,11 @@ export class TrashEmptyRunService {
     const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       run.circleId,
       perms,
-      CircleRole.circle_admin,
+      'admin',
     );
 
     if (TERMINAL_RUN_STATUSES.includes(run.status)) {
@@ -169,11 +168,11 @@ export class TrashEmptyRunService {
     const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       run.circleId,
       perms,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const statusGroups = await this.prisma.trashEmptyRunItem.groupBy({
@@ -197,11 +196,11 @@ export class TrashEmptyRunService {
     const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
-    await this.circleMembership.assertCircleAccess(
+    await this.circleMembership.requireOwnerRole(
       userId,
       run.circleId,
       perms,
-      CircleRole.viewer,
+      'viewer',
     );
 
     const { page, pageSize, status } = query;

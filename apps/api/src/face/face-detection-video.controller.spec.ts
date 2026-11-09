@@ -14,7 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { FaceDetectionController } from './face-detection.controller';
 import { PrismaService } from '../prisma/prisma.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -25,7 +25,7 @@ import { RequestUser } from '@marinoscar/platform-api/identity';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockCircleMembershipService = { assertCircleAccess: jest.fn() };
+const mockOwnerAccessService = { requireOwnerRole: jest.fn() };
 const mockEnrichmentJobService = { enqueue: jest.fn() };
 const mockPeopleService = {};
 const mockMediaThumbnailService = {
@@ -89,7 +89,7 @@ describe('FaceDetectionController — video face fields', () => {
     jest.clearAllMocks();
     mockPrisma = createMockPrismaService();
 
-    mockCircleMembershipService.assertCircleAccess.mockResolvedValue(undefined);
+    mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
     mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: 'pending' });
     // Default: signThumb returns a fixed URL
     mockMediaThumbnailService.signThumb.mockResolvedValue('https://cdn.example.com/signed-thumb.jpg');
@@ -98,7 +98,7 @@ describe('FaceDetectionController — video face fields', () => {
       controllers: [FaceDetectionController],
       providers: [
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: CircleMembershipService, useValue: mockCircleMembershipService },
+        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: PeopleService, useValue: mockPeopleService },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },

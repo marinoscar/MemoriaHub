@@ -2,7 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
@@ -22,7 +22,7 @@ import { ReviewRunsModule } from '../review-runs/review-runs.module';
     EnrichmentModule,
     MediaProcessingModule,
     PrismaModule,
-    CirclesModule,
+    OwnerAccessModule,
     
     MediaModule,
     // Mutual: the duplicate review-run strategy wraps DuplicateService's

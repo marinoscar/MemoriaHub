@@ -14,6 +14,8 @@ import {
 import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { prismaMock } from '../mocks/prisma.mock';
+import { mirroredSharingData } from '../mocks/group-mirror.mock';
+import { SHARING_DATA } from '@marinoscar/platform-api/sharing';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
 
@@ -139,7 +141,16 @@ export async function createTestApp(
       })
       // The single-organization default: no organizations table behind the mock.
       .overrideProvider(DefaultOrgId)
-      .useValue({ get: async () => '00000000-0000-4000-8000-0000000000d0' });
+      .useValue({ get: async () => '00000000-0000-4000-8000-0000000000d0' })
+      // The sharing slice's data port: group memberships mirrored from the circle
+      // mocks, as the RETRO-I2 trigger mirrors them in the database (RETRO-I3).
+      // `runAsSystem` stays on the (possibly suite-overridden) PrismaSystemService.
+      .overrideProvider(SHARING_DATA)
+      .useFactory({
+        factory: (system: { runAsSystem: (reason: string, fn: (tx: unknown) => unknown) => unknown }) =>
+          mirroredSharingData(prismaMock, system),
+        inject: [PrismaSystemService],
+      });
     for (const { provide, useValue } of options.overrideProviders ?? []) {
       builder = builder.overrideProvider(provide).useValue(useValue);
     }

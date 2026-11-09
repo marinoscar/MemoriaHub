@@ -1,7 +1,7 @@
 import { Injectable, Module } from '@nestjs/common';
 
 import { bindIdentityExtensionClient } from '../app-registrations/identity';
-import { CirclesModule } from '../circles/circles.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { UserAvatarService } from './user-avatar.service';
@@ -26,7 +26,7 @@ export class IdentityExtensionBinder {
  *
  * Imports (profile picture management, issue #354):
  *   - MediaProcessingModule: StorageProviderResolver, for the rendered avatar.
- *   - CirclesModule: CircleMembershipService.assertCircleAccess, to validate a
+ *   - OwnerAccessModule: OwnerAccessService.requireOwnerRole, to validate a
  *     person link against the caller's circle membership.
  *   - SettingsModule: UserSettingsService, the single writer of
  *     User.displayName (via its syncDisplayName).
@@ -40,7 +40,7 @@ export class IdentityExtensionBinder {
  * before any parametric route.
  */
 @Module({
-  imports: [MediaProcessingModule, CirclesModule, ],
+  imports: [MediaProcessingModule, OwnerAccessModule, ],
   controllers: [UserProfileController],
   providers: [UserAvatarService, IdentityExtensionBinder],
   exports: [UserAvatarService],

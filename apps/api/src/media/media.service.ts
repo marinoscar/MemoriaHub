@@ -10,7 +10,6 @@ import {
 } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
-import { CircleRole } from '@prisma/client';
 import { FastifyReply } from 'fastify';
 import { stringify as csvStringify } from 'csv-stringify';
 import { PrismaService } from '../prisma/prisma.service';
@@ -36,7 +35,7 @@ import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate
 import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query.dto';
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { CircleMembershipService } from '../circles/circle-membership.service';
+import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
@@ -101,7 +100,7 @@ export class MediaService {
     @Inject(STORAGE_PROVIDER)
     private readonly storageProvider: StorageProvider,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly circleMembershipService: CircleMembershipService,
+    private readonly circleMembershipService: OwnerAccessService,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly forwardGeocodeService: ForwardGeocodeService,
     private readonly resolver: StorageProviderResolver,
@@ -181,7 +180,7 @@ export class MediaService {
       );
     }
 
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, userPermissions, 'collaborator' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
 
     // Android Media Sync attribution (#505): an android upload naming a
     // device must name an active device of the caller's.
@@ -434,7 +433,7 @@ export class MediaService {
       peopleMatch,
     } = query;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // Resolve which person filter to apply (personIds takes precedence over personId)
     const effectivePersonIds =
@@ -568,7 +567,7 @@ export class MediaService {
       limit,
     } = query;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const where: Prisma.MediaItemWhereInput = {
       circleId,
@@ -735,11 +734,11 @@ export class MediaService {
   > {
     const { circleId, precision, zoom, bbox, capturedAtFrom, capturedAtTo, type } = query;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     // Build optional WHERE fragments; user input is always parameterized.
@@ -845,11 +844,11 @@ export class MediaService {
   ): Promise<{ minLat: number; minLng: number; maxLat: number; maxLng: number; count: number } | null> {
     const { circleId, capturedAtFrom, capturedAtTo, type } = query;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const where: Prisma.MediaItemWhereInput = {
@@ -911,11 +910,11 @@ export class MediaService {
   ): Promise<Array<{ id: string; thumbnailUrl: string | null }>> {
     const { circleId, ids } = query;
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
@@ -956,7 +955,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(userId, item.circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, item.circleId, userPermissions, 'viewer');
 
     // Fetch only the fields needed to sign the download URL (avoids spreading
     // BigInt `size` into the response; storageProvider + bucket are needed to
@@ -998,7 +997,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const updated = await this.prisma.mediaItem.update({
@@ -1032,7 +1031,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     await this.prisma.mediaItem.update({
@@ -1053,7 +1052,7 @@ export class MediaService {
    * List the caller's tags with the count of active (non-deleted) MediaItems attached.
    */
   async listTags(circleId: string, userId: string, userPermissions: string[]) {
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const tags = await this.prisma.tag.findMany({
       where: { circleId },
@@ -1088,7 +1087,7 @@ export class MediaService {
       mediaItemId,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const result: Array<{ tagId: string; name: string }> = [];
@@ -1141,7 +1140,7 @@ export class MediaService {
       mediaItemId,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const mediaTag = await this.prisma.mediaTag.findUnique({
@@ -1172,7 +1171,7 @@ export class MediaService {
    * Create a new album owned by the caller.
    */
   async createAlbum(dto: CreateAlbumDto, userId: string, userPermissions: string[]) {
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, userPermissions, 'collaborator' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
 
     const album = await this.prisma.album.create({
       data: {
@@ -1195,7 +1194,7 @@ export class MediaService {
     const { circleId, page, pageSize, sortBy, sortOrder } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const where: Prisma.AlbumWhereInput = { circleId };
 
@@ -1276,7 +1275,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(userId, album.circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, album.circleId, userPermissions, 'viewer');
 
     // Flatten AlbumItem join rows into full MediaItem-shaped objects, each with
     // a signed thumbnailUrl (matching listMedia / listLocations item shape).
@@ -1311,7 +1310,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Resolve the cover pointer only when the field was actually supplied.
@@ -1359,7 +1358,7 @@ export class MediaService {
       id,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Backup change feed: capture member ids BEFORE the cascade removes the
@@ -1397,7 +1396,7 @@ export class MediaService {
       albumId,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     // Verify all mediaItemIds exist and belong to the same circle
@@ -1448,7 +1447,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
   ): Promise<{ added: number }> {
-    const album = await this.getAlbumWithOwnershipCheck(albumId, userId, userPermissions, 'collaborator' as CircleRole);
+    const album = await this.getAlbumWithOwnershipCheck(albumId, userId, userPermissions, 'editor');
 
     // Force the circle to match the album's circle — ignore any client-supplied circleId mismatch
     const {
@@ -1575,7 +1574,7 @@ export class MediaService {
       albumId,
       userId,
       userPermissions,
-      'collaborator' as CircleRole,
+      'editor',
     );
 
     const albumItem = await this.prisma.albumItem.findUnique({
@@ -1630,7 +1629,7 @@ export class MediaService {
     // 1. Circle access check (MUST happen before first write)
     // ------------------------------------------------------------------
     const { circleId, type, from, to } = dto;
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // ------------------------------------------------------------------
     // 2. Build Prisma where clause
@@ -1877,7 +1876,7 @@ export class MediaService {
   async getReviewCounts(query: ReviewCountsQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     return this.computeReviewCounts(circleId);
   }
@@ -1951,7 +1950,7 @@ export class MediaService {
   async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     const now = new Date();
     const month = now.getUTCMonth() + 1; // 1-12
@@ -2042,7 +2041,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ updated: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     const data: Record<string, unknown> = {};
 
@@ -2089,7 +2088,7 @@ export class MediaService {
     perms: string[],
     opts?: { addSource?: MediaTagSource; removeSources?: MediaTagSource[] },
   ): Promise<{ added: number; removed: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     let added = 0;
     let removed = 0;
@@ -2198,7 +2197,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ deleted: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     // The ids actually moved (already-trashed ones are not reported again), read before the write.
     const trashable = this.webhookEvents
@@ -2226,7 +2225,7 @@ export class MediaService {
   // ---------------------------------------------------------------------------
 
   async bulkArchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ archived: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     const { count } = await this.prisma.mediaItem.updateMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: null },
@@ -2238,7 +2237,7 @@ export class MediaService {
   }
 
   async bulkUnarchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ unarchived: number }> {
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     const { count } = await this.prisma.mediaItem.updateMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: { not: null } },
@@ -2264,7 +2263,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ queued: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     const uniqueIds = [...new Set(dto.ids)];
 
@@ -2298,7 +2297,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ queued: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     const uniqueIds = [...new Set(dto.ids)];
 
@@ -2328,7 +2327,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ queued: number }> {
-    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'collaborator' as CircleRole);
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
     const uniqueIds = [...new Set(dto.ids)];
     let queued = 0;
@@ -2345,7 +2344,7 @@ export class MediaService {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const where: Prisma.MediaItemWhereInput = {
       circleId,
@@ -2381,7 +2380,7 @@ export class MediaService {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const where: Prisma.MediaItemWhereInput = {
       circleId,
@@ -2417,7 +2416,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ restored: number; conflicts: string[] }> {
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     let restored = 0;
     const conflicts: string[] = [];
@@ -2633,7 +2632,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ deleted: number }> {
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'collaborator' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     const items = await this.prisma.mediaItem.findMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: { not: null } },
@@ -2650,7 +2649,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ deleted: number }> {
-    await this.circleMembershipService.assertCircleAccess(userId, dto.circleId, perms, 'circle_admin' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'admin');
 
     const items = await this.prisma.mediaItem.findMany({
       where: { circleId: dto.circleId, deletedAt: { not: null } },
@@ -2676,9 +2675,9 @@ export class MediaService {
     circleId: string,
     userId: string,
     perms: string[],
-    role: CircleRole,
+    role: OwnerRole,
   ): Promise<void> {
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, perms, role);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, role);
 
     const uniqueIds = [...new Set(ids)];
 
@@ -2704,7 +2703,7 @@ export class MediaService {
     id: string,
     userId: string,
     userPermissions: string[],
-    required: CircleRole,
+    required: OwnerRole,
   ) {
     const item = await this.prisma.mediaItem.findUnique({ where: { id } });
 
@@ -2712,7 +2711,7 @@ export class MediaService {
       throw new NotFoundException(`MediaItem with id ${id} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(userId, item.circleId, userPermissions, required);
+    await this.circleMembershipService.requireOwnerRole(userId, item.circleId, userPermissions, required);
 
     return item;
   }
@@ -2797,7 +2796,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
   ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // Fetch all geotagged items with the fields we need (no pagination — we aggregate)
     const items = await this.prisma.mediaItem.findMany({
@@ -2865,7 +2864,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
   ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
-    await this.circleMembershipService.assertCircleAccess(userId, circleId, userPermissions, 'viewer' as CircleRole);
+    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // Fetch tags with count and one cover media item's metadata
     const tags = await this.prisma.tag.findMany({
@@ -3227,11 +3226,11 @@ export class MediaService {
     regions: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
     cities: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
   }> {
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const rows = await this.fetchGeoGroupRows(circleId);
@@ -3282,11 +3281,11 @@ export class MediaService {
       );
     }
 
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     const rows = await this.fetchGeoGroupRows(circleId);
@@ -3313,7 +3312,7 @@ export class MediaService {
     id: string,
     userId: string,
     userPermissions: string[],
-    required: CircleRole,
+    required: OwnerRole,
   ) {
     const album = await this.prisma.album.findUnique({ where: { id } });
 
@@ -3321,7 +3320,7 @@ export class MediaService {
       throw new NotFoundException(`Album with id ${id} not found`);
     }
 
-    await this.circleMembershipService.assertCircleAccess(userId, album.circleId, userPermissions, required);
+    await this.circleMembershipService.requireOwnerRole(userId, album.circleId, userPermissions, required);
 
     return album;
   }
@@ -3366,11 +3365,11 @@ export class MediaService {
       }>;
     }>
   > {
-    await this.circleMembershipService.assertCircleAccess(
+    await this.circleMembershipService.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
-      'viewer' as CircleRole,
+      'viewer',
     );
 
     // Location Grouping (issue #374): the canonical columns are ADDED to `by:`

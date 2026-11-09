@@ -195,7 +195,7 @@ function makeWorkflowJob(overrides: Record<string, unknown> = {}): EnrichmentJob
 }
 
 /** Wires the Prisma calls the real `set_favorite` action path needs:
- * CircleMembershipService.assertCircleAccess (via setupCircleMocks),
+ * OwnerAccessService.requireOwnerRole (via setupCircleMocks),
  * MediaService.assertAllInCircle (mediaItem.findMany), and
  * MediaService.bulkUpdateMedia's write (mediaItem.updateMany). */
 function mockSetFavoriteAction(context: TestContext, itemId: string): void {
