@@ -3,11 +3,11 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { JobReason, MhLegacyJobStatus } from '@prisma/client';
-import { MediaReprocessService } from './media-reprocess.service';
+import { JobsService, type Job } from '@marinoscar/platform-api/jobs';
 import {
-  StorageProcessingRecoveryService,
-  StorageProcessingRecoveryResult,
-} from '../media-processing/recovery/storage-processing-recovery.service';
+  STORAGE_RECOVER_STUCK_TYPE,
+  STORAGE_REPROCESS_TYPE,
+} from '../media-processing/recovery/storage-recovery.constants';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auth } from '@marinoscar/platform-api/identity';
@@ -38,8 +38,7 @@ export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySche
 @Controller('admin/media')
 export class MediaReprocessController {
   constructor(
-    private readonly reprocessService: MediaReprocessService,
-    private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly jobs: JobsService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly prisma: PrismaService,
   ) {}
@@ -47,18 +46,28 @@ export class MediaReprocessController {
   @Post('reprocess')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
-    summary: 'Reprocess existing media thumbnails and dimensions (Admin)',
+    summary: 'Queue reprocessing of existing media objects (Admin)',
     description:
-      'Re-runs ImageDimensionsProcessor and ThumbnailProcessor for all ready/failed image and ' +
-      'video StorageObjects linked to MediaItems in the given circle (circleId) or all circles ' +
-      '(all:true). ImageDimensionsProcessor self-skips videos via canProcess; ThumbnailProcessor ' +
-      'covers both images and videos. ' +
-      'Old thumbnail blobs and StorageObject rows are deleted to prevent storage leaks.',
+      'Enqueues a media.storage.reprocess job (RETRO-D1b) and returns at once. The job queues the ' +
+      'platform storage.object.process job, at background priority, for every ready/failed image ' +
+      'and video StorageObject behind the live MediaItems of the given circle (circleId) or of every ' +
+      'circle (all:true or no circleId): the full pipeline re-runs, regenerating thumbnails and ' +
+      'dimensions. One job per circle (and one for all) is in flight at a time; a repeat request ' +
+      "returns that job's id. Follow it in /admin/settings/jobs.",
   })
-  @ApiResponse({ status: 201, description: '{ reprocessed: number, failed: number }' })
-  async reprocess(@Body() body: ReprocessBodyDto): Promise<{ reprocessed: number; failed: number }> {
+  @ApiResponse({ status: 201, description: '{ data: { jobId: string, status: string } }' })
+  async reprocess(@Body() body: ReprocessBodyDto): Promise<{ data: { jobId: string; status: string } }> {
     const circleId = body.circleId;
-    return this.reprocessService.reprocessCircle(circleId);
+    const job = await this.jobs.enqueue({
+      type: STORAGE_REPROCESS_TYPE,
+      reason: 'rerun',
+      // One in flight per circle, and one for the whole library.
+      ...(circleId ? { subjectType: 'circle', subjectId: circleId } : {}),
+      payload: circleId ? { circleId } : {},
+      orgId: null,
+      priority: 0,
+    });
+    return { data: { jobId: job.id, status: job.status } };
   }
 
   @Post('reprocess-stuck')
@@ -66,41 +75,59 @@ export class MediaReprocessController {
   @ApiOperation({
     summary: 'Recover StorageObjects orphaned at status=processing (Admin)',
     description:
-      'Finds StorageObjects stuck at status=processing (left behind when the API process was ' +
-      'killed mid-pipeline — OOM, crash, or deploy) older than olderThanMinutes (default: ' +
-      'STORAGE_PROCESSING_STUCK_MINUTES, currently 10) and re-runs the full processing pipeline ' +
-      '(content-hash/exif/dimensions/video-probe/geocode/thumbnail/visual-hash) for each — covers ' +
-      'both photos and videos. Retries are capped at STORAGE_PROCESSING_MAX_RETRIES per object; ' +
-      'objects that exhaust the cap are marked status=failed instead of retried further. The same ' +
-      'recovery also runs automatically every 10 minutes via StorageProcessingRecoveryTask — this ' +
-      'endpoint exists to trigger it immediately without waiting for the next tick.',
+      'Enqueues the media.storage.recover_stuck job (mode stuck) at priority 0 and returns at once ' +
+      '(RETRO-D1b). The job finds StorageObjects stuck at status=processing (left behind when a ' +
+      'process was killed mid-pipeline) older than olderThanMinutes (default: ' +
+      'STORAGE_PROCESSING_STUCK_MINUTES, 10) that have no live storage.object.process job, and ' +
+      're-queues that job for each. Retries are capped at STORAGE_PROCESSING_MAX_RETRIES per object; ' +
+      'objects that exhaust the cap are marked status=failed. The same job runs every 10 minutes ' +
+      '(StorageRecoveryTask); when one is already pending or running its id is returned instead ' +
+      '(a pending one is promoted to priority 0, and keeps its own olderThanMinutes).',
   })
-  @ApiResponse({ status: 201, description: '{ claimed: number, reprocessed: number, exhausted: number, errors: number }' })
-  async reprocessStuck(@Body() body: ReprocessStuckBodyDto): Promise<StorageProcessingRecoveryResult> {
-    return this.recoveryService.recoverStuckObjects(body.olderThanMinutes);
+  @ApiResponse({ status: 201, description: '{ data: { jobId: string, status: string } }' })
+  async reprocessStuck(
+    @Body() body: ReprocessStuckBodyDto,
+  ): Promise<{ data: { jobId: string; status: string } }> {
+    // No subject: collapses onto the cron's in-flight job of the same type.
+    const job = await this.jobs.enqueue({
+      type: STORAGE_RECOVER_STUCK_TYPE,
+      reason: 'rerun',
+      payload: { mode: 'stuck', ...(body.olderThanMinutes ? { olderThanMinutes: body.olderThanMinutes } : {}) },
+      orgId: null,
+      priority: 0,
+    });
+    await this.promoteIfWaiting(job);
+    return { data: { jobId: job.id, status: job.status } };
   }
 
   @Post('reprocess-failed')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
-    summary: 'Recover StorageObjects stuck at status=failed image objects (Admin)',
+    summary: 'Recover image StorageObjects stuck at status=failed (Admin)',
     description:
-      'Finds all image StorageObjects at status=failed (most commonly HEIC/HEIF images that ' +
-      'failed to decode before the ffmpeg-transcode fallback existed — issue #106) and re-runs ' +
-      'the full processing pipeline for each: regenerates the thumbnail and, via ' +
-      'OBJECT_PROCESSED_EVENT, re-fires face/tag/duplicate enrichment automatically. Thumbnail ' +
-      "objects (under the 'thumbnails/' prefix) are excluded. Distinct from reprocess-stuck, " +
-      'which targets status=processing (objects orphaned mid-pipeline by a crash) and will not ' +
-      'pick these up. Optional limit bounds the batch size.',
+      'Enqueues the media.storage.recover_stuck job (mode failed) and returns at once (RETRO-D1b). ' +
+      'The job finds image StorageObjects at status=failed (most commonly HEIC/HEIF images that ' +
+      'failed to decode before the ffmpeg-transcode fallback existed, issue #106), resets each to ' +
+      'processing and queues the platform storage.object.process job: the thumbnail regenerates and, ' +
+      'via OBJECT_PROCESSED_EVENT, face/tag/duplicate enrichment re-fires. Thumbnail objects ' +
+      "(under 'thumbnails/') are excluded. Distinct from reprocess-stuck (status=processing). " +
+      'Optional limit bounds how many objects one job re-queues.',
   })
-  @ApiResponse({
-    status: 201,
-    description: '{ claimed: number, reprocessed: number, exhausted: number, errors: number }',
-  })
+  @ApiResponse({ status: 201, description: '{ data: { jobId: string, status: string } }' })
   async reprocessFailed(
     @Body() body: ReprocessFailedBodyDto,
-  ): Promise<StorageProcessingRecoveryResult> {
-    return this.recoveryService.recoverFailedImageObjects({ limit: body.limit });
+  ): Promise<{ data: { jobId: string; status: string } }> {
+    const job = await this.jobs.enqueue({
+      type: STORAGE_RECOVER_STUCK_TYPE,
+      reason: 'rerun',
+      // Its own dedup slot: a failed-mode request never collapses onto a stuck-mode job.
+      subjectType: 'system',
+      subjectId: 'failed',
+      payload: { mode: 'failed', ...(body.limit ? { limit: body.limit } : {}) },
+      orgId: null,
+      priority: 0,
+    });
+    return { data: { jobId: job.id, status: job.status } };
   }
 
   @Post('thumbnails/repair')
@@ -142,5 +169,16 @@ export class MediaReprocessController {
     }
 
     return { data: { jobId: job.id, status: job.status } };
+  }
+
+  /**
+   * A dedup hit returns the job already in flight. A pending one waiting at a
+   * lower priority (the cron's 100) is promoted to 0: an explicit admin request
+   * pre-empts the queue. A running one is left alone.
+   */
+  private async promoteIfWaiting(job: Job): Promise<void> {
+    if (job.status === 'pending' && job.priority > 0) {
+      await this.prisma.job.update({ where: { id: job.id }, data: { priority: 0 } });
+    }
   }
 }

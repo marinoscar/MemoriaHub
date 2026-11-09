@@ -29,7 +29,9 @@ import { takeProcessingMime } from './processing-metrics';
 //      exactly when the old in-process pipeline emitted it after its last
 //      processor. A pure re-emit: no I/O in the listener.
 //   2. An inline re-run (`runNow`): the destructive edits (orientation, the AI
-//      enhancer's replace) and the recovery service reprocess an object in the
+//      enhancer's replace), the thumbnail rerun and the in-job thumbnail paths
+//      reprocess an object through `ObjectReprocessService` (the recovery sweep
+//      queues `storage.object.process` jobs instead, RETRO-D1b) in the
 //      request or job that changed it, then emit the event themselves, as before.
 // =============================================================================
 
