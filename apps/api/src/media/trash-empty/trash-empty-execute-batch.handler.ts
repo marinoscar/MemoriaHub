@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   JobHandlerRegistry,
@@ -63,6 +64,8 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `trash_empty`). Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -182,6 +185,8 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
           failedCount: { increment: failedCount },
         },
       });
+      this.metrics?.add('runItems', succeeded, { engine: 'trash_empty', outcome: 'applied' });
+      this.metrics?.add('runItems', failedCount, { engine: 'trash_empty', outcome: 'failed' });
     }
 
     await this.maybeFinalizeRun(runId);
@@ -214,7 +219,7 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
     });
 
     if (fin.count > 0) {
-      // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome})
+      this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: finalStatus });
       this.logger.log({
         event: 'trash_empty_run.finalized',
         runId,
