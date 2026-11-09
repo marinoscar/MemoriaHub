@@ -123,7 +123,11 @@ const MEDIA_RESOURCE_BASE = {
   roles: ['viewer', 'editor'],
   actions: { read: 'viewer', write: 'editor', share_link: 'editor', share: 'owner', delete: 'owner' },
   actionPermissions: { write: 'media:write', delete: 'media:delete' },
-  bypassPermissions: { read: 'media:read_any', write: 'media:write_any', delete: 'media:delete_any' },
+  // `share_link: 'sharing:admin'` (RETRO-I4, #578): the slice gives `sharing:admin` the `share`
+  // action on every record but decides a LINK's update and revocation on `share_link`, so the
+  // admin public-links page (`/admin/settings/sharing`, which replaced `shares:manage_any`) can
+  // revoke or re-date any link through `PATCH` / `DELETE /api/grants/:id`.
+  bypassPermissions: { read: 'media:read_any', write: 'media:write_any', delete: 'media:delete_any', share_link: 'sharing:admin' },
   ownership: 'user_or_group',
   groupRoleMap: { admin: 'owner', editor: 'editor', viewer: 'viewer' },
   grantable: { user: ['viewer'], group: ['viewer', 'editor'], link: ['viewer'] },

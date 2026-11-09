@@ -131,8 +131,6 @@ model MediaItem {
   // Duplicate Detection relations
   duplicateGroup         DuplicateGroup?      @relation("DuplicateGroupItems", fields: [duplicateGroupId], references: [id], onDelete: SetNull)
   suggestedForDuplicates DuplicateGroup[]     @relation("DuplicateGroupSuggestedBest")
-  // Media Sharing relations
-  shares                 MediaShare[]
   // Location Inference relations
   locationSuggestion     LocationSuggestion?
   // Social Media Detection relations
@@ -241,8 +239,6 @@ model Album {
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz
   items            AlbumItem[]
-  // Media Sharing relations
-  shares           MediaShare[]
   // Album cover pointer
   coverMediaItemId String?      @map("cover_media_item_id") @db.Uuid
   coverMediaItem   MediaItem?   @relation("AlbumCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
@@ -344,36 +340,8 @@ model InsightsSnapshot {
 }
 
 // =============================================================================
-// Public Media Sharing
+// Public Media Sharing: platform link grants since RETRO-I4 (#578). The
+// `media_shares` table and the `ShareTargetType` enum were imported as `grants`
+// rows (grantee_kind 'link') and dropped by migration
+// 20261109100000_i4_media_shares_to_link_grants.
 // =============================================================================
-
-enum ShareTargetType {
-  media_item
-  album
-}
-
-model MediaShare {
-  id          String          @id @default(uuid()) @db.Uuid
-  token       String          @unique
-  targetType  ShareTargetType @map("target_type")
-  mediaItemId String?         @map("media_item_id") @db.Uuid
-  albumId     String?         @map("album_id") @db.Uuid
-  circleId    String          @map("circle_id") @db.Uuid
-  createdById String          @map("created_by_id") @db.Uuid
-  expiresAt   DateTime?       @map("expires_at") @db.Timestamptz
-  revokedAt   DateTime?       @map("revoked_at") @db.Timestamptz
-  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  mediaItem MediaItem? @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
-  album     Album?     @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  circle    Circle     @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  createdBy User       @relation("MediaShareCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-
-  @@index([circleId])
-  @@index([createdById])
-  @@index([mediaItemId])
-  @@index([albumId])
-  @@map("media_shares")
-}

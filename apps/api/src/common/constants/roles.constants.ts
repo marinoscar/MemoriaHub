@@ -92,9 +92,9 @@ export const PERMISSIONS = {
   BROADCASTS_READ: 'broadcasts:read',
   BROADCASTS_WRITE: 'broadcasts:write',
 
-  // Sharing (Admin + Contributor; manage_any = Admin only)
-  SHARES_MANAGE: 'shares:manage',
-  SHARES_MANAGE_ANY: 'shares:manage_any',
+  // Sharing (the sharing slice's; RETRO-I4 replaced shares:manage / shares:manage_any)
+  SHARING_WRITE: 'sharing:write',
+  SHARING_ADMIN: 'sharing:admin',
 
   // PostgreSQL Database Backup & Restore (Admin only, epic #339)
   DB_BACKUP_READ: 'db_backup:read',

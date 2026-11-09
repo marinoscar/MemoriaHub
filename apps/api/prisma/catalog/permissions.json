@@ -359,16 +359,6 @@
       "scope": "org"
     },
     {
-      "name": "shares:manage",
-      "description": "Create, list, update, and revoke own shares",
-      "scope": "org"
-    },
-    {
-      "name": "shares:manage_any",
-      "description": "Admin: manage any user's shares",
-      "scope": "system"
-    },
-    {
       "name": "ai_settings:read",
       "description": "Read AI provider settings and status",
       "scope": "system"
@@ -437,7 +427,6 @@
       "media:write_any",
       "media:delete_any",
       "circles:manage_any",
-      "shares:manage_any",
       "ai_settings:read",
       "ai_settings:write",
       "face_settings:read",
@@ -462,8 +451,7 @@
       "media:delete",
       "circles:read",
       "circles:write",
-      "search:use",
-      "shares:manage"
+      "search:use"
     ],
     "viewer": [
       "user_settings:read",
@@ -512,8 +500,7 @@
       "media:delete",
       "circles:read",
       "circles:write",
-      "search:use",
-      "shares:manage"
+      "search:use"
     ]
   }
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { MediaModule } from '../media/media.module';
+import { LinkGrantDirectory } from '../public-links/link-grant-directory.service';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
 import { EnrichmentFailureNotificationListener } from './enrichment-failure-notification.listener';
 import { NotificationReconcileTask } from './notification-reconcile.task';
@@ -16,6 +17,8 @@ import { ShareExpiringTask } from './share-expiring.task';
     NotificationReconcileTask,
     ShareExpiringService,
     ShareExpiringTask,
+    // RETRO-I4: the share sweep reads link grants (stateless; PrismaService + DefaultOrgId).
+    LinkGrantDirectory,
     EnrichmentFailureNotificationListener,
     // The three job types the platform slice replaced keep dispatching (no-op).
     RetiredNotificationJobTypes,

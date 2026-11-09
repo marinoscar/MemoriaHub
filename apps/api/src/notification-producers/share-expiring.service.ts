@@ -1,51 +1,54 @@
 // =============================================================================
-// Expiring-Share Notification Producer (epic #240, issue #247)
+// Expiring-Share Notification Producer (epic #240, issue #247; RETRO-I4, #578)
 // =============================================================================
 //
-// Daily sweep producing `share_expiring` rows for public shares whose
-// `expires_at` falls inside a 7-day lead window — long enough that the owner
-// can extend or re-publish before a link a family member is using goes dark.
+// Daily sweep producing `share_expiring` (`shares.expiring`) notifications for
+// public LINKS whose `expires_at` falls inside a 7-day lead window — long enough
+// that the owner can extend or re-publish before a link a family member is using
+// goes dark.
 //
-// A sweep, not an event: a share's expiry is a passage of time, not an action,
-// so there is nothing to hook. Shares that never expire (`expires_at IS NULL`)
-// and revoked shares are excluded by the query, never by post-filtering.
+// Since RETRO-I4 a public share is a platform link grant (`grants`,
+// `grantee_kind = 'link'`, resource type `media_item` or `album`), read through
+// `LinkGrantDirectory` (the one app file allowed to list link grants across
+// records). Links that never expire (`expires_at IS NULL`), revoked links and
+// links already expired are excluded by the query, never by post-filtering.
 //
-// AUDIENCE — the share's creator (`created_by`). `MediaShare.createdBy` is a
-// REQUIRED FK with `onDelete: Cascade`, so a deleted user's shares are deleted
-// with them and a creator always exists; selecting the relation makes that an
-// INNER JOIN, so the "creator still exists" restriction is structural rather
-// than a hopeful post-check.
+// AUDIENCE — the link's creator (`granted_by_id`). The column is SetNull on a
+// user deletion, so a link whose creator is gone is skipped (counted, not
+// emitted).
 //
 // VOLUME GUARD — the `data.notifiedFor` stamp.
 //   The sweep runs every day and the lead window is seven days wide, so the
-//   same share is a candidate on seven consecutive days. Each emitted row
-//   carries `data.notifiedFor = <expiresAt ISO>`, and the sweep skips any share
-//   that already has a row — LIVE **or DISMISSED** — carrying the same
-//   `(shareId, notifiedFor)` pair. Checking dismissed rows too is the load
-//   bearing half: an owner who dismisses today's warning must not be re-warned
-//   about the same expiry tomorrow.
+//   same link is a candidate on seven consecutive days. Each emitted row
+//   carries `data.shareId = <grant id>` and `data.notifiedFor = <expiresAt ISO>`,
+//   and the sweep skips any link that already has a row — LIVE **or DISMISSED**
+//   — carrying the same `(shareId, notifiedFor)` pair. Checking dismissed rows
+//   too is the load bearing half: an owner who dismisses today's warning must
+//   not be re-warned about the same expiry tomorrow. The import of the old
+//   `media_shares` rows re-keys existing stamps from the share id to the new
+//   grant id, so a warning sent before the cutover is not sent again.
 //
 //   Keying on the expiry VALUE rather than a boolean "notified" flag is what
-//   makes a rescheduled share work correctly: if the owner pushes `expires_at`
+//   makes a re-dated link work correctly: if the owner pushes `expires_at`
 //   out, the stamp no longer matches and a fresh notification is allowed —
 //   which is right, because the new date is genuinely new information.
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, ShareTargetType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { MEMORIAHUB_EVENT_KEYS } from '../notifications-registry/memoriahub.notifications';
 import { PrismaService } from '../prisma/prisma.service';
+import { LinkGrantDirectory, type ExpiringLink } from '../public-links/link-grant-directory.service';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** How far ahead of expiry the owner is warned. */
 export const SHARE_EXPIRY_LEAD_DAYS = 7;
 
-/** Shares fetched per keyset page — the sweep never loads them all at once. */
+/** Links fetched per keyset page — the sweep never loads them all at once. */
 const SHARE_PAGE_SIZE = 200;
-
 
 /** Outcome tally for one sweep — returned for the task's log line. */
 export interface ShareExpiringSweepResult {
@@ -62,6 +65,7 @@ export class ShareExpiringService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly links: LinkGrantDirectory,
   ) {}
 
   /**
@@ -83,80 +87,53 @@ export class ShareExpiringService {
     let cursor: string | undefined;
 
     for (;;) {
-      const shares = await this.prisma.mediaShare.findMany({
-        where: {
-          revokedAt: null,
-          // `gt: now` excludes shares that have ALREADY expired — warning about
-          // a link that is already dark is noise, not an action item.
-          expiresAt: { gt: now, lte: horizon },
-        },
-        orderBy: { id: 'asc' },
-        take: SHARE_PAGE_SIZE,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        select: {
-          id: true,
-          circleId: true,
-          targetType: true,
-          expiresAt: true,
-          // INNER JOIN — see the audience note in the header.
-          createdBy: { select: { id: true } },
-          mediaItem: { select: { originalFilename: true } },
-          album: { select: { name: true } },
-        },
-      });
-      if (shares.length === 0) break;
+      // `gt: now` excludes links that have ALREADY expired — warning about a
+      // link that is already dark is noise, not an action item.
+      const links = await this.links.expiringPage(now, horizon, SHARE_PAGE_SIZE, cursor);
+      if (links.length === 0) break;
 
-      for (const share of shares) {
+      for (const link of links) {
         result.candidates += 1;
         try {
-          const emitted = await this.notifyForShare(share);
+          const emitted = await this.notifyForLink(link);
           if (emitted) result.emitted += 1;
           else result.skipped += 1;
         } catch (err) {
           result.errors += 1;
           this.logger.warn(
-            `share_expiring notification failed for share ${share.id}: ` +
+            `share_expiring notification failed for link ${link.id}: ` +
               (err instanceof Error ? err.message : String(err)),
           );
         }
       }
 
-      if (shares.length < SHARE_PAGE_SIZE) break;
-      cursor = shares[shares.length - 1]!.id;
+      if (links.length < SHARE_PAGE_SIZE) break;
+      cursor = links[links.length - 1]!.id;
     }
 
     return result;
   }
 
-  /** @returns true when a row was emitted, false when the stamp already existed. */
-  private async notifyForShare(
-    share: {
-      id: string;
-      circleId: string;
-      targetType: ShareTargetType;
-      expiresAt: Date | null;
-      createdBy: { id: string } | null;
-      mediaItem: { originalFilename: string | null } | null;
-      album: { name: string } | null;
-    },
-  ): Promise<boolean> {
-    if (!share.expiresAt || !share.createdBy) return false;
+  /** @returns true when a row was emitted, false when the stamp already existed or nobody owns the link. */
+  private async notifyForLink(link: ExpiringLink): Promise<boolean> {
+    if (!link.grantedById) return false;
 
-    const userId = share.createdBy.id;
-    const notifiedFor = share.expiresAt.toISOString();
+    const userId = link.grantedById;
+    const notifiedFor = link.expiresAt.toISOString();
 
-    if (await this.alreadyNotified(userId, share.id, notifiedFor)) return false;
+    if (await this.alreadyNotified(userId, link.id, notifiedFor)) return false;
 
-    const targetName = this.resolveTargetName(share);
+    const target = await this.describeTarget(link);
+    if (!target) return false; // the record is gone (hard-deleted): nothing to warn about
 
     // The title is rendered by the event's template at dispatch time
     // ("expires tomorrow"); `notifiedFor` is the idempotency stamp below.
     await this.notifications.notify(MEMORIAHUB_EVENT_KEYS.shareExpiring, userId, {
-      shareId: share.id,
+      shareId: link.id,
       notifiedFor,
-      targetType: share.targetType,
-      targetName,
-      circleId: share.circleId,
+      targetType: link.resourceType,
+      targetName: target.name,
+      circleId: target.circleId,
     });
 
     return true;
@@ -188,14 +165,16 @@ export class ShareExpiringService {
     return rows.length > 0;
   }
 
-  private resolveTargetName(share: {
-    targetType: ShareTargetType;
-    mediaItem: { originalFilename: string | null } | null;
-    album: { name: string } | null;
-  }): string {
-    if (share.targetType === ShareTargetType.album) {
-      return share.album?.name ?? 'an album';
+  /** The shared record's display name and circle, or `null` when it no longer exists. */
+  private async describeTarget(link: ExpiringLink): Promise<{ name: string; circleId: string } | null> {
+    if (link.resourceType === 'album') {
+      const album = await this.prisma.album.findUnique({ where: { id: link.resourceId }, select: { name: true, circleId: true } });
+      return album ? { name: album.name, circleId: album.circleId } : null;
     }
-    return share.mediaItem?.originalFilename ?? 'a photo';
+    const item = await this.prisma.mediaItem.findUnique({
+      where: { id: link.resourceId },
+      select: { originalFilename: true, circleId: true },
+    });
+    return item ? { name: item.originalFilename ?? 'a photo', circleId: item.circleId } : null;
   }
 }

@@ -23,7 +23,8 @@
 // THE MATRIX (identical to the pre-adoption `rbac.catalog.ts`):
 //   admin       everything
 //   contributor user_settings:*, storage:read|write, media:read|write|delete,
-//               circles:read|write, search:use, shares:manage
+//               circles:read|write, search:use (sharing:write is the sharing
+//               slice's since RETRO-I4, #578; it replaced shares:manage)
 //   viewer      user_settings:*, storage:read|write, media:read|write|delete,
 //               circles:read|write, search:use
 // `user_settings:*` is the platform's. Its default grants (org_admin,
@@ -33,7 +34,8 @@
 // system_settings:read|write), ai_settings:* (E1), storage_settings:* (D1, done:
 // replaced by the storage slice's storage_config:read|write, admin only),
 // storage:* (D1: the storage slice's set, registered through `permissions.ts`),
-// db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications slice
+// shares:manage|manage_any (I4, done: the sharing slice's sharing:write and
+// sharing:admin), db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications slice
 // declares them, plus the org-scoped org_broadcasts:* granted to org_admin). Their
 // ids are permanent: the web cards and the CLI use the strings exactly.
 //
@@ -116,20 +118,6 @@ export const MEMORIAHUB_PERMISSIONS = {
     description: 'Use the AI-powered search feature',
     scope: 'org',
     defaultGrants: [...ALL_ORG_ROLES],
-  },
-
-  // Sharing
-  SHARES_MANAGE: {
-    id: 'shares:manage',
-    description: 'Create, list, update, and revoke own shares',
-    scope: 'org',
-    defaultGrants: [...ORG_WRITERS],
-  },
-  SHARES_MANAGE_ANY: {
-    id: 'shares:manage_any',
-    description: "Admin: manage any user's shares",
-    scope: 'system',
-    defaultGrants: ['admin'],
   },
 
   // Provider and operations settings (Admin only)

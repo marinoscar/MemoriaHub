@@ -42,8 +42,6 @@ model Circle {
   bursts                  BurstGroup[]
   // Duplicate Detection relations
   duplicateGroups         DuplicateGroup[]
-  // Media Sharing relations
-  mediaShares             MediaShare[]
   // Location Inference relations
   locationSuggestions     LocationSuggestion[]
   // AI Picture Enhancer relations

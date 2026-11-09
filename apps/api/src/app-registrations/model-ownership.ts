@@ -16,7 +16,7 @@ const SINGLE_ORG = 'MemoriaHub app table: single-organization mode, no org_id co
 
 const SYSTEM_MODELS = [
   'UserProfile', 'Circle', 'CircleMember', 'CircleInvite', 'AlbumItem', 'MediaTag', 'MediaFaceStatus', 'TagLabel',
-  'InsightsSnapshot', 'MediaSocialStatus', 'LocationGroup', 'LocationGroupAlias', 'MediaShare', 'ReviewRunItem',
+  'InsightsSnapshot', 'MediaSocialStatus', 'LocationGroup', 'LocationGroupAlias', 'ReviewRunItem',
   'TrashEmptyRunItem', 'WorkflowRunItem', 'MemoryItem', 'MemoryUserState', 'MediaSyncDevice', 'MediaSyncRun',
   'MediaSyncDiagnosticReport', 'NodeBackupConfig', 'NodeBackupRun', 'EnrichmentJob', 'AiProviderCredential',
   'FaceProviderCredential', 'GeoProviderCredential', 'StorageProviderCredential', 'MhLegacyStorageMigrationRun',
