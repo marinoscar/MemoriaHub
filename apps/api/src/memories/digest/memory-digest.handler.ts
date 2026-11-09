@@ -43,7 +43,8 @@
 // the next tick would re-send everything.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   type Job,
@@ -74,6 +75,8 @@ export class MemoryDigestHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly digest: MemoryDigestService,
+    // App metrics (RETRO-T3, #628): `app.memories.digest.sent`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -97,7 +100,11 @@ export class MemoryDigestHandler implements JobHandler, OnModuleInit {
       return;
     }
 
-    // metrics: RETRO-T3 (app.memories.digest.sent{outcome}: result.sent / result.failed)
+    this.metrics?.add('memoriesDigestSent', result.sent, { outcome: 'sent' });
+    this.metrics?.add('memoriesDigestSent', result.skippedOptOut + result.skippedEmpty + result.skippedNoEmail, {
+      outcome: 'skipped',
+    });
+    this.metrics?.add('memoriesDigestSent', result.failed, { outcome: 'failed' });
     this.logger.log({
       event: 'memory_digest.completed',
       jobId: job.id,
