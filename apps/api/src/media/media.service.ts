@@ -28,6 +28,7 @@ import { AttachTagsDto } from './dto/attach-tags.dto';
 import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
+import type { SharedWithMeQueryDto } from './dto/shared-with-me-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
@@ -1280,9 +1281,27 @@ export class MediaService {
       this.prisma.album.count({ where }),
     ]);
 
+    const items = await this.enrichAlbums(albums);
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Enrich albums with an item count, a resolved cover thumbnail, and the
+   * captured-at date range across their non-deleted / non-archived members.
+   */
+  private async enrichAlbums<A extends { id: string; coverMediaItemId: string | null }>(albums: A[]) {
     // Enrich each album with an item count, a resolved cover thumbnail, and the
     // captured-at date range across its non-deleted / non-archived members.
-    const items = await Promise.all(
+    return Promise.all(
       albums.map(async (album) => {
         const memberWhere: Prisma.MediaItemWhereInput = {
           albumItems: { some: { albumId: album.id } },
@@ -1316,16 +1335,48 @@ export class MediaService {
         };
       }),
     );
+  }
 
-    return {
-      items,
-      meta: {
-        page,
-        pageSize,
-        totalItems,
-        totalPages: Math.ceil(totalItems / pageSize),
-      },
-    };
+  // ---------------------------------------------------------------------------
+  // Shared with me (RETRO-I6, #588)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The media items shared with the caller through grants (user or group
+   * grants on `media_item`), across every owner scope, newest capture first.
+   * Only records granted to the caller: a member's own libraries are not
+   * repeated here. An empty page when nothing is shared.
+   */
+  async listSharedMedia(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
+    const { page, pageSize } = query;
+    const shared = this.recordAccess ? await this.recordAccess.sharedWhere(userId, userPermissions, 'media_item') : null;
+    if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
+    const where: Prisma.MediaItemWhereInput = { AND: [shared as Prisma.MediaItemWhereInput, { deletedAt: null }] };
+    const [rows, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: [{ capturedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+    const items = await this.mediaThumbnailService.attachThumbnailUrls(rows);
+    return { items, meta: { page, pageSize, totalItems, totalPages: Math.ceil(totalItems / pageSize) } };
+  }
+
+  /** The albums shared with the caller through grants, newest first; same item shape as `listAlbums`. */
+  async listSharedAlbums(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
+    const { page, pageSize } = query;
+    const shared = this.recordAccess ? await this.recordAccess.sharedWhere(userId, userPermissions, 'album') : null;
+    if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
+    const where = shared as Prisma.AlbumWhereInput;
+    const [albums, totalItems] = await Promise.all([
+      this.prisma.album.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.album.count({ where }),
+    ]);
+    const items = await this.enrichAlbums(albums);
+    return { items, meta: { page, pageSize, totalItems, totalPages: Math.ceil(totalItems / pageSize) } };
   }
 
   /**

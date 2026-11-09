@@ -234,4 +234,38 @@ describe('Grants on media items and albums (RETRO-I3)', () => {
       expect(context.prismaMock.grant.groupBy).not.toHaveBeenCalled();
     });
   });
+
+  describe('shared with me (RETRO-I6 #588)', () => {
+    it('lists nothing (200, empty page) when nothing is shared', async () => {
+      const res = await get('/api/media/shared-with-me');
+      expect(res.status).toBe(200);
+      expect(res.body.data.items).toEqual([]);
+      expect(res.body.data.meta.totalItems).toBe(0);
+    });
+
+    it('lists the granted items across libraries, with no owner scope filter', async () => {
+      grants.push({ resourceType: 'media_item', resourceId: ITEM_ID, role: 'viewer' });
+      context.prismaMock.mediaItem.count.mockResolvedValue(1);
+      const res = await get('/api/media/shared-with-me?page=1&pageSize=10');
+      expect(res.status).toBe(200);
+      const listCall = context.prismaMock.mediaItem.findMany.mock.calls.find(
+        ([args]: [{ take?: number }]) => args?.take === 10,
+      );
+      expect(JSON.stringify(listCall[0].where)).toContain(ITEM_ID);
+      expect(JSON.stringify(listCall[0].where)).not.toContain('circleId');
+    });
+
+    it('lists the granted albums', async () => {
+      grants.push({ resourceType: 'album', resourceId: ALBUM_ID, role: 'viewer' });
+      context.prismaMock.grant.groupBy.mockResolvedValue([{ resourceId: ALBUM_ID }]);
+      context.prismaMock.album.count.mockResolvedValue(1);
+      context.prismaMock.mediaItem.aggregate.mockResolvedValue({ _count: { _all: 0 }, _min: { capturedAt: null }, _max: { capturedAt: null } });
+      const res = await get('/api/media/albums/shared-with-me');
+      expect(res.status).toBe(200);
+      const listCall = context.prismaMock.album.findMany.mock.calls.find(
+        ([args]: [{ take?: number }]) => args?.take !== undefined,
+      );
+      expect(JSON.stringify(listCall[0].where)).toContain(ALBUM_ID);
+    });
+  });
 });
