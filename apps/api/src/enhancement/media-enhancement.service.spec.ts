@@ -41,7 +41,7 @@ import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
@@ -187,7 +187,7 @@ describe('MediaEnhancementService', () => {
     getProviderFor: jest.Mock;
     getActiveProvider: jest.Mock;
   };
-  let mockRecoveryService: { reprocessObjectNow: jest.Mock };
+  let mockRecoveryService: { reprocessNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
   let mockThumbnailPrune: { pruneSupersededThumbnails: jest.Mock };
   /** Records sync-vs-prune ordering on the replace path (issue #434). */
@@ -234,8 +234,13 @@ describe('MediaEnhancementService', () => {
       getActiveProvider: jest.fn().mockResolvedValue({ id: 'r2', provider: mockActiveProvider }),
     };
 
-    mockRecoveryService = { reprocessObjectNow: jest.fn().mockResolvedValue(undefined) };
     replaceCallOrder = [];
+    mockRecoveryService = {
+      reprocessNow: jest.fn().mockImplementation(async () => {
+        replaceCallOrder.push('reprocess');
+        return 'ready';
+      }),
+    };
     mockMetadataSync = {
       syncFromStorageObject: jest.fn().mockImplementation(async () => {
         replaceCallOrder.push('sync');
@@ -280,7 +285,7 @@ describe('MediaEnhancementService', () => {
         { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
         { provide: CircleMembershipService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
+        { provide: ObjectReprocessService, useValue: mockRecoveryService },
         { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
         { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
@@ -1415,7 +1420,7 @@ describe('MediaEnhancementService', () => {
       it('reprocesses the new object and best-effort syncs metadata', async () => {
         await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
 
-        expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledWith({ id: 'new-obj-1' });
+        expect(mockRecoveryService.reprocessNow).toHaveBeenCalledWith({ id: 'new-obj-1' });
         expect(mockMetadataSync.syncFromStorageObject).toHaveBeenCalledWith('new-obj-1');
       });
 
@@ -1635,7 +1640,7 @@ describe('MediaEnhancementService', () => {
       it('reprocesses the (same) storage object after overwrite', async () => {
         await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER);
 
-        expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledWith(
+        expect(mockRecoveryService.reprocessNow).toHaveBeenCalledWith(
           expect.objectContaining({ id: 'obj-1' }),
         );
       });
@@ -1656,7 +1661,8 @@ describe('MediaEnhancementService', () => {
         await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER);
 
         expect(mockThumbnailPrune.pruneSupersededThumbnails).toHaveBeenCalledWith('obj-1');
-        expect(replaceCallOrder).toEqual(['sync', 'prune']);
+        // reprocess (new content-addressed key) -> sync (repoint) -> prune (RETRO-D1b, #567).
+        expect(replaceCallOrder).toEqual(['reprocess', 'sync', 'prune']);
       });
 
       it('re-enqueues face_detection when features.faceRecognition is on', async () => {
