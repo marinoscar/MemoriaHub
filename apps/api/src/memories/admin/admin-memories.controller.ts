@@ -17,6 +17,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  Get,
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -47,6 +48,20 @@ export class AdminMemoriesController {
     private readonly backfillService: MemoryBackfillService,
     private readonly systemSettingsService: AppSystemSettingsService,
   ) {}
+
+  @Get('libraries')
+  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
+  @ApiOperation({
+    summary: 'List the libraries the memories backfill can target (Admin)',
+    description:
+      'Every shared library (a group) by name, then every personal library by its owner, ' +
+      'each with the id `POST /api/admin/memories/backfill` takes as `circleId`. ' +
+      'Replaces the picker\'s former `GET /api/circles?all=true` (RETRO-I6).',
+  })
+  @ApiResponse({ status: 200, description: '`{ items: [{ id, kind: group|personal, name }] }`' })
+  async libraries() {
+    return { data: { items: await this.backfillService.listLibraries() } };
+  }
 
   @Post('backfill')
   @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })

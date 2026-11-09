@@ -251,4 +251,21 @@ describe('MemoryBackfillService', () => {
       expect(result).toEqual({ enqueued: 0, circles: 0, skipped: 0 });
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('listLibraries (RETRO-I6 #588)', () => {
+    it('lists the groups by name, then the personal libraries by owner', async () => {
+      prisma.circle.findMany.mockResolvedValue([
+        { id: 'g-1', name: 'Group Alpha', isPersonal: false, owner: { displayName: 'Person A', email: 'a@example.test' } },
+        { id: 'p-2', name: 'Personal', isPersonal: true, owner: { displayName: null, email: 'b@example.test' } },
+        { id: 'p-1', name: 'Personal', isPersonal: true, owner: { displayName: 'Person A', email: 'a@example.test' } },
+      ]);
+
+      await expect(service.listLibraries()).resolves.toEqual([
+        { id: 'g-1', kind: 'group', name: 'Group Alpha' },
+        { id: 'p-2', kind: 'personal', name: 'b@example.test' },
+        { id: 'p-1', kind: 'personal', name: 'Person A' },
+      ]);
+    });
+  });
 });

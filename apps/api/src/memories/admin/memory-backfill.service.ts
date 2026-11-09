@@ -62,6 +62,19 @@ export interface MemoryBackfillResult {
   skipped: number;
 }
 
+/** One library the admin backfill picker lists (RETRO-I6, #588). */
+export interface MemoryBackfillLibrary {
+  /** The scope id `POST /api/admin/memories/backfill` takes as `circleId`. */
+  id: string;
+  /** `group`: a shared library (a platform group); `personal`: a user's own library. */
+  kind: 'group' | 'personal';
+  /** The group's name, or the owner's display name (email when none) for a personal library. */
+  name: string;
+}
+
+/** Upper bound of the picker list (the "All libraries" choice covers any deployment). */
+export const MEMORY_BACKFILL_LIBRARIES_MAX = 1000;
+
 @Injectable()
 export class MemoryBackfillService {
   private readonly logger = new Logger(MemoryBackfillService.name);
@@ -70,6 +83,31 @@ export class MemoryBackfillService {
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
   ) {}
+
+  /**
+   * The libraries an admin can target with the backfill: every shared library
+   * (group) by name, then every personal library by its owner. Replaces the
+   * picker's former `GET /api/circles?all=true` (RETRO-I6, #588). Reads the
+   * app's own scope table, the one the backfill itself walks.
+   */
+  async listLibraries(): Promise<MemoryBackfillLibrary[]> {
+    const rows = await this.prisma.circle.findMany({
+      select: { id: true, name: true, isPersonal: true, owner: { select: { displayName: true, email: true } } },
+      orderBy: [{ isPersonal: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      take: MEMORY_BACKFILL_LIBRARIES_MAX,
+    });
+    const groups: MemoryBackfillLibrary[] = [];
+    const personal: MemoryBackfillLibrary[] = [];
+    for (const row of rows) {
+      if (row.isPersonal) {
+        personal.push({ id: row.id, kind: 'personal', name: row.owner?.displayName || row.owner?.email || row.name });
+      } else {
+        groups.push({ id: row.id, kind: 'group', name: row.name });
+      }
+    }
+    personal.sort((a, b) => a.name.localeCompare(b.name));
+    return [...groups, ...personal];
+  }
 
   /**
    * Enqueue the sharded backfill plan for one circle, or for every circle when
