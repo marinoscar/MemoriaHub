@@ -6,7 +6,7 @@ import { LocationGroupResolverService } from '../../location-groups/location-gro
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
-} from '../../storage/processing/events/object-processed.event';
+} from '../../media-processing/events/object-processed.event';
 
 /**
  * MediaMetadataSyncService

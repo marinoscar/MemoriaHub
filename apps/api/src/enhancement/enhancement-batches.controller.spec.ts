@@ -40,6 +40,7 @@
  *   - List: paginated, newest-first, circle-scoped, one groupBy per page.
  */
 
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
@@ -47,9 +48,9 @@ import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
-import { ThumbnailPruneService } from '../storage/processing/thumbnail-prune.service';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
@@ -145,6 +146,7 @@ describe('EnhancementBatchesController', () => {
         { provide: MediaThumbnailService, useValue: {} },
         { provide: EnrichmentJobService, useValue: {} },
         { provide: AppSystemSettingsService, useValue: {} },
+        { provide: AiDeploymentKeySource, useValue: {} },
       ],
     }).compile();
 

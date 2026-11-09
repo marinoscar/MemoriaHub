@@ -3,7 +3,7 @@ import { CredentialsModule } from '../platform/credentials/credentials.config';
 import { FaceSettingsController } from './face-settings.controller';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { CirclesModule } from '../circles/circles.module';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionController } from './face-detection.controller';
@@ -28,11 +28,11 @@ import { ProfileModule } from '../profile/profile.module';
  * ProfileModule is imported for issue #354: PeopleService propagates a person's
  * profile-picture change to any account linked to that person, and carries the
  * link over on merge. The edge points FaceModule -> ProfileModule; ProfileModule
- * imports only StorageProvidersModule / CirclesModule / so no
+ * imports only MediaProcessingModule / CirclesModule / so no
  * cycle is closed and no forwardRef is needed.
  */
 @Module({
-  imports: [CredentialsModule, StorageProvidersModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
+  imports: [CredentialsModule, MediaProcessingModule, CirclesModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
     FaceSettingsService,

@@ -36,7 +36,7 @@ import { ExportsHostModule } from './exports-host.module';
 // (user-data first: the dialog default), before the application is created (the registry
 // freezes at bootstrap).
 //
-// Ports: `ExportsHostModule` (bypass client, notifier, and the storage shim until RETRO-D1).
+// Ports: `ExportsHostModule` (bypass client, notifier, and the per-row storage routing adapter).
 // =============================================================================
 
 /** Days an export file is kept. */

@@ -14,6 +14,8 @@ import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { composePatchSystemSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../settings/registry';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
+import { CredentialsService } from '@marinoscar/platform-api/credentials';
 
 const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 
@@ -47,6 +49,12 @@ describe('AiSettingsService', () => {
       getSettings: jest.fn(),
       patchSettings: jest.fn(),
     };
+    // `getSettings` lists the providers (`findMany`), then reads each status (`findUnique`): answer
+    // the per-provider read from whatever the test's `findMany` returns.
+    mockPrisma.aiProviderCredential.findUnique.mockImplementation((async (args: { where: { provider: string } }) => {
+      const rows = ((await mockPrisma.aiProviderCredential.findMany({} as never)) ?? []) as Array<{ provider: string }>;
+      return rows.find((r) => r.provider === args.where.provider) ?? null;
+    }) as never);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -54,98 +62,25 @@ describe('AiSettingsService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AiProviderRegistry, useValue: mockRegistry },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        // The real key source over an EMPTY platform store, so every test here exercises the
+        // legacy-row fallback (the platform-first order: ai-deployment-key-source.spec.ts).
+        AiDeploymentKeySource,
+        {
+          provide: CredentialsService,
+          useValue: {
+            describe: jest.fn().mockResolvedValue(null),
+            list: jest.fn().mockResolvedValue([]),
+            getSecret: jest.fn().mockResolvedValue(null),
+          },
+        },
       ],
     }).compile();
 
     service = module.get<AiSettingsService>(AiSettingsService);
   });
 
-  // ---------------------------------------------------------------------------
-  // upsertCredential
-  // ---------------------------------------------------------------------------
-  describe('upsertCredential', () => {
-    it('encrypts the apiKey and stores last4 correctly', async () => {
-      const upsertedRecord = {
-        id: 'cred-1',
-        provider: 'openai',
-        encryptedKey: 'somebase64ciphertext',
-        last4: '1234',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      mockPrisma.aiProviderCredential.upsert.mockResolvedValue(upsertedRecord as any);
-
-      const result = await service.upsertCredential(
-        'openai',
-        { apiKey: 'sk-test-1234' },
-        'user-1',
-      );
-
-      // Verify upsert was called with correct last4
-      const upsertCall = mockPrisma.aiProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('1234');
-
-      // Verify the key is encrypted (not plaintext)
-      expect(upsertCall.create.encryptedKey).not.toBe('sk-test-1234');
-      expect(typeof upsertCall.create.encryptedKey).toBe('string');
-      expect(upsertCall.create.encryptedKey.length).toBeGreaterThan(0);
-
-      // Verify returned object does NOT expose the encrypted key
-      expect(result).not.toHaveProperty('encryptedKey');
-      expect(result).toMatchObject({
-        provider: 'openai',
-        configured: true,
-        enabled: true,
-        last4: '1234',
-        baseUrl: null,
-      });
-    });
-
-    it('extracts last4 from the end of the apiKey', async () => {
-      mockPrisma.aiProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'anthropic',
-        encryptedKey: 'somebase64',
-        last4: 'abcd',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: 'user-2',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential('anthropic', { apiKey: 'sk-mykey-abcd' }, 'user-2');
-
-      const upsertCall = mockPrisma.aiProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.last4).toBe('abcd');
-    });
-
-    it('passes baseUrl and enabled through to the upsert', async () => {
-      mockPrisma.aiProviderCredential.upsert.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'openai',
-        encryptedKey: 'cipher',
-        last4: '9999',
-        baseUrl: 'https://custom-openai.example.com',
-        enabled: false,
-        updatedByUserId: 'user-1',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      await service.upsertCredential(
-        'openai',
-        { apiKey: 'sk-abcd9999', baseUrl: 'https://custom-openai.example.com', enabled: false },
-        'user-1',
-      );
-
-      const upsertCall = mockPrisma.aiProviderCredential.upsert.mock.calls[0][0];
-      expect(upsertCall.create.baseUrl).toBe('https://custom-openai.example.com');
-    });
-  });
+  // upsertCredential / deleteCredential were removed by RETRO-E3 (#605): the legacy key table is
+  // read-only and the routes answer 410 (ai-settings.controller.spec.ts).
 
   // ---------------------------------------------------------------------------
   // getSettings

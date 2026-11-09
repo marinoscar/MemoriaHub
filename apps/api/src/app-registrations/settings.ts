@@ -55,7 +55,7 @@ import { MEMORIES_SYSTEM_SETTINGS, type MemoriesSettingsValue } from '../setting
 import { PICTURE_ENHANCEMENT_SYSTEM_SETTINGS, type PictureEnhancementSettingsValue } from '../settings/registry/namespaces/system/picture-enhancement';
 import { REVIEW_RUNS_SYSTEM_SETTINGS, type ReviewRunsSettingsValue } from '../settings/registry/namespaces/system/review-runs';
 import { SOCIAL_MEDIA_SYSTEM_SETTINGS, type SocialMediaSettingsValue } from '../settings/registry/namespaces/system/social-media';
-import { STORAGE_SYSTEM_SETTINGS, type StorageSettingsValue } from '../settings/registry/namespaces/system/storage';
+import { STORAGE_SYSTEM_SETTINGS_EXTENSION } from '../settings/registry/namespaces/system/storage';
 import { UI_SYSTEM_SETTINGS, type UiSettingsValue } from '../settings/registry/namespaces/system/ui';
 import { WORKFLOWS_SYSTEM_SETTINGS, type WorkflowsSettingsValue } from '../settings/registry/namespaces/system/workflows';
 import { MEMORIES_USER_SETTINGS, type MemoriesPreferencesValue } from '../settings/registry/namespaces/user/memories';
@@ -81,7 +81,7 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
   AI_SYSTEM_SETTINGS as unknown as SystemSettingsNamespace,
   AUTO_TAGGING_SYSTEM_SETTINGS,
   FACE_SYSTEM_SETTINGS,
-  STORAGE_SYSTEM_SETTINGS, // PLATFORM-ADOPTION-SHIM(RETRO-D1)
+  // `storage` is the storage slice's since RETRO-D1 (#563): system-settings.manifest.ts, extended below.
   BURST_SYSTEM_SETTINGS,
   DEDUP_SYSTEM_SETTINGS,
   LOCATION_INFERENCE_SYSTEM_SETTINGS,
@@ -106,9 +106,11 @@ export const APP_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespace[] 
  *
  * `ai` (RETRO-E1, #595): the per-feature provider/model selections (`features.*`) MemoriaHub has
  * always stored in the `ai` block; same names and shapes, so the row is unchanged.
+ * `storage` (RETRO-D1, #563): `storage.insights` and `storage.trash`.
  */
 export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExtension[] = [
   MEMORIAHUB_AI_SETTINGS_EXTENSION,
+  STORAGE_SYSTEM_SETTINGS_EXTENSION,
 ];
 
 /**

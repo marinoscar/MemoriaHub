@@ -98,35 +98,20 @@ export default () => {
     token: (process.env.STACK_AGENT_TOKEN || '').trim(),
   },
 
-  // Storage Configuration
+  // Storage deployment limits (RETRO-D1, #563). The object store itself (driver,
+  // bucket, region, endpoint, keys, the local root) is runtime configuration: the
+  // `storage` system-settings namespace and the credential store, edited at
+  // /admin/settings/storage. `STORAGE_PROVIDER`, `S3_*`, `AWS_ACCESS_KEY_ID`,
+  // `AWS_SECRET_ACCESS_KEY`, `S3_MAX_ATTEMPTS`, `S3_RETRY_MODE` and
+  // `BACKUP_LOCAL_PATH` are no longer read; `scripts/migrate-storage-settings.ts`
+  // copies their values once (runbook: docs/runbooks/storage-configuration.md).
   storage: {
-    provider: process.env.STORAGE_PROVIDER || 's3',
-    s3: {
-      bucket: process.env.S3_BUCKET || '',
-      region: process.env.S3_REGION || 'us-east-1',
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-      endpoint: process.env.S3_ENDPOINT || undefined,
-      maxAttempts: parseInt(process.env.S3_MAX_ATTEMPTS || '5', 10),
-      retryMode: process.env.S3_RETRY_MODE || 'adaptive',
-    },
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10737418240', 10), // 10GB default
     allowedMimeTypes: (
       process.env.ALLOWED_MIME_TYPES || 'image/*,application/pdf,video/*'
     ).split(','),
     signedUrlExpiry: parseInt(process.env.SIGNED_URL_EXPIRY || '3600', 10), // 1 hour default
     partSize: parseInt(process.env.STORAGE_PART_SIZE || '10485760', 10), // 10MB default
-    // HISTORICAL NAME — this key is now consumed SOLELY by
-    // LocalDiskStorageProvider as the filesystem root for the `local` storage
-    // provider (STORAGE_PROVIDER=local / storage.activeProvider='local'). Its
-    // `backup` name dates from the v0 server-side media backup feature, which
-    // has been retired; it has nothing to do with backups any more. Do NOT
-    // rename it or the BACKUP_LOCAL_PATH env var without a migration plan —
-    // doing so silently relocates the storage root of every deployment running
-    // on the local provider, which is a data-availability change.
-    backup: {
-      localPath: process.env.BACKUP_LOCAL_PATH || '/tmp/memoriahub-backup',
-    },
   },
 
   logLevel: process.env.LOG_LEVEL || 'info',

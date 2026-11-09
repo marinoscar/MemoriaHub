@@ -113,7 +113,7 @@ const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'))
 const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
-const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
+const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
@@ -396,13 +396,15 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/admin/settings/storage/providers"
+                  path="/admin/settings/storage"
                   element={
-                    <RequirePermission permission="storage_settings:read" fallback={<Navigate to="/" replace />}>
-                      <StorageProvidersPage />
+                    <RequirePermission permission="storage_config:read" fallback={<Navigate to="/" replace />}>
+                      <StorageConfigPage />
                     </RequirePermission>
                   }
                 />
+                {/* MemoriaHub's former Storage Providers page (RETRO-D1): the platform page replaces it. */}
+                <Route path="/admin/settings/storage/providers" element={<Navigate to="/admin/settings/storage" replace />} />
                 <Route
                   path="/admin/settings/storage/insights"
                   element={
@@ -616,7 +618,7 @@ function AppRoutes() {
                 <Route path="/admin/jobs" element={<Navigate to="/admin/settings/jobs" replace />} />
                 <Route path="/admin/tags" element={<Navigate to="/admin/settings/tagging" replace />} />
                 <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
-                <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage/providers" replace />} />
+                <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage" replace />} />
                 <Route path="/admin/backup" element={<Navigate to="/admin/settings/nodes" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 {/* The Collections hub (issue #391, spec §4.6) ADDS a route; it

@@ -6,9 +6,9 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { computeAndPersistVisualHash } from '../storage/processing/hash-backfill.util';
+} from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { computeAndPersistVisualHash } from '../media-processing/hash-backfill.util';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
 

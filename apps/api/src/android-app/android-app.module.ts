@@ -6,7 +6,7 @@ import { AssetLinksController } from './asset-links.controller';
 import { AndroidReleaseAdminController } from './releases/android-release-admin.controller';
 import { AndroidReleaseController } from './releases/android-release.controller';
 import { AndroidReleaseService } from './releases/android-release.service';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // =============================================================================
@@ -18,7 +18,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 // public Digital Asset Links document the edge serves at
 // `/.well-known/assetlinks.json`.
 //
-// Imports only `StorageProvidersModule` (for the APK releases, below):
+// Imports only `MediaProcessingModule` (for the APK releases, below):
 // `PrismaModule` is global, the trusted list is its own
 // `system_settings` row read through Prisma (never AppSystemSettingsService), and
 // the audit row is a direct `audit_events` insert. It reads
@@ -29,14 +29,14 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 // (`/api/admin/android-app/releases`), `AndroidReleaseController`
 // (`/api/android-app/releases/*`, `/api/android-app/download/:token`) and
 // `AndroidReleaseService`, which calls `AndroidAppService.ensureTrusted` when
-// a release becomes current. Storage comes from `StorageProvidersModule` (the
+// a release becomes current. Storage comes from `MediaProcessingModule` (the
 // provider resolver only), NOT the full storage module, so the job queue and
 // the object pipeline are not pulled in. `AndroidReleaseService` is exported
 // for the Doctor checks (#507), which also land here.
 // =============================================================================
 
 @Module({
-  imports: [StorageProvidersModule],
+  imports: [MediaProcessingModule],
   controllers: [AndroidAppController, AssetLinksController, AndroidReleaseAdminController, AndroidReleaseController],
   providers: [AndroidAppService, AndroidReleaseService],
   exports: [AndroidAppService, AndroidReleaseService],

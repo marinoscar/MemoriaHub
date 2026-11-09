@@ -27,7 +27,7 @@ import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-e
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler';
-import { StorageMigrationHandler } from '../../src/storage-settings/storage-migration.handler';
+import { RetiredStorageMigrationHandler } from '../../src/platform/jobs/retired-job-types';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
 import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
@@ -75,7 +75,7 @@ export const ALL_HANDLER_CLASSES = [
   ReviewRunsRetentionHandler,
   SocialMediaDetectionHandler,
   StorageInsightsHandler,
-  StorageMigrationHandler,
+  RetiredStorageMigrationHandler,
   ThumbnailRegenHandler,
   ThumbnailRepairHandler,
   TrashEmptyEvaluateHandler,

@@ -64,10 +64,10 @@ import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } fro
 import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
 import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { downloadToTempFile } from '../storage/processing/processors/stream-utils';
-import { probeVideoFile, extractContainerMetadata } from '../storage/processing/processors/ffprobe.util';
+import { downloadToTempFile } from '../media-processing/processors/stream-utils';
+import { probeVideoFile, extractContainerMetadata } from '../media-processing/processors/ffprobe.util';
 import {
   SocialMediaDetectorService,
   VideoDetectionInput,

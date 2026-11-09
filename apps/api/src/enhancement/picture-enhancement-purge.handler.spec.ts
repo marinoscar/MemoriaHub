@@ -15,7 +15,7 @@ import type { EnrichmentJob } from '@prisma/client';
 import { PictureEnhancementPurgeHandler } from './picture-enhancement-purge.handler';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

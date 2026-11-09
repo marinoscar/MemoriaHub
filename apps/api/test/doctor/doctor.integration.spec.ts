@@ -21,8 +21,9 @@ import { setupBaseMocks } from '../fixtures/mock-setup.helper';
  */
 
 /**
- * The 29 app checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice
- * retired, and `core.pg-client-version`, replaced by the db-backup slice's `backup.pg-client`).
+ * The 27 app checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice
+ * retired, `core.pg-client-version`, replaced by the db-backup slice's `backup.pg-client`, and the
+ * two storage checks the storage slice's `storage.config` / `storage.bucket` replace, RETRO-D1).
  */
 const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.core.pgvector',
@@ -30,8 +31,6 @@ const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.auth.jwt',
   'memoriahub.auth.google-oauth',
   'memoriahub.auth.admin-bootstrap',
-  'memoriahub.storage.active-provider',
-  'memoriahub.storage.live-test',
   'memoriahub.ai.search',
   'memoriahub.ai.tagging',
   'memoriahub.ai.embedding',
@@ -69,6 +68,9 @@ const PLATFORM_REPLACEMENT_IDS = [
   'backup.schedule',
   'backup.rls-bypass',
   'backup.mirrors',
+  // The storage slice (RETRO-D1) replaces memoriahub.storage.active-provider and memoriahub.storage.live-test.
+  'storage.config',
+  'storage.bucket',
 ];
 
 /** The telemetry slice's five checks (RETRO-T2, #625), under the `telemetry` category. */
@@ -98,7 +100,7 @@ describe('Platform Doctor (Integration)', () => {
     context.prismaMock.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
   });
 
-  it('registers all 29 memoriahub checks plus the platform replacements after app.init()', () => {
+  it('registers all 27 memoriahub checks plus the platform replacements after app.init()', () => {
     const ids = context.module.get(DoctorCheckRegistry).list().map((check) => check.id);
 
     for (const id of [...MEMORIAHUB_CHECK_IDS, ...PLATFORM_REPLACEMENT_IDS, ...TELEMETRY_CHECK_IDS]) {

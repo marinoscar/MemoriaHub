@@ -25,6 +25,7 @@
 
 import type { Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { resolveJobOrgId } from '@marinoscar/platform-api/identity';
 import { RateLimitError as PlatformRateLimitError, type Job, type JobScope } from '@marinoscar/platform-api/jobs';
 
 import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../../enrichment/rate-limit.error';
@@ -138,14 +139,21 @@ export type OrgWriteScope = <R>(fn: (tx: Prisma.TransactionClient) => Promise<R>
 /**
  * The write scope of a job: the platform `JobScope` (its organization).
  *
- * PLATFORM-ADOPTION-SHIM(RETRO-D1): a row queued before the facade stamped
- * `orgId` (or a hand-inserted one) has `orgId` null, and `JobScope.run` refuses a
- * system job. Such a job keeps the plain client, which is what it had before the
- * cutover; while the API connects as the bootstrap superuser, row-level security
- * is inert either way (local-exceptions.md). D1 removes the fallback.
+ * A row queued before the facade stamped `orgId` (or a hand-inserted one) has
+ * `orgId` null. Since RETRO-D1 it runs in the organization `resolveJobOrgId`
+ * answers, exactly as the platform's own handlers do: the default organization
+ * in single-organization mode (a refusal naming the job in multi mode). The
+ * lookup happens when the scope is first used, so a caller that writes nothing
+ * reads nothing.
  */
-export function jobWriteScope(jobScope: Pick<JobScope, 'run'>, job: Job): OrgWriteScope | undefined {
-  if (!job.orgId) return undefined;
+export function jobWriteScope(
+  jobScope: Pick<JobScope, 'run'>,
+  job: Job,
+  prisma: Parameters<typeof resolveJobOrgId>[0],
+): OrgWriteScope {
   return <R>(fn: (tx: Prisma.TransactionClient) => Promise<R>) =>
-    jobScope.run<R, Prisma.TransactionClient>(job, fn);
+    (async () => {
+      const orgId = job.orgId ?? (await resolveJobOrgId(prisma, job));
+      return jobScope.run<R, Prisma.TransactionClient>({ ...job, orgId }, fn);
+    })();
 }

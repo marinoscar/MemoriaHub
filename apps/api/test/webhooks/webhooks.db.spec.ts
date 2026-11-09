@@ -22,12 +22,14 @@ import '../../src/platform/webhooks/memoriahub-webhook-events';
 import { MemoriaHubWebhooks } from '../../src/platform/webhooks/memoriahub-webhooks.service';
 import { webhooksSystemPrisma } from '../../src/platform/webhooks/webhooks-host.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
 describeMaybeDb('media webhook events on the platform tables (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let system: PrismaSystemService;
   let endpointId: string;
   const circleId = randomUUID();
   const uploaderId = randomUUID();
@@ -35,6 +37,8 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
   beforeAll(async () => {
     registerWebhooksSystemAccessReason();
     prisma = new PrismaService();
+    system = new PrismaSystemService();
+    await system.$connect();
     await prisma.$connect();
     const endpoint = await prisma.webhookEndpoint.create({
       data: {
@@ -57,13 +61,14 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
       where: { type: { in: ['webhooks.fanout', 'webhooks.deliver'] }, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
     });
     await prisma.$disconnect();
+    await system.$disconnect();
   });
 
   it('150 uploads become two fan-out jobs and two deliveries per subscribed endpoint', async () => {
     const jobs = new JobsService(prisma as never);
-    const repository = new PrismaWebhooksRepository(prisma as never, webhooksSystemPrisma(prisma), jobs);
+    const repository = new PrismaWebhooksRepository(prisma as never, webhooksSystemPrisma(system), jobs);
     const webhooks = new WebhooksService(repository, jobs, prisma as never, { record: async () => undefined } as never);
-    const events = new MemoriaHubWebhooks(webhooks, prisma);
+    const events = new MemoriaHubWebhooks(webhooks, prisma, system);
     const since = new Date();
 
     for (let n = 0; n < 150; n += 1) {
@@ -100,9 +105,9 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
     await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { enabled: false } });
     try {
       const jobs = new JobsService(prisma as never);
-      const repository = new PrismaWebhooksRepository(prisma as never, webhooksSystemPrisma(prisma), jobs);
+      const repository = new PrismaWebhooksRepository(prisma as never, webhooksSystemPrisma(system), jobs);
       const webhooks = new WebhooksService(repository, jobs, prisma as never, { record: async () => undefined } as never);
-      const events = new MemoriaHubWebhooks(webhooks, prisma);
+      const events = new MemoriaHubWebhooks(webhooks, prisma, system);
       const since = new Date();
       events.mediaTrashed(circleId, [randomUUID()]);
       await events.flushPending();

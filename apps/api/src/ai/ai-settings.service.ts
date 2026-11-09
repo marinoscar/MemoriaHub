@@ -1,14 +1,7 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
-import { encryptSecret, decryptSecret } from '../legacy/legacy-secret-cipher';
+import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import {
-  UpsertAiCredentialsDto,
   TestAiProviderDto,
   SetSearchFeatureDto,
   SetTaggingFeatureDto,
@@ -22,27 +15,20 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
 
 @Injectable()
 export class AiSettingsService {
-  private readonly logger = new Logger(AiSettingsService.name);
-
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly keys: AiDeploymentKeySource,
     private readonly registry: AiProviderRegistry,
     private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
-  /** Return the AI settings summary (no plaintext keys, no ciphertext) */
+  /**
+   * Return the AI settings summary (no plaintext keys, no ciphertext). Since RETRO-E3 (#605) a
+   * provider's status comes from the platform credential store when it holds a key there, else
+   * from the legacy row (`AiDeploymentKeySource`).
+   */
   async getSettings() {
-    const creds = await this.prisma.aiProviderCredential.findMany({
-      select: {
-        provider: true,
-        last4: true,
-        baseUrl: true,
-        enabled: true,
-        updatedAt: true,
-      },
-      orderBy: { provider: 'asc' },
-    });
-
+    const statuses = await this.keys.list(this.registry.keys());
+    const creds = statuses.filter((c) => c.configured);
     const sysSettings = await this.systemSettings.getSettings();
     const ai = sysSettings.ai;
 
@@ -76,64 +62,6 @@ export class AiSettingsService {
     };
   }
 
-  /** Upsert credential for a provider */
-  async upsertCredential(
-    provider: string,
-    dto: UpsertAiCredentialsDto,
-    userId: string,
-  ) {
-    const last4 = dto.apiKey.slice(-4);
-    const encryptedKey = encryptSecret(dto.apiKey);
-
-    const cred = await this.prisma.aiProviderCredential.upsert({
-      where: { provider },
-      create: {
-        provider,
-        encryptedKey,
-        last4,
-        baseUrl: dto.baseUrl ?? null,
-        enabled: dto.enabled ?? true,
-        updatedByUserId: userId,
-      },
-      update: {
-        encryptedKey,
-        last4,
-        baseUrl: dto.baseUrl ?? null,
-        ...(dto.enabled !== undefined && { enabled: dto.enabled }),
-        updatedByUserId: userId,
-      },
-    });
-
-    this.logger.log(
-      `AI credential upserted for provider "${provider}" by user ${userId}`,
-    );
-
-    return {
-      provider: cred.provider,
-      configured: true,
-      enabled: cred.enabled,
-      last4: cred.last4,
-      baseUrl: cred.baseUrl ?? null,
-    };
-  }
-
-  /** Delete credential for a provider */
-  async deleteCredential(provider: string, userId: string) {
-    const existing = await this.prisma.aiProviderCredential.findUnique({
-      where: { provider },
-    });
-    if (!existing) {
-      throw new NotFoundException(
-        `No credential configured for provider: ${provider}`,
-      );
-    }
-
-    await this.prisma.aiProviderCredential.delete({ where: { provider } });
-    this.logger.log(
-      `AI credential deleted for provider "${provider}" by user ${userId}`,
-    );
-  }
-
   /** Test provider connectivity */
   async testProvider(dto: TestAiProviderDto) {
     const creds = await this.resolveCredentials(dto.provider);
@@ -146,20 +74,14 @@ export class AiSettingsService {
     // Validate the provider key — registry.get throws for unknown providers.
     const provider = this.registry.get(providerKey);
 
-    // Credential is optional: pass key only when a row exists AND is enabled.
-    const cred = await this.prisma.aiProviderCredential.findUnique({
-      where: { provider: providerKey },
-    });
-
+    // Credential is optional: pass the key only when one is stored AND the provider is enabled;
+    // otherwise the curated list is used (empty key).
+    const status = await this.keys.status(providerKey);
     let creds: { apiKey: string; baseUrl?: string };
-    if (cred && cred.enabled) {
-      creds = { apiKey: decryptSecret(cred.encryptedKey), baseUrl: cred.baseUrl ?? undefined };
-    } else if (cred) {
-      // Row exists but provider is disabled — pass empty key so curated list is used.
-      creds = { apiKey: '', baseUrl: cred.baseUrl ?? undefined };
+    if (status.configured && status.enabled) {
+      creds = await this.keys.resolve(providerKey);
     } else {
-      // No credential row — return curated/static list without a key.
-      creds = { apiKey: '' };
+      creds = { apiKey: '', ...(status.baseUrl ? { baseUrl: status.baseUrl } : {}) };
     }
 
     return provider.listModels(creds);
@@ -430,16 +352,13 @@ export class AiSettingsService {
    * all a feature-selection write needs to know.
    */
   private async assertProviderUsable(providerKey: string): Promise<void> {
-    const cred = await this.prisma.aiProviderCredential.findUnique({
-      where: { provider: providerKey },
-      select: { enabled: true },
-    });
-    if (!cred) {
+    const status = await this.keys.status(providerKey);
+    if (!status.configured) {
       throw new BadRequestException(
         `Provider "${providerKey}" is not configured`,
       );
     }
-    if (!cred.enabled) {
+    if (!status.enabled) {
       throw new BadRequestException(`Provider "${providerKey}" is disabled`);
     }
   }
@@ -472,25 +391,16 @@ export class AiSettingsService {
   }
 
   /**
-   * Resolve decrypted credentials for a provider.
-   * Used internally by the chat/search service.
-   * Never returns key to HTTP callers.
+   * Resolve decrypted credentials for a provider: the platform deployment key first, then the
+   * legacy row (PLATFORM-ADOPTION-SHIM(#605), `AiDeploymentKeySource`). Used internally by the
+   * AI call sites and the worker-node credential broker. Never returns a key to HTTP callers.
    */
   async resolveCredentials(providerKey: string) {
-    const cred = await this.prisma.aiProviderCredential.findUnique({
-      where: { provider: providerKey },
-    });
-    if (!cred) {
-      throw new BadRequestException(
-        `Provider "${providerKey}" is not configured`,
-      );
-    }
-    if (!cred.enabled) {
-      throw new BadRequestException(
-        `Provider "${providerKey}" is disabled`,
-      );
-    }
-    const apiKey = decryptSecret(cred.encryptedKey);
-    return { apiKey, baseUrl: cred.baseUrl ?? undefined };
+    return this.keys.resolve(providerKey);
+  }
+
+  /** Presentation-safe key status for one provider (no key material). */
+  async credentialStatus(providerKey: string) {
+    return this.keys.status(providerKey);
   }
 }

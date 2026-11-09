@@ -48,7 +48,7 @@
 // ffprobe binary — only used by the OOM-fix "downloadVideo() memoization"
 // tests below, which deliberately omit the persisted `video-probe` block to
 // force that branch.
-jest.mock('../storage/processing/processors/ffprobe.util', () => ({
+jest.mock('../media-processing/processors/ffprobe.util', () => ({
   probeVideoFile: jest.fn().mockResolvedValue({}),
   extractContainerMetadata: jest.fn().mockReturnValue({
     formatTags: {},
@@ -97,7 +97,7 @@ import { SocialMediaDetectionHandler, type SocialMediaJobContext } from './socia
 import { SocialMediaDetectorService, type VideoDetectionInput } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import {
   createMockPrismaService,
@@ -777,7 +777,7 @@ describe('SocialMediaDetectionHandler', () => {
 
     it('still cleans up the memoized temp file exactly once when the legacy re-probe itself throws', async () => {
       const ffprobeUtil = jest.requireMock(
-        '../storage/processing/processors/ffprobe.util',
+        '../media-processing/processors/ffprobe.util',
       ) as { probeVideoFile: jest.Mock };
       ffprobeUtil.probeVideoFile.mockRejectedValueOnce(new Error('ffprobe exploded'));
 

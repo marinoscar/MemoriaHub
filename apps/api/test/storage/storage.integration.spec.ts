@@ -12,7 +12,7 @@ import {
   authHeader,
 } from '../helpers/auth-mock.helper';
 import { createMockStorageProvider } from '../mocks/storage-provider.mock';
-import { StorageProviderResolver } from '../../src/storage/providers/storage-provider.resolver';
+import { StorageProviderRouter } from '@marinoscar/platform-api/storage';
 
 describe('Storage Integration', () => {
   let context: TestContext;
@@ -50,24 +50,13 @@ describe('Storage Integration', () => {
     setupBaseMocks();
     jest.clearAllMocks();
 
-    // ObjectsService still *injects* STORAGE_PROVIDER, but every upload path
-    // now obtains its provider from StorageProviderResolver instead — a
-    // consequence of multi-provider storage (per-object routing, see
-    // docs/specs/storage-providers.md). This spec used to mock the injected
-    // token with Object.assign, which those paths stopped consulting, so real
-    // S3StorageProvider instances were constructed and issued real AWS calls
-    // ("No value provided for input HTTP label: Bucket"). Stub the resolver
-    // instead, which is what the service actually calls (issue #220).
-    //
-    // Re-applied per test, after jest.clearAllMocks(), so the stubs can never
-    // be cleared out from under a later test in the file.
-    const resolver = context.module.get(StorageProviderResolver, { strict: false });
-    jest
-      .spyOn(resolver, 'getActiveProvider')
-      .mockResolvedValue({ id: 's3', provider: mockStorageProvider as any });
-    jest
-      .spyOn(resolver, 'getProviderFor')
-      .mockResolvedValue(mockStorageProvider as any);
+    // The objects API is the platform storage slice's since RETRO-D1: every path
+    // asks the platform's StorageProviderRouter for the provider (the active one,
+    // or the one recorded on the row). Stub the router, re-applied per test after
+    // jest.clearAllMocks(), so no real S3 client is ever built.
+    const router = context.module.get(StorageProviderRouter, { strict: false });
+    jest.spyOn(router, 'forLocation').mockResolvedValue(mockStorageProvider as any);
+    jest.spyOn(router, 'forObject').mockResolvedValue(mockStorageProvider as any);
   });
 
   describe('POST /api/storage/objects/upload/init', () => {
@@ -226,6 +215,15 @@ describe('Storage Integration', () => {
         status: 'processing',
       });
       context.prismaMock.auditEvent.create.mockResolvedValue({});
+      // The platform completes in one transaction: claim the row, then queue the
+      // `storage.object.process` job (RETRO-D1).
+      context.prismaMock.storageObject.updateMany.mockResolvedValue({ count: 1 });
+      context.prismaMock.storageObject.findUniqueOrThrow.mockResolvedValue({
+        ...mockStorageObject,
+        uploadedById: user.id,
+        status: 'processing',
+      });
+      context.prismaMock.job.create.mockResolvedValue({ id: 'job-1' });
 
       const response = await request(context.app.getHttpServer())
         .post(`/api/storage/objects/${mockStorageObjectId}/upload/complete`)

@@ -15,8 +15,8 @@ import {
   FfprobeDataLike,
 } from '@memoriahub/enrichment-compute/metadata';
 import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER, StorageProvider } from '../storage/providers/storage-provider.interface';
-import { streamToBuffer, streamToTempFile } from '../storage/processing/processors/stream-utils';
+import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
+import { streamToBuffer, streamToTempFile } from '../media-processing/processors/stream-utils';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 

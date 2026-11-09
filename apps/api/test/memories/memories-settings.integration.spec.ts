@@ -412,6 +412,8 @@ describe('Memories settings integration (issue #302)', () => {
       const admin = await createMockAdminUser(context);
       grantAiSettingsPermissions(admin.id);
       context.prismaMock.aiProviderCredential.findMany.mockResolvedValue([]);
+      // The platform key store (RETRO-E3, #605) holds no AI key either.
+      context.prismaMock.credential.findMany.mockResolvedValue([]);
 
       const response = await request(context.app.getHttpServer())
         .get('/api/ai/settings')

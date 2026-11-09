@@ -4,7 +4,7 @@ import {
   LegacyEnrichmentHandlerAdapter,
 } from '../platform/jobs/legacy-handlers.adapter';
 import { EnrichmentJobService, LegacyJobSettledBridge } from '../platform/jobs/enrichment-job.facade';
-import { RetiredJobTypeHandler } from '../platform/jobs/retired-job-types';
+import { RetiredJobTypeHandler, RetiredStorageMigrationHandler } from '../platform/jobs/retired-job-types';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
 
@@ -27,6 +27,7 @@ import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
     EnrichmentJobService,
     LegacyJobSettledBridge,
     RetiredJobTypeHandler,
+    RetiredStorageMigrationHandler,
   ],
   exports: [EnrichmentJobService, EnrichmentHandlerRegistry],
 })

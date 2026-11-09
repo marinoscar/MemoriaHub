@@ -1,12 +1,8 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-export const upsertCredentialsSchema = z.object({
-  apiKey: z.string().min(1),
-  baseUrl: z.string().url().optional(),
-  enabled: z.boolean().optional(),
-});
-export class UpsertAiCredentialsDto extends createZodDto(upsertCredentialsSchema) {}
+// The legacy key-write body (`UpsertAiCredentialsDto`) was removed by RETRO-E3 (#605): keys are set
+// through the platform `PUT /api/admin/ai/providers/:provider/key`.
 
 export const testProviderSchema = z.object({
   provider: z.string().min(1),

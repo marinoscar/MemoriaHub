@@ -18,7 +18,7 @@ import sharp from 'sharp';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MetadataExtractionService } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER } from '../storage/providers/storage-provider.interface';
+import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import {

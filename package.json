@@ -41,8 +41,8 @@
     "ink": "^7.1.1"
   },
   "devDependencies": {
-    "@marinoscar/platform-contract": "0.1.0-next.27",
-    "@marinoscar/platform-infra": "0.1.0-next.27",
+    "@marinoscar/platform-contract": "0.1.0-next.28",
+    "@marinoscar/platform-infra": "0.1.0-next.28",
     "@stoplight/spectral-cli": "^6.16.3",
     "eslint": "^10.12.0",
     "typescript-eslint": "^8.71.2"

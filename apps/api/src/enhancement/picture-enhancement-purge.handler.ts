@@ -13,7 +13,7 @@ import { EnrichmentJob, MediaEnhancementStatus } from '@prisma/client';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()

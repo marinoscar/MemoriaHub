@@ -5,7 +5,7 @@ export const ENRICHMENT_HANDLER = Symbol('ENRICHMENT_HANDLER');
 
 /**
  * Image-based enrichment handlers MUST load pixels via prepareImageForProcessing
- * (storage/processing/image-orientation.util) — never decode raw bytes directly —
+ * (media-processing/image-orientation.util) — never decode raw bytes directly —
  * so EXIF orientation is always applied.
  */
 export interface EnrichmentHandler {

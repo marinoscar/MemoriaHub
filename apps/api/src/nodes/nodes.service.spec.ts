@@ -53,8 +53,7 @@ import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { ObjectsService } from '../storage/objects/objects.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AiSettingsService } from '../ai/ai-settings.service';
 import { AutoTaggingService } from '../tagging/auto-tagging.service';
 import { VideoAutoTaggingService } from '../tagging/video-auto-tagging.service';
@@ -102,7 +101,7 @@ describe('NodesService — result/failure ingestion', () => {
   let mockPrisma: MockPrismaService;
   let mockRegistry: { get: jest.Mock; types: jest.Mock };
   let mockTerminal: { completeSucceeded: jest.Mock; completeFailed: jest.Mock };
-  let mockResolver: { getActiveProvider: jest.Mock };
+  let mockResolver: { getActiveProvider: jest.Mock; getInternalDownloadUrl: jest.Mock };
   let mockActiveProvider: { getSignedPutUrl: jest.Mock; getBucket: jest.Mock };
   let mockClaimService: { claim: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
@@ -119,10 +118,14 @@ describe('NodesService — result/failure ingestion', () => {
       getSignedPutUrl: jest.fn().mockResolvedValue('https://mock-presigned-url.example/put'),
       getBucket: jest.fn().mockReturnValue('test-bucket'),
     };
+    // The internal download URL moved from the app's ObjectsService onto the
+    // resolver (RETRO-D1); `mockObjects` names the same object.
+    mockObjects = { getDownloadUrl: jest.fn(), getInternalDownloadUrl: jest.fn() };
     mockResolver = {
       getActiveProvider: jest
         .fn()
         .mockResolvedValue({ id: 's3', provider: mockActiveProvider }),
+      getInternalDownloadUrl: mockObjects.getInternalDownloadUrl,
     };
     mockClaimService = { claim: jest.fn().mockResolvedValue([]) };
     mockSystemSettings = { getSettings: jest.fn().mockResolvedValue({}) };
@@ -132,13 +135,6 @@ describe('NodesService — result/failure ingestion', () => {
         NodesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
-        {
-          provide: ObjectsService,
-          useValue: {
-            getDownloadUrl: jest.fn(),
-            getInternalDownloadUrl: jest.fn(),
-          },
-        },
         { provide: StorageProviderResolver, useValue: mockResolver },
         // getJobCredentials dependencies (auto_tagging/geocode transient
         // credentials) — not exercised by this spec file's existing coverage
@@ -157,7 +153,6 @@ describe('NodesService — result/failure ingestion', () => {
     }).compile();
 
     service = module.get(NodesService);
-    mockObjects = module.get(ObjectsService);
 
     // The queue is the platform `jobs` table since RETRO-C1 and a legacy node cannot hold a
     // platform job, so the service's claim and settle hooks are the paused ones (see the service

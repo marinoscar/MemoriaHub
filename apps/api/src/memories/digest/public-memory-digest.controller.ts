@@ -72,11 +72,11 @@ import { Readable } from 'stream';
 import { Public } from '@marinoscar/platform-api/identity';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { StorageProviderResolver } from '../../storage/providers/storage-provider.resolver';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../../storage/providers/storage-provider.interface';
+} from '@marinoscar/platform-api/storage';
 import { UserSettingsService } from '@marinoscar/platform-api/settings';
 import type { PatchUserSettingsDto } from '@marinoscar/platform-api/settings';
 import {

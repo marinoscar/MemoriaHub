@@ -159,19 +159,31 @@ describe('legacy credential migration', () => {
     await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/Round trip failed.*row-geo-1/);
   });
 
-  it('plans storage but refuses to apply it (smtp and ses apply since RETRO-D2, push_vapid since RETRO-D3)', async () => {
-    const storage: LegacyItem = {
+  it('applies every S3-family storage secret to its own driver address, set-if-absent (RETRO-D1, platform next.28)', async () => {
+    const s3: LegacyItem = {
       purpose: 'storage',
       rowId: 'row-s3',
       label: 'storage_provider_credentials/s3',
       ciphertext: encryptSecret('aws-secret-key-1111'),
-      target: { purpose: 'storage', name: 'default' },
+      target: { purpose: 'storage', name: 's3' },
     };
-    const inactive: LegacyItem = { ...storage, rowId: 'row-r2', label: 'storage_provider_credentials/r2', target: null, note: 'not the active provider' };
-    const plan = await buildPlan(['storage'], source([storage, inactive]), creds, settings, decryptSecret);
-    expect(plan.entries.map((e) => e.status)).toEqual(['write', 'skipped']);
-    await expect(applyPlan(plan, creds, settings, decryptSecret)).rejects.toThrow(/storage not applicable yet/);
-    expect(creds.rows.size).toBe(0);
+    const r2: LegacyItem = {
+      ...s3,
+      rowId: 'row-r2',
+      label: 'storage_provider_credentials/r2',
+      ciphertext: encryptSecret('r2-secret-key-2222'),
+      target: { purpose: 'storage', name: 'r2' },
+    };
+    const local: LegacyItem = { ...s3, rowId: 'row-local', label: 'storage_provider_credentials/local', ciphertext: null, target: null, note: 'the local driver has no secret' };
+    // An administrator already saved r2's key after the cutover: kept.
+    await creds.setSecret('storage', 'r2', 'admin-saved-r2-key');
+    const plan = await buildPlan(['storage'], source([s3, r2, local]), creds, settings, decryptSecret, { onlyIfAbsent: true });
+    expect(plan.entries.map((e) => e.status)).toEqual(['write', 'unchanged', 'skipped']);
+    const result = await applyPlan(plan, creds, settings, decryptSecret);
+    expect(result).toMatchObject({ written: 1, unchanged: 1, skipped: 1 });
+    expect(await creds.getSecret('storage', 's3')).toBe('aws-secret-key-1111');
+    expect(await creds.getSecret('storage', 'r2')).toBe('admin-saved-r2-key');
+    expect(await creds.getSecret('storage', 'default')).toBeNull();
   });
 
   it('applies push_vapid since RETRO-D3 (the platform PushConfigService reads the credential store)', async () => {

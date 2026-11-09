@@ -48,7 +48,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 // Imported for the side effect of wiring the shared package's logger into
 // NestJS logging (and kept as the canonical orientation-prep import site).
-import '../storage/processing/image-orientation.util';
+import '../media-processing/image-orientation.util';
 
 // -----------------------------------------------------------------------------
 // Re-exports for import-compat — the pure functions/constants moved to the

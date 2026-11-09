@@ -23,11 +23,24 @@ export const prismaMock = _prismaMock as any;
 export const mockPrisma = prismaMock;
 
 /**
+ * `PrismaService.forOrg` / `runInOrg` (RETRO-D1): the org-scoped client is the
+ * mock itself, so a test that seeds `prismaMock.storageObject` sees the same
+ * rows through the platform slices' `storageForOrg` / `storageRunInOrg`.
+ */
+export function installOrgScopeMocks(mock: any = prismaMock): void {
+  mock.forOrg.mockImplementation(() => mock);
+  mock.runInOrg.mockImplementation((_orgId: string, fn: (tx: unknown) => unknown) => fn(mock));
+}
+
+installOrgScopeMocks();
+
+/**
  * Reset all Prisma mocks
  * Call this in beforeEach() to ensure clean state
  */
 export function resetPrismaMock(): void {
   mockReset(prismaMock);
+  installOrgScopeMocks();
 }
 
 /**

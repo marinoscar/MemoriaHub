@@ -8,6 +8,8 @@
 
 ---
 
+
+> **Since RETRO-D1 (#563) this document is history.** Object storage is the platform storage slice (`@marinoscar/platform-api/storage`): the driver registry (`s3`, `r2`, `s3compatible`, and MemoriaHub's `local` driver), the `storage` settings namespace and the credential store, per-row routing (`StorageProviderRouter`), the objects API with the API-proxied part route, and the copy-only migration (`/api/admin/storage/migrations`). The routes, tables and job described below (`/api/storage-settings/*`, `storage_provider_credentials`, `storage_migration`) are retired; their wire behaviour for upload clients is unchanged. Operators: [storage configuration runbook](../runbooks/storage-configuration.md). Exceptions and seam requests: [local-exceptions.md](../platform-adoption/local-exceptions.md).
 ## Table of Contents
 
 1. [Overview and Goals](#1-overview-and-goals)
