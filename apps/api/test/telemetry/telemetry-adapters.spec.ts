@@ -368,11 +368,18 @@ describe('the telemetry settings namespace and the dashboard options', () => {
     expect(TELEMETRY_SYSTEM_SETTINGS.patchSchema.parse({ query: { maxRows: 100 } })).toEqual({ query: { maxRows: 100 } });
   });
 
-  it("MemoriaHub's verdict thresholds equal the platform defaults (RETRO-T3 tunes them)", () => {
+  it("MemoriaHub's verdict thresholds equal the platform defaults (RETRO-T3 kept them)", () => {
     expect(resolveVerdictThresholds(MEMORIAHUB_VERDICT_THRESHOLDS)).toEqual(DEFAULT_VERDICT_THRESHOLDS);
   });
 
-  it('adds no metric group of its own until RETRO-T3', () => {
-    expect(APP_METRIC_GROUPS).toEqual([]);
+  it("adds MemoriaHub's six metric groups (RETRO-T3), ordered after the platform's", () => {
+    expect(APP_METRIC_GROUPS.map((group) => [group.id, group.order])).toEqual([
+      ['media', 80],
+      ['enrichment', 81],
+      ['memories', 82],
+      ['storage', 83],
+      ['ai_spend', 84],
+      ['fleet_mh', 86],
+    ]);
   });
 });
