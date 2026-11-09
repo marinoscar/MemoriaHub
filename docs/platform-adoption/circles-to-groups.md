@@ -40,7 +40,10 @@ Access is decided on the platform groups; the data model and every route shape a
 - **403 -> 404 (§6).** A non-member, a stranger on a personal library and an unknown scope get the same 404. A member below the required role still gets 403. Bypass: `groups:admin` (and the deprecated `circles:manage_any`, kept one release), `media:write_any`, `media:read_any`, exactly as before.
 - **Personal circles take no members**: `POST /api/circles/:id/members` and `POST /api/circles/:id/invites` answer 400 on a personal circle (such a member was dropped by I2 and would hold no access).
 - **Equivalence** is pinned by `apps/api/test/sharing/access-matrix.spec.ts` (decision table and 16 routes across ten domains x five callers, each against the legacy rule table) and `apps/api/test/sharing/owner-access.db.spec.ts` (real PostgreSQL, the I2 mirror, forced RLS).
-- **Not done here** (local-exceptions.md): `AccessPolicy` / `decideMany` / `accessibleWhere` on `media_item` and `album` (so grants still give no access, the I4 step), the `ownerGroupId` / `scope=me` parameters, the §8 cross-circle queries (still read the mirrored `circles` / `circle_members`), job payloads on the owner, `move_to_circle` -> `move_to_owner`, dropping the content trigger (a migration; #573 is not a migration-lock issue) and `deleteGrantsForResources` in hard deletes. Viewer keeps `circles:write` (creating a circle); `groups:write` is not granted to `viewer`, so creating through `/api/groups` stays `contributor`/`org_admin` (§5).
+- **Grants (part 2).** On `media_item` and `album` a caller the owner-scope check refused is then asked about GRANTS through the sharing slice's `AccessPolicy` (`RecordAccessService`, `apps/api/src/platform/sharing/record-access.ts`): `decide` for one record (`GET/PATCH /api/media/:id`, tags, albums), ONE `decideMany` for a bulk batch (`MediaService.assertAllInCircle`), and `accessibleWhere` (scope `shared`) AND-ed onto a non-member's `GET /api/media` / `GET /api/media/albums`. Only a decision `via` a user or group grant is accepted, so every member's outcome is exactly the owner-scope one and a member's list keeps its `circle_id` filter (gallery keyset, map and KNN plans untouched). A viewer grant reads, an editor grant also writes, no grant trashes (`delete` needs the owner) or reaches a group-`admin` action. Pinned by `test/sharing/record-grants.spec.ts` and `test/sharing/cross-group-queries.db.spec.ts`.
+- **Owner-scope parameters.** Every route that took `circleId` also takes `ownerGroupId` (a shared library) or `scope=me` (the caller's personal library); `circleId` stays, deprecated in OpenAPI, for one release. A global interceptor (`platform/sharing/owner-scope-params.ts`) rewrites both forms into `circleId` before validation; conflicting forms are 400, `scope=me` with no personal library 404.
+- **`groups:write` for `viewer`** (§5), so a viewer can still create a shared library as they could always create a circle.
+- **Kept on purpose** (local-exceptions.md): the §8 sweeps still read the mirrored `circles` / `circle_members` (no platform system listing of groups and members; EAB seam), proven equal by `cross-group-queries.db.spec.ts`; job payloads keep `circleId` and the job type strings are unchanged (queued jobs and the platform's permanent type strings); the workflow action stays `move_to_circle` (stored workflow definitions and run snapshots name it; renaming it is RETRO-I6's, with the web builder); the content trigger stays (dropping it is a migration). Grants are not consulted by the map aggregate, explore, facets, search/KNN and the review queues, which stay member-only.
 
 ## 1. Decisions (the three open decisions of #562)
 
@@ -130,7 +133,7 @@ The `bypassPermissions` keep today's super-admin bypass (`circles:manage_any`, `
 
 Granted since RETRO-I1 (`apps/api/prisma/catalog/permissions.json`, `npm run catalog:permissions --workspace=api`): `groups:read`, `sharing:read` to `viewer`, `contributor`, `org_admin`; `groups:write`, `sharing:write` to `contributor`, `org_admin`; `groups:admin`, `sharing:admin` to `org_admin`. A system `admin` holds the last two through the `org_admin` role the identity slice gives it on the default organization (all six are ORG-scope, so they are never granted to the system role directly). The MemoriaHub ids stay until I3 retires the last route that checks them; the seed applies the new rows on the next `npm run prisma:seed` (idempotent).
 
-Note the one deliberate difference: today `viewer` holds `circles:write` (can create a circle); the platform gives `groups:write` only to `contributor` and `org_admin`. I3 decides whether to grant `groups:write` to `viewer` (an app grant in `permissions.ts`) to keep that behaviour.
+Note the one deliberate difference: `viewer` holds `circles:write` (can create a circle); the platform gives `groups:write` only to `contributor` and `org_admin`. **Decided in I3:** `groups:write` is granted to `viewer` too (`platformGrants` in `apps/api/src/app-registrations/permissions.ts`), keeping that behaviour. No MemoriaHub permission name is dead yet: `circles:*` are checked by the circle routes until I6, `shares:*` by the share routes until I4.
 
 ## 6. Error semantics
 
@@ -142,25 +145,25 @@ A non-member of a circle gets **403** today (`apps/api/src/circles/circle-member
 
 ## 8. Cross-circle query inventory
 
-The "12 cross-circle queries" of the EAB tenancy table, refreshed against MemoriaHub at RETRO-I1. Each reads or writes across more than one circle and must become a system read (named `SystemAccessReason`), a group-scoped loop, or an `ownedByMeOrMyGroups` list in I3:
+Every query that reads or writes across more than one circle, refreshed at RETRO-I3 part 2 (`grep -rn "circle\.findMany\|circleMember\.findMany\|circleId: { in" apps/api/src`). **Decision for all of them in I3: they keep reading the app's `circles` / `circle_members`.** The platform has no system listing of groups and of a group's members for a background job, and app code may not read `groups` / `group_members` directly (`no-direct-access`); the RETRO-I2 mirror keeps the two models equal for every circle the app writes. `apps/api/test/sharing/cross-group-queries.db.spec.ts` pins the equality on real PostgreSQL (the swept scopes are the groups plus one personal library per user, the reconcile audience is the group's `editor` + `admin` members, the digest audience all members, a node's backup scope the owner's groups plus their personal library). The EAB seam (system listing) and RETRO-I6 (circles dropped) turn each into a group query.
 
-| File:line | What it does |
-|---|---|
-| `apps/api/src/memories/memories-generation.task.ts:129` | every circle due for `memory_generation` |
-| `apps/api/src/memories/digest/memory-digest.task.ts:140` | every circle due for `memory_digest` |
-| `apps/api/src/memories/admin/memory-backfill.service.ts:86`, `:99` | one or every circle for the memories backfill |
-| `apps/api/src/nodes/node-backup.service.ts:251-252` | owner's memberships to validate `circleIds` |
-| `apps/api/src/nodes/node-backup-query.service.ts:206` (memberships), `:244`, `:377`, `:414`, `:467`, `:477`, `:487` (`circleId: { in: scope }`) | the backup change feed, manifest and dimensions across the node owner's circles |
-| `apps/api/src/notification-producers/review-queue-reconcile.service.ts:153`, `:199` | every circle and its collaborator/admin members for the review-queue reconcile |
-| `apps/api/src/media-sync/media-sync.service.ts:603-613` (`defaultTargetCircle`) | personal circle, else the first collaborator/admin circle, as a device's target |
-| `apps/api/src/circles/circles.service.ts:70`, `:77`, `:138` | list circles (all for an admin, else the caller's memberships) and members |
-| `apps/api/src/search/search.service.ts:75`, `apps/api/src/search/semantic-search.service.ts:83` | membership check and the pgvector KNN by `e.circle_id` |
-| `apps/api/src/workflows/actions/workflow-action.executor.ts:115`, `:381` | `move_to_circle`, the one cross-circle cascade (collaborator on both circles, `action-params.schema.ts:157`) |
-| `apps/api/src/platform/onboarding/onboarding.facts.ts:124`, `:133`, `:136` | the caller's circles, their other members and pending invites |
-| `apps/api/src/platform/user-data/memoriahub-user-data.service.ts:105`, `:221`, `:248`, `:272`, `:291`, `:363`, `:400` | personal-circle purge and owned-circle hand-over |
-| `apps/api/src/metadata/metadata-backfill.service.ts:95`, `apps/api/src/face/face-backfill.service.ts:101`, `apps/api/src/burst/burst.service.ts:749`, `apps/api/src/dedup/duplicate-backfill.service.ts:41`, `apps/api/src/tagging/tagging-backfill.service.ts:109`, `apps/api/src/social-media/social-media-backfill.service.ts:103`, `apps/api/src/location-groups/location-group-rebuild.handler.ts:196` | admin backfills and the location rebuild over every circle |
+| File:line | What it does | Group-model meaning | Proven by |
+|---|---|---|---|
+| `apps/api/src/memories/memories-generation.task.ts:117` | every circle due for `memory_generation` | every group + every personal library | db spec case 1 |
+| `apps/api/src/memories/digest/memory-digest.task.ts:133` | every circle due for `memory_digest`; recipients are its members | groups + personal libraries; recipients = `group_members` | cases 1, 2 |
+| `apps/api/src/memories/admin/memory-backfill.service.ts:99` | one or every circle for the memories backfill | same as generation | case 1 |
+| `apps/api/src/notification-producers/review-queue-reconcile.service.ts:152`, `:198` | every circle, and its collaborator/admin members | every group, its `editor` + `admin` members (open decision 2: 1:1) | cases 1, 2 |
+| `apps/api/src/nodes/node-backup.service.ts:251-252` | owner's memberships to validate `circleIds` | owner's groups + personal library | case 3 |
+| `apps/api/src/nodes/node-backup-query.service.ts:206` (memberships), `:244`, `:377`, `:414`, `:467`, `:477`, `:487` (`circleId: { in: scope }`) | backup change feed, manifest and dimensions across the node owner's circles | the same scope over `owner_*` (equal by the I2 trigger) | case 3 |
+| `apps/api/src/media-sync/media-sync.service.ts:603` (`defaultTargetCircle`) | personal circle, else the first collaborator/admin circle, as a device's target | personal library, else the first group where the user is `editor`+ | owner-access.db.spec (roles) |
+| `apps/api/src/circles/circles.service.ts:73`, `:80`, `:133`, `:143` | list circles (all for an admin, else the caller's memberships) and members | `/api/groups` (RETRO-I5/I6 replace these routes) | n/a (routes slated for I6) |
+| `apps/api/src/search/semantic-search.service.ts:83` | pgvector KNN by `e.circle_id` | the owner scope's key; grants deliberately not consulted (member-only, index plan kept) | access-matrix (search route) |
+| `apps/api/src/workflows/actions/workflow-action.executor.ts:115`, `:381` | `move_to_circle`, editor on BOTH scopes | unchanged name (stored definitions); the check is `requireOwnerRole` on both | workflow-run specs |
+| `apps/api/src/platform/onboarding/onboarding.facts.ts:125`, `:134`, `:137` | the caller's circles, their other members and pending invites | groups + invites (I5) | n/a |
+| `apps/api/src/platform/user-data/memoriahub-user-data.service.ts:108`, `:224`, `:251`, `:275`, `:294`, `:366`, `:403` | personal-circle purge and owned-circle hand-over | personal library purge (`owner_user_id`); group hand-over | ownership.db.spec |
+| `apps/api/src/metadata/metadata-backfill.service.ts:95`, `apps/api/src/face/face-backfill.service.ts:101`, `apps/api/src/burst/burst.service.ts:756`, `apps/api/src/dedup/duplicate-backfill.service.ts:41`, `apps/api/src/tagging/tagging-backfill.service.ts:109`, `apps/api/src/social-media/social-media-backfill.service.ts:103`, `apps/api/src/location-groups/location-group-rebuild.handler.ts:196` | admin backfills and the location rebuild over every circle | every group + personal library | case 1 |
 
-Re-run `grep -rn "circle\.findMany\|circleMember\.findMany\|circleId: { in" apps/api/src` before I3 starts; a new hit belongs in this table.
+A new hit of the grep belongs in this table, with a case in the db spec when it decides who sees or receives something.
 
 ## 9. Public shares (`MediaShare`) to link grants (I4)
 

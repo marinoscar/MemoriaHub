@@ -2,8 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { APP_PIPE } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
+import { OwnerScopeParamsInterceptor } from './platform/sharing/owner-scope-params';
 
 import { PrismaModule } from './prisma/prisma.module';
 import './settings/registry';
@@ -259,6 +260,12 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     {
       provide: APP_PIPE,
       useClass: ZodValidationPipe,
+    },
+    // RETRO-I3 (#573): `ownerGroupId` / `scope=me` -> the routes' `circleId` (deprecated alias),
+    // rewritten after the guards and before the validation pipe (platform/sharing/owner-scope-params.ts).
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: OwnerScopeParamsInterceptor,
     },
     // The exception filter, the logging and envelope interceptors and
     // `MaintenanceGuard` (the application's ONLY global guard, and the first)

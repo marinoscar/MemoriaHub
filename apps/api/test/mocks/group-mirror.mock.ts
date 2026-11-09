@@ -56,6 +56,9 @@ export function mirroredSharingData(
   const tx = new Proxy(prisma, {
     get(target, key) {
       if (key === 'groupMember') return mirroredGroupMemberDelegate(prisma);
+      // RETRO-I3: AccessPolicy / accessibleWhere read grants and record owners through this
+      // port. An unseeded deep-mock answers `undefined`; read that as "no rows".
+      if (key === 'grant' || key === 'mediaItem' || key === 'album') return orEmpty(target[key]);
       return target[key];
     },
   });
@@ -64,4 +67,15 @@ export function mirroredSharingData(
     runAsSystem: (reason: string, fn: (tx: unknown) => unknown) =>
       system ? system.runAsSystem(reason, fn) : fn(prisma),
   };
+}
+
+/** A delegate whose `findMany` / `groupBy` answer `[]` instead of an unseeded mock's `undefined`. */
+function orEmpty(delegate: any) {
+  return new Proxy(delegate, {
+    get(target, key) {
+      const fn = target[key];
+      if (key !== 'findMany' && key !== 'groupBy') return fn;
+      return async (...args: unknown[]) => (await fn(...args)) ?? [];
+    },
+  });
 }

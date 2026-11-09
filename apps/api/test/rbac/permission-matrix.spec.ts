@@ -147,8 +147,9 @@ const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
   // slice's own routes are mounted but empty until circles become groups (RETRO-I2..I5).
   contributor: ['ai:use', 'webhooks:read', 'webhooks:write', 'groups:read', 'groups:write', 'sharing:read', 'sharing:write'],
   // RETRO-D1 (#563): storage:write, widened to `viewer` through platformGrants (the objects API was a
-  // bare @Auth() before, so viewers uploaded).
-  viewer: ['webhooks:read', 'webhooks:write', 'groups:read', 'sharing:read', 'storage:write'],
+  // bare @Auth() before, so viewers uploaded). RETRO-I3 (#573): groups:write, widened to `viewer`
+  // the same way, because a viewer could always create a circle (circles:write).
+  viewer: ['webhooks:read', 'webhooks:write', 'groups:read', 'groups:write', 'sharing:read', 'storage:write'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */

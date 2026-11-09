@@ -511,6 +511,8 @@ Indexes: `(workflow_id, created_at)` (run history), `(circle_id, status)`, `(sta
 
 ## 13. API Endpoints
 
+> **Since RETRO-I3 (#573)** the per-circle roles are group roles of the workflow's owner scope (`collaborator` = group `editor`), checked by `OwnerAccessService.requireOwnerRole`; a non-member gets 404. `move_to_circle` keeps its name: stored workflow definitions and run snapshots name it, and the job type strings are permanent; its both-scope check is `requireOwnerRole(..., 'editor')` on the source and the target. A grant on a photo gives no workflow access (workflows are group-owned, not shareable). Routes also take `ownerGroupId` / `scope=me` (deprecated alias `circleId`).
+
 All routes are circle-scoped (except the Admin plane) and feature-gated by `features.workflows` + `WORKFLOWS_ENABLED` (404 when off, via `assertFeatureEnabled()` in every service). No new RBAC permission was introduced — the feature reuses `media:read`/`media:write`/`media:delete` plus per-circle `viewer`/`collaborator` roles, exactly mirroring the bulk-media-ops permission model; the Admin plane reuses `system_settings:*`/`jobs:*`.
 
 ### Workflow CRUD, preview, and subjects (`WorkflowsController`)
