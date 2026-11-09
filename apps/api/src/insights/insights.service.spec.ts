@@ -80,6 +80,30 @@ describe('InsightsService', () => {
   // computeMetrics
   // =========================================================================
 
+  describe('computeMetrics storage breakdown (RETRO-T3)', () => {
+    it('folds provider x kind bytes and trashed originals into string fields', async () => {
+      (mockPrisma.$queryRaw as jest.Mock)
+        .mockResolvedValueOnce([{ type: 'photo', cnt: 2n, bytes: 300n }])
+        .mockResolvedValueOnce([
+          { provider: 's3', kind: 'photo', trashed: false, bytes: 200n },
+          { provider: 's3', kind: 'photo', trashed: true, bytes: 100n },
+          { provider: 's3', kind: 'thumbnail', trashed: false, bytes: 7n },
+          { provider: 'local', kind: 'video', trashed: true, bytes: 50n },
+        ]);
+      (mockPrisma.face.count as jest.Mock).mockResolvedValue(0);
+      (mockPrisma.mediaTagStatus.count as jest.Mock).mockResolvedValue(0);
+
+      const result = await service.computeMetrics();
+
+      expect(result.storageBreakdown).toEqual([
+        { provider: 's3', kind: 'photo', bytes: '300' },
+        { provider: 's3', kind: 'thumbnail', bytes: '7' },
+        { provider: 'local', kind: 'video', bytes: '50' },
+      ]);
+      expect(result.trashBytes).toBe('150');
+    });
+  });
+
   describe('computeMetrics', () => {
     const photoRow = { type: 'photo', cnt: 800n, bytes: 472_000_000n };
     const videoRow = { type: 'video', cnt: 200n, bytes: 788_000_000n };
