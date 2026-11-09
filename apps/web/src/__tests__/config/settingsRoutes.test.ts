@@ -50,8 +50,10 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/notifications': 'system_settings:read', // system settings (notifications.* policy)
   '/admin/settings/android': 'system_settings:read', // android-app/android-app.controller
   '/admin/settings/setup': 'system_settings:read', // platform onboarding (admin block, metrics) RETRO-H3
-  '/admin/settings/ai': 'ai_settings:read', // ai/ai-settings.controller
-  '/admin/settings/tagging': 'ai_settings:read', // tagging/tag-labels.controller
+  '/admin/settings/ai': 'ai_config:read', // platform AI slice: ai-admin.controller (GET admin/ai/config) RETRO-E4
+  '/admin/settings/ai/models': 'ai_config:read', // platform AI slice: ai-admin.controller (GET admin/ai/models)
+  '/admin/settings/ai/usage': 'ai_config:read', // platform AI slice: usage admin controller (GET admin/ai/usage)
+  '/admin/settings/tagging': 'ai_config:read', // tagging/tag-labels.controller
   '/admin/settings/face': 'face_settings:read', // face/face-settings.controller
   '/admin/settings/bursts': 'system_settings:read', // system settings (burst.*)
   '/admin/settings/duplicates': 'system_settings:read', // dedup/admin-duplicate.controller

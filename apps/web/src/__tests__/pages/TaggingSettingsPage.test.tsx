@@ -59,7 +59,7 @@ const mockRunGlobalTaggingBackfill = vi.mocked(runGlobalTaggingBackfill);
 function adminPermissions() {
   return {
     isAdmin: true,
-    permissions: new Set(['ai_settings:read', 'ai_settings:write']),
+    permissions: new Set(['ai_config:read', 'ai_config:write']),
     roles: new Set(['admin']),
     hasPermission: vi.fn().mockReturnValue(true),
     hasAnyPermission: vi.fn().mockReturnValue(true),
