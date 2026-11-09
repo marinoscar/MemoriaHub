@@ -37,6 +37,7 @@ import { appJobsAdapters } from './platform/jobsAdapters';
 // provider and this app's auth-gated binding of `GET /api/telemetry/config`.
 import { RequireTelemetryEnabled, TelemetryWebAdaptersProvider } from '@marinoscar/platform-web/telemetry/headless';
 import { appTelemetryAdapters } from './platform/telemetryAdapters';
+import { RequireAiEnabled } from '@marinoscar/platform-web/ai/ui/require-ai-enabled';
 import { AppTelemetryConfigProvider } from './platform/TelemetryConfigBinding';
 import { APP_NAME } from './constants/app';
 
@@ -75,7 +76,11 @@ const FactoryResetPage = lazy(() =>
 const DataExportPage = lazy(() =>
   import('@marinoscar/platform-web/exports/ui').then((m) => ({ default: m.DataExportPage })),
 );
-const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
+// RETRO-E4 (#607): the platform's admin AI pages, each a thin binding (`platform/ai/`); the
+// MemoriaHub feature selections ride in the AI page's `Sections` slot.
+const AiConfigRoute = lazy(() => import('./platform/ai/AiConfigRoute'));
+const AiModelsRoute = lazy(() => import('./platform/ai/AiModelsRoute'));
+const AiUsageRoute = lazy(() => import('./platform/ai/AiUsageRoute'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 // The platform's email settings page (RETRO-D2, #570): transports, sender, write-only secrets and the
@@ -270,15 +275,36 @@ function AppRoutes() {
                 <Route
                   path="/admin/settings/ai"
                   element={
-                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
-                      <AiSettingsPage />
+                    <RequirePermission permission="ai_config:read" fallback={<Navigate to="/" replace />}>
+                      <AiConfigRoute />
+                    </RequirePermission>
+                  }
+                />
+                {/* Not the switch: hidden while AI is off (RequireAiEnabled), like their cards. */}
+                <Route
+                  path="/admin/settings/ai/models"
+                  element={
+                    <RequirePermission permission="ai_config:read" fallback={<Navigate to="/" replace />}>
+                      <RequireAiEnabled fallback={<Navigate to="/admin/settings/ai" replace />}>
+                        <AiModelsRoute />
+                      </RequireAiEnabled>
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/admin/settings/ai/usage"
+                  element={
+                    <RequirePermission permission="ai_config:read" fallback={<Navigate to="/" replace />}>
+                      <RequireAiEnabled fallback={<Navigate to="/admin/settings/ai" replace />}>
+                        <AiUsageRoute />
+                      </RequireAiEnabled>
                     </RequirePermission>
                   }
                 />
                 <Route
                   path="/admin/settings/tagging"
                   element={
-                    <RequirePermission permission="ai_settings:read" fallback={<Navigate to="/" replace />}>
+                    <RequirePermission permission="ai_config:read" fallback={<Navigate to="/" replace />}>
                       <TaggingSettingsPage />
                     </RequirePermission>
                   }
