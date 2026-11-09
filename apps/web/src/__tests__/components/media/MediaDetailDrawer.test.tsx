@@ -49,6 +49,20 @@ const mockGetMedia = vi.mocked(getMedia);
 // test output with "fetch failed" errors.
 // ---------------------------------------------------------------------------
 
+// The sharing slice's link hook (RETRO-I4): the panel's contents are covered by LinkSharePanel.test.tsx.
+vi.mock('@marinoscar/platform-web/sharing/headless', () => ({
+  useLinkGrants: () => ({
+    data: [],
+    loading: false,
+    error: null,
+    pending: false,
+    refresh: vi.fn(),
+    create: vi.fn(),
+    revoke: vi.fn(),
+    copyUrl: vi.fn(),
+  }),
+}));
+
 vi.mock('../../../services/face', () => ({
   getMediaFaces: vi.fn().mockResolvedValue([]),
   getMediaFaceStatus: vi.fn().mockResolvedValue({
@@ -758,7 +772,7 @@ describe('MediaDetailDrawer', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Inline share panel — the share button toggles SharePanel INLINE inside the
+  // Inline share panel — the share button toggles LinkSharePanel (RETRO-I4) INLINE inside the
   // Drawer rather than opening a portaled Dialog (which would trip the
   // nested-modal focus-trap freeze). See fix/inline-share-panel.
   // -------------------------------------------------------------------------
@@ -766,8 +780,8 @@ describe('MediaDetailDrawer', () => {
   describe('inline share panel', () => {
     it('does not render the share panel until the share button is clicked', () => {
       render(<MediaDetailDrawer {...defaultProps()} />);
-      // The Make public action lives inside SharePanel — absent until toggled.
-      expect(screen.queryByRole('button', { name: /make public/i })).not.toBeInTheDocument();
+      // The Create link action lives inside LinkSharePanel — absent until toggled.
+      expect(screen.queryByRole('button', { name: /create link/i })).not.toBeInTheDocument();
     });
 
     it('renders the share panel inline when the share button is clicked', async () => {
@@ -777,7 +791,7 @@ describe('MediaDetailDrawer', () => {
       await user.click(screen.getByRole('button', { name: /share publicly/i }));
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /make public/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /create link/i })).toBeInTheDocument();
       });
       // The share heading is rendered inline within the drawer content.
       expect(screen.getAllByText(/share publicly/i).length).toBeGreaterThan(0);
@@ -790,12 +804,12 @@ describe('MediaDetailDrawer', () => {
       const shareButton = screen.getByRole('button', { name: /share publicly/i });
       await user.click(shareButton);
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /make public/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /create link/i })).toBeInTheDocument();
       });
 
       await user.click(shareButton);
       await waitFor(() => {
-        expect(screen.queryByRole('button', { name: /make public/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /create link/i })).not.toBeInTheDocument();
       });
     });
   });
