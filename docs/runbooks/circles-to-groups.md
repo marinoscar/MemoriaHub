@@ -83,3 +83,42 @@ Data: `apps/api/test/sharing/fixtures/circle-content.seed.sql`, `SELECT mh_i2_se
 | Replay of the file on the migrated database | no change (fingerprint of every owner, group and member identical; `test/sharing/ownership.db.spec.ts`) |
 
 Host: PostgreSQL 16.15 with pgvector, default configuration (`maintenance_work_mem` 64MB, raised to 256MB by the migration), shared with other databases.
+
+## 7. Public shares to link grants (RETRO-I4)
+
+Release #578 makes every public share a platform link grant ([public-sharing spec](../specs/public-sharing.md)). The code no longer reads `media_shares`; the rows move with a TypeScript import (the platform's `importLegacyToken`, which hashes and encrypts each token), and only then does the contract migration drop the table. **Order matters: deploy, import, migrate. Never the reverse.** The migration refuses to run while any share is not imported, so applying it first fails loudly instead of destroying every public link.
+
+Prerequisites: RETRO-I2 applied (every media item and album has `org_id`), `SECRETS_ENCRYPTION_KEY` set (the same key the API uses), a fresh, verified database backup.
+
+```bash
+# 0. Backup (admin Database Backup page, or POST /api/admin/db-backup/runs), completed AND verified.
+# 1. Count what exists (read-only, any time before the deploy):
+#      SELECT target_type, count(*) FILTER (WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())) AS active,
+#             count(*) FILTER (WHERE revoked_at IS NULL AND expires_at <= now()) AS expired,
+#             count(*) FILTER (WHERE revoked_at IS NOT NULL) AS revoked
+#      FROM media_shares GROUP BY target_type;
+# 2. Deploy the release WITHOUT running `prisma:migrate` (the deploy flow's migrate step must wait).
+# 3. Dry run (counts, zero writes), then import, in the api container:
+npm run sharing:import-media-shares --workspace=api               # "media_shares: N (active a, expired e, revoked r; ...)"
+npm run sharing:import-media-shares --workspace=api -- --apply    # "imported N, already there 0, invalid 0, ... re-keyed K"
+#    Re-running is safe: already imported shares are skipped. "invalid" lists rows whose token is
+#    malformed or whose target is gone; the migration refuses until they are resolved (delete them).
+# 4. Apply the contract migration (drops media_shares, ShareTargetType, shares:manage|manage_any):
+npm run prisma:migrate --workspace=api
+# 5. Smoke: open one old media link /s/<token>, one old album link and one revoked one; the first two
+#    land on /s#lnk_<token> and show the item / grid, the revoked one says "This link is not available".
+#    Create a new link from an album page; revoke it from /admin/settings/sharing.
+```
+
+Expected time: seconds (one grant per share; a library has hundreds of shares at most).
+
+Rollback: **before step 4**, revert the release; `media_shares` is intact. Delete the imported grants if wanted: `DELETE FROM grants WHERE grantee_kind = 'link' AND link_token_hash IN (SELECT encode(sha256(convert_to('lnk_' || token, 'UTF8')), 'hex') FROM media_shares)` (as the table owner, inside `BEGIN; SELECT set_config('app.rls_bypass','on',true); ...; COMMIT;`). **After step 4**, restore the backup taken in step 0 and revert.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Migration fails: `RETRO-I4: N media_shares row(s) are not imported as link grants yet` | Step 3 was skipped or reported invalid rows | Run step 3; delete the rows it lists as invalid; re-run the migration |
+| Import fails: `SECRETS_ENCRYPTION_KEY` | The key is not in the script's environment | Run it in the api container (or export the API's key) |
+| An old link shows "This link is not available" | It was revoked or expired before the cutover (imported as such), or its record is trashed | Expected; restore the record or re-share |
+| A client calling `/api/public/shares/...` gets 410 `LEGACY_SHARE_ROUTE` | The retired API route | Use the web link; the API log counts these hits (no token logged) |
+
+Rehearsal: on a restored production backup, record the dry-run counts, the import output and the three sampled old URLs here before release. The real-Postgres proof of the procedure is `apps/api/test/sharing/media-shares-import.db.spec.ts` (five shares: active media, active album, expired, revoked, never-expiring; migration refused before the import, idempotent import, migration and replay after it).
