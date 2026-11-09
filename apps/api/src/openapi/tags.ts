@@ -315,14 +315,12 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'Sharing & Public',
     tags: [
       {
-        name: 'Sharing',
-        description: 'Create, list, expire, and revoke public share links for a media item or an album.',
-      },
-      {
         name: 'Public Sharing',
         description:
-          'Unauthenticated share consumption. Media bytes are proxied by the API — a storage URL is ' +
-          'never exposed — and revoked, expired, or trashed targets return an indistinguishable 404.',
+          'Public links on photos, videos and albums (platform link grants since RETRO-I4). The views a ' +
+          'link opens (token in the `X-Link-Token` header; presigned URLs, never proxied bytes; every ' +
+          'failure the same 404), the retired `/public/shares/*` routes (410) and the admin listing. ' +
+          'Links are created, re-dated and revoked through the sharing routes (`/grants/links`, `/grants/{id}`).',
       },
       {
         name: 'Public Memories',

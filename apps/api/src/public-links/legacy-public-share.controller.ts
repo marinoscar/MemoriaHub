@@ -18,7 +18,7 @@
 // =============================================================================
 
 import { Controller, Get, GoneException, HttpCode, HttpStatus, Logger } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@marinoscar/platform-api/identity';
 
 /** `details.reason` of the 410. */
@@ -38,6 +38,7 @@ export class LegacyPublicShareController {
       'Always 410 with `details.reason: LEGACY_SHARE_ROUTE`. Public shares are link grants since RETRO-I4: ' +
       'open them with `GET /api/public/links/media` or `/album` and the `X-Link-Token` header.',
   })
+  @ApiParam({ name: 'token', description: 'An old share token (never read)' })
   @ApiResponse({ status: 410, description: 'Retired route' })
   info(): never {
     return this.gone('info');
@@ -51,6 +52,8 @@ export class LegacyPublicShareController {
       'Always 410 with `details.reason: LEGACY_SHARE_ROUTE`. Public media is never streamed through the API ' +
       'any more; the link routes return presigned URLs.',
   })
+  @ApiParam({ name: 'token', description: 'An old share token (never read)' })
+  @ApiParam({ name: 'idx', description: 'An item index (never read)' })
   @ApiResponse({ status: 410, description: 'Retired route' })
   media(): never {
     return this.gone('media');
