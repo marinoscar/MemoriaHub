@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
-import { StorageModule } from '../storage/storage.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { CirclesModule } from '../circles/circles.module';
 import { AiModule } from '../ai/ai.module';
 import { MediaModule } from '../media/media.module';
@@ -21,8 +20,8 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *
  * Imports:
  *   - EnrichmentModule: handler registration + EnrichmentJobService.enqueue.
- *   - StorageProvidersModule: StorageProviderResolver (per-object + active provider).
- *   - StorageModule: StorageProcessingRecoveryService.reprocessObjectNow.
+ *   - MediaProcessingModule: StorageProviderResolver (per-object + active provider) and
+ *     StorageProcessingRecoveryService.reprocessObjectNow.
  *   - CirclesModule: CircleMembershipService.assertCircleAccess.
  *   - SettingsModule: AppSystemSettingsService.
  *   - AiModule: AiSettingsService + AiProviderRegistry (enhanceImage provider).
@@ -34,8 +33,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
   imports: [
     PrismaModule,
     EnrichmentModule,
-    StorageProvidersModule,
-    StorageModule,
+    MediaProcessingModule,
     CirclesModule,
     
     AiModule,

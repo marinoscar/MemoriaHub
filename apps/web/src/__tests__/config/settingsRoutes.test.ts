@@ -25,9 +25,15 @@ const cardPaths = new Set(
 
 /**
  * Settings routes that are deliberately not cards: a child page reached from
- * its card's page, and the retired v0 backup URL, which redirects.
+ * its card's page, the retired v0 backup URL, which redirects, and MemoriaHub's
+ * former Storage Providers page, which redirects to the platform's storage page
+ * (RETRO-D1).
  */
-const NOT_CARDS = new Set(['/admin/settings/nodes/:id/backup', '/admin/settings/backup']);
+const NOT_CARDS = new Set([
+  '/admin/settings/nodes/:id/backup',
+  '/admin/settings/backup',
+  '/admin/settings/storage/providers',
+]);
 
 /**
  * Every admin card's permission, and the controller that enforces it on the
@@ -55,7 +61,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/geo': 'system_settings:read', // system settings (geo.*)
   '/admin/settings/location-inference': 'system_settings:read', // system settings (locationInference.*)
   '/admin/settings/location-groups': 'geo_settings:read', // location-groups/location-groups.controller
-  '/admin/settings/storage/providers': 'storage_settings:read', // storage-settings/storage-settings.controller
+  '/admin/settings/storage': 'storage_config:read', // platform storage: storage-config.controller (RETRO-D1)
   '/admin/settings/storage/insights': 'system_settings:read', // insights/insights.controller
   '/admin/settings/jobs': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/jobs/insights': 'jobs:read', // enrichment/enrichment-admin.controller
@@ -77,6 +83,8 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/factory-reset': 'system:factory_reset',
   // RETRO-H4 (#603): platform webhooks admin controller (SYSTEM_WEBHOOKS_PERMISSIONS).
   '/admin/settings/webhooks': 'system_webhooks:read', // admin-webhooks.controller (GET admin/webhooks)
+  // RETRO-H2 (#596): platform exports service (ORG_DATA_EXPORT_PERMISSION for `org-data`).
+  '/admin/settings/data-export': 'org_members:read',
 };
 
 describe('settings routes against the registries', () => {
@@ -112,6 +120,7 @@ describe('settings routes against the registries', () => {
     ...Object.keys(ENFORCED_ADMIN_PERMISSIONS),
     '/admin/settings/nodes/:id/backup',
     '/admin/settings/backup',
+    '/admin/settings/storage/providers',
     '/admin/users',
     '/admin/ai-settings',
     '/admin/face-settings',

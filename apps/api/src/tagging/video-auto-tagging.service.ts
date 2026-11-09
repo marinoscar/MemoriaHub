@@ -67,7 +67,7 @@ import type {
   AiProviderCredentials,
   AnalyzeImageInputImage,
 } from '../ai-port/legacy-ai-provider.types';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { AutoTaggingService } from './auto-tagging.service';

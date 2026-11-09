@@ -1,11 +1,11 @@
 import type { OnboardingFactDef } from '@marinoscar/platform-api/onboarding';
+import { StorageConfigService } from '@marinoscar/platform-api/storage';
 import { CircleRole, MediaSyncDeviceStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiDeploymentKeySource } from '../../ai-port/ai-deployment-key-source';
 import { AppSystemSettingsService } from '../settings/app-system-settings.service';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
-import { resolveActiveStorageProvider } from '../../doctor/checks/storage/active-provider.doctor-check';
 
 // =============================================================================
 // MemoriaHub's onboarding facts (RETRO-H3, #599)
@@ -175,28 +175,22 @@ export const DEVICES_FACT: OnboardingFactDef<DevicesFact> = {
 
 /**
  * The deployment's readiness. The flags come from the CACHED settings document
- * (`AppSystemSettingsService.getSettings`, the same read every feature gate makes), and the storage
- * credential read is a `findFirst` with a `select` of the id only and the AI one a key status: no key material is ever read.
+ * (`AppSystemSettingsService.getSettings`, the same read every feature gate makes), the storage slice's
+ * resolution, and the AI key status (`AiDeploymentKeySource`, RETRO-E3): no key material is ever read.
  */
 export const FEATURE_READINESS_FACT: OnboardingFactDef<FeatureReadinessFact> = {
   id: MEMORIAHUB_ONBOARDING_FACTS.FEATURE_READINESS,
   resolve: async (ctx) => {
     const settings = await ctx.get(AppSystemSettingsService).getSettings();
-    const prisma = ctx.get(PrismaService);
-
-    const storageProvider = resolveActiveStorageProvider(
-      settings.storage?.activeProvider,
-      process.env['STORAGE_PROVIDER'],
-    );
     const tagging = settings.ai?.features?.tagging;
 
-    const [storageCredential, taggingCredential] = await Promise.all([
-      storageProvider === 'local'
-        ? Promise.resolve(null)
-        : prisma.storageProviderCredential.findFirst({
-            where: { provider: storageProvider, enabled: true },
-            select: { id: true },
-          }),
+    const [storageReady, taggingCredential] = await Promise.all([
+      // The platform storage slice (RETRO-D1): the active driver's settings and its secret are complete.
+      ctx
+        .get(StorageConfigService)
+        .resolve()
+        .then((resolution) => resolution.configured)
+        .catch(() => false),
       // The platform deployment key first, then the legacy row (RETRO-E3, #605); a status read,
       // never a decryption.
       tagging?.provider && tagging.model
@@ -205,7 +199,7 @@ export const FEATURE_READINESS_FACT: OnboardingFactDef<FeatureReadinessFact> = {
     ]);
 
     return {
-      storageReady: storageProvider === 'local' || storageCredential !== null,
+      storageReady,
       faceRecognition: settings.features?.['faceRecognition'] === true,
       autoTagging: settings.features?.['autoTagging'] === true,
       taggingProviderReady: taggingCredential !== null && taggingCredential.configured && taggingCredential.enabled,

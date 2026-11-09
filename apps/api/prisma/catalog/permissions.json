@@ -69,6 +69,21 @@
       "scope": "system"
     },
     {
+      "name": "storage:read",
+      "description": "Read object metadata, get download URLs",
+      "scope": "org"
+    },
+    {
+      "name": "storage:write",
+      "description": "Upload, update metadata",
+      "scope": "org"
+    },
+    {
+      "name": "storage:delete_any",
+      "description": "Admin: delete any object",
+      "scope": "system"
+    },
+    {
       "name": "jobs:read",
       "description": "View queued, running and completed jobs",
       "scope": "system"
@@ -111,6 +126,16 @@
     {
       "name": "push:write",
       "description": "Generate, rotate, enable/disable and remove Web Push VAPID keys",
+      "scope": "system"
+    },
+    {
+      "name": "storage_config:read",
+      "description": "View the object-storage configuration and the masked status of its stored secret key",
+      "scope": "system"
+    },
+    {
+      "name": "storage_config:write",
+      "description": "Change the object-storage provider, bucket, endpoint and credential, test a configuration, and provision a bucket",
       "scope": "system"
     },
     {
@@ -184,6 +209,36 @@
       "scope": "system"
     },
     {
+      "name": "groups:read",
+      "description": "View the groups you belong to, answer your group invitations and leave a group",
+      "scope": "org"
+    },
+    {
+      "name": "groups:write",
+      "description": "Create groups and manage the members and invitations of groups you administer",
+      "scope": "org"
+    },
+    {
+      "name": "groups:admin",
+      "description": "View and administer every group of the organization, including groups you do not belong to",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:read",
+      "description": "View what is shared with you and who a record you can share is shared with, and remove your own access",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:write",
+      "description": "Share records you are allowed to share with people and groups of the organization, and change or revoke those shares",
+      "scope": "org"
+    },
+    {
+      "name": "sharing:admin",
+      "description": "Manage the shares of every record of the organization, including records you do not own",
+      "scope": "org"
+    },
+    {
       "name": "org_settings:read",
       "description": "Read the active organization's settings overrides",
       "scope": "org"
@@ -251,21 +306,6 @@
     {
       "name": "alerts:write",
       "description": "Create, edit and delete alert rules; test them; acknowledge incidents",
-      "scope": "system"
-    },
-    {
-      "name": "storage:read",
-      "description": "Read object metadata, get download URLs",
-      "scope": "org"
-    },
-    {
-      "name": "storage:write",
-      "description": "Upload, update metadata",
-      "scope": "org"
-    },
-    {
-      "name": "storage:delete_any",
-      "description": "Admin: delete any object",
       "scope": "system"
     },
     {
@@ -357,16 +397,6 @@
       "name": "geo_settings:write",
       "description": "Configure geo provider credentials and active reverse-geocoding provider",
       "scope": "system"
-    },
-    {
-      "name": "storage_settings:read",
-      "description": "View storage provider configuration and test connectivity",
-      "scope": "system"
-    },
-    {
-      "name": "storage_settings:write",
-      "description": "Configure storage provider credentials, set active provider, run migrations",
-      "scope": "system"
     }
   ],
   "rolePermissions": {
@@ -378,6 +408,7 @@
       "rbac:manage",
       "allowlist:read",
       "allowlist:write",
+      "storage:delete_any",
       "jobs:read",
       "jobs:write",
       "db_backup:read",
@@ -387,6 +418,8 @@
       "broadcasts:write",
       "push:read",
       "push:write",
+      "storage_config:read",
+      "storage_config:write",
       "ai_config:read",
       "ai_config:write",
       "telemetry:read",
@@ -400,7 +433,6 @@
       "system_webhooks:write",
       "alerts:read",
       "alerts:write",
-      "storage:delete_any",
       "media:read_any",
       "media:write_any",
       "media:delete_any",
@@ -411,18 +443,20 @@
       "face_settings:read",
       "face_settings:write",
       "geo_settings:read",
-      "geo_settings:write",
-      "storage_settings:read",
-      "storage_settings:write"
+      "geo_settings:write"
     ],
     "contributor": [
       "user_settings:read",
       "user_settings:write",
-      "ai:use",
-      "webhooks:read",
-      "webhooks:write",
       "storage:read",
       "storage:write",
+      "ai:use",
+      "groups:read",
+      "groups:write",
+      "sharing:read",
+      "sharing:write",
+      "webhooks:read",
+      "webhooks:write",
       "media:read",
       "media:write",
       "media:delete",
@@ -434,9 +468,12 @@
     "viewer": [
       "user_settings:read",
       "user_settings:write",
+      "storage:read",
+      "storage:write",
+      "groups:read",
+      "sharing:read",
       "webhooks:read",
       "webhooks:write",
-      "storage:read",
       "media:read",
       "media:write",
       "media:delete",
@@ -447,6 +484,8 @@
     "org_admin": [
       "user_settings:read",
       "user_settings:write",
+      "storage:read",
+      "storage:write",
       "ai:use",
       "org_ai_config:read",
       "org_ai_config:write",
@@ -454,6 +493,12 @@
       "org_members:write",
       "org_invites:read",
       "org_invites:write",
+      "groups:read",
+      "groups:write",
+      "groups:admin",
+      "sharing:read",
+      "sharing:write",
+      "sharing:admin",
       "org_settings:read",
       "org_settings:write",
       "org_broadcasts:read",
@@ -462,8 +507,6 @@
       "webhooks:write",
       "org_webhooks:read",
       "org_webhooks:write",
-      "storage:read",
-      "storage:write",
       "media:read",
       "media:write",
       "media:delete",

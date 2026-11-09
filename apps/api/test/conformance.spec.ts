@@ -61,6 +61,9 @@
 // signing secret never leaves create/rotate, nothing makes an HTTP request outside the delivery job,
 // and endpoints never cross owners, scopes or organizations. It drives the slice over in-memory ports.
 //
+// `exports` (`@marinoscar/platform-api/exports/testing`, RETRO-H2): source permissions, writers,
+// the credential-model policy and the secret-egress sentinel run (see the entry below).
+//
 // `host` (`@marinoscar/platform-api/host/testing`): a walk of `AppModule` from
 // its root. `MaintenanceGuard` is the first and only global guard,
 // `PlatformHostCoreModule.forRoot()` is imported exactly once, and the
@@ -78,16 +81,20 @@ import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
 import '@marinoscar/platform-api/doctor/testing';
 import '@marinoscar/platform-api/email/testing';
+import '@marinoscar/platform-api/exports/testing';
 import '@marinoscar/platform-api/host/testing';
 import '@marinoscar/platform-api/identity/testing';
 import '@marinoscar/platform-api/jobs/testing';
 import '@marinoscar/platform-api/notifications/testing';
 import '@marinoscar/platform-api/onboarding/testing';
 import '@marinoscar/platform-api/settings/testing';
+import '@marinoscar/platform-api/storage/testing';
+import '@marinoscar/platform-api/sharing/testing';
 import '@marinoscar/platform-api/user-data/testing';
 import { composedSchemaDatamodel } from '@marinoscar/platform-api/user-data';
 import '@marinoscar/platform-api/webhooks/testing';
 import { runPlatformConformance } from '@marinoscar/platform-api/testing';
+import { Prisma } from '@prisma/client';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
 
@@ -98,6 +105,7 @@ import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-pu
 import '../src/app-registrations/permission-manifest';
 import '../src/app-registrations/ownership-manifest';
 import { MEMORIAHUB_REQUIRED_CARRY_OVER_IDS } from '../src/app-registrations/db-backup';
+import { MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS } from '../src/platform/storage/storage-key-prefix.manifest';
 // Configures email rendering and registers this app's templates (the `email` suite renders them).
 import '../src/platform/email/email.config';
 // Registers the notification channels and events the `notifications` suite reads (RETRO-D3).
@@ -109,8 +117,14 @@ import '../src/platform/user-data/user-data.manifest';
 import { RAW_SQL_ALLOWLIST } from './conformance/raw-sql-allowlist';
 import { EMAIL_TEMPLATE_SAMPLES } from './conformance/email-samples';
 import { doctorConformanceFixture } from './conformance/doctor-fixture';
+// Registers the exports slice's writers and sources (platform `user-data` / `org-data` plus
+// MemoriaHub's four) the `exports` suite reads (RETRO-H2; AppModule imports it too).
+import '../src/platform/exports/exports.config';
 // Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
 import '../src/platform/onboarding/onboarding.manifest';
+// The sharing slice's registrations (RETRO-I1); AppModule imports them too.
+import '../src/app-registrations/sharing';
+import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -163,18 +177,20 @@ runPlatformConformance({
     // until the issue that pays it enables the suite (with `exempt` for the three platform
     // exemptions only). Measured with the suites on at the cutover: 18 inline findings in 13 cron
     // files (the db-backup one is gone since RETRO-D4: the platform task only enqueues; insights, memories, node-backup, node-prune, notification-reconcile,
-    // share-expiring, storage-cleanup, storage-processing-recovery and workflow crons) and one
-    // listener download (storage/processing/object-processing.service.ts).
+    // share-expiring, storage-processing-recovery and workflow crons; storage-cleanup is gone since
+    // RETRO-D1, the platform's stale-upload cron only enqueues) and one listener download (the old
+    // object-processing listener, gone since RETRO-D1: `onEventNoIo` is on below).
     cronEnqueueOnly: {
       skip:
         'RETRO-C9 (cron remediation) turns the crons that still work inline into enqueue-only ones; ' +
         'until then 13 cron files fail this suite. The queue they enqueue into is the platform\'s since RETRO-C1.',
     },
-    onEventNoIo: {
-      skip:
-        'object-processing.service.ts downloads object bytes inside an OBJECT_UPLOADED_EVENT listener; ' +
-        'the storage slice (RETRO-D1) moves it into a post-upload processor job. No other listener fails.',
-    },
+    // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
+    // object-processing listener that downloaded bytes is gone.
+    onEventNoIo: { minListenerFiles: 7 }, // 7 since RETRO-D3 removed the broadcast-failure listener
+
+    // Every MemoriaHub writer's key prefix is registered (platform/storage/storage-key-prefix.manifest.ts).
+    storage: { requiredPrefixIds: [...MEMORIAHUB_REQUIRED_KEY_PREFIX_IDS] },
 
     // Database backup and restore (RETRO-D4, #580).
     dbBackup: { requiredCarryOverIds: [...MEMORIAHUB_REQUIRED_CARRY_OVER_IDS] },
@@ -314,10 +330,32 @@ runPlatformConformance({
     // against the composed schema the purge planner reads at bootstrap.
     userData: { datamodel: composedSchemaDatamodel(join(__dirname, '..', 'src', 'platform', 'user-data'))() },
 
+    // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly, the
+    // public link route carries the identity slice's `@Public()` marker, and the three partial
+    // unique indexes are in the installed platform migrations. No model has an `owner_group_id`
+    // and no resource type is registered yet: RETRO-I2 adds both (`media_item`, `album`, the
+    // group-owned models) and updates `groupOwnedModels` and `resourceTypeIds` here.
+    sharing: {
+      schemaPath: join(__dirname, '..', 'prisma', 'schema'),
+      migrationsDir: join(__dirname, '..', 'prisma', 'migrations'),
+      rootModule: AppModule,
+      isPublic: (target) => Reflect.getMetadata(IS_PUBLIC_KEY, target) === true,
+      groupOwnedModels: {},
+      resourceTypeIds: [],
+      minRoutes: 100,
+    },
+
+    // Data export (RETRO-H2, #596): every source's permission is registered and every source offers a
+    // writer; every credential-shaped user-owned model is excluded or metadata-only; and the
+    // `user-data` / `org-data` sources, run over a client that fills EVERY column with a sentinel,
+    // write no redacted field into any byte of any format. MemoriaHub's own four sources are proven
+    // the same way by test/exports/memoriahub-export.sources.spec.ts.
+    exports: { datamodel: Prisma.dmmf.datamodel, permissions: permissionRegistry.list() },
+
     doctorReadOnly: {
       fixture: doctorConformanceFixture,
       minChecks: 30,
-      forbiddenServices: [...DOCTOR_FORBIDDEN_SERVICES, 'StorageSettingsService'],
+      forbiddenServices: [...DOCTOR_FORBIDDEN_SERVICES],
     },
   },
 });

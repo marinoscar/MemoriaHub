@@ -15,11 +15,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { ConfigService } from '@nestjs/config';
 import { describeBackupTargetConformance } from '@marinoscar/platform-api/db-backup/testing';
 
-import { LocalDiskStorageProvider } from '../../storage/providers/local/local-disk.provider';
-import type { StorageProvider } from '../../storage/providers/storage-provider.interface';
+import { LocalDiskStorageProvider } from '../../platform-extensions/storage/local-disk.driver';
+import type { StorageProvider } from '@marinoscar/platform-api/storage';
 import { MemoriaHubBackupTarget } from './memoriahub-backup.target';
 
 type Run = { storageKey: string; storageProvider: string; bucket: string };
@@ -42,8 +41,7 @@ function buildTarget(options: {
     },
   };
   const settings = { getSettings: jest.fn(async () => ({ databaseBackup: { storageProvider: options.pin ?? '' } })) };
-  const config = new ConfigService({ storage: { provider: 's3' } });
-  const target = new MemoriaHubBackupTarget(resolver as never, prisma as never, settings as never, config);
+  const target = new MemoriaHubBackupTarget(resolver as never, prisma as never, settings as never);
   return { target, resolver, prisma };
 }
 
@@ -79,7 +77,7 @@ describe('MemoriaHubBackupTarget over the local-disk provider', () => {
 
   describeBackupTargetConformance(
     async () => {
-      const local = new LocalDiskStorageProvider(new ConfigService({ storage: { backup: { localPath: root } } }));
+      const local = new LocalDiskStorageProvider(root);
       const { target } = buildTarget({ active: { id: 'local', provider: local } });
       await target.refresh();
       return target;
@@ -142,6 +140,23 @@ describe('MemoriaHubBackupTarget routing', () => {
     expect(r2.calls).toEqual([`download:${key}`, `delete:${key}`, `sign:${key}:300:attachment; filename="a.dump"`]);
     expect(s3.calls).toEqual([]);
     expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', 'old-bucket');
+  });
+
+  it('uses the recorded location the engine passes (platform next.28) without looking the run up', async () => {
+    const s3 = fakeProvider('s3');
+    const r2 = fakeProvider('r2');
+    const key = 'database-backups/memoriahub/2026/11/run-b.dump';
+    const { target, resolver, prisma } = buildTarget({ active: { id: 's3', provider: s3 }, byId: { r2 } });
+
+    await target.openRead(key, { provider: 'r2', bucket: 'archive-bucket' });
+    await target.delete(key, { provider: 'r2', bucket: 'archive-bucket' });
+    await target.signedDownloadUrl(key, { expiresInSeconds: 60, filename: 'b.dump' }, { provider: 'r2', bucket: null });
+
+    expect(r2.calls).toEqual([`download:${key}`, `delete:${key}`, `sign:${key}:60:attachment; filename="b.dump"`]);
+    expect(s3.calls).toEqual([]);
+    expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', 'archive-bucket');
+    expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', null);
+    expect(prisma.databaseBackupRun.findFirst).not.toHaveBeenCalled();
   });
 
   it('falls back to the current provider for a key no run records', async () => {

@@ -51,7 +51,7 @@ function fakeProvider(id: string, bucket: string | null) {
   return {
     deleteMany: async (keys: string[]) => {
       deletedKeys.set(group, [...(deletedKeys.get(group) ?? []), ...keys]);
-      return { deleted: keys.length, errors: [] };
+      return { deleted: [...keys], failed: [] }; // the platform StorageDeleteManyResult (next.28)
     },
     delete: async (key: string) => {
       deletedKeys.set(group, [...(deletedKeys.get(group) ?? []), key]);
@@ -136,7 +136,9 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     // The real batched media purge; only its storage resolver is faked.
     const media = Object.create(MediaService.prototype) as MediaService;
     Object.assign(media, { prisma, resolver, logger: new Logger('MediaService') });
-    service = new MemoriaHubUserDataService(prisma, media, resolver as never);
+    // The system client over the app's client (PrismaSystemService.asSystem in the app).
+    const system = { asSystem: (reason: string) => forSystem(prisma, reason as never) };
+    service = new MemoriaHubUserDataService(prisma, media, resolver as never, system as never);
     bindMemoriaHubFactoryResetDeps({ service });
   });
 

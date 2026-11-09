@@ -14,8 +14,9 @@
 // So those keys are NOT augmented, and the app reads the document through this type instead
 // (`AppSystemSettingsService.getSettings()` and `readKnownValue()` are typed with it). Each slice
 // adoption removes a key's entry here and augments the interface instead.
-// PLATFORM-ADOPTION-SHIM: D1 (storage), D2 (email). `ai` is the platform AI
-// slice's since RETRO-E1 (#595); `ai` below is MemoriaHub's view of it (its `features` extension).
+// PLATFORM-ADOPTION-SHIM: D2 (email). `ai` is the platform AI slice's since RETRO-E1 (#595); `ai`
+// below is MemoriaHub's view of it (its `features` extension). `storage` is the storage slice's since
+// RETRO-D1, extended with MemoriaHub's `insights` and `trash`.
 // `jobs` and `retention` are the jobs slice's (RETRO-C1), `databaseBackup` the db-backup slice's (RETRO-D4),
 // `notifications` the notifications slice's (RETRO-D3).
 // =============================================================================
@@ -37,7 +38,7 @@ import type { MemoriesSettingsValue } from './registry/namespaces/system/memorie
 import type { PictureEnhancementSettingsValue } from './registry/namespaces/system/picture-enhancement';
 import type { ReviewRunsSettingsValue } from './registry/namespaces/system/review-runs';
 import type { SocialMediaSettingsValue } from './registry/namespaces/system/social-media';
-import type { StorageSettingsValue } from './registry/namespaces/system/storage';
+import type { StorageAppSettingsValue } from './registry/namespaces/system/storage';
 import type { UiSettingsValue } from './registry/namespaces/system/ui';
 import type { WorkflowsSettingsValue } from './registry/namespaces/system/workflows';
 
@@ -57,7 +58,8 @@ export interface AppSystemSettingsDocument {
   ai: AiSettingsValue;
   autoTagging: AutoTaggingSettingsValue;
   face: FaceSettingsValue;
-  storage: StorageSettingsValue;
+  /** The storage slice's `provider` / `drivers` (RETRO-D1) plus MemoriaHub's `insights` and `trash`. */
+  storage: SystemSettingsNamespaces['storage'] & StorageAppSettingsValue;
   burst: BurstSettingsValue;
   dedup: DedupSettingsValue;
   locationInference: LocationInferenceSettingsValue;

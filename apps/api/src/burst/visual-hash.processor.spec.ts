@@ -130,7 +130,7 @@ function computeVariance(pixels: Uint8Array): number {
 // Import processor after mocks are set up
 // ---------------------------------------------------------------------------
 
-import { VisualHashProcessor } from '../storage/processing/processors/visual-hash.processor';
+import { VisualHashProcessor } from '../media-processing/processors/visual-hash.processor';
 import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
 import { StorageObject } from '@prisma/client';
 

@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-next.27",
+  "version": "0.1.0-next.28",
   "identity": {
     "cliName": "memoriahub",
     "envPrefix": "MEMORIAHUB_",
@@ -37,7 +37,7 @@
     },
     "env": {
       "files": {
-        "infra/compose/.env.example": "f4480510975bd626b81cdd528ca068bcdce317d2883c6fd2fe99fa0ca0fad0d8",
+        "infra/compose/.env.example": "e592b139ab36f9f76d266e914464a61f4012e2c7380d5e98195b9f6966d191a2",
         "infra/compose/.env.worker.example": "af78299cba0a9c90efac1daca2b385e2f4237684a83f2e3fb3dc8e8116893a5c"
       }
     },

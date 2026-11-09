@@ -1,0 +1,249 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { Prisma, StorageObject } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { STORAGE_OBJECT_PROCESS_TYPE } from '@marinoscar/platform-api/storage';
+import { MediaObjectProcessingService } from '../media-object-processing.service';
+
+export interface StorageProcessingRecoveryResult {
+  claimed: number;
+  reprocessed: number;
+  exhausted: number;
+  errors: number;
+}
+
+const DEFAULT_STUCK_MINUTES = 10;
+const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Recovers StorageObjects orphaned at status='processing' — the state left
+ * behind when the API process is killed (OOM, crash, deploy) mid-pipeline,
+ * between the initial 'processing' write and the final markReady/markFailed
+ * call in ObjectProcessingService. Nothing else in the codebase watches this
+ * status: the enrichment stuck-reset cron only touches enrichment_jobs, the
+ * storage cleanup cron only touches pending/uploading, and the existing
+ * MediaReprocessService requires status ready/failed and image/video mimeType.
+ */
+@Injectable()
+export class StorageProcessingRecoveryService {
+  private readonly logger = new Logger(StorageProcessingRecoveryService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly objectProcessingService: MediaObjectProcessingService,
+  ) {}
+
+  async recoverStuckObjects(olderThanMinutes?: number): Promise<StorageProcessingRecoveryResult> {
+    const thresholdMinutes =
+      olderThanMinutes ??
+      parseInt(process.env['STORAGE_PROCESSING_STUCK_MINUTES'] ?? String(DEFAULT_STUCK_MINUTES), 10);
+    const maxRetries = parseInt(
+      process.env['STORAGE_PROCESSING_MAX_RETRIES'] ?? String(DEFAULT_MAX_RETRIES),
+      10,
+    );
+
+    const cutoff = new Date(Date.now() - thresholdMinutes * 60_000);
+
+    const stale = await this.prisma.storageObject.findMany({
+      where: { status: 'processing', updatedAt: { lt: cutoff } },
+    });
+    // Since RETRO-D1 a `processing` object normally has a queued
+    // `storage.object.process` job (the platform's), which retries and, on
+    // giving up, marks the object `failed`. Only an object with NO live job is
+    // orphaned; re-running one that is merely waiting in a busy queue would
+    // process it twice, concurrently.
+    const candidates = await this.withoutLiveProcessingJob(stale);
+
+    const result: StorageProcessingRecoveryResult = {
+      claimed: candidates.length,
+      reprocessed: 0,
+      exhausted: 0,
+      errors: 0,
+    };
+
+    if (candidates.length === 0) {
+      return result;
+    }
+
+    this.logger.log(`recoverStuckObjects: ${candidates.length} object(s) stuck past ${thresholdMinutes}m`);
+
+    // Sequential, not Promise.all: this pipeline runs sharp/ffmpeg, which is
+    // memory-heavy — the exact workload that caused the original OOM. Don't
+    // add concurrent memory pressure while recovering from a memory incident.
+    for (const object of candidates) {
+      try {
+        await this.recoverOne(object, maxRetries, result);
+      } catch (err) {
+        result.errors++;
+        this.logger.error(
+          `recoverStuckObjects: unexpected error recovering object ${object.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  private async recoverOne(
+    object: StorageObject,
+    maxRetries: number,
+    result: StorageProcessingRecoveryResult,
+  ): Promise<void> {
+    const existingMeta = (object.metadata as Record<string, unknown> | null) ?? {};
+    const retryCount =
+      typeof existingMeta['_processingRetryCount'] === 'number'
+        ? (existingMeta['_processingRetryCount'] as number)
+        : 0;
+
+    if (retryCount >= maxRetries) {
+      await this.prisma.storageObject.update({
+        where: { id: object.id },
+        data: {
+          status: 'failed',
+          metadata: {
+            ...existingMeta,
+            _processingRetryExhausted: true,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      result.exhausted++;
+      this.logger.warn(
+        `recoverStuckObjects: object ${object.id} exhausted ${retryCount} retries — marked failed, will not retry again`,
+      );
+      return;
+    }
+
+    // Persist the incremented counter BEFORE invoking the pipeline. If this
+    // recovery attempt itself gets killed mid-flight, the counter must have
+    // already advanced — otherwise the object would be reclaimed and retried
+    // forever every cycle without ever reaching maxRetries, reproducing the
+    // exact bug this service exists to fix. This write also bumps `updatedAt`
+    // (Prisma @updatedAt), which as a side effect keeps the object off the
+    // next scan's candidate list until another full threshold window passes
+    // — a natural lease, even when an attempt hangs rather than crashing.
+    const claimed = await this.prisma.storageObject.update({
+      where: { id: object.id },
+      data: {
+        metadata: {
+          ...existingMeta,
+          _processingRetryCount: retryCount + 1,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(
+      `recoverStuckObjects: reprocessing object ${object.id} (attempt ${retryCount + 1}/${maxRetries})`,
+    );
+
+    await this.objectProcessingService.runNow(claimed);
+    result.reprocessed++;
+  }
+
+  /**
+   * Recover StorageObjects that reached status='failed' — most commonly HEIC/
+   * HEIF image objects that failed to decode before the ffmpeg-transcode
+   * fallback existed (issue #106), but any failed image object is eligible.
+   * Distinct from recoverStuckObjects (which targets status='processing'):
+   * that path recovers objects orphaned mid-pipeline by a crash, whereas this
+   * one re-drives objects the pipeline already gave up on.
+   *
+   * Each candidate is re-run through the FULL pipeline via reprocessObjectNow —
+   * which clears any retry bookkeeping, resets status='processing', re-runs all
+   * processors (regenerating the thumbnail), and emits OBJECT_PROCESSED_EVENT.
+   * That event's MediaEnrichmentEnqueueListener backstop re-fires face/tag/
+   * duplicate enrichment automatically, so this single call covers both
+   * thumbnail regeneration and downstream enrichment recovery.
+   *
+   * Thumbnail objects (storageKey under 'thumbnails/') are excluded — they are
+   * derived artefacts, never a source image to re-decode.
+   *
+   * Processed SEQUENTIALLY (memory-safe, mirroring recoverStuckObjects) because
+   * the pipeline runs sharp/ffmpeg, which is memory-heavy. `exhausted` is always
+   * 0 here — unlike the stuck path there is no per-object retry cap; an explicit
+   * recovery request always gets a fresh attempt.
+   */
+  async recoverFailedImageObjects(opts?: {
+    limit?: number;
+  }): Promise<StorageProcessingRecoveryResult> {
+    const candidates = await this.prisma.storageObject.findMany({
+      where: {
+        status: 'failed',
+        mimeType: { startsWith: 'image/' },
+        NOT: { storageKey: { startsWith: 'thumbnails/' } },
+      },
+      ...(opts?.limit ? { take: opts.limit } : {}),
+    });
+
+    const result: StorageProcessingRecoveryResult = {
+      claimed: candidates.length,
+      reprocessed: 0,
+      exhausted: 0,
+      errors: 0,
+    };
+
+    if (candidates.length === 0) {
+      return result;
+    }
+
+    this.logger.log(
+      `recoverFailedImageObjects: ${candidates.length} failed image object(s) to reprocess`,
+    );
+
+    for (const object of candidates) {
+      try {
+        await this.reprocessObjectNow(object);
+        result.reprocessed++;
+      } catch (err) {
+        result.errors++;
+        this.logger.error(
+          `recoverFailedImageObjects: error reprocessing object ${object.id}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Re-run the full processing pipeline for a single object right now,
+   * regardless of its current status or retry history — used by the
+   * user-facing "Retry thumbnail" action (an explicit request should always
+   * get a fresh attempt, unlike the automatic cron which respects the retry
+   * cap). Clears any prior retry bookkeeping and resets status to
+   * 'processing' before invoking, mirroring the original upload flow.
+   */
+  async reprocessObjectNow(object: StorageObject): Promise<void> {
+    const existingMeta = (object.metadata as Record<string, unknown> | null) ?? {};
+    const { _processingRetryCount, _processingRetryExhausted, ...restMeta } = existingMeta;
+
+    const reset = await this.prisma.storageObject.update({
+      where: { id: object.id },
+      data: {
+        status: 'processing',
+        metadata: restMeta as Prisma.InputJsonValue,
+      },
+    });
+
+    this.logger.log(`reprocessObjectNow: manual retry triggered for object ${object.id}`);
+
+    await this.objectProcessingService.runNow(reset);
+  }
+
+  /** `objects` minus those with a pending or running `storage.object.process` job. */
+  private async withoutLiveProcessingJob(objects: StorageObject[]): Promise<StorageObject[]> {
+    if (objects.length === 0) return objects;
+    const live = await this.prisma.job.findMany({
+      where: {
+        type: STORAGE_OBJECT_PROCESS_TYPE,
+        status: { in: ['pending', 'running'] },
+        subjectId: { in: objects.map((object) => object.id) },
+      },
+      select: { subjectId: true },
+    });
+    const queued = new Set(live.map((job) => job.subjectId));
+    return objects.filter((object) => !queued.has(object.id));
+  }
+}

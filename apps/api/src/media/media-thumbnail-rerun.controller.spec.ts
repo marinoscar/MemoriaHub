@@ -15,7 +15,7 @@ import { NotFoundException } from '@nestjs/common';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import {
   createMockPrismaService,
   MockPrismaService,

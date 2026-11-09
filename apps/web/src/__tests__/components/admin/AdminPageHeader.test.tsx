@@ -184,6 +184,8 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
 
     // 19 since RETRO-D3 (#576): the Web Push, Notifications policy and
     // Broadcasts pages are the platform notifications slice's packaged pages.
-    expect(adopters.length).toBeGreaterThanOrEqual(19);
+    // 18 since RETRO-D1 (#563): the Storage Providers page is the storage
+    // slice's packaged StorageConfigPage.
+    expect(adopters.length).toBeGreaterThanOrEqual(18);
   });
 });

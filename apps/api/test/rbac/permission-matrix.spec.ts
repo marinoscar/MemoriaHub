@@ -1,4 +1,4 @@
-import { permissionRegistry } from '@marinoscar/platform-api/core';
+import { permissionRegistry, roleGrantRegistry } from '@marinoscar/platform-api/core';
 
 import '../../src/app-registrations/permission-manifest';
 
@@ -99,6 +99,10 @@ const NEW_PLATFORM_PERMISSIONS = [
   // The alerts slice (RETRO-H5, #609): system scope, admin only. (The list is sorted.)
   'alerts:read',
   'alerts:write',
+  // The sharing slice (RETRO-I1, #562): org scope; groups:admin and sharing:admin via org_admin.
+  'groups:admin',
+  'groups:read',
+  'groups:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.
@@ -127,6 +131,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'system_webhooks:write',
   'webhooks:read',
   'webhooks:write',
+  'sharing:admin',
+  'sharing:read',
+  'sharing:write',
 ];
 
 /**
@@ -138,8 +145,12 @@ const GAINED_BY_SLICE: Partial<Record<'contributor' | 'viewer', string[]>> = {
   // `webhooks:read|write` (RETRO-H4, #603): a member's own webhook endpoints (`/api/webhooks`);
   // the platform grants them to every org role. What an endpoint receives is still gated by the
   // event's own permission (`media:read`), re-checked for the owner at every fan-out.
-  contributor: ['ai:use', 'webhooks:read', 'webhooks:write'],
-  viewer: ['webhooks:read', 'webhooks:write'],
+  // RETRO-I1 (#562): the sharing slice's org grants. Nothing in MemoriaHub checks them yet: the
+  // slice's own routes are mounted but empty until circles become groups (RETRO-I2..I5).
+  contributor: ['ai:use', 'webhooks:read', 'webhooks:write', 'groups:read', 'groups:write', 'sharing:read', 'sharing:write'],
+  // RETRO-D1 (#563): storage:write, widened to `viewer` through platformGrants (the objects API was a
+  // bare @Auth() before, so viewers uploaded).
+  viewer: ['webhooks:read', 'webhooks:write', 'groups:read', 'sharing:read', 'storage:write'],
 };
 
 /** Permissions a slice adoption retired: the platform's routes check another string. */
@@ -147,14 +158,22 @@ const RETIRED_BY_SLICE: Record<string, string> = {
   // RETRO-D2 (#570): /api/email-settings checks system_settings:read|write.
   'email_settings:read': 'system_settings:read',
   'email_settings:write': 'system_settings:write',
+  // RETRO-D1 (#563): /api/admin/storage-config checks storage_config:read|write.
+  'storage_settings:read': 'storage_config:read',
+  'storage_settings:write': 'storage_config:write',
 };
 
+/** A role's permissions: the declared defaults plus the explicit grants (`platformGrants`, RETRO-D1). */
 function grants(role: string): string[] {
-  return permissionRegistry
+  const byDefault = permissionRegistry
     .list()
     .filter((permission) => permission.defaultGrants.includes(role))
-    .map((permission) => permission.id)
-    .sort();
+    .map((permission) => permission.id);
+  const granted = roleGrantRegistry
+    .list()
+    .filter((grant) => grant.role === role)
+    .map((grant) => grant.permission);
+  return [...new Set([...byDefault, ...granted])].sort();
 }
 
 describe('role permission matrix', () => {
@@ -173,7 +192,10 @@ describe('role permission matrix', () => {
       expect(now).toContain(RETIRED_BY_SLICE[permission] ?? permission);
     }
     for (const retired of Object.keys(RETIRED_BY_SLICE)) expect(now).not.toContain(retired);
-    const gained = [...now].filter((permission) => !OLD_MATRIX.admin.includes(permission)).sort();
+    const replacements = new Set(Object.values(RETIRED_BY_SLICE));
+    const gained = [...now]
+      .filter((permission) => !OLD_MATRIX.admin.includes(permission) && !replacements.has(permission))
+      .sort();
     expect(gained).toEqual([...NEW_PLATFORM_PERMISSIONS].sort());
   });
 

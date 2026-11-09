@@ -23,8 +23,8 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+} from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { hammingDistance } from '../burst/burst-detection.service';
 import { PERMISSIONS } from '../common/constants/roles.constants';

@@ -45,6 +45,7 @@ import CampaignOutlinedIcon from '@mui/icons-material/CampaignOutlined';
 import AndroidIcon from '@mui/icons-material/Android';
 import BuildCircleOutlinedIcon from '@mui/icons-material/BuildCircleOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined';
 import { doctorSettingsPage } from '@marinoscar/platform-web/doctor/ui';
 import { setupGuideSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { identityAdminSections } from '@marinoscar/platform-web/identity/ui';
@@ -234,12 +235,13 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
     label: 'Storage',
     cards: [
       {
-        title: 'Storage Providers',
+        title: 'Object Storage',
         description:
-          'Manage S3, R2, and local storage credentials, set the active provider, and run migrations.',
+          'Choose the storage driver (S3, R2, S3-compatible or local disk), test it, and copy objects between providers.',
         Icon: StorageIcon,
-        path: '/admin/settings/storage/providers',
-        permission: 'storage_settings:read',
+        path: '/admin/settings/storage',
+        // The platform's `GET /api/admin/storage-config` (RETRO-D1); writes need `storage_config:write`.
+        permission: 'storage_config:read',
       },
       {
         title: 'Storage Insights',
@@ -335,6 +337,16 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
       // (`webhooksAdminSections.organizations`, `feature: 'orgs'`) is not spread, like the other
       // organization cards: no organization page is routed in single-organization mode.
       ...webhooksAdminSections.operations,
+      {
+        // RETRO-H2 (#596), appended. `org_members:read` is the exact string the exports service
+        // checks for the platform `org-data` source; the page is the packaged `DataExportPage`.
+        title: 'Organization data export',
+        description:
+          'Export what this deployment stores for the organization (members, files list, settings) as JSON, CSV or Excel.',
+        Icon: CloudDownloadOutlinedIcon,
+        path: '/admin/settings/data-export',
+        permission: 'org_members:read',
+      },
     ],
   },
   // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to

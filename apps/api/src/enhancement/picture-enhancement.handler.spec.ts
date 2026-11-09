@@ -3,7 +3,7 @@
  *
  * Mocking strategy (mirrors video-face-detection.handler.spec.ts /
  * social-media-detection.handler.spec.ts):
- *   - `../storage/processing/image-orientation.util` is module-mocked so
+ *   - `../media-processing/image-orientation.util` is module-mocked so
  *     `prepareImageForProcessing` never touches sharp/libvips — it returns a
  *     deterministic "prepared" buffer + dimensions.
  *   - PrismaService, StorageProviderResolver, AiSettingsService,
@@ -25,7 +25,7 @@
  *   - provider.enhanceImage rejection -> failed + rethrow
  */
 
-jest.mock('../storage/processing/image-orientation.util', () => ({
+jest.mock('../media-processing/image-orientation.util', () => ({
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared-jpeg-bytes'),
     width: 800,
@@ -37,8 +37,8 @@ import { Readable } from 'stream';
 import sharp from 'sharp';
 import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
-import { prepareImageForProcessing } from '../storage/processing/image-orientation.util';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { RateLimitError } from '../enrichment/rate-limit.error';
 import {
   ENRICHMENT_MAX_ATTEMPTS,
@@ -878,7 +878,7 @@ describe('PictureEnhancementHandler', () => {
         expect.any(Readable),
         expect.objectContaining({
           mimeType: 'image/jpeg',
-          // Same immutable caching contract as every other thumbnail.
+          // Same immutable caching contract as every other thumbnail (platform `cacheControl`, next.28).
           cacheControl: 'public, max-age=31536000, immutable',
         }),
       );

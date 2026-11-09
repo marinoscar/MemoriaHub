@@ -145,7 +145,7 @@ describe('user steps', () => {
 describe('administrator steps', () => {
   it('storage_ready follows the active provider readiness', () => {
     expect(STORAGE_READY_STEP.audience).toBe('admin');
-    expect(STORAGE_READY_STEP.href).toBe('/admin/settings/storage/providers');
+    expect(STORAGE_READY_STEP.href).toBe('/admin/settings/storage');
     expect(status(STORAGE_READY_STEP, readiness())).toBe('todo');
     expect(status(STORAGE_READY_STEP, readiness({ storageReady: true }))).toBe('done');
   });

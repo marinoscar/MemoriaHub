@@ -69,6 +69,12 @@ const UserDangerZonePage = lazy(() =>
 const FactoryResetPage = lazy(() =>
   import('@marinoscar/platform-web/user-data/ui').then((m) => ({ default: m.FactoryResetPage })),
 );
+// RETRO-H2 (#596): the exports slice's "Download your data" page (`/api/exports`): every source
+// the caller may use (the platform's `user-data`, `org-data` for `org_members:read`, and
+// MemoriaHub's media, albums, memories and people), the request dialog and the recent exports.
+const DataExportPage = lazy(() =>
+  import('@marinoscar/platform-web/exports/ui').then((m) => ({ default: m.DataExportPage })),
+);
 const AiSettingsPage = lazy(() => import('./pages/Admin/AiSettingsPage'));
 const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
@@ -107,7 +113,7 @@ const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'))
 const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
-const StorageProvidersPage = lazy(() => import('./pages/Admin/StorageProvidersPage'));
+const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
@@ -222,6 +228,10 @@ function AppRoutes() {
                 {/* RETRO-H3 (#599): the user steps of `GET /api/onboarding`, which needs
                     only `user_settings:read` (every role). */}
                 <Route path="/settings/getting-started" element={<GettingStartedPage />} />
+                {/* RETRO-H2 (#596): "Download your data". Ungated like its siblings: every source
+                    is checked by the API (`user-data` on `user_settings:read`, MemoriaHub's on
+                    `media:read`, both held by every role); the `export.ready` notification links here. */}
+                <Route path="/settings/data-export" element={<DataExportPage />} />
                 {/* Android app + Media Sync (issue #515). */}
                 <Route path="/settings/android-app" element={<AndroidAppDownloadPage />} />
                 <Route
@@ -386,13 +396,15 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/admin/settings/storage/providers"
+                  path="/admin/settings/storage"
                   element={
-                    <RequirePermission permission="storage_settings:read" fallback={<Navigate to="/" replace />}>
-                      <StorageProvidersPage />
+                    <RequirePermission permission="storage_config:read" fallback={<Navigate to="/" replace />}>
+                      <StorageConfigPage />
                     </RequirePermission>
                   }
                 />
+                {/* MemoriaHub's former Storage Providers page (RETRO-D1): the platform page replaces it. */}
+                <Route path="/admin/settings/storage/providers" element={<Navigate to="/admin/settings/storage" replace />} />
                 <Route
                   path="/admin/settings/storage/insights"
                   element={
@@ -502,6 +514,17 @@ function AppRoutes() {
                     </RequirePermission>
                   }
                 />
+                {/* RETRO-H2 (#596). `org_members:read`, the exact string the exports service checks
+                    for the platform `org-data` source (an organization's rows). Same packaged page
+                    as `/settings/data-export`: its dialog lists `org-data` for this holder. */}
+                <Route
+                  path="/admin/settings/data-export"
+                  element={
+                    <RequirePermission permission="org_members:read" fallback={<Navigate to="/" replace />}>
+                      <DataExportPage />
+                    </RequirePermission>
+                  }
+                />
                 <Route
                   path="/admin/settings/sharing"
                   element={
@@ -595,7 +618,7 @@ function AppRoutes() {
                 <Route path="/admin/jobs" element={<Navigate to="/admin/settings/jobs" replace />} />
                 <Route path="/admin/tags" element={<Navigate to="/admin/settings/tagging" replace />} />
                 <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
-                <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage/providers" replace />} />
+                <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage" replace />} />
                 <Route path="/admin/backup" element={<Navigate to="/admin/settings/nodes" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 {/* The Collections hub (issue #391, spec §4.6) ADDS a route; it

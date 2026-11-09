@@ -8,7 +8,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { PrismaModule } from './prisma/prisma.module';
 import './settings/registry';
 import { FeaturesModule } from './settings/features.module';
-import { StorageModule } from './storage/storage.module';
+import { MediaProcessingModule } from './media-processing/media-processing.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
 import { AiModule } from './ai/ai.module';
@@ -27,7 +27,6 @@ import { ReviewRunsModule } from './review-runs/review-runs.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { GeoModule } from './geo/geo.module';
 import { emailModule } from './platform/email/email.config';
-import { StorageSettingsModule } from './storage-settings/storage-settings.module';
 import { ShareModule } from './share/share.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
@@ -52,11 +51,15 @@ import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
 import { aboutModule } from './platform/about/about.config';
 import { dbBackupModule } from './platform/db-backup/db-backup.config';
+import { StorageConfigModule, storageModule } from './platform/storage/storage.config';
+import { LocalStorageDownloadModule } from './platform-extensions/storage/local-storage-download.module';
 import { telemetryModule } from './platform/telemetry/telemetry.config';
 import { alertsModules } from './platform/alerts/alerts.config';
 import { userDataModule } from './platform/user-data/user-data.config';
 import { onboardingModule } from './platform/onboarding/onboarding.config';
 import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
+import { sharingModule } from './platform/sharing/sharing.config';
+import { exportsModule } from './platform/exports/exports.config';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -73,7 +76,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     ScheduleModule.forRoot(),
 
     // Event emitter for async events
-    EventEmitterModule.forRoot(),
+    // `job.settled` has eleven listeners once the storage (RETRO-D1), notifications, alerts and
+    // webhooks slices are all mounted beside MemoriaHub's bridges. Past eventemitter2's default
+    // of 10 it emits a leak warning whose object Node's `emitWarning` rejects, failing the boot.
+    EventEmitterModule.forRoot({ maxListeners: 25 }),
 
     // Database
     PrismaModule,
@@ -117,7 +123,14 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     hostCoreModule,
     // `GET /api/admin/about` (`system_settings:read`).
     aboutModule,
-    StorageModule,
+    // Object storage (RETRO-D1, #563): @marinoscar/platform-api/storage. `/api/storage/objects`, the
+    // `storage.object.process` and stale-upload jobs, `/api/admin/storage-config` and the copy-only
+    // provider migration (`/api/admin/storage/migrations`); the `local` driver is MemoriaHub's
+    // (app-registrations/storage.ts), and so are the seven post-upload processors (MediaProcessingModule).
+    storageModule,
+    StorageConfigModule,
+    LocalStorageDownloadModule,
+    MediaProcessingModule,
     MediaModule,
     CirclesModule,
     AiModule,
@@ -146,7 +159,6 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // registered by `app-registrations/email.ts`) and the Doctor check `email.config`.
     // Sends go through the notifications slice's email channel (RETRO-D3).
     emailModule,
-    StorageSettingsModule,
     ShareModule,
     SocialMediaModule,
     EnhancementModule,
@@ -189,6 +201,17 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // jobs, the SSRF egress guard, the `webhook` notification channel), plus MemoriaHub's
     // events and the global `MemoriaHubWebhooks` its write paths raise them through.
     MemoriaHubWebhooksModule,
+    // Sharing (RETRO-I1, #562): @marinoscar/platform-api/sharing, single-organization mode.
+    // `/api/groups`, `/api/grants`, `/api/grants/links` and the public `/api/public/links/current`
+    // are live and empty: circles and public shares keep deciding access until RETRO-I2..I5
+    // (mapping: docs/platform-adoption/circles-to-groups.md). Binding: `platform/sharing/`.
+    sharingModule,
+    // Data export (RETRO-H2, #596): @marinoscar/platform-api/exports. "Download your data"
+    // (`/api/exports`, the `export.run` / `export.purge` jobs, the daily expiry cron): the
+    // platform's `user-data` and `org-data` sources plus MemoriaHub's media, albums, memories and
+    // people sources (`platform/exports/`). Files are written through the app's storage
+    // providers until RETRO-D1 (`exports-storage.adapter.ts`).
+    exportsModule,
   ],
   providers: [
     // Global validation pipe (Zod)

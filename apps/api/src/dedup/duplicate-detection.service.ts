@@ -3,8 +3,8 @@ import { BurstGroupStatus, DuplicateGroupStatus, MediaType, Prisma } from '@pris
 import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
 import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { streamToBuffer } from '../storage/processing/processors/stream-utils';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { VisualEmbeddingService } from './visual-embedding.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';

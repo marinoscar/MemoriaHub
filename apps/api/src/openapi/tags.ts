@@ -132,6 +132,30 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           'every read; aggregate activation metrics (`GET /api/admin/onboarding/metrics`). Served by the ' +
           'platform onboarding slice.',
       },
+      {
+        name: 'Groups',
+        description:
+          'Sharing groups of the platform sharing slice (RETRO-I1): groups, members, roles and invitations ' +
+          '(`groups:read` / `groups:write` / `groups:admin`). Mounted in single-organization mode and empty ' +
+          'until circles become groups (RETRO-I2); circles still decide access until then.',
+      },
+      {
+        name: 'Grants',
+        description:
+          'Shares of a record with a user, a group or a link (`sharing:read` / `sharing:write` / ' +
+          '`sharing:admin`), what is shared with the caller, the registered grantee kinds and group roles, ' +
+          'and the public link resolution `GET /api/public/links/current` (the `X-Link-Token` header is the ' +
+          'credential). Platform sharing slice (RETRO-I1); no resource type is shareable until RETRO-I2.',
+      },
+      {
+        name: 'Exports',
+        description:
+          'Download your data (RETRO-H2): the export sources the caller may use, queued exports (`export.run`) ' +
+          'and a short-lived signed download per finished file. Sources: the platform\'s `user-data` and ' +
+          '`org-data` (`org_members:read`) and MemoriaHub\'s media, albums, memories and people (`media:read`). ' +
+          'Original files, hashes, storage keys and face embeddings are never exported. Served by the platform ' +
+          'exports slice.',
+      },
     ],
   },
   {
@@ -415,10 +439,10 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
           "test send to the caller's own devices. The private key is never returned.",
       },
       {
-        name: 'Storage Settings',
+        name: 'Storage Configuration',
         description:
-          'Object-storage providers, connectivity tests, active-provider selection, and copy-only ' +
-          'migration between providers.',
+          'The object-storage driver (S3, R2, S3-compatible or local disk) and its write-only credential, ' +
+          'connection test, bucket provisioning, and copy-only migration between drivers (the platform storage slice).',
       },
     ],
   },

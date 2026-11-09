@@ -3,7 +3,7 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
 import { CirclesModule } from '../circles/circles.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { SocialMediaDetectorService } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { SocialMediaDetectionHandler } from './social-media-detection.handler';
@@ -24,7 +24,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *   - SettingsModule         → AppSystemSettingsService (feature flags + socialMedia.*)
  *   - FaceModule             → VideoFrameExtractionService (now exported)
  *   - MediaModule            → MediaEnrichmentService (clean-path fan-out)
- *   - StorageProvidersModule → StorageProviderResolver (legacy re-probe + OCR download)
+ *   - MediaProcessingModule → StorageProviderResolver (legacy re-probe + OCR download)
  *
  * No circular import: FaceModule already imports MediaModule; nothing imports
  * SocialMediaModule except AppModule.
@@ -36,7 +36,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     FaceModule,
     MediaModule,
     CirclesModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
   ],
   controllers: [SocialMediaMediaController, AdminSocialMediaController],
   providers: [

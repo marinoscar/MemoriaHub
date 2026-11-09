@@ -19,10 +19,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaReprocessService } from './media-reprocess.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { ThumbnailProcessor } from '../storage/processing/processors/thumbnail.processor';
-import { ImageDimensionsProcessor } from '../storage/processing/processors/image-dimensions.processor';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
-import { OBJECT_PROCESSED_EVENT } from '../storage/processing/events/object-processed.event';
+import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
+import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { OBJECT_PROCESSED_EVENT } from '../media-processing/events/object-processed.event';
 
 // ---------------------------------------------------------------------------
 // Factory helpers

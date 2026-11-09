@@ -15,7 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JobHandlerRegistry, JobScope, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageProcessingRecoveryService } from '../storage/tasks/storage-processing-recovery.service';
+import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import {
   createMockPrismaService,

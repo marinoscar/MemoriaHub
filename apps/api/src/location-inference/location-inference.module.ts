@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { StorageProvidersModule } from '../storage/providers/storage-providers.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CirclesModule } from '../circles/circles.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
@@ -35,7 +35,7 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
 @Module({
   imports: [
     EnrichmentModule,
-    StorageProvidersModule,
+    MediaProcessingModule,
     PrismaModule,
     CirclesModule,
     

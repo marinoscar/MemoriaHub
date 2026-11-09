@@ -1,5 +1,10 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  orgScopeExtension,
+  runInOrg,
+  type RlsTransactionOptions,
+} from '@marinoscar/platform-api/core';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { buildBaseDatabaseUrl, resolvePoolConfig } from '../config/database-url.util';
 // Fills core's ownership registries before bootstrap (they freeze with the app).
@@ -82,6 +87,39 @@ export class PrismaService
   async onModuleDestroy() {
     await this.$disconnect();
     this.logger.log('Database disconnected');
+  }
+
+  /**
+   * A client whose every operation runs in ONE organization's row-level-security
+   * scope: each call opens a short transaction whose first statement is
+   * `set_config('app.org_id', <orgId>, true)` (transaction-local, never a session
+   * `SET`). The platform slices reach it through `storageForOrg` and friends
+   * (RETRO-D1, #563). Never used inside `$transaction(async tx => ...)`: use
+   * {@link PrismaService.runInOrg} for a unit of work of more than one statement.
+   *
+   * @param orgId - the organization (`principal.activeOrgId` or a job payload's `orgId`, never request input).
+   * @param opts - `userId`, the acting user (`app.user_id`).
+   */
+  forOrg(orgId: string, opts: { userId?: string } = {}) {
+    return this.$extends(orgScopeExtension(this, { orgId, ...opts }));
+  }
+
+  /**
+   * One interactive transaction in one organization's scope; `fn` receives the
+   * plain transaction client. The scope is the transaction's first statement.
+   */
+  runInOrg<R>(
+    orgId: string,
+    fn: (tx: Prisma.TransactionClient) => Promise<R>,
+    opts: { userId?: string } & RlsTransactionOptions = {},
+  ): Promise<R> {
+    const { userId, ...transaction } = opts;
+    return runInOrg(
+      this,
+      { orgId, ...(userId !== undefined ? { userId } : {}) },
+      fn as (tx: unknown) => Promise<R>,
+      transaction,
+    );
   }
 
   /**

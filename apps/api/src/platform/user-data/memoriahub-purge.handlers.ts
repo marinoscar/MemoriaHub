@@ -24,7 +24,7 @@ import { MemoriaHubUserDataService, type Counts } from './memoriahub-user-data.s
 // `orgId`: the platform enqueues the delegates with `orgId: null`. MemoriaHub's
 // circle tables carry no `org_id` (single-organization mode until Epic I), so
 // nothing here needs a `JobScope`; the storage-object deletes run on the
-// platform's `forSystem(..., 'purge')` bypass.
+// system client (`PrismaSystemService.asSystem('purge')`).
 // =============================================================================
 
 /** The delegated job types (permanent). */

@@ -39,6 +39,10 @@ jobs:
   tooling:
     name: Repository tooling
     runs-on: ubuntu-latest
+    env:
+      # This job never loads onnxruntime: skip the native binary download, a
+      # recurring CDN timeout during `npm ci`.
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - uses: actions/checkout@v7
 
@@ -64,6 +68,9 @@ jobs:
     name: Typecheck (api, web, cli)
     runs-on: ubuntu-latest
     env:
+      # This job never loads onnxruntime: skip the native binary download, a
+      # recurring CDN timeout during `npm ci`.
+      ONNXRUNTIME_NODE_INSTALL: skip
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v7
@@ -180,6 +187,9 @@ jobs:
     # Declares no `needs`, like every other job here — it runs concurrently
     # and adds no wall-clock time as long as it stays under the slowest job.
     env:
+      # This job never loads onnxruntime: skip the native binary download, a
+      # recurring CDN timeout during `npm ci`.
+      ONNXRUNTIME_NODE_INSTALL: skip
       NODE_ENV: test
     steps:
       # Full history so the base branch can be checked out for the spec diff.

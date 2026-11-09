@@ -9,6 +9,7 @@
 import type { Client } from 'pg';
 
 import type { LegacyItem, LegacySource, MigrationPurpose, SettingsStore } from './legacy-credentials-migration';
+import { S3_FAMILY_DRIVER_IDS } from './legacy-storage-settings-migration';
 
 const GLOBAL_KEY = 'global';
 
@@ -125,19 +126,29 @@ export class PgLegacySource implements LegacySource {
   }
 
   private async storage(): Promise<LegacyItem[]> {
-    const active = String((await this.settings.get(['storage', 'activeProvider'])) ?? process.env['STORAGE_PROVIDER'] ?? 's3');
+    // PER DRIVER (RETRO-D1 on platform 0.1.0-next.28, EAB #1124): every S3-family row's secret goes to
+    // that driver's own address `storage/<driverId>` (`s3`, `r2`), so a deployment that kept objects
+    // on two providers with different key pairs keeps reading both. `storage/default` is only the
+    // platform's read fallback and is never written here. The `local` driver has no secret.
     const res = await this.client.query<{ id: string; provider: string; encrypted_key: string }>(
       `SELECT id::text AS id, provider, encrypted_key FROM storage_provider_credentials ORDER BY provider`,
     );
     return res.rows.map((row) => {
-      const isActive = row.provider === active;
+      const s3Family = (S3_FAMILY_DRIVER_IDS as readonly string[]).includes(row.provider);
       return {
         purpose: 'storage' as const,
         rowId: row.id,
         label: `storage_provider_credentials/${row.provider}`,
         ciphertext: row.encrypted_key,
-        target: isActive ? { purpose: 'storage', name: 'default' } : null,
-        ...(isActive ? {} : { note: `not the active provider (${active}); the platform keeps one storage secret, RETRO-D1 decides` }),
+        target: s3Family ? { purpose: 'storage', name: row.provider } : null,
+        ...(s3Family
+          ? {}
+          : {
+              note:
+                row.provider === 'local'
+                  ? 'the local driver has no secret'
+                  : `"${row.provider}" names no platform storage driver`,
+            }),
       };
     });
   }

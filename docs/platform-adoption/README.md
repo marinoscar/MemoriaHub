@@ -13,6 +13,7 @@ Rule for every contributor: platform code is never edited here. When a platform 
 | [drift-baseline.md](drift-baseline.md), [.json](drift-baseline.json) | Apps view of EAB's drift report |
 | [drift-baseline-slices.md](drift-baseline-slices.md), [.json](drift-baseline-slices.json) | Slice view (API modules against packaged slices) |
 | `scripts/platform-adoption/make-slice-view.sh` | Builds the slice view of EAB |
+| [circles-to-groups.md](circles-to-groups.md) | Circles to platform sharing groups: every mapping decision RETRO-I2..I6 implement (RETRO-I1, #562) |
 
 The reports were generated at EAB `59e377cbebb60e711fe4d7b0d818715f23af8a59` and MemoriaHub `928ea684fe95329d4a81e1e4b47ba3c54354e919` on 2026-11-08. Scratch paths in them are replaced by placeholders.
 

@@ -11,7 +11,7 @@ import { IsIn } from 'class-validator';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { OrientationOp } from '../storage/processing/image-orientation.util';
+import { OrientationOp } from '../media-processing/image-orientation.util';
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 
 const ORIENTATION_OPS: OrientationOp[] = [

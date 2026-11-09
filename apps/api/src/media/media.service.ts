@@ -16,8 +16,9 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
-} from '../storage/providers/storage-provider.interface';
-import { StorageProviderResolver } from '../storage/providers/storage-provider.resolver';
+} from '@marinoscar/platform-api/storage';
+import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
+import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
 import { MediaQueryDto } from './dto/media-query.dto';
@@ -2464,8 +2465,8 @@ export class MediaService {
    *      fallback ONLY if the batch delete throws, so one bad row can't strand
    *      the rest and we can report precisely which ids failed).
    *   2. Best-effort blob deletes grouped by `(storageProvider, bucket)` — one
-   *      `provider.deleteMany(keys)` per distinct group (S3 batches up to 1000
-   *      keys per call). Blob-delete failures are non-fatal (warn only), matching
+   *      platform `deleteStorageKeys` per distinct group (the S3 drivers'
+   *      `deleteMany`: `DeleteObjects`, up to 1000 keys per call). Blob-delete failures are non-fatal (warn only), matching
    *      `purgeMediaItems` semantics — an item still counts as deleted.
    *   3. A single `storageObject.deleteMany` for the objects of the rows that
    *      were actually deleted (skipping any whose MediaItem delete failed, since
@@ -2549,10 +2550,10 @@ export class MediaService {
     for (const group of groups.values()) {
       try {
         const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
-        const result = await provider.deleteMany(group.keys);
-        if (result.errors.length > 0) {
+        const result = await deleteStorageKeys(provider, group.keys);
+        if (result.failed.length > 0) {
           this.logger.warn(
-            `purgeMediaItemsBatched: ${result.errors.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
+            `purgeMediaItemsBatched: ${result.failed.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
           );
         }
       } catch (err) {

@@ -36,12 +36,12 @@ Issue [#580](https://github.com/marinoscar/MemoriaHub/issues/580) (epic #557) re
 
 | Port / option | Bound to | Note |
 |---|---|---|
-| `target` | `MemoriaHubBackupTarget` | Writes to `databaseBackup.storageProvider` if set, else the active provider of MemoriaHub's own storage stack (`StorageProviderResolver`). Reads, deletes and signed links resolve the provider and bucket RECORDED ON THE RUN (looked up by key), never the active one, which is what keeps pre-cutover archives reachable. Shim until RETRO-D1 (the default target over the platform `STORAGE_PROVIDER` then applies). With an app target the platform withholds node offload |
-| `DB_BACKUP_NOTIFIER` | log and drop | MemoriaHub never notified on a backup or restore; RETRO-D3 binds `NotificationsService` and registers `DB_BACKUP_NOTIFICATION_EVENTS` / `DB_BACKUP_EMAIL_TEMPLATES` |
+| `target` | `MemoriaHubBackupTarget` | Writes through the platform storage slice to `databaseBackup.storageProvider` if set, else the active driver. Reads, deletes and signed links resolve the provider and bucket RECORDED ON THE RUN (the `BackupObjectLocation` the engine passes since platform 0.1.0-next.28, by key otherwise), never the active one, which is what keeps pre-cutover archives reachable. Kept because the platform's default target writes only to the active driver (it refuses a pin to another provider); see [local-exceptions.md](../platform-adoption/local-exceptions.md) |
+| `DB_BACKUP_NOTIFIER` | `NotificationsService` | since RETRO-D3 (#576), with `DB_BACKUP_NOTIFICATION_EVENTS` / `DB_BACKUP_EMAIL_TEMPLATES` registered |
 | `DB_BACKUP_MAINTENANCE` | `MaintenanceModeService` | the host core's in-memory override, set during the swap |
 | `DB_BACKUP_METRICS` | `AppMetricsService` | `app.backup.*` |
 | `DB_BACKUP_DEPLOYMENT_MODE` | `DeploymentModeService` | `DEPLOYMENT_MODE=saas` turns restore off |
-| `DB_BACKUP_SYSTEM_DATA` | transaction with `set_config('app.rls_bypass','on',true)` | for the `backup.rls-bypass` count; shim until RETRO-D1 brings `PrismaSystemService` |
+| `DB_BACKUP_SYSTEM_DATA` | `PrismaSystemService.runAsSystem('doctor', ...)` | for the `backup.rls-bypass` count (RETRO-D1) |
 
 **MemoriaHub's registrations** (`apps/api/src/app-registrations/db-backup.ts`):
 

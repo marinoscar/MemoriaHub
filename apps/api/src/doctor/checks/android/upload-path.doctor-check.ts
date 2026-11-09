@@ -32,7 +32,7 @@ export function decideAndroidUploadPath(f: UploadPathFacts): DoctorCheckOutcome 
   if (f.providerId === null) {
     return fail(
       `Phones cannot upload: the active storage provider "${f.missingProvider ?? 'unknown'}" is not configured.`,
-      'Configure a storage provider in Admin Settings → Storage Providers.',
+      'Configure a storage provider in Admin Settings → Storage.',
     );
   }
   if (f.supportsPresignedParts !== false) {
@@ -67,7 +67,7 @@ export class AndroidUploadPathDoctorCheck implements DoctorCheck, OnModuleInit {
   readonly id = checkId('android', 'upload-path');
   readonly category = 'android';
   readonly label = 'Phone upload path';
-  readonly settingsPath = '/admin/settings/storage/providers';
+  readonly settingsPath = '/admin/settings/storage';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
 
   constructor(
@@ -88,8 +88,10 @@ export class AndroidUploadPathDoctorCheck implements DoctorCheck, OnModuleInit {
     }
     return decideAndroidUploadPath({
       providerId: target.id,
-      supportsPresignedParts: target.provider.supportsPresignedParts,
-      hasWritePart: typeof target.provider.writePart === 'function',
+      // The platform's provider contract (RETRO-D1): `partUploadMode: 'proxied'`
+      // means the API part route, which needs `uploadPart`.
+      supportsPresignedParts: target.provider.partUploadMode !== 'proxied',
+      hasWritePart: typeof target.provider.uploadPart === 'function',
     });
   }
 }

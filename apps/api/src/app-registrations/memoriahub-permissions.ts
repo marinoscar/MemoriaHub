@@ -24,16 +24,26 @@
 //   admin       everything
 //   contributor user_settings:*, storage:read|write, media:read|write|delete,
 //               circles:read|write, search:use, shares:manage
-//   viewer      user_settings:*, storage:read, media:read|write|delete,
+//   viewer      user_settings:*, storage:read|write, media:read|write|delete,
 //               circles:read|write, search:use
 // `user_settings:*` is the platform's. Its default grants (org_admin,
 // contributor, viewer) are the same.
 //
 // REMOVED BY SLICE: email_settings:* (D2, done: the platform email routes check
-// system_settings:read|write), ai_settings:* (E1), storage_settings:*
-// and storage:* (D1), db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications
-// slice declares them, plus the org-scoped org_broadcasts:* granted to org_admin). Their ids
-// are permanent: the web cards and the CLI use the strings exactly.
+// system_settings:read|write), ai_settings:* (E1), storage_settings:* (D1, done:
+// replaced by the storage slice's storage_config:read|write, admin only),
+// storage:* (D1: the storage slice's set, registered through `permissions.ts`),
+// db_backup:* (D4), push:* and broadcasts:* (D3, done: the notifications slice
+// declares them, plus the org-scoped org_broadcasts:* granted to org_admin). Their
+// ids are permanent: the web cards and the CLI use the strings exactly.
+//
+// STORAGE (RETRO-D1): `storage:read|write`, `storage:delete_any` and
+// `storage_config:read|write` are the storage slice's (`permissions.ts` lists
+// `storage` in `slices`), with ONE grant widened through
+// `platformGrants` (platform 0.1.0-next.28): `storage:write` for `viewer` too.
+// Before RETRO-D1 the objects API was a bare `@Auth()`, so every member (the
+// default role is `viewer`) uploaded, and the per-circle role decided where the
+// media item may go; the platform grants it to org_admin and contributor only.
 // =============================================================================
 
 import type { PermissionDeclaration } from '@marinoscar/platform-api/core';
@@ -42,26 +52,6 @@ const ALL_ORG_ROLES = ['org_admin', 'contributor', 'viewer'] as const;
 const ORG_WRITERS = ['org_admin', 'contributor'] as const;
 
 export const MEMORIAHUB_PERMISSIONS = {
-  // Storage objects (own objects)
-  STORAGE_READ: {
-    id: 'storage:read',
-    description: 'Read object metadata, get download URLs',
-    scope: 'org',
-    defaultGrants: [...ALL_ORG_ROLES],
-  },
-  STORAGE_WRITE: {
-    id: 'storage:write',
-    description: 'Upload, update metadata',
-    scope: 'org',
-    defaultGrants: [...ORG_WRITERS],
-  },
-  STORAGE_DELETE_ANY: {
-    id: 'storage:delete_any',
-    description: 'Admin: delete any object',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-
   // Media
   MEDIA_READ: {
     id: 'media:read',
@@ -176,18 +166,6 @@ export const MEMORIAHUB_PERMISSIONS = {
   GEO_SETTINGS_WRITE: {
     id: 'geo_settings:write',
     description: 'Configure geo provider credentials and active reverse-geocoding provider',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  STORAGE_SETTINGS_READ: {
-    id: 'storage_settings:read',
-    description: 'View storage provider configuration and test connectivity',
-    scope: 'system',
-    defaultGrants: ['admin'],
-  },
-  STORAGE_SETTINGS_WRITE: {
-    id: 'storage_settings:write',
-    description: 'Configure storage provider credentials, set active provider, run migrations',
     scope: 'system',
     defaultGrants: ['admin'],
   },
