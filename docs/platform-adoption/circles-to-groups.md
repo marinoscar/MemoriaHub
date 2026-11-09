@@ -9,7 +9,7 @@ Decided by RETRO-I1 ([#562](https://github.com/marinoscar/MemoriaHub/issues/562)
 | RETRO-I3 (#573) | `CircleMemberGuard` / `assertCircleAccess` to `AccessPolicy` and the list helpers (§6, §7, §8). |
 | RETRO-I4 (#578) | `MediaShare` to link grants (§9). **Done**: see [public-sharing.md](../specs/public-sharing.md) and the [runbook §7](../runbooks/circles-to-groups.md#7-public-shares-to-link-grants-retro-i4). |
 | RETRO-I5 (#583) | `CircleInvite` to `GroupInvite`, and the sign-in claim (§10). |
-| RETRO-I6 (#588) | The web, CLI, TUI and Android "circle" UX on platform groups. |
+| RETRO-I6 (#588) | The web, CLI, TUI and Android "circle" UX on platform groups. Part 1: web and CLI (§0d). |
 
 Source recipe: `packages/platform-api/src/sharing/README.md` of EnterpriseAppBase, section *Migration recipe: from circles and public links (MemoriaHub-style)* (the same text ships in `node_modules/@marinoscar/platform-api/src/sharing/README.md`). Platform decision D6 (EAB `docs/specs/platform-packages.md`): **circles are sharing groups inside one organization, never tenants.** MemoriaHub stays `TENANCY_MODE=single` permanently (`SHARING_TENANCY.mode()` returns `'single'`, `apps/api/src/platform/sharing/sharing-host.module.ts`); see EAB `docs/runbooks/multi-org.md` for what is deliberately not switched on.
 
@@ -44,6 +44,13 @@ Access is decided on the platform groups; the data model and every route shape a
 - **Owner-scope parameters.** Every route that took `circleId` also takes `ownerGroupId` (a shared library) or `scope=me` (the caller's personal library); `circleId` stays, deprecated in OpenAPI, for one release. A global interceptor (`platform/sharing/owner-scope-params.ts`) rewrites both forms into `circleId` before validation; conflicting forms are 400, `scope=me` with no personal library 404.
 - **`groups:write` for `viewer`** (§5), so a viewer can still create a shared library as they could always create a circle.
 - **Kept on purpose** (local-exceptions.md): the §8 sweeps still read the mirrored `circles` / `circle_members` (no platform system listing of groups and members; EAB seam), proven equal by `cross-group-queries.db.spec.ts`; job payloads keep `circleId` and the job type strings are unchanged (queued jobs and the platform's permanent type strings); the workflow action stays `move_to_circle` (stored workflow definitions and run snapshots name it; renaming it is RETRO-I6's, with the web builder); the content trigger stays (dropping it is a migration). Grants are not consulted by the map aggregate, explore, facets, search/KNN and the review queues, which stay member-only.
+
+## 0d. State after RETRO-I6 part 1 (#588)
+
+- **Web.** The active library is an owner scope (`apps/web/src/contexts/OwnerScopeContext.tsx`): "My library" (`GET /api/users/me/library`, the personal library's scope id) plus the caller's groups (`GET /api/groups?scope=mine`), persisted in `user_settings.activeOwnerScope` (`{ kind: 'me' } | { kind: 'group', groupId }`, a declared user namespace; absent means `me`). The undeclared `activeCircleId` had been dropped by the settings slice since RETRO-B3, so there was no stored value to migrate. The switcher is `OwnerScopeChip`; groups are managed on the packaged `GroupsPage` / `GroupDetailPage` at `/settings/groups[/:id]` (card `groupsSettingsPage`, section `Sharing`, `groups:read`); `/circles` and `/circles/:id` redirect; `PendingGroupInvites` is on Home. `services/api.ts` sends `ownerGroupId` / `scope=me` instead of `circleId` (local-exceptions.md).
+- **API.** Media item and album hard deletes call `deleteGrantsForResources` in the delete transaction. New `GET /api/users/me/library`.
+- **CLI 1.5.2.** `memoriahub groups list|use <id|me>`; `circles` is a hidden alias with a deprecation notice; the TUI screen is `GroupManager` (menu id `circles` kept). Scope ids are unchanged (a group's id is the circle's), so no local SQLite or config migration was needed.
+- **Left for later** (each recorded on #588): the `move_to_owner` workflow action and job payload renames; `targetOwner` on the Media Sync config and the Android Hub picker (Kotlin, #675); removing `/api/circles/*`, the `circleId` alias and `circles:*`; dropping `circles` / `circle_members` / `CircleRole`, the mirror triggers and `GroupMemberMirrorListener` (a migration-lock change over the 20 content tables).
 
 ## 1. Decisions (the three open decisions of #562)
 
