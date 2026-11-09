@@ -13,7 +13,8 @@
 //   - markStatus() / markFailed() — MediaFaceStatus upsert helpers
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { MediaFaceStatusType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
@@ -63,6 +64,8 @@ export interface PersistFaceInput {
   faces: Array<NormalizedFace & VideoFaceFields>;
   /** True for video faces (passes through video fields); false for photos. */
   isVideo: boolean;
+  /** Which side computed the faces (the `executor` label of `app.media.faces.detected`). Default `server`. */
+  executor?: 'server' | 'node';
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +82,8 @@ export class FaceDetectionCore {
     private readonly registry: FaceProviderRegistry,
     private readonly matchingService: FaceMatchingService,
     private readonly systemSettings: AppSystemSettingsService,
+    // App metrics (RETRO-T3, #628): `app.media.faces.detected`, `app.people.assignments`.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -258,6 +263,7 @@ export class FaceDetectionCore {
     let archivedCandidates: Array<{ id: string; embedding: number[] }> | null =
       null;
     const toArchive: string[] = [];
+    let autoAssigned = 0;
 
     // Person-matching loop
     for (const face of createdFaces) {
@@ -279,6 +285,7 @@ export class FaceDetectionCore {
           // The person just gained a face — drop its cached centroid so the
           // next probe in this run recomputes against the fresh face set.
           this.matchingService.invalidateCentroid(matchResult.personId);
+          autoAssigned += 1;
           this.logger.debug(
             `Face ${face.id} matched to person ${matchResult.personId}`,
           );
@@ -345,9 +352,10 @@ export class FaceDetectionCore {
 
     // Batch-archive matched faces. The personId/hiddenAt guards keep this
     // idempotent and race-safe; a failure here is non-fatal.
+    let autoArchived = 0;
     if (toArchive.length > 0) {
       try {
-        await this.prisma.face.updateMany({
+        const archived = await this.prisma.face.updateMany({
           where: {
             id: { in: toArchive },
             circleId,
@@ -356,6 +364,7 @@ export class FaceDetectionCore {
           },
           data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
         });
+        autoArchived = archived?.count ?? 0;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(
@@ -363,6 +372,13 @@ export class FaceDetectionCore {
         );
       }
     }
+
+    this.metrics?.add('mediaFacesDetected', createdFaces.length, {
+      media_type: isVideo ? 'video' : 'photo',
+      executor: input.executor ?? 'server',
+    });
+    if (autoAssigned > 0) this.metrics?.add('peopleAssignments', autoAssigned, { mode: 'auto' });
+    if (autoArchived > 0) this.metrics?.add('peopleAssignments', autoArchived, { mode: 'auto_archive' });
 
     return createdFaces.length;
   }

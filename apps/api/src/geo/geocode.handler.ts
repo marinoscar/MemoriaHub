@@ -1,4 +1,6 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
+import { classifyRateLimit, RateLimitError } from '../enrichment/rate-limit.error';
 import { EnrichmentJob, MediaMetadataStatusType } from '@prisma/client';
 import { geocodeResultSchema, type GeocodeResult } from '@memoriahub/enrichment-compute/dto';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
@@ -29,6 +31,8 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
     private readonly geoLocationService: GeoLocationService,
     private readonly prisma: PrismaService,
     private readonly locationGroupResolver: LocationGroupResolverService,
+    // App metrics (RETRO-T3, #628): `app.media.geocoded`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -88,6 +92,9 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Geocode job ${job.id} failed for MediaItem ${mediaItemId}: ${error}`);
       await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.failed, undefined, error);
+      // The provider is resolved inside the geo service, so a failed lookup reports it as `other`.
+      const deferred = err instanceof RateLimitError || classifyRateLimit(err) !== null;
+      this.metrics?.add('mediaGeocoded', 1, { provider: 'other', outcome: deferred ? 'deferred' : 'failed' });
       throw err;
     }
   }
@@ -213,6 +220,11 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
     }
 
     await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processed, new Date());
+    this.metrics?.add('mediaGeocoded', 1, {
+      // `geonames-offline` is the offline provider; `none` (no provider resolved) reads as `other`.
+      provider: result.source === 'geonames-offline' ? 'offline' : result.source,
+      outcome: hasData ? 'resolved' : 'no_result',
+    });
   }
 
   /**

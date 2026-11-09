@@ -36,7 +36,7 @@ export class StorageInsightsHandler implements JobHandler, OnModuleInit {
   }
 
   async process(): Promise<void> {
-    // metrics: RETRO-T3 (app.storage.bytes gauge source: the snapshot's totalBytes)
+    // The snapshot is the source of the `app.storage.bytes` / `app.storage.trash.bytes` gauges (RETRO-T3).
     await this.insights.runComputation();
   }
 }
