@@ -108,13 +108,16 @@ function refusalOf(error: unknown): { status: number; reason?: string; details?:
 
 describe('MediaSyncService', () => {
   let prisma: DeepMockProxy<PrismaClient>;
-  let circles: { requireOwnerRole: jest.Mock };
+  let circles: { requireOwnerRole: jest.Mock; personalLibraryOf: jest.Mock };
   let service: MediaSyncService;
   let devices: DeviceRow[];
 
   beforeEach(() => {
     prisma = mockDeep<PrismaClient>();
-    circles = { requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }) };
+    circles = {
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
+      personalLibraryOf: jest.fn().mockResolvedValue(PERSONAL_CIRCLE),
+    };
     service = new MediaSyncService(prisma as unknown as PrismaService, circles as unknown as OwnerAccessService);
     devices = [deviceRow(), deviceRow({ id: DEVICE_B, installationId: 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1', patId: PAT_B })];
 
@@ -355,6 +358,48 @@ describe('MediaSyncService', () => {
     it('accepts a collaborator target circle', async () => {
       const result = await service.updateConfig(web, DEVICE_A, { targetCircleId: OTHER_CIRCLE }, JWT);
       expect(result.config.targetCircleId).toBe(OTHER_CIRCLE);
+    });
+
+    describe('targetOwner (RETRO-I6 #588, additive alias)', () => {
+      it('stores a group target as targetCircleId', async () => {
+        const result = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'group', groupId: OTHER_CIRCLE } }, JWT);
+        expect(result.config.targetCircleId).toBe(OTHER_CIRCLE);
+        expect(result.config).not.toHaveProperty('targetOwner');
+        expect(circles.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
+      });
+
+      it("resolves { kind: 'me' } to the caller's personal library", async () => {
+        devices[0].config = { ...(devices[0].config as Record<string, unknown>), targetCircleId: OTHER_CIRCLE };
+        const result = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'me' } }, JWT);
+        expect(circles.personalLibraryOf).toHaveBeenCalledWith(USER);
+        expect(result.config.targetCircleId).toBe(PERSONAL_CIRCLE);
+      });
+
+      it('refuses with 403 TARGET_OWNER_FORBIDDEN (the targetCircleId refusal is unchanged)', async () => {
+        circles.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
+        const error = await service
+          .updateConfig(web, DEVICE_A, { targetOwner: { kind: 'group', groupId: OTHER_CIRCLE } }, JWT)
+          .catch((e) => e);
+        expect(refusalOf(error)).toMatchObject({
+          status: 403,
+          reason: 'TARGET_OWNER_FORBIDDEN',
+          details: { reason: 'TARGET_OWNER_FORBIDDEN', circleId: OTHER_CIRCLE },
+        });
+        expect(devices[0].configVersion).toBe(1);
+      });
+
+      it("refuses 'me' with TARGET_OWNER_FORBIDDEN when the caller has no personal library", async () => {
+        circles.personalLibraryOf.mockResolvedValue(null);
+        const error = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'me' } }, JWT).catch((e) => e);
+        expect(refusalOf(error)).toMatchObject({ status: 403, reason: 'TARGET_OWNER_FORBIDDEN' });
+      });
+
+      it('refuses a targetOwner that names a different library than targetCircleId with 400', async () => {
+        const error = await service
+          .updateConfig(web, DEVICE_A, { targetCircleId: PERSONAL_CIRCLE, targetOwner: { kind: 'group', groupId: OTHER_CIRCLE } }, JWT)
+          .catch((e) => e);
+        expect(error.getStatus()).toBe(400);
+      });
     });
 
     it('refuses a folder missing from the inventory with 400 UNKNOWN_FOLDER and the bucket ids', async () => {

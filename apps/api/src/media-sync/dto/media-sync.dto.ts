@@ -203,9 +203,27 @@ export class RegisterDeviceDto extends createZodDto(registerDeviceSchema) {}
  * folder in the same request that selects it. Folder `name`s are overwritten
  * from the inventory entry by the server.
  */
+/**
+ * The library new media goes to, as an owner scope (RETRO-I6, #588): the caller's
+ * personal library or one group. An ADDITIVE alias of `targetCircleId` on PATCH only:
+ * the server resolves it to the same scope id and stores `targetCircleId`, which the
+ * phone keeps reading and sending.
+ */
+export const targetOwnerSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('me') }).strict(),
+  z.object({ kind: z.literal('group'), groupId: z.uuid() }).strict(),
+]);
+export type TargetOwner = z.infer<typeof targetOwnerSchema>;
+
 export const updateConfigSchema = z
   .object({
     targetCircleId: z.uuid().optional(),
+    targetOwner: targetOwnerSchema.optional().meta({
+      description:
+        'The library new media goes to: `{ kind: "me" }` (your personal library) or `{ kind: "group", groupId }`. ' +
+        'Resolved to `targetCircleId`, which the stored config keeps; refused with `details.reason` ' +
+        '`TARGET_OWNER_FORBIDDEN`. Sending it with a different `targetCircleId` is 400.',
+    }),
     folders: foldersSchema.optional(),
     includePhotos: z.boolean().optional(),
     includeVideos: z.boolean().optional(),
