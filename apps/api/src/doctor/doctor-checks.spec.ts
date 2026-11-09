@@ -24,7 +24,7 @@ import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-api/doctor';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AppSystemSettings } from '../settings/app-settings.types';
-import type { AiSettingsService } from '../ai/ai-settings.service';
+import type { AiSettingsService } from '../ai-port/ai-settings.service';
 import type { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import type { FaceSettingsService } from '../face/face-settings.service';
 import type { GeoSettingsService } from '../geo/geo-settings.service';

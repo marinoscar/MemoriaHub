@@ -11,7 +11,7 @@ import { ROLES, PERMISSIONS } from '../common/constants/roles.constants';
  */
 @ApiTags('Admin: AI Picture Enhancer')
 @ApiBearerAuth('JWT-auth')
-@Controller('admin/ai/enhance')
+@Controller('admin/memoriahub-ai/enhance')
 export class AdminEnhancementController {
   constructor(private readonly service: MediaEnhancementService) {}
 

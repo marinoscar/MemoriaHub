@@ -60,7 +60,7 @@ import {
 } from '@memoriahub/enrichment-compute/ai';
 import { PrismaService } from '../prisma/prisma.service';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
-import { AiSettingsService } from '../ai/ai-settings.service';
+import { AiSettingsService } from '../ai-port/ai-settings.service';
 import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import type {
   AiProvider,
