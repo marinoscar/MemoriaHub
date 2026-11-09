@@ -3,13 +3,11 @@ import type {
   MediaShare,
   ShareStatus,
   ShareTargetType,
-  CreateShareRequest,
   UpdateShareRequest,
   BulkShareRequest,
 } from '../types/sharing';
 import {
   listShares,
-  createShare as createShareApi,
   updateShare as updateShareApi,
   revokeShare as revokeShareApi,
   bulkShares as bulkSharesApi,
@@ -22,7 +20,6 @@ import { useIsMounted } from './useIsMounted';
 // ---------------------------------------------------------------------------
 
 interface UseMediaSharesParams {
-  scope?: 'mine' | 'all';
   status?: ShareStatus;
   targetType?: ShareTargetType;
   page?: number;
@@ -35,8 +32,7 @@ interface UseMediaSharesResult {
   isLoading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
-  createShare: (req: CreateShareRequest) => Promise<MediaShare>;
-  updateShare: (id: string, req: UpdateShareRequest) => Promise<MediaShare>;
+  updateShare: (id: string, req: UpdateShareRequest) => Promise<void>;
   revokeShare: (id: string) => Promise<void>;
   bulkAction: (req: BulkShareRequest) => Promise<{ affected: number }>;
 }
@@ -70,7 +66,6 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
       if (isMounted()) setIsLoading(false);
     }
   }, [
-    params?.scope,
     params?.status,
     params?.targetType,
     params?.page,
@@ -78,29 +73,12 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
     isMounted,
   ]);
 
-  const createShare = useCallback(
-    async (req: CreateShareRequest): Promise<MediaShare> => {
-      setError(null);
-      try {
-        const share = await createShareApi(req);
-        await refetch();
-        return share;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create share';
-        if (isMounted()) setError(message);
-        throw err;
-      }
-    },
-    [refetch, isMounted],
-  );
-
   const updateShare = useCallback(
-    async (id: string, req: UpdateShareRequest): Promise<MediaShare> => {
+    async (id: string, req: UpdateShareRequest): Promise<void> => {
       setError(null);
       try {
-        const updated = await updateShareApi(id, req);
+        await updateShareApi(id, req);
         await refetch();
-        return updated;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update share';
         if (isMounted()) setError(message);
@@ -151,7 +129,6 @@ export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesRes
     isLoading,
     error,
     refetch,
-    createShare,
     updateShare,
     revokeShare,
     bulkAction,

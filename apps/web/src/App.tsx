@@ -18,7 +18,7 @@ import { InstallPrompt, MaintenanceGate, UpdatePrompt } from '@marinoscar/platfo
 // so the packaged `UpdatePrompt` takes the hook as a prop.
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import './platform/notifications';
-import { AppPlatformHostProvider } from './platform/platformHost';
+import { AppPlatformHostProvider, appPlatformApi } from './platform/platformHost';
 // The packaged identity UI (RETRO-B2, #611): sign-in, callback, device
 // activation, access tokens, users and allowlist, behind the identity guards.
 import { RequireAuth } from '@marinoscar/platform-web/identity/headless';
@@ -146,7 +146,12 @@ const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPag
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
 const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
-const PublicSharePage = lazy(() => import('./pages/Public/PublicSharePage'));
+const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));
+// RETRO-I4 (#578): public links are the sharing slice's; the page resolves `/s#lnk_...` and
+// renders the `media_item` / `album` renderers registered in `platform/linkRenderers`.
+const PublicLinkPage = lazy(() =>
+  import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.PublicLinkPage })),
+);
 const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
 const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage'));
 const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilderPage'));
@@ -194,7 +199,9 @@ function AppRoutes() {
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            <Route path="/s/:token" element={<PublicSharePage />} />
+            <Route path="/s" element={<PublicLinkPage apiClient={appPlatformApi} />} />
+            {/* Links made before RETRO-I4 carried the token in the path: move it to the fragment. */}
+            <Route path="/s/:token" element={<LegacyShareRedirect />} />
 
             {/* Test login (development only) */}
             {!import.meta.env.PROD && TestLoginPage && (
@@ -528,7 +535,7 @@ function AppRoutes() {
                 <Route
                   path="/admin/settings/sharing"
                   element={
-                    <RequirePermission permission="shares:manage_any" fallback={<Navigate to="/" replace />}>
+                    <RequirePermission permission="sharing:admin" fallback={<Navigate to="/" replace />}>
                       <PublicSharesPage />
                     </RequirePermission>
                   }

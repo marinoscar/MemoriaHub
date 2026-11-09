@@ -249,7 +249,7 @@ export function buildShareColumns({
             sx={{ fontFamily: 'monospace', fontSize: '0.75rem', minWidth: 0 }}
             noWrap
           >
-            {truncateShareUrl(share.publicUrl)}
+            {share.publicUrl ? truncateShareUrl(share.publicUrl) : "—"}
           </Typography>
           <Tooltip title="Copy link">
             <IconButton
