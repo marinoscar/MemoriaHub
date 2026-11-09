@@ -30,6 +30,8 @@ import { StorageInsightsHandler } from '../../src/insights/storage-insights.hand
 import { RetiredStorageMigrationHandler } from '../../src/platform/jobs/retired-job-types';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
+import { StorageRecoveryHandler } from '../../src/media-processing/recovery/storage-recovery.handler';
+import { StorageReprocessHandler } from '../../src/media-processing/recovery/storage-reprocess.handler';
 import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from '../../src/media/trash-empty/trash-empty-execute-batch.handler';
 import { TrashPurgeHandler } from '../../src/media/trash-purge.handler';
@@ -87,9 +89,12 @@ export const ALL_HANDLER_CLASSES = [
   WorkflowEvaluateItemHandler,
   WorkflowExecuteBatchHandler,
   WorkflowRunsRetentionHandler,
+  // RETRO-D1b (#567): the storage processing recovery and the admin bulk reprocess.
+  StorageRecoveryHandler,
+  StorageReprocessHandler,
 ];
 
-/** The 35 permanent type strings with an app handler (RETRO-D3 retired three more: see below). */
+/** The 37 permanent type strings with an app handler (RETRO-D3 retired three more: see below; RETRO-D1b added the two `media.storage.*`). */
 export const EXPECTED_JOB_TYPES = [
   'auto_tagging',
   'burst_detection',
@@ -102,6 +107,8 @@ export const EXPECTED_JOB_TYPES = [
   'job_history_purge',
   'location_group_rebuild',
   'location_inference',
+  'media.storage.recover_stuck',
+  'media.storage.reprocess',
   'location_suggestion_run_evaluate',
   'location_suggestion_run_execute_batch',
   'memory_digest',
