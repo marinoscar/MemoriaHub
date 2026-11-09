@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { CirclesModule } from '../circles/circles.module';
 import { MediaSyncController } from './media-sync.controller';
 import { MediaSyncService } from './media-sync.service';
+import { MediaSyncDeviceSourceBinder } from './media-sync.device-source';
 
 /**
  * Android Media Sync device API (epic #498, issue #505): `/api/media-sync`
@@ -13,7 +14,7 @@ import { MediaSyncService } from './media-sync.service';
 @Module({
   imports: [CirclesModule],
   controllers: [MediaSyncController],
-  providers: [MediaSyncService],
+  providers: [MediaSyncService, MediaSyncDeviceSourceBinder],
   exports: [MediaSyncService],
 })
 export class MediaSyncModule {}

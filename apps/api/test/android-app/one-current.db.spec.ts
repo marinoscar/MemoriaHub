@@ -1,8 +1,11 @@
 /**
- * Real-Postgres tier (issue #502): proves the raw-SQL partial unique index
- * `mh_legacy_android_app_releases_one_current_uniq_idx` (intentional schema drift, see
+ * Real-Postgres tier (issue #502; post-RETRO-D5 model, #586): proves the raw-SQL
+ * partial unique index `android_app_releases_one_current_uniq_idx` (intentional
+ * schema drift, installed by the platform migration `0033_add_android_app`, see
  * the AndroidAppRelease model comment) allows at most ONE current release
- * deployment-wide, and that the CHECK constraints on media_sync_runs hold.
+ * deployment-wide on the platform table the android-app slice serves, that the
+ * slice's `AndroidReleaseService.makeCurrent` keeps it under concurrency, and
+ * that the CHECK constraints on media_sync_runs hold.
  *
  * Needs a database migrated to the latest schema (`npm run prisma:migrate`).
  * When no database is reachable the suite skips (logged) so the default
@@ -11,12 +14,18 @@
  */
 import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../src/prisma/prisma.service';
-import { ONE_CURRENT_RELEASE_INDEX } from '../../src/android-app/releases/android-release.constants';
 import {
   AndroidReleaseService,
-  isUniqueViolationOn,
-} from '../../src/android-app/releases/android-release.service';
+  ONE_CURRENT_RELEASE_INDEX,
+  isUniqueViolation,
+  resolveAndroidAppModuleOptions,
+} from '@marinoscar/platform-api/android-app';
+import { randomUUID } from 'node:crypto';
+import { Client } from 'pg';
+
+import { buildBaseDatabaseUrl } from '../../src/config/database-url.util';
+import { applyReleaseCopy, planReleaseCopy } from '../../src/legacy/legacy-android-releases-migration';
+import { PrismaService } from '../../src/prisma/prisma.service';
 
 const PKG = 'cr.marin.memoriahub.test';
 
@@ -49,7 +58,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
       return;
     }
     prisma = candidate;
-    await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
+    await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
     const user = await prisma.user.create({
       data: { email: `one-current-${Date.now()}@example.test` },
     });
@@ -58,14 +67,14 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
   afterAll(async () => {
     if (!prisma) return;
-    await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
+    await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
     await prisma.auditEvent.deleteMany({ where: { actorUserId: userId } }).catch(() => undefined);
     await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
     await prisma.$disconnect();
   });
 
   beforeEach(async () => {
-    if (prisma) await prisma.mhLegacyAndroidAppRelease.deleteMany({ where: { packageName: PKG } });
+    if (prisma) await prisma.androidAppRelease.deleteMany({ where: { packageName: PKG } });
   });
 
   it('rejects a second is_current=true row with P2002', async () => {
@@ -75,7 +84,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     expect(error).toMatchObject({ code: 'P2002' });
     // The release service recognises the index BY NAME in a real driver error
     // (issue #504: P2002 on it becomes 409 RELEASE_CURRENT_CONFLICT).
-    expect(isUniqueViolationOn(error, ONE_CURRENT_RELEASE_INDEX)).toBe(true);
+    expect(isUniqueViolation(error, ONE_CURRENT_RELEASE_INDEX)).toBe(true);
     await expect(release(2, true)).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
   });
 
@@ -84,7 +93,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     await release(1, true);
     await release(2, false);
     await release(3, false);
-    expect(await prisma.mhLegacyAndroidAppRelease.count({ where: { packageName: PKG } })).toBe(3);
+    expect(await prisma.androidAppRelease.count({ where: { packageName: PKG } })).toBe(3);
   });
 
   it('allows make-current as clear-then-set in one transaction', async () => {
@@ -92,10 +101,10 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     const a = await release(1, true);
     const b = await release(2, false);
     await prisma.$transaction([
-      prisma.mhLegacyAndroidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }),
-      prisma.mhLegacyAndroidAppRelease.update({ where: { id: b.id }, data: { isCurrent: true } }),
+      prisma.androidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }),
+      prisma.androidAppRelease.update({ where: { id: b.id }, data: { isCurrent: true } }),
     ]);
-    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { isCurrent: true } });
+    const current = await prisma.androidAppRelease.findMany({ where: { isCurrent: true } });
     expect(current.map((r) => r.id)).toEqual([b.id]);
     expect(a.id).not.toBe(b.id);
   });
@@ -149,9 +158,12 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
   const service = () =>
     new AndroidReleaseService(
-      prisma!,
-      { getActiveProvider: jest.fn(), getProviderFor: jest.fn() } as never,
+      prisma! as never,
+      { upload: jest.fn(), download: jest.fn(), delete: jest.fn() } as never,
+      { resolve: jest.fn() } as never,
       { ensureTrusted: jest.fn().mockResolvedValue(false) } as never,
+      { record: jest.fn().mockResolvedValue(undefined) } as never,
+      resolveAndroidAppModuleOptions({ appName: 'MemoriaHub', apkStem: 'memoriahub-android' }),
     );
 
   it('makeCurrent swaps the current release in one step, rollback included', async () => {
@@ -162,9 +174,9 @@ describe('android_app_releases one-current partial unique index (db)', () => {
     const view = await service().makeCurrent(one.id, userId);
 
     expect(view).toMatchObject({ id: one.id, isCurrent: true, sizeBytes: '5000000000' });
-    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
     expect(current.map((row) => row.id)).toEqual([one.id]);
-    expect((await prisma.mhLegacyAndroidAppRelease.findUnique({ where: { id: two.id } }))?.isCurrent).toBe(false);
+    expect((await prisma.androidAppRelease.findUnique({ where: { id: two.id } }))?.isCurrent).toBe(false);
   });
 
   it('two concurrent makeCurrent calls leave exactly one current release; a loser gets RELEASE_CURRENT_CONFLICT', async () => {
@@ -173,7 +185,7 @@ describe('android_app_releases one-current partial unique index (db)', () => {
 
     const results = await Promise.allSettled(rows.map((row) => service().makeCurrent(row.id, userId)));
 
-    const current = await prisma.mhLegacyAndroidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
+    const current = await prisma.androidAppRelease.findMany({ where: { packageName: PKG, isCurrent: true } });
     expect(current).toHaveLength(1);
     expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
     for (const result of results) {
@@ -184,5 +196,126 @@ describe('android_app_releases one-current partial unique index (db)', () => {
         });
       }
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // The legacy release copy (RETRO-D5, #586): `npm run android:migrate-legacy-releases`.
+  // In THIS file for the same reason as above: it sets the deployment-wide current flag.
+  // ---------------------------------------------------------------------------
+
+  describe('legacy release copy (mh_legacy_android_app_releases -> android_app_releases)', () => {
+    const COPY_PKG = 'example.test.copy';
+    let client: Client;
+
+    const insertLegacy = (id: string, code: number, current: boolean) =>
+      client.query(
+        `INSERT INTO mh_legacy_android_app_releases (id, package_name, version_name, version_code, signing_sha256,
+           file_sha256, size_bytes, storage_key, storage_provider, bucket, is_current, uploaded_by_id)
+         VALUES ($1, $2, $3, $4, 'AA:BB', $5, 5000000000, $6, 'r2', 'apk-bucket', $7, $8)`,
+        [id, COPY_PKG, `1.0.${code}`, code, 'c'.repeat(64), `android-releases/${id}.apk`, current, userId],
+      );
+
+    const clean = async () => {
+      await client.query('DELETE FROM android_app_releases WHERE package_name = $1', [COPY_PKG]);
+      await client.query('DELETE FROM mh_legacy_android_app_releases WHERE package_name = $1', [COPY_PKG]);
+    };
+
+    beforeAll(async () => {
+      if (!prisma) return;
+      client = new Client({ connectionString: buildBaseDatabaseUrl() });
+      await client.connect();
+    });
+
+    afterAll(async () => {
+      if (!prisma) return;
+      await clean();
+      await client.end();
+    });
+
+    beforeEach(async () => {
+      if (!prisma) return;
+      await clean();
+      // The deployment-wide current flag belongs to these tests while they run.
+      await prisma.androidAppRelease.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+    });
+
+    it('dry run reports, copies nothing; apply copies under the same ids, promotes the legacy current, keeps conflicts', async () => {
+      if (!prisma) return;
+      const [old, current, clash, platformClash] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+      await insertLegacy(old, 1, false);
+      await insertLegacy(current, 2, true);
+      await insertLegacy(clash, 3, false);
+      // A version the slice already serves under another id: the platform row wins.
+      await client.query(
+        `INSERT INTO android_app_releases (id, package_name, version_name, version_code, signing_sha256, file_sha256,
+           size_bytes, storage_key) VALUES ($1, $2, '1.0.3', 3, 'AA:BB', $3, 1, $4)`,
+        [platformClash, COPY_PKG, 'd'.repeat(64), `android-releases/${platformClash}.apk`],
+      );
+
+      const plan = await planReleaseCopy(client);
+      expect(plan).not.toBeNull();
+      expect(plan!.conflicts).toEqual([
+        { id: clash, packageName: COPY_PKG, versionCode: 3, platformId: platformClash },
+      ]);
+      expect(plan!.legacyCurrentId).toBe(current);
+      expect(plan!.platformCurrentId).toBeNull();
+      expect(await prisma.androidAppRelease.count({ where: { packageName: COPY_PKG } })).toBe(1);
+
+      const result = await applyReleaseCopy(client);
+      expect(result.copied).toBeGreaterThanOrEqual(2);
+      expect(result.promotedCurrent).toBe(true);
+      expect(result.currentId).toBe(current);
+
+      const copied = await prisma.androidAppRelease.findMany({
+        where: { packageName: COPY_PKG },
+        orderBy: { versionCode: 'asc' },
+      });
+      expect(copied.map((row) => [row.id, row.versionCode, row.isCurrent])).toEqual([
+        [old, 1, false],
+        [current, 2, true],
+        [platformClash, 3, false],
+      ]);
+      expect(copied[1]).toMatchObject({
+        storageKey: `android-releases/${current}.apk`,
+        storageProvider: 'r2',
+        bucket: 'apk-bucket',
+        sizeBytes: BigInt(5_000_000_000),
+        uploadedById: userId,
+      });
+
+      // The legacy table is never modified.
+      const legacy = await client.query(
+        'SELECT id::text AS id, is_current FROM mh_legacy_android_app_releases WHERE package_name = $1 ORDER BY version_code',
+        [COPY_PKG],
+      );
+      expect(legacy.rows).toEqual([
+        { id: old, is_current: false },
+        { id: current, is_current: true },
+        { id: clash, is_current: false },
+      ]);
+
+      // Idempotent: a second run copies and promotes nothing.
+      const again = await applyReleaseCopy(client);
+      expect(again).toEqual({ copied: 0, promotedCurrent: false, currentId: current });
+    });
+
+    it('keeps a current release the slice already serves', async () => {
+      if (!prisma) return;
+      const legacyCurrent = randomUUID();
+      const platformCurrent = randomUUID();
+      await insertLegacy(legacyCurrent, 1, true);
+      await client.query(
+        `INSERT INTO android_app_releases (id, package_name, version_name, version_code, signing_sha256, file_sha256,
+           size_bytes, storage_key, is_current) VALUES ($1, $2, '1.0.9', 9, 'AA:BB', $3, 1, $4, true)`,
+        [platformCurrent, COPY_PKG, 'e'.repeat(64), `android-releases/${platformCurrent}.apk`],
+      );
+
+      const result = await applyReleaseCopy(client);
+
+      expect(result.promotedCurrent).toBe(false);
+      expect(result.currentId).toBe(platformCurrent);
+      const copied = await prisma.androidAppRelease.findUnique({ where: { id: legacyCurrent } });
+      expect(copied?.isCurrent).toBe(false);
+    });
   });
 });

@@ -10,6 +10,10 @@
  * `@Auth()` with no permission, so every signed-in user may install the app.
  * Whether an update exists is decided by comparing the API's versionCode
  * with the one the TWA launch URL reported; nothing here grants anything.
+ *
+ * Since RETRO-D5 (#586) the release comes from the platform's `useAndroidRelease`
+ * (the android-app slice's client over the platform host); a 404 `NO_RELEASE` is
+ * "no release", any other failure an error with Retry.
  */
 import { useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
@@ -29,15 +33,15 @@ import {
   Typography,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { useLatestRelease } from '../hooks/useMediaSync';
+import { useAndroidRelease } from '@marinoscar/platform-web/android-app/headless';
 import { usePermissions } from '../hooks/usePermissions';
 import {
   ANDROID_APP_ADMIN_PATH,
   formatMegabytes,
   type PublicRelease,
 } from '../services/androidApp';
-import { LEGACY_ANDROID_PACKAGE_NAME } from '../utils/androidIdentity';
-import { getInstalledAppVersion, isRunningInTwa, type InstalledAppVersion } from '../utils/twa';
+import { LEGACY_ANDROID_PACKAGE_NAME } from '../platform/android-app/identity';
+import { getInstalledAppVersion, isRunningInTwa, type InstalledAppVersion } from '../platform/android-app/twa';
 import { DownloadApkButton } from '../components/settings/androidApp/DownloadApkButton';
 import { APP_NAME } from '../constants/app';
 
@@ -171,20 +175,21 @@ function ReleaseCards({ release, installed }: { release: PublicRelease; installe
   );
 }
 
-export default function AndroidAppDownloadPage() {
-  const { release, isLoading, error, refresh } = useLatestRelease();
+/** The release card, the empty state or the error; remounted by Retry (the hook fetches on mount). */
+function ReleaseBody({ onRetry }: { onRetry: () => void }) {
+  const { release, isLoading, error } = useAndroidRelease();
   const { hasPermission } = usePermissions();
   const [installed] = useState(() => (isRunningInTwa() ? getInstalledAppVersion() : null));
 
-  let body;
   if (isLoading && !release) {
-    body = <Skeleton variant="rounded" height={200} data-testid="android-app-loading" />;
-  } else if (error && !release) {
-    body = (
+    return <Skeleton variant="rounded" height={200} data-testid="android-app-loading" />;
+  }
+  if (error && !release) {
+    return (
       <Alert
         severity="error"
         action={
-          <Button color="inherit" size="small" onClick={() => void refresh()}>
+          <Button color="inherit" size="small" onClick={onRetry}>
             Retry
           </Button>
         }
@@ -192,8 +197,9 @@ export default function AndroidAppDownloadPage() {
         {error}
       </Alert>
     );
-  } else if (!release) {
-    body = (
+  }
+  if (!release) {
+    return (
       <Alert severity="info" data-testid="no-release">
         {NO_RELEASE_MESSAGE}
         {hasPermission('system_settings:read') && (
@@ -206,9 +212,13 @@ export default function AndroidAppDownloadPage() {
         )}
       </Alert>
     );
-  } else {
-    body = <ReleaseCards release={release} installed={installed} />;
   }
+  return <ReleaseCards release={release} installed={installed} />;
+}
+
+export default function AndroidAppDownloadPage() {
+  const [attempt, setAttempt] = useState(0);
+  const body = <ReleaseBody key={attempt} onRetry={() => setAttempt((n) => n + 1)} />;
 
   return (
     <Container maxWidth="md">

@@ -142,7 +142,7 @@ describe('MediaSyncService', () => {
       }
       return { count };
     });
-    (prisma.mhLegacyAndroidAppRelease.findFirst as jest.Mock).mockResolvedValue(null);
+    (prisma.androidAppRelease.findFirst as jest.Mock).mockResolvedValue(null);
     (prisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     (prisma.$executeRaw as unknown as jest.Mock).mockResolvedValue(0);
   });
@@ -253,7 +253,7 @@ describe('MediaSyncService', () => {
     it('builds the view: configPending, tokenExpiresAt, update availability', async () => {
       devices[0].configVersion = 3;
       devices[0].appliedConfigVersion = 2;
-      (prisma.mhLegacyAndroidAppRelease.findFirst as jest.Mock).mockResolvedValue({
+      (prisma.androidAppRelease.findFirst as jest.Mock).mockResolvedValue({
         packageName: 'memoriahub.marin.cr',
         versionCode: 2,
       });

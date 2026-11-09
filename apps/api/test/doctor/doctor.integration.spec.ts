@@ -21,9 +21,10 @@ import { setupBaseMocks } from '../fixtures/mock-setup.helper';
  */
 
 /**
- * The 27 app checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice
- * retired, `core.pg-client-version`, replaced by the db-backup slice's `backup.pg-client`, and the
- * two storage checks the storage slice's `storage.config` / `storage.bucket` replace, RETRO-D1).
+ * The 25 app checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice
+ * retired, `core.pg-client-version`, replaced by the db-backup slice's `backup.pg-client`, the
+ * two storage checks the storage slice's `storage.config` / `storage.bucket` replace, RETRO-D1,
+ * and the two Android trust checks the android-app slice replaces, RETRO-D5).
  */
 const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.core.pgvector',
@@ -49,8 +50,6 @@ const MEMORIAHUB_CHECK_IDS = [
   'memoriahub.nodes.stale-leases',
   'memoriahub.nodes.capability-health',
   'memoriahub.workflows.state',
-  'memoriahub.android.assetlinks',
-  'memoriahub.android.releases',
   'memoriahub.android.media-sync',
   'memoriahub.android.upload-path',
 ];
@@ -71,6 +70,9 @@ const PLATFORM_REPLACEMENT_IDS = [
   // The storage slice (RETRO-D1) replaces memoriahub.storage.active-provider and memoriahub.storage.live-test.
   'storage.config',
   'storage.bucket',
+  // The android-app slice (RETRO-D5) replaces memoriahub.android.assetlinks and memoriahub.android.releases.
+  'android.assetlinks',
+  'android.releases',
 ];
 
 /** The telemetry slice's five checks (RETRO-T2, #625), under the `telemetry` category. */
@@ -100,13 +102,15 @@ describe('Platform Doctor (Integration)', () => {
     context.prismaMock.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
   });
 
-  it('registers all 27 memoriahub checks plus the platform replacements after app.init()', () => {
+  it('registers all 25 memoriahub checks plus the platform replacements after app.init()', () => {
     const ids = context.module.get(DoctorCheckRegistry).list().map((check) => check.id);
 
     for (const id of [...MEMORIAHUB_CHECK_IDS, ...PLATFORM_REPLACEMENT_IDS, ...TELEMETRY_CHECK_IDS]) {
       expect(ids).toContain(id);
     }
     expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).not.toContain('memoriahub.android.assetlinks');
+    expect(ids).not.toContain('memoriahub.android.releases');
   });
 
   it('keeps every check read-only by id shape: lower-case dotted ids', () => {

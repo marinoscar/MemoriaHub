@@ -33,6 +33,7 @@
 // failed test left there is listed in docs/runbooks/storage-configuration.md.
 // =============================================================================
 
+import { ANDROID_RELEASES_KEY_PREFIX_DEF } from '@marinoscar/platform-api/android-app';
 import { DB_BACKUP_KEY_PREFIX } from '@marinoscar/platform-api/db-backup';
 import {
   STORAGE_SLICE_KEY_PREFIXES,
@@ -51,15 +52,12 @@ export const LEGACY_DB_BACKUP_KEY_PREFIX: StorageKeyPrefixDef = Object.freeze({
   survivesFactoryReset: true,
 });
 
-/** The hosted APKs: the android-app slice's own definition (`ANDROID_RELEASES_KEY_PREFIX_DEF`). */
-export const ANDROID_RELEASES_KEY_PREFIX: StorageKeyPrefixDef = Object.freeze({
-  id: 'android-releases',
-  prefix: 'android-releases/',
-  owner: 'android-app',
-  scope: 'deployment' as const,
-  description: 'Android APK releases the deployment hosts, android-releases/<releaseId>.apk (kept by the factory reset).',
-  survivesFactoryReset: true,
-});
+/**
+ * The hosted APKs: the android-app slice's own definition (RETRO-D5, #586). Registered with the
+ * rest of MemoriaHub's prefixes (same id, prefix and factory-reset rule as before the slice), so
+ * the slice's `registerAndroidAppKeyPrefixes()` finds it present and registers nothing twice.
+ */
+export const ANDROID_RELEASES_KEY_PREFIX: StorageKeyPrefixDef = ANDROID_RELEASES_KEY_PREFIX_DEF;
 
 /** MemoriaHub's own prefixes, appended after the platform's. */
 export const MEMORIAHUB_KEY_PREFIXES: readonly StorageKeyPrefixDef[] = [
