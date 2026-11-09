@@ -21,7 +21,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * Imports:
  *   - EnrichmentModule: handler registration + EnrichmentJobService.enqueue.
  *   - MediaProcessingModule: StorageProviderResolver (per-object + active provider) and
- *     StorageProcessingRecoveryService.reprocessObjectNow.
+ *     ObjectReprocessService.reprocessNow.
  *   - OwnerAccessModule: OwnerAccessService.requireOwnerRole.
  *   - SettingsModule: AppSystemSettingsService.
  *   - AiModule: AiSettingsService + AiProviderRegistry (enhanceImage provider).

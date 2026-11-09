@@ -49,7 +49,7 @@ import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
@@ -139,7 +139,7 @@ describe('EnhancementBatchesController', () => {
         defaultOrgIdProvider,
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: StorageProviderResolver, useValue: {} },
-        { provide: StorageProcessingRecoveryService, useValue: {} },
+        { provide: ObjectReprocessService, useValue: {} },
         { provide: ThumbnailPruneService, useValue: {} },
         { provide: MediaMetadataSyncService, useValue: {} },
         { provide: MediaEnrichmentService, useValue: {} },

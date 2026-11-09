@@ -140,7 +140,7 @@ describe('the memoriahub-extensions restore gate', () => {
 
 describe('the Android releases restore carry-over', () => {
   it('is registered after the built-in carries', () => {
-    expect(restoreCarryOverRegistry.list().map((carry) => carry.id)).toContain('mh_legacy_android_app_releases');
+    expect(restoreCarryOverRegistry.list().map((carry) => carry.id)).toContain('android_app_releases');
     expect(ANDROID_RELEASES_CARRY_OVER.order).toBeGreaterThan(0);
   });
 
@@ -150,7 +150,7 @@ describe('the Android releases restore carry-over', () => {
 
   it('upserts by id from $1 and re-resolves the uploader', () => {
     const sql = ANDROID_RELEASES_CARRY_OVER.reinsertSql;
-    expect(sql).toMatch(/jsonb_populate_record\(NULL::mh_legacy_android_app_releases, \$1::jsonb\)/);
+    expect(sql).toMatch(/jsonb_populate_record\(NULL::android_app_releases, \$1::jsonb\)/);
     expect(sql).toMatch(/ON CONFLICT \(id\) DO UPDATE/);
     expect(sql).toMatch(/SELECT u\.id FROM users u WHERE u\.id = r\.uploaded_by_id/);
     expect(sql).toMatch(/is_current = EXCLUDED\.is_current/);

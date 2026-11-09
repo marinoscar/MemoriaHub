@@ -10,11 +10,15 @@
 //   POST   /api/android-app/releases/:id/download-link        any signed-in user
 //   GET    /api/android-app/download/:token                   public, token-validated
 //
-// Through the real AppModule, guard stack and multipart plugin (registered by
-// the test harness with main.ts's options), with an in-memory object store
-// behind a spied StorageProviderResolver (which consumes the upload stream, so
-// the magic, size and SHA-256 checks run for real) and an in-memory release
-// table over the Prisma mock.
+// Since RETRO-D5 (#586) the routes are the platform android-app slice's,
+// mounted by `platform/android-app/android-app.config.ts`. Through the real
+// AppModule, guard stack and multipart plugin (registered by the test harness
+// with main.ts's options), with an in-memory object store as the storage
+// slice's `STORAGE_PROVIDER` (which consumes the upload stream, so the magic,
+// size and SHA-256 checks run for real), a spied `StorageConfigService` and an
+// in-memory `android_app_releases` table over the Prisma mock. The paths, the
+// permissions, the bodies and the `details.reason` refusals are MemoriaHub's
+// contract with the CLI and the phone, so this spec pins them.
 // =============================================================================
 
 // Must precede the first signing-key derivation — secret-cipher caches its master key.
@@ -27,17 +31,15 @@ import request from 'supertest';
 
 import { PERMISSIONS_KEY, IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
-import { ANDROID_APP_SETTINGS_KEY } from '../../src/android-app/android-app.schema';
-import { AndroidReleaseAdminController } from '../../src/android-app/releases/android-release-admin.controller';
-import { AndroidReleaseController } from '../../src/android-app/releases/android-release.controller';
-import { deriveSubKey } from '../../src/legacy/legacy-secret-cipher';
+import { ANDROID_APP_SETTINGS_KEY } from '@marinoscar/platform-contract/android-app';
 import {
-  ANDROID_APK_STEM,
-  DEFAULT_ANDROID_PACKAGE_NAME,
-} from '../../src/android-app/releases/android-release.constants';
-import { signDownloadToken } from '../../src/android-app/releases/download-token';
-import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
-import type { StorageProvider } from '@marinoscar/platform-api/storage';
+  AndroidReleaseAdminController,
+  AndroidReleaseController,
+  downloadTokenKey,
+  signDownloadToken,
+} from '@marinoscar/platform-api/android-app';
+import { STORAGE_PROVIDER, StorageConfigService } from '@marinoscar/platform-api/storage';
+import { IDENTITY } from '@app/shared';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 import {
   authHeader,
@@ -52,7 +54,9 @@ import { resetPrismaMock } from '../mocks/prisma.mock';
 const ADMIN = '/api/admin/android-app/releases';
 const LATEST = '/api/android-app/releases/latest';
 const SHA = Array.from({ length: 32 }, () => 'AB').join(':');
-const PKG = DEFAULT_ANDROID_PACKAGE_NAME;
+/** `packages/shared/identity.json` android block: the APK file-name stem and the package. */
+const ANDROID_APK_STEM = IDENTITY.android!.apkStem;
+const PKG = IDENTITY.android!.applicationId;
 const MISSING_ID = '99999999-9999-4999-8999-999999999999';
 
 function apkBytes(size = 4096): Buffer {
@@ -113,41 +117,41 @@ function installReleaseTable(prisma: any, users: () => Map<string, Row>) {
     });
   };
 
-  prisma.mhLegacyAndroidAppRelease.findUnique.mockImplementation(async ({ where, include }: any) => {
+  prisma.androidAppRelease.findUnique.mockImplementation(async ({ where, include }: any) => {
     const row = rows.find((r) => matches(r, where));
     return row ? withUploader(row, include) : null;
   });
-  prisma.mhLegacyAndroidAppRelease.findFirst.mockImplementation(async ({ where, include }: any = {}) => {
+  prisma.androidAppRelease.findFirst.mockImplementation(async ({ where, include }: any = {}) => {
     const row = rows.find((r) => matches(r, where));
     return row ? withUploader(row, include) : null;
   });
-  prisma.mhLegacyAndroidAppRelease.findMany.mockImplementation(async ({ include }: any = {}) =>
+  prisma.androidAppRelease.findMany.mockImplementation(async ({ include }: any = {}) =>
     [...rows].sort((a, b) => b.createdAt - a.createdAt).map((row) => withUploader(row, include)),
   );
-  prisma.mhLegacyAndroidAppRelease.create.mockImplementation(async ({ data, include }: any) => {
+  prisma.androidAppRelease.create.mockImplementation(async ({ data, include }: any) => {
     if (rows.some((r) => r.packageName === data.packageName && r.versionCode === data.versionCode)) {
       throw unique('android_app_releases_package_name_version_code_key');
     }
-    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
+    if (data.isCurrent && rows.some((r) => r.isCurrent)) throw unique('android_app_releases_one_current_uniq_idx');
     const row = { notes: null, createdAt: new Date(Date.now() + rows.length), ...data };
     rows.push(row);
     return withUploader(row, include);
   });
-  prisma.mhLegacyAndroidAppRelease.updateMany.mockImplementation(async ({ where, data }: any) => {
+  prisma.androidAppRelease.updateMany.mockImplementation(async ({ where, data }: any) => {
     const hit = rows.filter((r) => matches(r, where));
     hit.forEach((r) => Object.assign(r, data));
     return { count: hit.length };
   });
-  prisma.mhLegacyAndroidAppRelease.update.mockImplementation(async ({ where, data, include }: any) => {
+  prisma.androidAppRelease.update.mockImplementation(async ({ where, data, include }: any) => {
     const row = rows.find((r) => matches(r, where));
     if (!row) throw new Error('not found');
     if (data.isCurrent && rows.some((r) => r.isCurrent && r !== row)) {
-      throw unique('mh_legacy_android_app_releases_one_current_uniq_idx');
+      throw unique('android_app_releases_one_current_uniq_idx');
     }
     Object.assign(row, data);
     return withUploader(row, include);
   });
-  prisma.mhLegacyAndroidAppRelease.deleteMany.mockImplementation(async ({ where }: any) => {
+  prisma.androidAppRelease.deleteMany.mockImplementation(async ({ where }: any) => {
     const before = rows.length;
     for (let i = rows.length - 1; i >= 0; i -= 1) if (matches(rows[i], where)) rows.splice(i, 1);
     return { count: before - rows.length };
@@ -160,22 +164,23 @@ describe('Android APK releases (Integration)', () => {
   let storage: MemoryStorage;
   let storageConfigured = true;
   let activeProviderId = 'r2';
-  let resolver: StorageProviderResolver;
+  let storageConfig: StorageConfigService;
   let rows: Row[];
   let trusted: unknown;
   const registry = new Map<string, Row>();
 
   beforeAll(async () => {
     storage = new MemoryStorage();
-    context = await createTestApp({ useMockDatabase: true });
-    resolver = context.module.get(StorageProviderResolver, { strict: false });
-    jest.spyOn(resolver, 'getActiveProvider').mockImplementation(async () => {
-      storage.bucket = storageConfigured ? 'test-bucket' : '';
-      return { id: activeProviderId, provider: storage as unknown as StorageProvider };
+    context = await createTestApp({
+      useMockDatabase: true,
+      overrideProviders: [{ provide: STORAGE_PROVIDER, useValue: storage }],
     });
-    jest
-      .spyOn(resolver, 'getProviderFor')
-      .mockImplementation(async () => storage as unknown as StorageProvider);
+    storageConfig = context.module.get(StorageConfigService, { strict: false });
+    jest.spyOn(storageConfig, 'resolve').mockImplementation(async () =>
+      (storageConfigured
+        ? { configured: true, config: { provider: activeProviderId, bucket: 'test-bucket' } }
+        : { configured: false, provider: activeProviderId, missing: ['bucket'] }) as any,
+    );
   }, 60000);
 
   afterAll(async () => {
@@ -192,7 +197,7 @@ describe('Android APK releases (Integration)', () => {
     storage.delete.mockClear();
     storageConfigured = true;
     activeProviderId = 'r2';
-    (resolver.getProviderFor as jest.Mock).mockClear();
+    storage.download.mockClear();
     trusted = undefined;
     registry.clear();
 
@@ -217,6 +222,7 @@ describe('Android APK releases (Integration)', () => {
       return { key: args.where.key, value: args.create.value, version: 1 };
     });
     prisma.mediaSyncDevice.groupBy.mockResolvedValue([]);
+    prisma.pushSubscription.groupBy.mockResolvedValue([]);
   });
 
   const server = () => context.app.getHttpServer();
@@ -307,6 +313,8 @@ describe('Android APK releases (Integration)', () => {
         createdAt: expect.any(String),
         signingSha256: SHA,
         isCurrent: true,
+        // Added by the platform slice (RETRO-D5): the admin view names the provider the APK is on.
+        storageProvider: 'r2',
         uploadedBy: { id: user.id, email: user.email, displayName: null },
       });
       const key = `android-releases/${body.data.id}.apk`;
@@ -531,11 +539,14 @@ describe('Android APK releases (Integration)', () => {
       expect((response.body as Buffer).equals(apk)).toBe(true);
     });
 
-    it('downloads through the provider RECORDED on the release, not the active one', async () => {
+    // Before RETRO-D5 a download resolved the provider RECORDED on the release. The slice reads
+    // through the storage slice's `STORAGE_PROVIDER` (the active driver) and still records
+    // `storage_provider`/`bucket` on each row. A release written to another driver than the
+    // active one is a known seam gap (RETRO-SEAM-ANDROID-STORAGE-ROUTING, local-exceptions.md).
+    it('records the provider and bucket on the release and downloads through the storage slice', async () => {
       const { headers } = await admin();
       const created = (await upload(headers, fields(1)).expect(201)).body.data;
-      activeProviderId = 'local';
-      (resolver.getProviderFor as jest.Mock).mockClear();
+      expect(rows[0]).toMatchObject({ id: created.id, storageProvider: 'r2', bucket: 'test-bucket' });
 
       const link = await request(server())
         .post(`/api/android-app/releases/${created.id}/download-link`)
@@ -543,7 +554,7 @@ describe('Android APK releases (Integration)', () => {
         .expect(200);
       await request(server()).get(link.body.data.url).expect(200);
 
-      expect(resolver.getProviderFor).toHaveBeenCalledWith('r2', 'test-bucket');
+      expect(storage.download).toHaveBeenCalledWith(`android-releases/${created.id}.apk`);
     });
 
     it('download-link is 404 for an unknown release', async () => {
@@ -558,7 +569,7 @@ describe('Android APK releases (Integration)', () => {
     it('answers 404 for a malformed or tampered token and 410 for an expired one', async () => {
       const { user, headers } = await admin();
       const created = (await upload(headers, fields(1)).expect(201)).body.data;
-      const key = deriveSubKey('android-app-download');
+      const key = downloadTokenKey();
       const now = Math.floor(Date.now() / 1000);
 
       const bad = await request(server()).get('/api/android-app/download/not-a-token').expect(404);
@@ -577,7 +588,7 @@ describe('Android APK releases (Integration)', () => {
       const { user, headers } = await admin();
       await upload(headers, fields(1)).expect(201);
       const old = (await upload(headers, fields(2, { makeCurrent: 'false' })).expect(201)).body.data;
-      const key = deriveSubKey('android-app-download');
+      const key = downloadTokenKey();
       const exp = Math.floor(Date.now() / 1000) + 60;
 
       const token = signDownloadToken(key, { releaseId: old.id, userId: user.id, expiresAt: exp });

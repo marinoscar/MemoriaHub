@@ -9,7 +9,7 @@ import { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -45,7 +45,7 @@ export interface OrientationEditResult {
  *   5. Overwrite the SAME storageKey via the provider, update the row's
  *      size/mimeType and the MediaItem's orientation/width/height.
  *   6. Regenerate the thumbnail by re-running the synchronous recovery pipeline
- *      (StorageProcessingRecoveryService.reprocessObjectNow) — the same path the
+ *      (ObjectReprocessService.reprocessNow) — the same path the
  *      thumbnail-rerun action uses; this also re-derives dimensions and content
  *      hash from the new bytes.
  *   7. Await MediaMetadataSyncService.syncFromStorageObject so the MediaItem
@@ -64,7 +64,7 @@ export class MediaOrientationEditService {
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: OwnerAccessService,
     private readonly resolver: StorageProviderResolver,
-    private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly recoveryService: ObjectReprocessService,
     private readonly metadataSync: MediaMetadataSyncService,
     private readonly thumbnailPrune: ThumbnailPruneService,
     private readonly enrichmentJobService: EnrichmentJobService,
@@ -164,7 +164,7 @@ export class MediaOrientationEditService {
       where: { id: storageObject.id },
     });
     if (refreshed) {
-      await this.recoveryService.reprocessObjectNow(refreshed);
+      await this.recoveryService.reprocessNow(refreshed);
 
       // Repoint the MediaItem at the freshly-rendered thumbnail INSIDE the
       // request (issue #434). The pipeline's OBJECT_PROCESSED_EVENT listener

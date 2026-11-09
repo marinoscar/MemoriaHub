@@ -59,7 +59,7 @@ describe('MemoriaHub notification registry', () => {
     expect(LEGACY_NOTIFICATION_TYPE_TO_EVENT_KEY.admin_broadcast_critical).toBe('admin.broadcast_critical');
   });
 
-  it('declares browser and push (plus webhook on the forwardable four), default on, none mandatory, and a renderer for each', () => {
+  it('declares browser and push (plus webhook on the forwardable four, android_app on the phone five), default on, none mandatory, and a renderer for each', () => {
     // RETRO-H4 (#603): the manifest puts the `webhook` channel on the events a member may forward.
     const forwardable = new Set<string>([
       MEMORIAHUB_EVENT_KEYS.uploadCompleted,
@@ -67,11 +67,23 @@ describe('MemoriaHub notification registry', () => {
       MEMORIAHUB_EVENT_KEYS.workflowRunCompleted,
       MEMORIAHUB_EVENT_KEYS.shareExpiring,
     ]);
+    // RETRO-D5 (#586): the review queues and new memories also reach the Android companion
+    // (`android_app`, covered by `push`, so never a second toast); uploads deliberately do not.
+    const onPhone = new Set<string>([
+      MEMORIAHUB_EVENT_KEYS.reviewBursts,
+      MEMORIAHUB_EVENT_KEYS.reviewDuplicates,
+      MEMORIAHUB_EVENT_KEYS.reviewLocationSuggestions,
+      MEMORIAHUB_EVENT_KEYS.reviewEnhancements,
+      MEMORIAHUB_EVENT_KEYS.memoriesReady,
+    ]);
     for (const key of Object.values(MEMORIAHUB_EVENT_KEYS)) {
       const event = findEvent(key);
       expect(event?.defaultEnabled).toBe(true);
       expect(isMandatory(key)).toBe(false);
-      expect([...channelsFor(key)].sort()).toEqual(forwardable.has(key) ? ['browser', 'push', 'webhook'] : ['browser', 'push']);
+      const expected = ['browser', 'push'];
+      if (forwardable.has(key)) expected.push('webhook');
+      if (onPhone.has(key)) expected.push('android_app');
+      expect([...channelsFor(key)].sort()).toEqual(expected.sort());
       expect(eventBrowserTemplateRegistry.has(key)).toBe(true);
       expect(MEMORIAHUB_NOTIFICATION_FOLDS[key]).toBeDefined();
     }
@@ -169,5 +181,13 @@ describe('MemoriaHub notification registry', () => {
       expect(memoriahubDedupKey('shares.expiring', CIRCLE, {})).toBeNull();
       expect(memoriahubDedupKey('admin.broadcast', null, {})).toBeNull();
     });
+  });
+});
+
+describe('the android_app channel (RETRO-D5, #586)', () => {
+  it('is registered covered by push, and the critical broadcast lists it while the plain one does not', () => {
+    expect(channelsFor('admin.broadcast_critical')).toContain('android_app');
+    expect(channelsFor('admin.broadcast')).not.toContain('android_app');
+    expect(channelsFor(MEMORIAHUB_EVENT_KEYS.uploadCompleted)).not.toContain('android_app');
   });
 });

@@ -14,13 +14,13 @@
 //
 //   2. Full reprocess — the thumbnail genuinely never got generated. Re-run
 //      the whole processing pipeline via
-//      StorageProcessingRecoveryService.reprocessObjectNow, whose pipeline
+//      ObjectReprocessService.reprocessNow, whose pipeline
 //      emits OBJECT_PROCESSED_EVENT and thereby triggers the MediaItem sync
 //      automatically. Attempts are capped via a crash-safe counter persisted
 //      in StorageObject.metadata._thumbnailRepairAttempts.
 //
 // Objects at status='processing' are deliberately EXCLUDED — they are owned
-// by the existing 10-minute StorageProcessingRecoveryTask cron. This sweep
+// by the existing 10-minute StorageRecoveryTask (`media.storage.recover_stuck`) cron. This sweep
 // owns the 'ready'/'failed' terminal states that cron never revisits.
 //
 // A native platform `JobHandler` (RETRO-C3, #585): a SYSTEM job (no subject,
@@ -48,7 +48,7 @@ import { withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaSystemService } from '../prisma/prisma-system.service';
 import { MEDIA_HOUSEKEEPING_REASON } from '../app-registrations/system-access-reasons';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 
 const DEFAULT_BATCH_SIZE = 25;
@@ -80,7 +80,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly system: PrismaSystemService,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly storageProcessingRecoveryService: StorageProcessingRecoveryService,
+    private readonly storageProcessingRecoveryService: ObjectReprocessService,
   ) {}
 
   onModuleInit(): void {
@@ -108,7 +108,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     // Candidates: live media items with no thumbnail reference whose storage
     // object settled at a terminal status long enough ago that in-flight
     // processing cannot explain the gap. status='processing' is excluded on
-    // purpose — those objects belong to StorageProcessingRecoveryTask.
+    // purpose — those objects belong to StorageRecoveryTask (`media.storage.recover_stuck`).
     const candidates = await this.system.runAsSystem(MEDIA_HOUSEKEEPING_REASON, (tx) => tx.$queryRaw<ThumbnailRepairCandidate[]>(Prisma.sql`
       SELECT mi.id AS media_item_id, so.id AS storage_object_id
       FROM media_items mi
@@ -136,7 +136,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     // Sequential, not Promise.all: the reprocess path runs the full
     // sharp/ffmpeg pipeline, which is memory-heavy — the exact workload that
     // causes OOM incidents in the first place. Same rationale as
-    // StorageProcessingRecoveryService: don't add concurrent memory pressure
+    // StorageRecoveryService: don't add concurrent memory pressure
     // while repairing the aftermath of a memory incident.
     for (const candidate of candidates) {
       try {
@@ -206,7 +206,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     // pipeline is the memory-heavy part), the counter must have already
     // advanced — otherwise the object would be reclaimed and retried forever
     // every sweep without ever reaching maxAttempts. Mirrors
-    // StorageProcessingRecoveryService.recoverOne.
+    // StorageRecoveryService.recoverOne.
     const claimed = await this.system.asSystem(MEDIA_HOUSEKEEPING_REASON).storageObject.update({
       where: { id: object.id },
       data: {
@@ -222,10 +222,10 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
       `thumbnail_repair: reprocessing object ${object.id} (attempt ${nextAttempts}/${maxAttempts})`,
     );
 
-    // reprocessObjectNow's pipeline emits OBJECT_PROCESSED_EVENT, which
+    // reprocessNow's pipeline emits OBJECT_PROCESSED_EVENT, which
     // triggers the MediaItem metadata sync automatically — no manual sync
     // call needed on this path.
-    await this.storageProcessingRecoveryService.reprocessObjectNow(claimed);
+    await this.storageProcessingRecoveryService.reprocessNow(claimed);
 
     // Did the reprocess actually produce a thumbnail on the MediaItem?
     const mediaItem = await this.prisma.mediaItem.findUnique({

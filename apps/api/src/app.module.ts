@@ -36,7 +36,7 @@ import { BroadcastsModule, notificationsModule } from './platform/notifications/
 import { NotificationReconcileModule } from './notification-producers/notification-reconcile.module';
 import { MemoriesModule } from './memories/memories.module';
 import { MediaSyncModule } from './media-sync/media-sync.module';
-import { AndroidAppModule } from './android-app/android-app.module';
+import { androidAppModule } from './platform/android-app/android-app.config';
 import { doctorModule } from './doctor/doctor.config';
 import { DoctorChecksModule } from './doctor/doctor-checks.module';
 import { LoggerModule } from './common/logger/logger.module';
@@ -176,7 +176,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // MemoriaHub's restore gate, carry-over and legacy prefix (app-registrations/db-backup.ts).
     dbBackupModule,
     MediaSyncModule,
-    AndroidAppModule,
+    // Android companion (RETRO-D5, #586): @marinoscar/platform-api/android-app. Trusted apps,
+    // assetlinks.json, hosted APK releases, the `android_app` channel sender and the
+    // `android.assetlinks` / `android.releases` Doctor checks; Media Sync is its device source.
+    androidAppModule,
     // Telemetry (RETRO-T2, #625): @marinoscar/platform-api/telemetry. The settings page, the
     // explorer and the dashboard at /admin/settings/telemetry, the runtime export gate over
     // RETRO-T1's SDK, the retention job and the `telemetry.*` Doctor checks.

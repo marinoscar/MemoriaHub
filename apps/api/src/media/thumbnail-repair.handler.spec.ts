@@ -7,7 +7,7 @@
  * empty candidate set is a no-op; the cheap resync path is chosen when the
  * StorageObject already carries _processing.thumbnail (no attempts bump); the
  * reprocess path persists the attempts counter BEFORE calling
- * reprocessObjectNow (crash-safety); a per-object error does not abort the
+ * reprocessNow (crash-safety); a per-object error does not abort the
  * sweep loop.
  *
  * Mirrors trash-purge.handler.spec.ts. No database required — all
@@ -18,7 +18,7 @@ import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaSystemService } from '../prisma/prisma-system.service';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { systemJob } from '../../test/helpers/platform-job';
@@ -69,7 +69,7 @@ describe('ThumbnailRepairHandler', () => {
   let handler: ThumbnailRepairHandler;
   let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
-  let mockRecovery: jest.Mocked<Pick<StorageProcessingRecoveryService, 'reprocessObjectNow'>>;
+  let mockRecovery: jest.Mocked<Pick<ObjectReprocessService, 'reprocessNow'>>;
   let mockPrisma: MockPrismaService;
 
   beforeEach(async () => {
@@ -82,7 +82,7 @@ describe('ThumbnailRepairHandler', () => {
     };
 
     mockRecovery = {
-      reprocessObjectNow: jest.fn().mockResolvedValue(undefined),
+      reprocessNow: jest.fn().mockResolvedValue(undefined),
     };
 
     mockPrisma = createMockPrismaService();
@@ -93,7 +93,7 @@ describe('ThumbnailRepairHandler', () => {
         ThumbnailRepairHandler,
         { provide: JobHandlerRegistry, useValue: mockRegistry },
         { provide: MediaMetadataSyncService, useValue: mockSync },
-        { provide: StorageProcessingRecoveryService, useValue: mockRecovery },
+        { provide: ObjectReprocessService, useValue: mockRecovery },
         { provide: PrismaService, useValue: mockPrisma },
         {
           provide: PrismaSystemService,
@@ -142,7 +142,7 @@ describe('ThumbnailRepairHandler', () => {
       expect(mockPrisma.storageObject.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.storageObject.update).not.toHaveBeenCalled();
       expect(mockSync.syncFromStorageObject).not.toHaveBeenCalled();
-      expect(mockRecovery.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecovery.reprocessNow).not.toHaveBeenCalled();
     });
   });
 
@@ -168,7 +168,7 @@ describe('ThumbnailRepairHandler', () => {
       expect(mockSync.syncFromStorageObject).toHaveBeenCalledWith('obj-1');
       // No attempts-counter bump and no pipeline rerun on the cheap path
       expect(mockPrisma.storageObject.update).not.toHaveBeenCalled();
-      expect(mockRecovery.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecovery.reprocessNow).not.toHaveBeenCalled();
     });
 
     it('takes the reprocess path when _processing.thumbnail is only partially present', async () => {
@@ -185,7 +185,7 @@ describe('ThumbnailRepairHandler', () => {
       await handler.process(makeJob());
 
       expect(mockSync.syncFromStorageObject).not.toHaveBeenCalled();
-      expect(mockRecovery.reprocessObjectNow).toHaveBeenCalledTimes(1);
+      expect(mockRecovery.reprocessNow).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -194,7 +194,7 @@ describe('ThumbnailRepairHandler', () => {
   // =========================================================================
 
   describe('reprocess path', () => {
-    it('persists the incremented attempts counter BEFORE calling reprocessObjectNow', async () => {
+    it('persists the incremented attempts counter BEFORE calling reprocessNow', async () => {
       const object = makeStorageObject('obj-3', { someKey: 'preserved' });
       const claimed = makeStorageObject('obj-3', {
         someKey: 'preserved',
@@ -224,12 +224,12 @@ describe('ThumbnailRepairHandler', () => {
       // Crash-safety: the counter write must precede the pipeline invocation
       const updateOrder = (mockPrisma.storageObject.update as jest.Mock).mock
         .invocationCallOrder[0];
-      const reprocessOrder = (mockRecovery.reprocessObjectNow as jest.Mock).mock
+      const reprocessOrder = (mockRecovery.reprocessNow as jest.Mock).mock
         .invocationCallOrder[0];
       expect(updateOrder).toBeLessThan(reprocessOrder);
 
       // The pipeline receives the claimed (counter-bearing) row
-      expect(mockRecovery.reprocessObjectNow).toHaveBeenCalledWith(claimed);
+      expect(mockRecovery.reprocessNow).toHaveBeenCalledWith(claimed);
     });
 
     it('sets _thumbnailRepairExhausted when the bump reaches maxAttempts', async () => {
@@ -317,7 +317,7 @@ describe('ThumbnailRepairHandler', () => {
       await expect(handler.process(makeJob())).resolves.toBeUndefined();
 
       expect(mockSync.syncFromStorageObject).not.toHaveBeenCalled();
-      expect(mockRecovery.reprocessObjectNow).not.toHaveBeenCalled();
+      expect(mockRecovery.reprocessNow).not.toHaveBeenCalled();
     });
   });
 

@@ -701,7 +701,7 @@ export class MediaSyncService {
   /** The server's current Android release, read directly (one indexed row). */
   private async currentRelease(): Promise<CurrentRelease> {
     return (
-      (await this.prisma.mhLegacyAndroidAppRelease.findFirst({
+      (await this.prisma.androidAppRelease.findFirst({
         where: { isCurrent: true },
         select: { packageName: true, versionCode: true },
       })) ?? null

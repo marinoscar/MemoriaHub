@@ -143,7 +143,7 @@ These cover the synchronous, in-process upload pipeline (content-hash/EXIF/dimen
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `STORAGE_PROCESSING_STUCK_MINUTES` | `10` | Threshold before `StorageProcessingRecoveryTask` (every 10 min) auto-recovers a `StorageObject` stuck at `status='processing'`. |
+| `STORAGE_PROCESSING_STUCK_MINUTES` | `10` | Threshold before the `media.storage.recover_stuck` job (queued every 10 min by `StorageRecoveryTask`) re-queues a `StorageObject` stuck at `status='processing'`. |
 | `STORAGE_PROCESSING_MAX_RETRIES` | `3` | Cap on automatic recovery attempts per object before it's marked `failed`. |
 | `STORAGE_PROCESSING_STUCK_RESET_ENABLED` | `true` | Kill switch for the recovery cron. |
 | `THUMBNAIL_REPAIR_ENABLED` | `true` | Kill switch for the hourly `ThumbnailRepairTask` cron. |

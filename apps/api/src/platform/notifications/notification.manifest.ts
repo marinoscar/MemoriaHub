@@ -23,6 +23,8 @@
 import '../email/email.config';
 
 import {
+  ANDROID_APP_NOTIFICATION_CHANNEL,
+  BROADCAST_CRITICAL_EVENT_KEY,
   BROADCASTS_NOTIFICATIONS,
   NODES_NOTIFICATIONS,
   OPS_NOTIFICATIONS,
@@ -30,6 +32,7 @@ import {
   notificationEventRegistry,
   registerNotificationChannels,
   registerNotifications,
+  registerAndroidAppNotificationChannel,
   registerPlatformNotificationChannels,
   type NotificationRegistration,
 } from '@marinoscar/platform-api/notifications';
@@ -73,13 +76,39 @@ export const MEMORIAHUB_NOTIFICATIONS_WITH_WEBHOOKS: readonly NotificationRegist
       : registration,
 );
 
+/**
+ * The events that also list the `android_app` channel (RETRO-D5, #586, Open decision 2): the four
+ * review queues, new memories and the critical broadcast, where a toast on the phone helps. Not
+ * `media.upload_completed` (noisy on the very device doing the upload). The channel is
+ * `coveredBy: 'push'`, so a recipient with a browser and an app subscription is pushed ONCE.
+ */
+export const ANDROID_APP_CHANNEL_EVENT_KEYS: readonly string[] = [
+  MEMORIAHUB_EVENT_KEYS.reviewBursts,
+  MEMORIAHUB_EVENT_KEYS.reviewDuplicates,
+  MEMORIAHUB_EVENT_KEYS.reviewLocationSuggestions,
+  MEMORIAHUB_EVENT_KEYS.reviewEnhancements,
+  MEMORIAHUB_EVENT_KEYS.memoriesReady,
+  BROADCAST_CRITICAL_EVENT_KEY,
+];
+
+/** Adds the `android_app` channel to the opted-in events of a group (idempotent). */
+export function withAndroidAppChannel(group: readonly NotificationRegistration[]): NotificationRegistration[] {
+  const channel = ANDROID_APP_NOTIFICATION_CHANNEL.id as NotificationRegistration['event']['channels'][number];
+  return group.map((registration) =>
+    ANDROID_APP_CHANNEL_EVENT_KEYS.includes(registration.event.key) &&
+    !registration.event.channels.includes(channel)
+      ? { ...registration, event: { ...registration.event, channels: [...registration.event.channels, channel] } }
+      : registration,
+  );
+}
+
 const GROUPS: readonly (readonly NotificationRegistration[])[] = [
-  BROADCASTS_NOTIFICATIONS,
+  withAndroidAppChannel(BROADCASTS_NOTIFICATIONS),
   OPS_NOTIFICATIONS,
   NODES_NOTIFICATIONS,
   IDENTITY_NOTIFICATIONS,
   DB_BACKUP_NOTIFICATIONS,
-  MEMORIAHUB_NOTIFICATIONS_WITH_WEBHOOKS,
+  withAndroidAppChannel(MEMORIAHUB_NOTIFICATIONS_WITH_WEBHOOKS),
   MEMORIAHUB_EMAIL_NOTIFICATIONS,
   // The alerts slice's two events (RETRO-H5, #609): `alerts.alert_fired` /
   // `alerts.alert_resolved`, to the holders of `alerts:read`.
@@ -98,6 +127,10 @@ const GROUPS: readonly (readonly NotificationRegistration[])[] = [
 registerAlertsEmailTemplates();
 
 registerPlatformNotificationChannels();
+// The android-app slice's `android_app` channel (RETRO-D5, #586): Web Push to the subscriptions the
+// Android companion registers (`push_subscriptions.platform = 'android_app'`), `coveredBy: 'push'`.
+// Its sender comes with `AndroidAppModule`. Registered before any event lists it.
+registerAndroidAppNotificationChannel();
 if (!isRegisteredNotificationChannel(WEBHOOK_NOTIFICATION_CHANNEL.id)) {
   registerNotificationChannels([WEBHOOK_NOTIFICATION_CHANNEL]);
 }

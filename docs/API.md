@@ -2983,6 +2983,21 @@ GET  /admin/insights         → refresh.state === "idle"     (done; metrics upd
 
 ---
 
+## Admin: Media Recovery
+
+Admin role + `storage:delete_any`. Since RETRO-D1b (#567) the three recovery endpoints only **enqueue a job** and answer at once with `201` `{ "data": { "jobId": "<uuid>", "status": "pending" | "running" } }`; follow the job in `/admin/settings/jobs`. Before, they ran the work inside the request and answered counts (`{ claimed, reprocessed, exhausted, errors }` or `{ reprocessed, failed }`); the counts are now attributes on the job's span and lines in the API log.
+
+| Endpoint | Body | Job |
+|---|---|---|
+| `POST /admin/media/reprocess` | `{ circleId?, all? }` | `media.storage.reprocess` (one in flight per circle, one for the whole library): queues the platform `storage.object.process` job, at background priority, for every ready/failed image and video object behind the circle's live media items |
+| `POST /admin/media/reprocess-stuck` | `{ olderThanMinutes? }` | `media.storage.recover_stuck`, mode `stuck` (the job the 10-minute cron queues; a request while one is in flight returns its id and promotes a pending one to priority 0) |
+| `POST /admin/media/reprocess-failed` | `{ limit? }` | `media.storage.recover_stuck`, mode `failed`: resets failed image objects to `processing` and queues their processing job |
+| `POST /admin/media/thumbnails/repair` | none | `thumbnail_repair` (unchanged) |
+
+`POST /media/:id/thumbnail/rerun`, the orientation edit and the AI enhancer's replace are unchanged: they re-run the processors for one object inside the request and answer the final status.
+
+---
+
 ## HTTP Status Codes
 
 | Code | Description |

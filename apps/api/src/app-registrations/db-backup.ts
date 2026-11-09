@@ -30,7 +30,7 @@
 // register for it: the restore replays into a scratch database while the live
 // one keeps serving, which is what makes the duration acceptable.
 //
-// RESTORE CARRY-OVER `mh_legacy_android_app_releases`  (Open decision 1 of #580)
+// RESTORE CARRY-OVER `android_app_releases`  (Open decision 1 of #580; retargeted by RETRO-D5)
 // -----------------------------------------------------------------------------
 // A restore replaces the live database with an archive, so a row written after
 // the archive was taken is gone. That is right for almost every table and wrong
@@ -41,12 +41,16 @@
 // catalog itself (`database_backup_runs`), the restore's own job row and the
 // completion audit row; this file adds the releases.
 //
-//   - The table is `mh_legacy_android_app_releases` until RETRO-D5 moves the
-//     releases onto the android-app slice's `android_app_releases`; D5 retargets
-//     (or drops, if the slice registers its own) this carry.
+//   - The table is the android-app slice's `android_app_releases` since RETRO-D5
+//     (#586) moved the releases onto it (the slice registers no carry of its own).
+//     The frozen pre-slice table `mh_legacy_android_app_releases` is not carried:
+//     nothing writes it any more, and its rows were copied by
+//     `npm run android:migrate-legacy-releases`. The id (`android_app_releases`) is
+//     the table's name, as before; an archive taken before D5 carries the legacy
+//     id only in its own registry, which is this process's, so nothing collides.
 //   - Rows are exported `is_current` FALSE first, so the row losing the current
 //     flag is updated before the new current one is inserted: the raw-SQL partial
-//     unique index `mh_legacy_android_app_releases_one_current_uniq_idx` admits one current
+//     unique index `android_app_releases_one_current_uniq_idx` admits one current
 //     release, and the carry upserts one row at a time.
 //   - The uploader is re-resolved against `users` (`NULL` for a user the archive
 //     does not know), the same rule the backup catalog carry uses.
@@ -159,19 +163,19 @@ registerRestoreGate({
 
 /** The Android APK releases survive a restore (their APKs live in object storage). */
 export const ANDROID_RELEASES_CARRY_OVER: RestoreCarryOver = Object.freeze({
-  id: 'mh_legacy_android_app_releases',
+  id: 'android_app_releases',
   // After the four built-in carries; nothing else references this table.
   order: 10,
   // `is_current` FALSE first: see the header (one current release at a time).
-  exportSql: 'SELECT * FROM mh_legacy_android_app_releases ORDER BY is_current, created_at, id',
+  exportSql: 'SELECT * FROM android_app_releases ORDER BY is_current, created_at, id',
   reinsertSql:
-    'INSERT INTO mh_legacy_android_app_releases (' +
+    'INSERT INTO android_app_releases (' +
     'id, package_name, version_name, version_code, signing_sha256, file_sha256, size_bytes, ' +
     'storage_key, storage_provider, bucket, notes, is_current, uploaded_by_id, created_at) ' +
     'SELECT r.id, r.package_name, r.version_name, r.version_code, r.signing_sha256, r.file_sha256, ' +
     'r.size_bytes, r.storage_key, r.storage_provider, r.bucket, r.notes, r.is_current, ' +
     '(SELECT u.id FROM users u WHERE u.id = r.uploaded_by_id), r.created_at ' +
-    'FROM jsonb_populate_record(NULL::mh_legacy_android_app_releases, $1::jsonb) r ' +
+    'FROM jsonb_populate_record(NULL::android_app_releases, $1::jsonb) r ' +
     'ON CONFLICT (id) DO UPDATE SET ' +
     'version_name = EXCLUDED.version_name, signing_sha256 = EXCLUDED.signing_sha256, ' +
     'file_sha256 = EXCLUDED.file_sha256, size_bytes = EXCLUDED.size_bytes, ' +

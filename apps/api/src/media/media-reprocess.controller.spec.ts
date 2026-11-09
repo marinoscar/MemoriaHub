@@ -1,7 +1,9 @@
 /**
  * Unit tests — MediaReprocessController
  *
- * Mock strategy: MediaReprocessService is replaced with a jest mock.
+ * Mock strategy: the platform JobsService and EnrichmentJobService are jest mocks.
+ * Since RETRO-D1b (#567) reprocess, reprocess-stuck and reprocess-failed only
+ * ENQUEUE a job and answer { data: { jobId, status } }.
  * Auth guards (JwtAuthGuard, RolesGuard, PermissionsGuard) are overridden to
  * allow=true so we can test method delegation without auth infrastructure.
  * HTTP-level auth enforcement is tested in integration tests, not here.
@@ -15,8 +17,7 @@ import {
   ReprocessStuckBodyDto,
   ReprocessFailedBodyDto,
 } from './media-reprocess.controller';
-import { MediaReprocessService } from './media-reprocess.service';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { JobsService } from '@marinoscar/platform-api/jobs';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
@@ -25,37 +26,19 @@ const allowAllGuard = { canActivate: () => true };
 
 describe('MediaReprocessController', () => {
   let controller: MediaReprocessController;
-  let mockReprocessCircle: jest.Mock;
-  let mockRecoverStuckObjects: jest.Mock;
-  let mockRecoverFailedImageObjects: jest.Mock;
+  let mockJobsEnqueue: jest.Mock;
   let mockEnqueue: jest.Mock;
   let mockJobUpdate: jest.Mock;
 
   beforeEach(async () => {
-    mockReprocessCircle = jest.fn().mockResolvedValue({ reprocessed: 3, failed: 0 });
-    mockRecoverStuckObjects = jest.fn().mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
-    mockRecoverFailedImageObjects = jest
-      .fn()
-      .mockResolvedValue({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 });
+    mockJobsEnqueue = jest.fn().mockResolvedValue({ id: 'job-r-1', status: 'pending', priority: 0 });
     mockEnqueue = jest.fn().mockResolvedValue({ id: 'job-new-1', status: MhLegacyJobStatus.pending, priority: 0 });
     mockJobUpdate = jest.fn().mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MediaReprocessController],
       providers: [
-        {
-          provide: MediaReprocessService,
-          useValue: {
-            reprocessCircle: mockReprocessCircle,
-          },
-        },
-        {
-          provide: StorageProcessingRecoveryService,
-          useValue: {
-            recoverStuckObjects: mockRecoverStuckObjects,
-            recoverFailedImageObjects: mockRecoverFailedImageObjects,
-          },
-        },
+        { provide: JobsService, useValue: { enqueue: mockJobsEnqueue } },
         {
           provide: EnrichmentJobService,
           useValue: {
@@ -85,104 +68,105 @@ describe('MediaReprocessController', () => {
   });
 
   // -------------------------------------------------------------------------
-  // reprocess — delegation to service
+  // reprocess — enqueues media.storage.reprocess (RETRO-D1b)
   // -------------------------------------------------------------------------
 
   describe('reprocess', () => {
-    it('should call reprocessCircle with undefined when body has no circleId', async () => {
-      const body = {} as ReprocessBodyDto;
+    it('enqueues one system job for the whole library when there is no circleId', async () => {
+      const result = await controller.reprocess({} as ReprocessBodyDto);
 
-      await controller.reprocess(body);
-
-      expect(mockReprocessCircle).toHaveBeenCalledWith(undefined);
+      expect(mockJobsEnqueue).toHaveBeenCalledWith({
+        type: 'media.storage.reprocess',
+        reason: 'rerun',
+        payload: {},
+        orgId: null,
+        priority: 0,
+      });
+      expect(result).toEqual({ data: { jobId: 'job-r-1', status: 'pending' } });
     });
 
-    it('should call reprocessCircle with the provided circleId', async () => {
-      const body = { circleId: 'abc123-uuid' } as ReprocessBodyDto;
+    it('scopes the job (and its dedup slot) to the circle', async () => {
+      await controller.reprocess({ circleId: 'circle-a' } as ReprocessBodyDto);
 
-      await controller.reprocess(body);
-
-      expect(mockReprocessCircle).toHaveBeenCalledWith('abc123-uuid');
-    });
-
-    it('should return the service result directly', async () => {
-      mockReprocessCircle.mockResolvedValue({ reprocessed: 5, failed: 2 });
-      const body = {} as ReprocessBodyDto;
-
-      const result = await controller.reprocess(body);
-
-      expect(result).toEqual({ reprocessed: 5, failed: 2 });
-    });
-
-    it('should return { reprocessed: 0, failed: 0 } when service returns zeros', async () => {
-      mockReprocessCircle.mockResolvedValue({ reprocessed: 0, failed: 0 });
-      const body = {} as ReprocessBodyDto;
-
-      const result = await controller.reprocess(body);
-
-      expect(result).toEqual({ reprocessed: 0, failed: 0 });
+      expect(mockJobsEnqueue).toHaveBeenCalledWith({
+        type: 'media.storage.reprocess',
+        reason: 'rerun',
+        subjectType: 'circle',
+        subjectId: 'circle-a',
+        payload: { circleId: 'circle-a' },
+        orgId: null,
+        priority: 0,
+      });
     });
   });
 
   // -------------------------------------------------------------------------
-  // reprocessStuck — delegation to StorageProcessingRecoveryService
+  // reprocessStuck — enqueues media.storage.recover_stuck, mode stuck
   // -------------------------------------------------------------------------
 
   describe('reprocessStuck', () => {
-    it('should call recoverStuckObjects with undefined when body has no olderThanMinutes', async () => {
-      const body = {} as ReprocessStuckBodyDto;
+    it('enqueues the recovery job at priority 0 with no subject (collapses onto the cron job)', async () => {
+      const result = await controller.reprocessStuck({ olderThanMinutes: 30 } as ReprocessStuckBodyDto);
 
-      await controller.reprocessStuck(body);
-
-      expect(mockRecoverStuckObjects).toHaveBeenCalledWith(undefined);
+      expect(mockJobsEnqueue).toHaveBeenCalledWith({
+        type: 'media.storage.recover_stuck',
+        reason: 'rerun',
+        payload: { mode: 'stuck', olderThanMinutes: 30 },
+        orgId: null,
+        priority: 0,
+      });
+      expect(result).toEqual({ data: { jobId: 'job-r-1', status: 'pending' } });
+      expect(mockJobUpdate).not.toHaveBeenCalled();
     });
 
-    it('should call recoverStuckObjects with the provided olderThanMinutes', async () => {
-      const body = { olderThanMinutes: 30 } as ReprocessStuckBodyDto;
+    it('omits olderThanMinutes when the body has none', async () => {
+      await controller.reprocessStuck({} as ReprocessStuckBodyDto);
 
-      await controller.reprocessStuck(body);
-
-      expect(mockRecoverStuckObjects).toHaveBeenCalledWith(30);
+      expect(mockJobsEnqueue.mock.calls[0][0].payload).toEqual({ mode: 'stuck' });
     });
 
-    it('should return the service result directly', async () => {
-      mockRecoverStuckObjects.mockResolvedValue({ claimed: 5, reprocessed: 4, exhausted: 1, errors: 0 });
-      const body = {} as ReprocessStuckBodyDto;
+    it("promotes the cron's pending job (priority 100) to 0 and returns its id", async () => {
+      mockJobsEnqueue.mockResolvedValue({ id: 'job-cron', status: 'pending', priority: 100 });
 
-      const result = await controller.reprocessStuck(body);
+      const result = await controller.reprocessStuck({} as ReprocessStuckBodyDto);
 
-      expect(result).toEqual({ claimed: 5, reprocessed: 4, exhausted: 1, errors: 0 });
+      expect(mockJobUpdate).toHaveBeenCalledWith({ where: { id: 'job-cron' }, data: { priority: 0 } });
+      expect(result).toEqual({ data: { jobId: 'job-cron', status: 'pending' } });
+    });
+
+    it('leaves a running job alone', async () => {
+      mockJobsEnqueue.mockResolvedValue({ id: 'job-run', status: 'running', priority: 100 });
+
+      await controller.reprocessStuck({} as ReprocessStuckBodyDto);
+
+      expect(mockJobUpdate).not.toHaveBeenCalled();
     });
   });
 
   // -------------------------------------------------------------------------
-  // reprocessFailed — delegation to StorageProcessingRecoveryService (issue #106)
+  // reprocessFailed — enqueues media.storage.recover_stuck, mode failed (issue #106)
   // -------------------------------------------------------------------------
 
   describe('reprocessFailed', () => {
-    it('should call recoverFailedImageObjects with { limit: undefined } when body has no limit', async () => {
-      const body = {} as ReprocessFailedBodyDto;
+    it('enqueues the failed mode in its own dedup slot', async () => {
+      const result = await controller.reprocessFailed({ limit: 25 } as ReprocessFailedBodyDto);
 
-      await controller.reprocessFailed(body);
-
-      expect(mockRecoverFailedImageObjects).toHaveBeenCalledWith({ limit: undefined });
+      expect(mockJobsEnqueue).toHaveBeenCalledWith({
+        type: 'media.storage.recover_stuck',
+        reason: 'rerun',
+        subjectType: 'system',
+        subjectId: 'failed',
+        payload: { mode: 'failed', limit: 25 },
+        orgId: null,
+        priority: 0,
+      });
+      expect(result).toEqual({ data: { jobId: 'job-r-1', status: 'pending' } });
     });
 
-    it('should call recoverFailedImageObjects with { limit: 25 } when body has limit: 25', async () => {
-      const body = { limit: 25 } as ReprocessFailedBodyDto;
+    it('omits limit when the body has none', async () => {
+      await controller.reprocessFailed({} as ReprocessFailedBodyDto);
 
-      await controller.reprocessFailed(body);
-
-      expect(mockRecoverFailedImageObjects).toHaveBeenCalledWith({ limit: 25 });
-    });
-
-    it('should return the service result directly', async () => {
-      mockRecoverFailedImageObjects.mockResolvedValue({ claimed: 5, reprocessed: 4, exhausted: 0, errors: 1 });
-      const body = {} as ReprocessFailedBodyDto;
-
-      const result = await controller.reprocessFailed(body);
-
-      expect(result).toEqual({ claimed: 5, reprocessed: 4, exhausted: 0, errors: 1 });
+      expect(mockJobsEnqueue.mock.calls[0][0].payload).toEqual({ mode: 'failed' });
     });
   });
 

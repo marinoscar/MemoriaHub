@@ -1,5 +1,8 @@
 // =============================================================================
 // Integration tests for the Android app trust routes (issue #503, epic #498)
+// Since RETRO-D5 (#586) the routes are the platform android-app slice's, mounted
+// by `platform/android-app/android-app.config.ts`; this spec proves the mount
+// keeps MemoriaHub's contract (same paths, permissions, bodies, audit action).
 // =============================================================================
 //
 //   GET /api/admin/android-app                system_settings:read
@@ -16,12 +19,12 @@
 import request from 'supertest';
 
 import { PERMISSIONS_KEY, IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
-import { AndroidAppController } from '../../src/android-app/android-app.controller';
-import { AssetLinksController } from '../../src/android-app/asset-links.controller';
 import {
-  ANDROID_APP_SETTINGS_KEY,
   ANDROID_APP_TRUSTED_APPS_UPDATED_ACTION,
-} from '../../src/android-app/android-app.schema';
+  AndroidAppController,
+  AssetLinksController,
+} from '@marinoscar/platform-api/android-app';
+import { ANDROID_APP_SETTINGS_KEY } from '@marinoscar/platform-contract/android-app';
 import { ALLOW_DURING_MAINTENANCE_KEY } from '@marinoscar/platform-api/core';
 import { MaintenanceModeService } from '@marinoscar/platform-api/host';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
@@ -73,6 +76,8 @@ describe('Android app trust API (Integration)', () => {
       },
     );
     prisma.mediaSyncDevice.groupBy.mockResolvedValue([]);
+    // The slice also counts Web Push subscriptions by platform (browser vs the app's own).
+    prisma.pushSubscription.groupBy.mockResolvedValue([]);
   });
 
   const server = () => context.app.getHttpServer();
@@ -118,7 +123,13 @@ describe('Android app trust API (Integration)', () => {
     it('returns an empty state in the { data } envelope when nothing is stored or reported', async () => {
       const { body } = await request(server()).get(ADMIN_ROUTE).set(await adminAuth()).expect(200);
 
-      expect(body.data).toEqual({ trustedApps: [], reportedApps: [], assetLinks: [] });
+      expect(body.data).toEqual({
+        trustedApps: [],
+        reportedApps: [],
+        assetLinks: [],
+        // Added by the platform slice (RETRO-D5): Web Push subscriptions by platform.
+        pushSubscriptions: { androidApp: 0, browser: 0, androidAppUsers: 0 },
+      });
     });
 
     it('lists reported apps from active media sync devices, flagged against the trusted list', async () => {
@@ -191,8 +202,9 @@ describe('Android app trust API (Integration)', () => {
           actorUserId: admin.id,
           action: ANDROID_APP_TRUSTED_APPS_UPDATED_ACTION,
           targetType: 'system_settings',
-          targetId: ANDROID_APP_SETTINGS_KEY,
-          meta: expect.objectContaining({ count: 2, added: trustedApps, removed: [] }),
+          // The platform settings row store names the row in `meta.key` (RETRO-D5); the pre-slice
+          // service wrote it to `targetId`. Same action string, so audit filters keep matching.
+          meta: expect.objectContaining({ key: ANDROID_APP_SETTINGS_KEY, count: 2, added: trustedApps, removed: [] }),
         }),
       });
     });

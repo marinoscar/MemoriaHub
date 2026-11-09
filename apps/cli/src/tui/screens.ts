@@ -14,6 +14,7 @@ import type { ComponentType } from 'react';
 
 import { REPORTS } from '../reports/registry.js';
 import { reportRoute } from './menu.js';
+import { APP_ANDROID_TUI_SCREEN } from '../extensions/android.js';
 
 type RouteExports = typeof import('./routes.js');
 type RouteName = {
@@ -63,7 +64,6 @@ const FIXED: readonly [route: string, label: string, name: RouteName][] = [
   ['folders', 'Manage folders', 'FoldersRoute'],
   ['circles', 'Manage circles', 'CirclesRoute'],
   ['app-settings', 'App settings', 'AppSettingsRoute'],
-  ['android', 'Android app (build, publish, releases)', 'AndroidRoute'],
   ['factory-reset', 'Factory reset (delete all local data)', 'FactoryResetRoute'],
   ['help', 'Help', 'HelpRoute'],
 ];
@@ -77,4 +77,6 @@ export const APP_TUI_SCREENS: readonly TuiScreenRegistration[] = [
     order: FIXED.length + index + 1,
     load: async () => (await import('./routes.js')).reportRouteFor(report.id),
   })),
+  // The platform's Android screen (RETRO-D5, #586), at the route the menu entry names.
+  { ...APP_ANDROID_TUI_SCREEN, label: 'Android app (build, publish, releases)' },
 ];
