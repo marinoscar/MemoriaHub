@@ -124,7 +124,7 @@ import '../src/platform/exports/exports.config';
 // Fills the onboarding step and fact registries the `onboarding` suite reads (AppModule imports it too).
 import '../src/platform/onboarding/onboarding.manifest';
 // The sharing slice's registrations (RETRO-I1); AppModule imports them too.
-import '../src/app-registrations/sharing';
+import { MEMORIAHUB_GROUP_OWNED_MODELS } from '../src/app-registrations/sharing';
 // The android-app slice's composition: the Media Sync device source it reads (RETRO-D5; AppModule imports it too).
 import '../src/platform/android-app/android-app.config';
 import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
@@ -341,16 +341,16 @@ runPlatformConformance({
 
     // The sharing slice (RETRO-I1, #562). No app file touches the sharing tables directly, the
     // public link route carries the identity slice's `@Public()` marker, and the three partial
-    // unique indexes are in the installed platform migrations. No model has an `owner_group_id`
-    // and no resource type is registered yet: RETRO-I2 adds both (`media_item`, `album`, the
-    // group-owned models) and updates `groupOwnedModels` and `resourceTypeIds` here.
+    // unique indexes are in the installed platform migrations. RETRO-I2 (#569): every model with an
+    // `owner_group_id` maps to a registered group-owned type, and the two shareable resource types
+    // are pinned (their ids are permanent once grants exist).
     sharing: {
       schemaPath: join(__dirname, '..', 'prisma', 'schema'),
       migrationsDir: join(__dirname, '..', 'prisma', 'migrations'),
       rootModule: AppModule,
       isPublic: (target) => Reflect.getMetadata(IS_PUBLIC_KEY, target) === true,
-      groupOwnedModels: {},
-      resourceTypeIds: [],
+      groupOwnedModels: { ...MEMORIAHUB_GROUP_OWNED_MODELS },
+      resourceTypeIds: ['album', 'media_item'],
       minRoutes: 100,
     },
 

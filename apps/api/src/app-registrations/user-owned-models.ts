@@ -28,6 +28,16 @@ import type { Prisma } from '@prisma/client';
 
 const SHARED_CONTENT =
   'Shared circle content: the user is the uploader, not the owner. The key is Restrict, so the user cannot be deleted while it exists; content is transferred or removed first.';
+// RETRO-I2 (#569): `owner_user_id` is the owner of a former personal circle's row,
+// `Restrict` like the personal circle's `owner_id` it replaces: the user removal
+// hook empties the personal library before the user row goes, and a user row is
+// never deleted with a library still attached. The nine content models that also
+// carry a SetNull actor key (burst and duplicate groups, location suggestions,
+// enhancements and their batches, review, trash and workflow runs) cannot list
+// it here (one purge policy per entry): their foreign key exists in the database
+// only (`PLATFORM-ADOPTION-SHIM(#573)`, local-exceptions.md).
+const PERSONAL_LIBRARY =
+  'A row of a former personal circle: owner_user_id names the library\'s user (Restrict, like the circle\'s owner_id); the user removal hook empties the personal library before the user row is deleted.';
 const RESOLVER =
   'Records who resolved or acted on a review item. The review row outlives the person, so the reference is detached.';
 
@@ -109,10 +119,17 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
     export: 'exclude',
     rationale: 'A circle has members besides its owner; the owner hands it over or deletes it before the user can be deleted.',
   },
-  { model: 'MediaItem', actorFields: ['addedById'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
-  { model: 'Album', actorFields: ['addedById'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
-  { model: 'Tag', actorFields: ['addedById'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
-  { model: 'Person', actorFields: ['addedById'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
+  { model: 'MediaItem', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
+  { model: 'Album', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
+  { model: 'Tag', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
+  { model: 'Person', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
+  { model: 'Face', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'Memory', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'MediaItemEmbedding', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'MediaGeocodeStatus', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'MediaMetadataStatus', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'MediaTagStatus', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
+  { model: 'MediaTranscript', actorFields: ['ownerUserId'], purge: 'retain', export: 'exclude', rationale: PERSONAL_LIBRARY },
   {
     model: 'CircleInvite',
     actorFields: ['addedById', 'claimedById'],

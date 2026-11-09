@@ -7,7 +7,9 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { CircleRole, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
@@ -49,6 +51,8 @@ export class PeopleService {
     // chosen picture must propagate. FaceModule -> ProfileModule is the only edge
     // between the two; ProfileModule must never import FaceModule back.
     private readonly userAvatarService: UserAvatarService,
+    // App metrics (RETRO-T3, #628): `app.people.assignments{mode=manual}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -366,10 +370,11 @@ export class PeopleService {
       // Verify all faces exist in the same circle
       await this.assertFacesInCircle(dto.faceIds, dto.circleId);
 
-      await this.prisma.face.updateMany({
+      const assigned = await this.prisma.face.updateMany({
         where: { id: { in: dto.faceIds }, circleId: dto.circleId },
         data: { personId: person.id, manuallyAssigned: true },
       });
+      this.metrics?.add('peopleAssignments', assigned?.count ?? 0, { mode: 'manual' });
 
       // Auto-set coverFaceId to the first assigned face when none was set
       if (!person.coverFaceId) {
@@ -542,10 +547,11 @@ export class PeopleService {
     // Verify each face exists in the same circle
     await this.assertFacesInCircle(dto.faceIds, person.circleId);
 
-    await this.prisma.face.updateMany({
+    const assigned = await this.prisma.face.updateMany({
       where: { id: { in: dto.faceIds }, circleId: person.circleId },
       data: { personId, manuallyAssigned: true },
     });
+    this.metrics?.add('peopleAssignments', assigned?.count ?? 0, { mode: 'manual' });
 
     // Auto-set coverFaceId to the first assigned face when person has none
     if (!person.coverFaceId) {
@@ -1454,6 +1460,7 @@ export class PeopleService {
         manuallyAssigned: true,
       },
     });
+    this.metrics?.add('peopleAssignments', 1, { mode: 'manual' });
 
     // 6. Enqueue auto-tagging rerun so description/embedding reflect the new person
     await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);

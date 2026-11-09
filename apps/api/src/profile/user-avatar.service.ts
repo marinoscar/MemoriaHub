@@ -734,7 +734,7 @@ export class UserAvatarService {
    * For the same reason the `avatars/` prefix must never become an input to the
    * processing pipeline, exactly like the `thumbnails/` recursion guard in
    * ThumbnailProcessor. Writing `status: 'ready'` also keeps these rows out of
-   * StorageProcessingRecoveryTask's stuck-at-`processing` sweep.
+   * StorageRecoveryTask (`media.storage.recover_stuck`)'s stuck-at-`processing` sweep.
    */
   private async storeAvatarObject(userId: string, jpeg: Buffer): Promise<string> {
     const storageKey = `${AVATAR_KEY_PREFIX}${userId}/${randomUUID()}.jpg`;

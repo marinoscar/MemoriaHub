@@ -27,6 +27,12 @@ model MediaTagStatus {
   id           String             @id @default(uuid()) @db.Uuid
   mediaItemId  String             @unique @map("media_item_id") @db.Uuid
   circleId     String             @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   status       MediaTagStatusType @default(not_processed)
   providerKey  String?            @map("provider_key")
   modelVersion String?            @map("model_version")
@@ -40,8 +46,15 @@ model MediaTagStatus {
   mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaTagStatusOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaTagStatusOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("MediaTagStatusOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
   @@index([status])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_tag_status")
 }
 
@@ -64,6 +77,12 @@ model MediaTranscript {
   id          String   @id @default(uuid()) @db.Uuid
   mediaItemId String   @unique @map("media_item_id") @db.Uuid
   circleId    String   @map("circle_id") @db.Uuid
+  // RETRO-I2 (#569): ownership (docs/platform-adoption/circles-to-groups.md §3). Derived from
+  // circle_id by the trigger mh_content_owner_from_circle while circles decide access (until
+  // RETRO-I3); CHECK num_nonnulls(owner_user_id, owner_group_id) = 1 and FORCE RLS are raw SQL.
+  orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
+  ownerGroupId String? @map("owner_group_id") @db.Uuid
+  ownerUserId  String? @map("owner_user_id") @db.Uuid
   text        String
   /// Detected or declared language (ISO-639-1), when the provider reports one.
   language    String?
@@ -78,6 +97,13 @@ model MediaTranscript {
   mediaItem MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
   circle    Circle    @relation(fields: [circleId], references: [id], onDelete: Cascade)
 
+  // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
+  org        Organization @relation("MediaTranscriptOrg", fields: [orgId], references: [id], onDelete: Restrict)
+  ownerGroup Group?       @relation("MediaTranscriptOwnerGroup", fields: [ownerGroupId, orgId], references: [id, orgId], onDelete: Restrict)
+  ownerUser  User?        @relation("MediaTranscriptOwnerUser", fields: [ownerUserId], references: [id], onDelete: Restrict)
+
   @@index([circleId])
+  @@index([ownerGroupId])
+  @@index([ownerUserId])
   @@map("media_transcripts")
 }

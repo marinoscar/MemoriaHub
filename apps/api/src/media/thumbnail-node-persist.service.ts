@@ -5,7 +5,7 @@
 // Shared PERSIST half for the node path of both `thumbnail_regen` and
 // `thumbnail_repair` (ThumbnailRegenHandler / ThumbnailRepairHandler). The
 // server-side in-process path for both handlers is untouched — it still
-// calls StorageProcessingRecoveryService.reprocessObjectNow, running the full
+// calls ObjectReprocessService.reprocessNow, running the full
 // sharp/ffmpeg pipeline synchronously on the server.
 //
 // This is the NEW path for a distributed worker node: the node computes the

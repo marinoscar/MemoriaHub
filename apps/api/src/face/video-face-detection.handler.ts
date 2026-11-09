@@ -67,7 +67,6 @@ export class VideoFaceDetectionHandler implements JobHandler, OnModuleInit {
     this.logger.debug(
       `VideoFaceJob ${job.id}: persisting node-computed result (${parsed.clusters.length} cluster(s))`,
     );
-    // metrics: RETRO-T3 (app.media.faces.detected)
-    await this.videoFaceDetectionService.persistVideoFaces(context, parsed);
+    await this.videoFaceDetectionService.persistVideoFaces(context, parsed, 'node');
   }
 }

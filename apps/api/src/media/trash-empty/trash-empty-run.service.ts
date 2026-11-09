@@ -4,7 +4,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   CircleRole,
   JobReason,
@@ -62,6 +64,8 @@ export class TrashEmptyRunService {
     private readonly circleMembership: CircleMembershipService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly thumbnails: MediaThumbnailService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=trash_empty,outcome=cancelled}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -143,6 +147,7 @@ export class TrashEmptyRunService {
       where: { id: run.id },
       data: { status: TrashEmptyRunStatus.cancelled, finishedAt: new Date() },
     });
+    this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'cancelled' });
 
     this.logger.log({
       event: 'trash_empty_run.cancelled',

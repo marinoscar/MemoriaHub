@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   type Job,
@@ -63,6 +64,8 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly runService: TrashEmptyRunService,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=trash_empty}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -171,7 +174,7 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
           where: { id: runId },
           data: { status: TrashEmptyRunStatus.completed, finishedAt: new Date() },
         });
-        // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome=completed})
+        this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'completed' });
         this.logTransition(run, TrashEmptyRunStatus.completed, { matchedCount: 0 });
         return;
       }
@@ -199,7 +202,7 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
             },
           })
           .catch(() => undefined);
-        // metrics: RETRO-T3 (app.runs.finished{engine=trash_empty,outcome=failed})
+        this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'failed' });
         this.logTransition(run, TrashEmptyRunStatus.failed, { error: message });
       }
       throw err;

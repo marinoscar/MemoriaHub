@@ -59,7 +59,6 @@ export class FaceDetectionHandler implements JobHandler, OnModuleInit {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
     this.logger.debug(`FaceJob ${job.id}: persisting node-computed result (${parsed.faces.length} face(s))`);
-    // metrics: RETRO-T3 (app.media.faces.detected)
-    await this.faceDetectionService.persistFaces(context, parsed);
+    await this.faceDetectionService.persistFaces(context, parsed, 'node');
   }
 }

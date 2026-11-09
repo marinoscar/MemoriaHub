@@ -44,7 +44,7 @@ runPlatformConformance({
 });
 
 describe('the telemetry suite sees this application', () => {
-  it("discovers the platform's six groups and then this app's (none until RETRO-T3)", () => {
+  it("discovers the platform's six groups and then this app's six (RETRO-T3)", () => {
     expect(metricGroupRegistry.ids()).toEqual([
       'host',
       'database',

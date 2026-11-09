@@ -6,16 +6,17 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 
 /**
  * POST /api/media/:id/thumbnail/rerun
  *
  * User-facing "Retry thumbnail" action, mirroring the existing
  * POST /api/media/:id/metadata/rerun pattern (MetadataController). Runs
- * synchronously (like MediaReprocessService.reprocessMediaObject) rather than
- * via the enrichment_jobs queue, since thumbnail generation is a few seconds
- * at most and there is no existing job type for it. Bypasses the stuck-
+ * synchronously, one object inside the request, through
+ * ObjectReprocessService.reprocessNow (the platform's run-processors-now API,
+ * RETRO-D1b #567 open decision 1), since thumbnail generation is a few seconds
+ * at most and the response reports the outcome. Bypasses the stuck-
  * threshold/retry-cap that gates the automatic recovery cron — an explicit
  * user request should always get a fresh attempt.
  */
@@ -28,7 +29,7 @@ export class MediaThumbnailRerunController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly circleMembershipService: CircleMembershipService,
-    private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly recoveryService: ObjectReprocessService,
   ) {}
 
   @Post('media/:id/thumbnail/rerun')
@@ -56,7 +57,7 @@ export class MediaThumbnailRerunController {
       'collaborator' as CircleRole,
     );
 
-    await this.recoveryService.reprocessObjectNow(mediaItem.storageObject);
+    await this.recoveryService.reprocessNow(mediaItem.storageObject);
 
     this.logger.log(`Thumbnail rerun triggered for MediaItem ${mediaItemId} by user ${user.id}`);
 

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
 import type { ObjectProcessor, ObjectProcessorResult } from '@marinoscar/platform-api/storage';
+import { rememberProcessingMime } from '../processing-metrics';
 
 /**
  * ContentHashProcessor — computes a SHA-256 hex digest of the raw byte stream.
@@ -28,6 +29,8 @@ export class ContentHashProcessor implements ObjectProcessor {
     object: StorageObject,
     getStream: () => Promise<Readable>,
   ): Promise<ObjectProcessorResult> {
+    // For app.media.processing.duration's media_type (RETRO-T3): see ../processing-metrics.ts.
+    rememberProcessingMime(object.id, object.mimeType);
     try {
       const stream = await getStream();
       const hash = createHash('sha256');

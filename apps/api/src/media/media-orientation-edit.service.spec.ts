@@ -14,7 +14,7 @@
  *
  * Covers:
  *  - Happy path: same storage key overwritten, MediaItem updated with
- *    orientation=1 and the swapped width/height, reprocessObjectNow invoked,
+ *    orientation=1 and the swapped width/height, reprocessNow invoked,
  *    and the resolved return shape.
  *  - BadRequestException for non-photo / non-image media items.
  *  - NotFoundException for missing / soft-deleted / storageObject-less items.
@@ -36,7 +36,7 @@ import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CircleMembershipService } from '../circles/circle-membership.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -103,7 +103,7 @@ describe('MediaOrientationEditService', () => {
   let mockCircleMembershipService: { assertCircleAccess: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
-  let mockRecoveryService: { reprocessObjectNow: jest.Mock };
+  let mockRecoveryService: { reprocessNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
   let mockThumbnailPrune: { pruneSupersededThumbnails: jest.Mock };
   /** Records sync-vs-prune ordering (issue #434). */
@@ -130,9 +130,14 @@ describe('MediaOrientationEditService', () => {
 
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
 
-    mockRecoveryService = { reprocessObjectNow: jest.fn().mockResolvedValue(undefined) };
-
     callOrder = [];
+    mockRecoveryService = {
+      reprocessNow: jest.fn().mockImplementation(async () => {
+        callOrder.push('reprocess');
+        return 'ready';
+      }),
+    };
+
     mockMetadataSync = {
       syncFromStorageObject: jest.fn().mockImplementation(async () => {
         callOrder.push('sync');
@@ -165,7 +170,7 @@ describe('MediaOrientationEditService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CircleMembershipService, useValue: mockCircleMembershipService },
         { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: StorageProcessingRecoveryService, useValue: mockRecoveryService },
+        { provide: ObjectReprocessService, useValue: mockRecoveryService },
         { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
         { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
@@ -234,10 +239,10 @@ describe('MediaOrientationEditService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
-    it('calls reprocessObjectNow to regenerate the thumbnail', async () => {
+    it('calls reprocessNow to regenerate the thumbnail', async () => {
       await service.editOrientation('media-1', 'rotate_right', makeUser());
 
-      expect(mockRecoveryService.reprocessObjectNow).toHaveBeenCalledTimes(1);
+      expect(mockRecoveryService.reprocessNow).toHaveBeenCalledTimes(1);
     });
 
     // -----------------------------------------------------------------------
@@ -255,8 +260,9 @@ describe('MediaOrientationEditService', () => {
 
       expect(mockThumbnailPrune.pruneSupersededThumbnails).toHaveBeenCalledWith('obj-1');
       // Order is load-bearing: pruning first would delete bytes a concurrent
-      // gallery request could still be signing.
-      expect(callOrder).toEqual(['sync', 'prune']);
+      // gallery request could still be signing. And the reprocess (which renders
+      // the new content-addressed key) must come first (RETRO-D1b, #567).
+      expect(callOrder).toEqual(['reprocess', 'sync', 'prune']);
     });
 
     it('resolves with { status, width, height } reflecting the post-reprocess status and transform dims', async () => {

@@ -283,7 +283,7 @@ Since RETRO-D5 the releases live in the platform table `android_app_releases`. T
    Every legacy row is copied under its **original id**, so the stored APK key `android-releases/<id>.apk`, the audit history and the release ids the CLI prints keep naming the same release; no APK moves. Rows are inserted not current; then, only when the platform table has no current release, the legacy current release is made current (the one-current index never sees two). One transaction; re-running copies nothing. The legacy table is never modified.
 4. Verify: `memoriahub android releases` (the `*` is on the release your phones run), `/admin/settings/android`, a download from `/settings/android-app`, and `curl -s https://<host>/.well-known/assetlinks.json` (unchanged: the trusted list is the same `android_app` settings row).
 
-Releases stored on a provider other than the ACTIVE one cannot be downloaded or deleted through the slice yet (a platform seam gap; the dry run lists them). Download links minted before the upgrade stop verifying (they last 10 minutes); start the download again. **Rollback:** revert the release; the pre-slice server reads the untouched legacy table.
+Releases stored on a provider other than the ACTIVE one cannot be downloaded or deleted through the slice yet (a platform seam gap, [EAB#1134](https://github.com/marinoscar/EnterpriseAppBase/issues/1134); the dry run lists them). Download links minted before the upgrade stop verifying (they last 10 minutes); start the download again. **Rollback:** revert the release; the pre-slice server reads the untouched legacy table.
 
 ## See also
 

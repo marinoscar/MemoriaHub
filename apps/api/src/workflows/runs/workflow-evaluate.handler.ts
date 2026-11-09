@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import {
   JobHandlerRegistry,
   type Job,
@@ -76,6 +77,8 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
     private readonly runNotifications: WorkflowRunNotificationService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the handler by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    // App metrics (RETRO-T3, #628): `app.runs.finished{engine=workflow}`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -247,7 +250,7 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
           matchedCount: 0,
         });
         this.logTransition(run, WorkflowRunStatus.completed, { matchedCount: 0 });
-        // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=completed})
+        this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: 'completed' });
         // Terminal (0 matches) — fire-and-forget notification (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
         // Webhook `workflows.run.completed` (RETRO-H4): after the terminal write; never throws.
@@ -294,7 +297,7 @@ export class WorkflowEvaluateHandler implements JobHandler, OnModuleInit {
           })
           .catch(() => undefined);
         this.logTransition(run, WorkflowRunStatus.failed, { error: message });
-        // metrics: RETRO-T3 (app.runs.finished{engine=workflow,outcome=failed})
+        this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: 'failed' });
         // Terminal failure (retries exhausted) — notify (issue #247).
         this.runNotifications.notifyRunFinishedAsync(runId);
         // Webhook `workflows.run.completed` (RETRO-H4): after the terminal write; never throws.

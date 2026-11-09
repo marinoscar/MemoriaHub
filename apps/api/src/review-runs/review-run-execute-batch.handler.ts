@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   JobHandlerRegistry,
@@ -71,6 +72,8 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly subjects: ReviewRunSubjectRegistry,
+    // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `review`). Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   onModuleInit(): void {
@@ -223,6 +226,9 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
           failedCount: { increment: failedTally },
         },
       });
+      this.metrics?.add('runItems', appliedTally, { engine: 'review', outcome: 'applied' });
+      this.metrics?.add('runItems', skippedTally, { engine: 'review', outcome: 'skipped' });
+      this.metrics?.add('runItems', failedTally, { engine: 'review', outcome: 'failed' });
     }
 
     await this.maybeFinalizeRun(runId);
@@ -257,7 +263,7 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
     });
 
     if (fin.count > 0) {
-      // metrics: RETRO-T3 (app.runs.finished{engine=review,outcome})
+      this.metrics?.add('runsFinished', 1, { engine: 'review', outcome: finalStatus });
       this.logger.log({
         event: 'review_run.finalized',
         runId,

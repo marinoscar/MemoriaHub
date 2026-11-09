@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { MediaType, BurstGroupStatus, JobReason } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
@@ -45,6 +46,8 @@ export class BurstDetectionService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly duplicateDetectionService: DuplicateDetectionService,
+    // App metrics (RETRO-T3, #628): `app.media.bursts.grouped`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   /**
@@ -229,7 +232,6 @@ export class BurstDetectionService {
 
     let targetGroupId: string;
 
-    // metrics: RETRO-T3 (app.media.bursts.grouped)
     if (existingGroupIds.length === 0) {
       // All linked neighbors are ungrouped — create a new group
       const earliestCapturedAt = [item.capturedAt, ...linkedCandidates.map((c) => c.capturedAt)]
@@ -257,6 +259,7 @@ export class BurstDetectionService {
       this.logger.log(
         `Created burst group ${targetGroupId} with ${idsToAssign.length} members (circleId=${item.circleId})`,
       );
+      this.metrics?.add('mediaBurstsGrouped', idsToAssign.length, { outcome: 'new_group' });
     } else if (existingGroupIds.length === 1) {
       // All linked neighbors belong to one existing group — join it
       targetGroupId = existingGroupIds[0];
@@ -267,6 +270,7 @@ export class BurstDetectionService {
       });
 
       this.logger.log(`Assigned MediaItem ${mediaItemId} to existing burst group ${targetGroupId}`);
+      this.metrics?.add('mediaBurstsGrouped', 1, { outcome: 'joined_group' });
     } else {
       // Multiple distinct groups — merge into the oldest one (by createdAt)
       const groups = await this.prisma.burstGroup.findMany({
@@ -298,6 +302,7 @@ export class BurstDetectionService {
       this.logger.log(
         `Merged ${groupsToMerge.length} burst group(s) into ${targetGroupId} for MediaItem ${mediaItemId}`,
       );
+      this.metrics?.add('mediaBurstsGrouped', 1, { outcome: 'joined_group' });
     }
 
     // Step 6: Recompute scores for all group members

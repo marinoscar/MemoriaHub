@@ -52,7 +52,8 @@
 //    before #306 existed.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { MediaTagSource, MediaType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MemoryTitleService } from '../titles/memory-title.service';
@@ -504,6 +505,8 @@ export class MemoryCurationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly titles: MemoryTitleService,
+    // App metrics (RETRO-T3, #628): `app.memories.generated`. Optional for hand-built tests.
+    @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
   /**
@@ -734,7 +737,7 @@ export class MemoryCurationService {
 
     const existing = await this.prisma.memory.findUnique({
       where: identity,
-      select: { id: true, deletedAt: true, items: { select: { mediaItemId: true } } },
+      select: { id: true, deletedAt: true, titleSource: true, items: { select: { mediaItemId: true } } },
     });
 
     if (existing?.deletedAt) {
@@ -750,6 +753,11 @@ export class MemoryCurationService {
         // AFTER the tombstone check, BEFORE the transaction — see header note 5.
         const aiTitle = await this.generateAiTitle(input);
         const memoryId = await this.createMemory(input, subjectKey, aiTitle);
+        this.metrics?.add('memoriesGenerated', 1, {
+          type: input.type,
+          title_source: aiTitle ? 'ai' : 'template',
+          outcome: 'created',
+        });
         return { memoryId, created: true, materiallyChanged: true, skippedTombstone: false };
       } catch (err) {
         // A concurrent generation pass won the race on the unique key. Re-read
@@ -763,7 +771,7 @@ export class MemoryCurationService {
         }
         const raced = await this.prisma.memory.findUnique({
           where: identity,
-          select: { id: true, deletedAt: true, items: { select: { mediaItemId: true } } },
+          select: { id: true, deletedAt: true, titleSource: true, items: { select: { mediaItemId: true } } },
         });
         if (!raced || raced.deletedAt) {
           return {
@@ -886,7 +894,7 @@ export class MemoryCurationService {
 
   private async refreshMemory(
     input: UpsertMemoryInput,
-    existing: { id: string; items: Array<{ mediaItemId: string }> },
+    existing: { id: string; titleSource?: string | null; items: Array<{ mediaItemId: string }> },
   ): Promise<UpsertMemoryResult> {
     const now = new Date();
     const { periodStart, periodEnd } = this.resolvePeriod(input, now);
@@ -946,6 +954,13 @@ export class MemoryCurationService {
           ...(resetTitle ? this.titleColumns(input, aiTitle) : {}),
         },
       });
+    });
+
+    this.metrics?.add('memoriesGenerated', 1, {
+      type: input.type,
+      // A minor refresh keeps the row's title, so its source is the stored one.
+      title_source: resetTitle ? (aiTitle ? 'ai' : 'template') : (existing.titleSource ?? 'template'),
+      outcome: 'refreshed',
     });
 
     return {
