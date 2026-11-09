@@ -204,7 +204,7 @@ Each row is one self-test check on the Diagnostics screen. **Warn** and **fail**
 | `upload.stalled` | Warns | A file has been uploading for over an hour with no progress | **Retry failed**; if it repeats on a big file, see the local-provider row in [section 8](#8-upload-problems) |
 | `upload.target` | Fails | The latest run stopped on `TARGET_CIRCLE_FORBIDDEN` (paused and skipped runs are ignored) | Choose a different target circle on the web ([section 8](#8-upload-problems)) |
 | `storage.space` | Warns under 500 MB free | Hashing and temporary files need room | Free some space on the phone |
-| `twa.verification` | Warns (never fails) | `/.well-known/assetlinks.json` does not list this package and signing key, could not be fetched, or Chrome cached an old answer. The app still works with a URL bar | Trust the build ([section 4](#4-make-the-app-open-full-screen)); check the `curl` output; reopen the app. The Doctor check `memoriahub.android.assetlinks` shows the same on the server |
+| `twa.verification` | Warns (never fails) | `/.well-known/assetlinks.json` does not list this package and signing key, could not be fetched, or Chrome cached an old answer. The app still works with a URL bar | Trust the build ([section 4](#4-make-the-app-open-full-screen)); check the `curl` output; reopen the app. The Doctor check `android.assetlinks` shows the same on the server |
 
 Server-side symptoms:
 
@@ -220,16 +220,16 @@ Server-side symptoms:
 
 ## 11. The Doctor `android` section
 
-Admin, then Settings, then **Doctor** (`/admin/settings/doctor`) has an **Android app** category with four checks (ids `memoriahub.android.*`; before the platform Doctor they were `android.assetlinks`, `android.releases`, `android.mediaSync` and `android.uploadPath`). It needs no phone to be open; it reads the server's view. In the table, Warning is the platform's `warn`, Error is `fail`, OK is `pass` and Skipped is `skip`. See the [Doctor spec](../specs/doctor.md).
+Admin, then Settings, then **Doctor** (`/admin/settings/doctor`) has an **Android app** category with four checks. Since RETRO-D5 (#586) two are the platform android-app slice's (`android.assetlinks`, `android.releases`, reading the phones through MemoriaHub's Media Sync device source) and two are Media Sync's own (`memoriahub.android.media-sync`, `memoriahub.android.upload-path`). Earlier names: `memoriahub.android.assetlinks` / `memoriahub.android.releases` (platform Doctor, RETRO-B1b), and before that `android.assetlinks`, `android.releases`, `android.mediaSync`, `android.uploadPath`. It needs no phone to be open; it reads the server's view. In the table, Warning is the platform's `warn`, Error is `fail`, OK is `pass` and Skipped is `skip`. See the [Doctor spec](../specs/doctor.md).
 
 | Check | Status | Meaning and fix |
 |---|---|---|
-| `memoriahub.android.assetlinks` | Skipped | No active phone has reported its signing key yet |
+| `android.assetlinks` | Skipped | No active phone has reported its signing key yet, and the current release's key is trusted |
 | | Warning | A phone reported a package and signing key that is not in the trusted list (up to 3 are named). Trust it at Admin, then Settings, then Android app ([section 4](#4-make-the-app-open-full-screen)) |
-| | OK | Every reported package and key is trusted |
-| `memoriahub.android.releases` | Skipped | No active phone |
+| | OK | Every reported package and key is trusted (and the current release's) |
+| `android.releases` | Skipped | No active phone that reported its package and signing key |
 | | Warning | Phones are paired but no release is current. Publish one ([release runbook](android-release.md)) |
-| | OK | A release is current; the message says how many phones are behind it |
+| | OK | A release is current; the message says how many paired phones run an older build |
 | `memoriahub.android.media-sync` | Skipped | No active phone |
 | | Warning | A phone has not been seen for over 48 hours, has blocked files, lacks full media access, or its token was revoked or expired (the phones and counts are named) |
 | | OK | Otherwise |

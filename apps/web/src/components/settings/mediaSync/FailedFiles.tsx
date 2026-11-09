@@ -7,7 +7,7 @@
 import { Alert, Box, Button, List, ListItem, Skeleton, Typography } from '@mui/material';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
 import type { MediaSyncDevice, MediaSyncRun } from '../../../services/mediaSync';
-import { mediaSyncDeepLink } from '../../../utils/androidIdentity';
+import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
 import { formatBytes } from '../../../utils/formatBytes';
 import { formatDateTime } from './format';
 

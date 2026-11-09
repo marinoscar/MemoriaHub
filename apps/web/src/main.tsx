@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { CssBaseline } from '@mui/material';
 import App from './App';
-import { captureTwaLaunch } from './utils/twa';
+import { captureTwaLaunch } from './platform/android-app/twa';
 import { registerImportProgressPanelView } from './platform-extensions/telemetry/ImportProgressPanelView';
 
 // Before the first render, so the launch parameters (`?source=twa&appVersion=…`)

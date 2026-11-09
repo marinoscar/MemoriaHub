@@ -53,8 +53,8 @@ describe('APP_CLI_OPTIONS', () => {
     expect(program.commands.find((c) => c.name() === 'jobs')!.aliases()).toContain('queue');
   });
 
-  it('has one factory per inventory command', () => {
-    expect(APP_COMMAND_FACTORIES.map((f) => f().name())).toEqual(INVENTORY.filter((n) => n !== 'node'));
+  it('has one factory per inventory command (android is the platform group since RETRO-D5)', () => {
+    expect(APP_COMMAND_FACTORIES.map((f) => f().name())).toEqual(INVENTORY.filter((n) => n !== 'node' && n !== 'android'));
   });
 
   it('adds the MemoriaHub deploy steps in the right place', () => {

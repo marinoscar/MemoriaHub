@@ -37,9 +37,16 @@ Check a build's identity with `aapt2 dump badging <apk>` (`$ANDROID_HOME/build-t
 
 ## Identity
 
-[`identity.properties`](identity.properties) is the single source of truth. `app/build.gradle.kts`
+[`identity.properties`](identity.properties) is what the Gradle build reads. `app/build.gradle.kts`
 turns it into `BuildConfig` fields, resources and manifest placeholders; no Kotlin source spells
-the product name, package or colours.
+the product name, package or colours. Since RETRO-D5 (#586) the server, the web app and the CLI
+read the same values from the `android` block of
+[`packages/shared/identity.json`](../../packages/shared/identity.json) (the platform's
+`androidIdentity`), and `apps/web/src/__tests__/platform/androidIdentity.test.ts` fails when the
+two files drift. The move of this app onto the platform's `:platform-core` (TWA, pairing, token
+store, API client, update check; `identity.gradle.kts` generating `BuildConfig` from
+`identity.json`) is a follow-up: it must keep `storagePrefix` `memoriahub` so paired phones keep
+`memoriahub_config` and `memoriahub_secure` ([local exceptions](../../docs/platform-adoption/local-exceptions.md)).
 
 | Key | Value | Becomes |
 |---|---|---|
