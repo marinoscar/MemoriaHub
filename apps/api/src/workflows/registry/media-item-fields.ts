@@ -17,6 +17,7 @@ import {
   removePersonParamsSchema,
   setLocationParamsSchema,
   moveToCircleParamsSchema,
+  moveToOwnerParamsSchema,
   rerunEnrichmentParamsSchema,
   resolveBurstGroupParamsSchema,
   resolveDuplicateGroupParamsSchema,
@@ -806,15 +807,28 @@ export const MEDIA_ITEM_ACTIONS: WorkflowActionDescriptor[] = [
     highImpact: false,
   },
   {
+    type: 'move_to_owner',
+    label: 'Move to library',
+    paramsSchema: moveToOwnerParamsSchema,
+    permission: MOVE_TO_CIRCLE_PERMISSION,
+    triggerCompatibility: 'all',
+    // Reversible (move it back), but high-impact: cross-library cascade +
+    // full re-enrichment fan-out in the target library.
+    reversible: true,
+    highImpact: true,
+  },
+  {
+    // DEPRECATED alias of move_to_owner (RETRO-I6, #588): still valid in stored
+    // definitions, run snapshots and queued batch payloads; hidden from the
+    // builder (`deprecated`), executed through the same path.
     type: 'move_to_circle',
     label: 'Move to circle',
     paramsSchema: moveToCircleParamsSchema,
     permission: MOVE_TO_CIRCLE_PERMISSION,
     triggerCompatibility: 'all',
-    // Reversible (move it back), but high-impact: cross-circle cascade +
-    // full re-enrichment fan-out in the target circle.
     reversible: true,
     highImpact: true,
+    deprecated: true,
   },
   {
     type: 'rerun_enrichment',

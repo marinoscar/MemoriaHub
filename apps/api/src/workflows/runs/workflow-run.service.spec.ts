@@ -135,7 +135,7 @@ describe('WorkflowRunService', () => {
   let service: WorkflowRunService;
   let prisma: MockPrismaService;
   let systemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettings'>>;
-  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
+  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole' | 'personalLibraryOf'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>>;
 
@@ -149,6 +149,7 @@ describe('WorkflowRunService', () => {
       requireOwnerRole: jest
         .fn()
         .mockResolvedValue({ role: 'editor' as const, isSuperAdmin: false }),
+      personalLibraryOf: jest.fn().mockResolvedValue(null),
     };
     enrichmentJobs = {
       enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }),
@@ -271,6 +272,23 @@ describe('WorkflowRunService', () => {
           makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE, PERMISSIONS.MEDIA_DELETE] }),
         ),
       ).resolves.toMatchObject({ status: WorkflowRunStatus.evaluating });
+    });
+
+    it('rejects move_to_owner at create time when the actor lacks target-group editor access', async () => {
+      prisma.workflow.findUnique.mockResolvedValue(
+        makeWorkflow({
+          definition: screenshotDefinition({
+            actions: [{ type: 'move_to_owner', target: { kind: 'group', groupId: OTHER_CIRCLE_ID } }],
+          }),
+        }) as any,
+      );
+      prisma.workflowRun.count.mockResolvedValue(0);
+      circleMembership.requireOwnerRole.mockImplementation(async (_u, circleId) => {
+        if (circleId === OTHER_CIRCLE_ID) throw new ForbiddenException('not a member');
+        return { role: 'editor' as const, isSuperAdmin: false };
+      });
+
+      await expect(service.createRun(WORKFLOW_ID, {}, makeUser())).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects move_to_circle at create time when the actor lacks target-circle collaborator access', async () => {

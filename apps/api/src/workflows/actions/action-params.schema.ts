@@ -110,9 +110,28 @@ export const setLocationParamsSchema = z
   })
   .strict();
 
+/**
+ * move_to_circle (DEPRECATED name, RETRO-I6 #588): still valid in stored
+ * definitions, run snapshots and queued `workflow_execute_batch` payloads, and
+ * executed exactly as `move_to_owner` with the scope id `targetCircleId`. The
+ * builder no longer offers it.
+ */
 export const moveToCircleParamsSchema = z
   .object({ targetCircleId: z.string().uuid() })
   .strict();
+
+/** The library a `move_to_owner` action moves items into. */
+export const moveTargetSchema = z.discriminatedUnion('kind', [
+  // The ACTING user's own personal library (for an unattended run: the user
+  // whose permissions authorize it, i.e. the run's starter or the creator).
+  z.object({ kind: z.literal('me') }).strict(),
+  // A shared library: a platform group id (a former shared circle's id).
+  z.object({ kind: z.literal('group'), groupId: z.string().uuid() }).strict(),
+]);
+export type MoveTarget = z.infer<typeof moveTargetSchema>;
+
+/** move_to_owner (RETRO-I6 #588): the owner-scope name of move_to_circle. */
+export const moveToOwnerParamsSchema = z.object({ target: moveTargetSchema }).strict();
 
 export const rerunEnrichmentParamsSchema = z
   .object({
@@ -154,7 +173,7 @@ export const RESOLVE_GROUP_PERMISSION: WorkflowActionPermission = {
   extraPermForTrashVariant: 'media:delete',
 };
 
-/** move_to_circle: collaborator + media:write on BOTH source and target circle. */
+/** move_to_owner / move_to_circle: editor + media:write on BOTH the source and the target library. */
 export const MOVE_TO_CIRCLE_PERMISSION: WorkflowActionPermission = {
   circleRole: 'collaborator',
   systemPerms: ['media:write'],

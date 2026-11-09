@@ -156,7 +156,7 @@ export interface WorkflowFieldDescriptor {
  *     action to be schedulable (`hard_delete` → `['workflows.allowHardDelete']`).
  *   - `bothCircles` — when true the actor must satisfy `circleRole` +
  *     `systemPerms` on BOTH the source and the target circle
- *     (`move_to_circle`).
+ *     (`move_to_owner` and its alias `move_to_circle`).
  *   - `extraPermForTrashVariant` — an extra system permission required ONLY
  *     when the action's `action` param is `'trash'` (the burst/duplicate
  *     resolve actions require `'media:delete'` to trash, not to archive).
@@ -200,6 +200,11 @@ export interface WorkflowActionDescriptor {
   reversible: boolean;
   /** Advisory: does the action have outsized/expensive side effects? */
   highImpact: boolean;
+  /**
+   * A deprecated alias kept valid for stored definitions and queued payloads,
+   * but no longer offered by the builder (`move_to_circle`, RETRO-I6 #588).
+   */
+  deprecated?: boolean;
 }
 
 /**

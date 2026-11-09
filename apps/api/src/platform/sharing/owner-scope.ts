@@ -108,6 +108,15 @@ export class OwnerAccessService {
     return { kind: 'group', groupId: scopeId };
   }
 
+  /** The user's personal library id (their former personal circle), or `null` when they have none. */
+  async personalLibraryOf(userId: string): Promise<string | null> {
+    const row = await this.prisma.circle.findFirst({
+      where: { ownerId: userId, isPersonal: true },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
   /**
    * The caller's role in a scope (`admin` for the owner of a personal
    * library), or `null` when the scope is unknown or the caller holds none.
