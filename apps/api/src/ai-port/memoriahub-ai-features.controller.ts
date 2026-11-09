@@ -42,7 +42,8 @@ import {
 // `PUT|DELETE /api/admin/ai/providers/:provider/key`.
 // =============================================================================
 
-@ApiTags('Admin: MemoriaHub AI features')
+// The tag is the one the old /api/ai settings routes had (openapi/tags.ts).
+@ApiTags('AI Settings')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/memoriahub-ai')
 export class MemoriaHubAiFeaturesController {
@@ -107,6 +108,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/search')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({ summary: 'Set the provider and model for agentic search (Admin)' })
   async setSearch(@Body() dto: SetSearchFeatureDto, @CurrentUser('id') userId: string) {
     return this.aiSettings.setSearchFeature(dto, userId);
@@ -114,6 +116,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/tagging')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({ summary: 'Set the provider and model for photo and video AI tagging (Admin)' })
   async setTagging(@Body() dto: SetTaggingFeatureDto, @CurrentUser('id') userId: string) {
     return this.aiSettings.setTaggingFeature(dto, userId);
@@ -121,6 +124,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/embedding')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({ summary: 'Set the provider and model for semantic-search embeddings (Admin)' })
   async setEmbedding(@Body() dto: SetEmbeddingFeatureDto, @CurrentUser('id') userId: string) {
     return this.aiSettings.setEmbeddingFeature(dto, userId);
@@ -128,6 +132,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/enhance')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({
     summary: 'Set the provider and model for the AI Picture Enhancer (Admin)',
     description: 'A null provider or model clears the selection.',
@@ -138,6 +143,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/memories')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({
     summary: 'Set the provider and model for Memories titles (Admin)',
     description:
@@ -151,6 +157,7 @@ export class MemoriaHubAiFeaturesController {
 
   @Put('features/transcription')
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
+  @ApiResponse({ status: 200, description: 'The saved selection' })
   @ApiOperation({
     summary: 'Set the provider and model for video speech-to-text (Admin)',
     description:

@@ -410,8 +410,9 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
       {
         name: 'AI Settings',
         description:
-          'AI provider credentials (encrypted at rest), connectivity tests, model listing, and which ' +
-          'provider/model serves each AI feature.',
+          'Which provider and model serve each MemoriaHub AI feature (search, tagging, embeddings, the ' +
+          'Picture Enhancer, memory titles, speech-to-text), their model lists and connectivity tests ' +
+          '(`/api/admin/memoriahub-ai/*`, RETRO-E4). Provider keys are the AI Administration routes\' job.',
       },
       {
         name: 'AI Administration',
