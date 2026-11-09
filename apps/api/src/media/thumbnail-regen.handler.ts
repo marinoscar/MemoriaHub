@@ -10,7 +10,7 @@ import { thumbnailResultSchema } from '@memoriahub/enrichment-compute/dto';
 import { jobWriteScope, resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildThumbnailKey, thumbnailVersionForJob } from '../media-processing/thumbnail-key.util';
-import { StorageProcessingRecoveryService } from '../media-processing/recovery/storage-processing-recovery.service';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 
 /**
@@ -21,7 +21,7 @@ import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
  * Bulk thumbnail reruns must NOT loop the synchronous reprocess path, so each
  * item enqueues a `thumbnail_regen` job whose server path does the same work the
  * single-item endpoint does: resolve the MediaItem's StorageObject and call
- * StorageProcessingRecoveryService.reprocessObjectNow, inside the worker.
+ * ObjectReprocessService.reprocessNow, inside the worker.
  *
  * Graceful skip (missing/deleted item, no storageObject): log and return so the
  * job succeeds rather than retrying forever on a permanently-invalid target.
@@ -49,7 +49,7 @@ export class ThumbnailRegenHandler implements JobHandler, OnModuleInit {
     private readonly registry: JobHandlerRegistry,
     private readonly jobScope: JobScope,
     private readonly prisma: PrismaService,
-    private readonly recoveryService: StorageProcessingRecoveryService,
+    private readonly recoveryService: ObjectReprocessService,
     private readonly thumbnailNodePersistService: ThumbnailNodePersistService,
   ) {}
 
@@ -73,7 +73,7 @@ export class ThumbnailRegenHandler implements JobHandler, OnModuleInit {
       return;
     }
 
-    await withPlatformRateLimits(() => this.recoveryService.reprocessObjectNow(mediaItem.storageObject!));
+    await withPlatformRateLimits(() => this.recoveryService.reprocessNow(mediaItem.storageObject!));
 
     this.logger.log(
       `thumbnail_regen job ${job.id}: reprocessed StorageObject ${mediaItem.storageObject.id} for MediaItem ${context.mediaItemId}`,

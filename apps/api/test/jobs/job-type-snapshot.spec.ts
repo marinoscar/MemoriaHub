@@ -5,7 +5,7 @@
  * type string is what a worker dispatches on, so a handler may be re-homed or
  * rewritten but its string never changes and never disappears. The spec pins:
  *
- *   - the 35 type strings the app registers a handler for, plus the three
+ *   - the 37 type strings the app registers a handler for, plus the three
  *     notification types RETRO-D3 retired (still dispatching, as no-ops),
  *   - which of them are node-eligible (a handler that carries BOTH
  *     `nodeResultSchema` and `persistNodeResult`; eligibility is derived,
@@ -56,8 +56,8 @@ describe('job type snapshot (job type strings are permanent)', () => {
     for (const handler of handlers) registry.register(handler);
   });
 
-  it('registers exactly the 35 pinned type strings', () => {
-    expect(ALL_HANDLER_CLASSES).toHaveLength(35);
+  it('registers exactly the 37 pinned type strings', () => {
+    expect(ALL_HANDLER_CLASSES).toHaveLength(37);
     expect(registry.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 

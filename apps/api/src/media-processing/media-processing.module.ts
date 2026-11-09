@@ -12,8 +12,11 @@ import { ReverseGeocodeProcessor } from './processors/reverse-geocode.processor'
 import { ThumbnailProcessor } from './processors/thumbnail.processor';
 import { VideoProbeProcessor } from './processors/video-probe.processor';
 import { VisualHashProcessor } from './processors/visual-hash.processor';
-import { StorageProcessingRecoveryService } from './recovery/storage-processing-recovery.service';
-import { StorageProcessingRecoveryTask } from './recovery/storage-processing-recovery.task';
+import { ObjectReprocessService } from './recovery/object-reprocess.service';
+import { StorageRecoveryHandler } from './recovery/storage-recovery.handler';
+import { StorageRecoveryService } from './recovery/storage-recovery.service';
+import { StorageRecoveryTask } from './recovery/storage-recovery.task';
+import { StorageReprocessHandler } from './recovery/storage-reprocess.handler';
 import { ThumbnailPruneService } from './thumbnail-prune.service';
 
 // =============================================================================
@@ -30,7 +33,9 @@ import { ThumbnailPruneService } from './thumbnail-prune.service';
 //     platform's `STORAGE_PROVIDER` and `StorageProviderRouter`, for every
 //     feature that moves bytes;
 //   * `ThumbnailPruneService` (content-addressed thumbnails, #434) and the
-//     stuck-object recovery (RETRO-D1b moves it onto the platform's own).
+//     stuck-object recovery: the `media.storage.recover_stuck` and
+//     `media.storage.reprocess` jobs, an enqueue-only cron, and
+//     `ObjectReprocessService` for the one-object inline re-run (RETRO-D1b, #567).
 //
 // `ObjectProcessingModule` and `StorageProvidersModule` are the platform's static
 // modules, so the registry and the provider here are the same instances the
@@ -51,15 +56,19 @@ import { ThumbnailPruneService } from './thumbnail-prune.service';
     MediaProcessorsRegistrar,
     MediaObjectProcessingService,
     ThumbnailPruneService,
-    StorageProcessingRecoveryService,
-    StorageProcessingRecoveryTask,
+    ObjectReprocessService,
+    StorageRecoveryService,
+    StorageRecoveryHandler,
+    StorageReprocessHandler,
+    StorageRecoveryTask,
   ],
   exports: [
     StorageProvidersModule,
     StorageProviderResolver,
     MediaObjectProcessingService,
     ThumbnailPruneService,
-    StorageProcessingRecoveryService,
+    ObjectReprocessService,
+    StorageRecoveryService,
     ThumbnailProcessor,
   ],
 })
