@@ -84,7 +84,8 @@
     "20261108040000_cutover_enrichment_jobs_to_jobs",
     "20261108160000_rename_legacy_storage_migration_tables",
     "20261108200000_i2_circles_to_groups_ownership",
-    "20261109100000_i4_media_shares_to_link_grants"
+    "20261109100000_i4_media_shares_to_link_grants",
+    "20261109200000_i5_circle_invites_to_group_invites"
   ],
   "deviations": [
     {
@@ -201,7 +202,6 @@
         "CREATE TABLE \"album_items\" ( \"id\" UUID NOT NULL DEFAULT uuid_generate_v4(), \"album_id\" UUID NOT NULL, \"media_item_id\" UUID NOT NULL, \"added_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"album_items_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"albums\" ( \"id\" UUID NOT NULL DEFAULT uuid_generate_v4(), \"added_by_id\" UUID NOT NULL, \"name\" TEXT NOT NULL, \"description\" TEXT, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL, \"circle_id\" UUID NOT NULL, \"cover_media_item_id\" UUID, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"albums_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"burst_groups\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"status\" \"BurstGroupStatus\" NOT NULL DEFAULT 'pending', \"suggested_best_item_id\" UUID, \"media_count\" INTEGER NOT NULL DEFAULT 0, \"captured_at\" TIMESTAMPTZ(6), \"resolved_by_id\" UUID, \"resolved_at\" TIMESTAMPTZ(6), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"confidence\" DOUBLE PRECISION, \"kept_count\" INTEGER, \"removed_count\" INTEGER, \"resolution_action\" TEXT, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"burst_groups_pkey\" PRIMARY KEY (\"id\") );",
-        "CREATE TABLE \"circle_invites\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"email\" TEXT NOT NULL, \"role\" \"CircleRole\" NOT NULL DEFAULT 'viewer', \"added_by_id\" UUID, \"added_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"claimed_by_id\" UUID, \"claimed_at\" TIMESTAMPTZ(6), \"notes\" TEXT, CONSTRAINT \"circle_invites_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"circle_members\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"user_id\" UUID NOT NULL, \"role\" \"CircleRole\" NOT NULL DEFAULT 'viewer', \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"circle_members_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"circles\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"name\" TEXT NOT NULL, \"description\" TEXT, \"owner_id\" UUID NOT NULL, \"is_personal\" BOOLEAN NOT NULL DEFAULT false, \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT \"circles_pkey\" PRIMARY KEY (\"id\") );",
         "CREATE TABLE \"duplicate_groups\" ( \"id\" UUID NOT NULL DEFAULT gen_random_uuid(), \"circle_id\" UUID NOT NULL, \"status\" \"DuplicateGroupStatus\" NOT NULL DEFAULT 'pending', \"suggested_best_item_id\" UUID, \"media_count\" INTEGER NOT NULL DEFAULT 0, \"resolved_by_id\" UUID, \"resolved_at\" TIMESTAMPTZ(6), \"created_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updated_at\" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP, \"captured_at\" TIMESTAMPTZ(6), \"kept_count\" INTEGER, \"removed_count\" INTEGER, \"resolution_action\" TEXT, \"confidence\" DOUBLE PRECISION, \"org_id\" UUID NOT NULL DEFAULT mh_default_org_id(), \"owner_group_id\" UUID, \"owner_user_id\" UUID, CONSTRAINT \"duplicate_groups_pkey\" PRIMARY KEY (\"id\") );",
@@ -256,9 +256,6 @@
         "CREATE INDEX \"burst_groups_circle_id_status_resolution_action_idx\" ON \"burst_groups\"(\"circle_id\" ASC, \"status\" ASC, \"resolution_action\" ASC);",
         "CREATE INDEX \"burst_groups_owner_group_id_idx\" ON \"burst_groups\"(\"owner_group_id\" ASC);",
         "CREATE INDEX \"burst_groups_owner_user_id_idx\" ON \"burst_groups\"(\"owner_user_id\" ASC);",
-        "CREATE UNIQUE INDEX \"circle_invites_circle_id_email_key\" ON \"circle_invites\"(\"circle_id\" ASC, \"email\" ASC);",
-        "CREATE INDEX \"circle_invites_circle_id_idx\" ON \"circle_invites\"(\"circle_id\" ASC);",
-        "CREATE INDEX \"circle_invites_email_idx\" ON \"circle_invites\"(\"email\" ASC);",
         "CREATE INDEX \"circle_members_circle_id_idx\" ON \"circle_members\"(\"circle_id\" ASC);",
         "CREATE UNIQUE INDEX \"circle_members_circle_id_user_id_key\" ON \"circle_members\"(\"circle_id\" ASC, \"user_id\" ASC);",
         "CREATE INDEX \"circle_members_user_id_idx\" ON \"circle_members\"(\"user_id\" ASC);",
@@ -435,9 +432,6 @@
         "ALTER TABLE \"burst_groups\" ADD CONSTRAINT \"burst_groups_owner_user_id_fkey\" FOREIGN KEY (\"owner_user_id\") REFERENCES \"users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
         "ALTER TABLE \"burst_groups\" ADD CONSTRAINT \"burst_groups_resolved_by_id_fkey\" FOREIGN KEY (\"resolved_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
         "ALTER TABLE \"burst_groups\" ADD CONSTRAINT \"burst_groups_suggested_best_item_id_fkey\" FOREIGN KEY (\"suggested_best_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
-        "ALTER TABLE \"circle_invites\" ADD CONSTRAINT \"circle_invites_added_by_id_fkey\" FOREIGN KEY (\"added_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
-        "ALTER TABLE \"circle_invites\" ADD CONSTRAINT \"circle_invites_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
-        "ALTER TABLE \"circle_invites\" ADD CONSTRAINT \"circle_invites_claimed_by_id_fkey\" FOREIGN KEY (\"claimed_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE NO ACTION;",
         "ALTER TABLE \"circle_members\" ADD CONSTRAINT \"circle_members_circle_id_fkey\" FOREIGN KEY (\"circle_id\") REFERENCES \"circles\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"circle_members\" ADD CONSTRAINT \"circle_members_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE NO ACTION;",
         "ALTER TABLE \"circles\" ADD CONSTRAINT \"circles_owner_id_fkey\" FOREIGN KEY (\"owner_id\") REFERENCES \"users\"(\"id\") ON DELETE RESTRICT ON UPDATE NO ACTION;",
