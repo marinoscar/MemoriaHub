@@ -200,6 +200,24 @@ describeMaybeDb('RETRO-I2 circles to groups and content ownership (DB_GATED: rea
       expect({ badOrg: row.bad_org, notOne: row.not_one, wrong: row.wrong }).toEqual({ badOrg: 0, notOne: 0, wrong: 0 });
     });
 
+    it('rebuilds the HNSW indexes it dropped for the backfill exactly as platform.lock lists them', async () => {
+      const lock = JSON.parse(readFileSync(join(__dirname, '..', '..', 'prisma', 'platform.lock'), 'utf8')) as {
+        rawSqlIndexes: { name: string; definition: string }[];
+      };
+      const hnsw = lock.rawSqlIndexes.filter((index) => /USING hnsw/.test(index.definition));
+      expect(hnsw.map((index) => index.name).sort()).toEqual([
+        'faces_embedding_vec_archive_hnsw_idx',
+        'faces_embedding_vec_assigned_hnsw_idx',
+        'faces_embedding_vec_hnsw_idx',
+        'media_item_embedding_hnsw_idx',
+        'media_visual_embedding_hnsw_idx',
+      ]);
+      for (const index of hnsw) {
+        const row = await one(`SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1`, [index.name]);
+        expect([index.name, row?.indexdef]).toEqual([index.name, index.definition]);
+      }
+    });
+
     it('leaves circles, circle members and every circle_id untouched', async () => {
       expect((await one(`SELECT count(*)::int AS n FROM circles`)).n).toBe(7);
       expect((await one(`SELECT count(*)::int AS n FROM circle_members`)).n).toBe(9);

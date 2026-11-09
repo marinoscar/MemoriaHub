@@ -46,6 +46,11 @@
 
 BEGIN;
 SELECT set_config('app.rls_bypass', 'on', true);
+-- The HNSW rebuilds of step 2 run far faster when the graph fits in memory; raise the
+-- transaction's maintenance_work_mem to 256MB when the server's is lower (a larger
+-- database-level value set by the operator is kept; docs/runbooks/circles-to-groups.md §2).
+SELECT set_config('maintenance_work_mem', '256MB', true)
+WHERE pg_size_bytes(current_setting('maintenance_work_mem')) < pg_size_bytes('256MB');
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -258,6 +263,15 @@ CREATE POLICY "people_org_isolation" ON "people"
 ALTER TABLE "faces" ADD COLUMN IF NOT EXISTS "org_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_group_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_user_id" UUID;
+-- Rebuilt below, after the backfill; only when there is something to backfill (a replay keeps them).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "faces" WHERE "org_id" IS NULL) THEN
+    DROP INDEX IF EXISTS "faces_embedding_vec_hnsw_idx";
+    DROP INDEX IF EXISTS "faces_embedding_vec_archive_hnsw_idx";
+    DROP INDEX IF EXISTS "faces_embedding_vec_assigned_hnsw_idx";
+  END IF;
+END $$;
 UPDATE "faces" t
 SET "org_id" = mh_default_org_id(),
     "owner_group_id" = CASE WHEN c."is_personal" THEN NULL ELSE c."id" END,
@@ -284,6 +298,9 @@ ALTER TABLE "faces" DROP CONSTRAINT IF EXISTS "faces_owner_user_id_fkey";
 ALTER TABLE "faces" ADD CONSTRAINT "faces_owner_user_id_fkey" FOREIGN KEY ("owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX IF NOT EXISTS "faces_owner_group_id_idx" ON "faces"("owner_group_id");
 CREATE INDEX IF NOT EXISTS "faces_owner_user_id_idx" ON "faces"("owner_user_id");
+CREATE INDEX IF NOT EXISTS "faces_embedding_vec_hnsw_idx" ON "faces" USING hnsw ("embedding_vec" vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+CREATE INDEX IF NOT EXISTS "faces_embedding_vec_archive_hnsw_idx" ON "faces" USING hnsw ("embedding_vec" vector_cosine_ops) WHERE "person_id" IS NULL AND "hidden_at" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "faces_embedding_vec_assigned_hnsw_idx" ON "faces" USING hnsw ("embedding_vec" vector_cosine_ops) WITH (m = 16, ef_construction = 64) WHERE "person_id" IS NOT NULL AND "embedding_vec" IS NOT NULL;
 ALTER TABLE "faces" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "faces" FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "faces_org_isolation" ON "faces";
@@ -336,6 +353,13 @@ CREATE POLICY "memories_org_isolation" ON "memories"
 ALTER TABLE "media_item_embedding" ADD COLUMN IF NOT EXISTS "org_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_group_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_user_id" UUID;
+-- Rebuilt below, after the backfill; only when there is something to backfill (a replay keeps them).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "media_item_embedding" WHERE "org_id" IS NULL) THEN
+    DROP INDEX IF EXISTS "media_item_embedding_hnsw_idx";
+  END IF;
+END $$;
 UPDATE "media_item_embedding" t
 SET "org_id" = mh_default_org_id(),
     "owner_group_id" = CASE WHEN c."is_personal" THEN NULL ELSE c."id" END,
@@ -369,6 +393,7 @@ ALTER TABLE "media_item_embedding" DROP CONSTRAINT IF EXISTS "media_item_embeddi
 ALTER TABLE "media_item_embedding" ADD CONSTRAINT "media_item_embedding_owner_user_id_fkey" FOREIGN KEY ("owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX IF NOT EXISTS "media_item_embedding_owner_group_id_idx" ON "media_item_embedding"("owner_group_id");
 CREATE INDEX IF NOT EXISTS "media_item_embedding_owner_user_id_idx" ON "media_item_embedding"("owner_user_id");
+CREATE INDEX IF NOT EXISTS "media_item_embedding_hnsw_idx" ON "media_item_embedding" USING hnsw ("embedding" vector_cosine_ops);
 ALTER TABLE "media_item_embedding" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "media_item_embedding" FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "media_item_embedding_org_isolation" ON "media_item_embedding";
@@ -889,6 +914,13 @@ CREATE POLICY "workflow_runs_org_isolation" ON "workflow_runs"
 ALTER TABLE "media_visual_embedding" ADD COLUMN IF NOT EXISTS "org_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_group_id" UUID,
   ADD COLUMN IF NOT EXISTS "owner_user_id" UUID;
+-- Rebuilt below, after the backfill; only when there is something to backfill (a replay keeps them).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "media_visual_embedding" WHERE "org_id" IS NULL) THEN
+    DROP INDEX IF EXISTS "media_visual_embedding_hnsw_idx";
+  END IF;
+END $$;
 UPDATE "media_visual_embedding" t
 SET "org_id" = mh_default_org_id(),
     "owner_group_id" = CASE WHEN c."is_personal" THEN NULL ELSE c."id" END,
@@ -922,6 +954,7 @@ ALTER TABLE "media_visual_embedding" DROP CONSTRAINT IF EXISTS "media_visual_emb
 ALTER TABLE "media_visual_embedding" ADD CONSTRAINT "media_visual_embedding_owner_user_id_fkey" FOREIGN KEY ("owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX IF NOT EXISTS "media_visual_embedding_owner_group_id_idx" ON "media_visual_embedding"("owner_group_id");
 CREATE INDEX IF NOT EXISTS "media_visual_embedding_owner_user_id_idx" ON "media_visual_embedding"("owner_user_id");
+CREATE INDEX IF NOT EXISTS "media_visual_embedding_hnsw_idx" ON "media_visual_embedding" USING hnsw ("embedding" vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 ALTER TABLE "media_visual_embedding" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "media_visual_embedding" FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "media_visual_embedding_org_isolation" ON "media_visual_embedding";
