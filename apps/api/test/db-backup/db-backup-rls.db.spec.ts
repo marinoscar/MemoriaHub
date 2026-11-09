@@ -275,7 +275,7 @@ describe('db-backup cutover (real Postgres)', () => {
       try {
         // The promoted (older) database: only the older release, and it is current.
         await admin.query(
-          `INSERT INTO mh_legacy_android_app_releases (id, package_name, version_name, version_code, signing_sha256, file_sha256,
+          `INSERT INTO android_app_releases (id, package_name, version_name, version_code, signing_sha256, file_sha256,
              size_bytes, storage_key, is_current) VALUES ($1, $2, '1.0.1', 1, 'AA:BB', $3, 1000, $4, true)`,
           [older, pkg, 'f'.repeat(64), `android-releases/${older}.apk`],
         );
@@ -284,7 +284,7 @@ describe('db-backup cutover (real Postgres)', () => {
         for (const carried of exported) await admin.query(ANDROID_RELEASES_CARRY_OVER.reinsertSql, [JSON.stringify(carried)]);
 
         const { rows } = await admin.query(
-          'SELECT id::text, is_current, uploaded_by_id FROM mh_legacy_android_app_releases WHERE package_name = $1 ORDER BY version_code',
+          'SELECT id::text, is_current, uploaded_by_id FROM android_app_releases WHERE package_name = $1 ORDER BY version_code',
           [pkg],
         );
         expect(rows).toEqual([
