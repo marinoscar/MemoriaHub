@@ -1857,6 +1857,18 @@ describe('MediaService', () => {
       });
     });
 
+    it('deletes the album\'s grants in the same transaction (RETRO-I6, #588)', async () => {
+      const album = makeAlbum({ addedById: 'user-1' });
+      mockPrisma.album.findUnique.mockResolvedValue(album as any);
+      mockPrisma.album.delete.mockResolvedValue(album as any);
+
+      await service.deleteAlbum(album.id, 'user-1', ownPerms);
+
+      expect(mockPrisma.grant.deleteMany).toHaveBeenCalledWith({
+        where: { resourceType: 'album', resourceId: { in: [album.id] } },
+      });
+    });
+
     it('should NOT call mediaItem.delete (MediaItems are not deleted)', async () => {
       const album = makeAlbum({ addedById: 'user-1' });
       mockPrisma.album.findUnique.mockResolvedValue(album as any);

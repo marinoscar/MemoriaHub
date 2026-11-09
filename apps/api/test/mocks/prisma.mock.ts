@@ -63,5 +63,9 @@ export function mockPrismaTransaction(): void {
  * Creates a fresh mock PrismaService for unit tests
  */
 export function createMockPrismaService(): MockPrismaService {
-  return mockDeep<PrismaClient>();
+  const prisma = mockDeep<PrismaClient>();
+  // RETRO-I6 (#588): every media/album hard delete also deletes the record's grants through the
+  // sharing slice's `deleteGrantsForResources`, which reads `{ count }` off `grant.deleteMany`.
+  prisma.grant.deleteMany.mockResolvedValue({ count: 0 } as never);
+  return prisma;
 }

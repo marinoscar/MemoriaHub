@@ -69,7 +69,7 @@ describe.each([
 
 describe('MediaService.purgeMediaItemsBatched', () => {
   function build(deleteMany: jest.Mock, events: ReturnType<typeof webhookEvents>) {
-    const prisma = {
+    const prisma: Record<string, unknown> = {
       mediaItem: {
         findMany: jest.fn(async () => [
           { id: 'a', circleId: 'circle-1', storageObjectId: null, storageObject: null },
@@ -81,6 +81,9 @@ describe('MediaService.purgeMediaItemsBatched', () => {
         }),
       },
       storageObject: { deleteMany: jest.fn(async () => ({ count: 0 })) },
+      // RETRO-I6 (#588): the rows and their grants are deleted in one transaction.
+      grant: { deleteMany: jest.fn(async () => ({ count: 0 })) },
+      $transaction: jest.fn(async (fn: (tx: unknown) => unknown): Promise<unknown> => fn(prisma)),
     };
     const args: unknown[] = Array.from({ length: 12 }, () => ({}));
     args[0] = prisma;

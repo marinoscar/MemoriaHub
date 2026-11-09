@@ -4,6 +4,7 @@ import { MediaService } from '../../media/media.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
+import { deleteGrantsForResources } from '@marinoscar/platform-api/sharing';
 
 import { StorageProviderResolver } from '../storage/storage-provider.resolver';
 
@@ -276,9 +277,23 @@ export class MemoriaHubUserDataService {
     return {
       ...media,
       ...people,
-      albums: (await this.prisma.album.deleteMany({ where })).count,
+      albums: await this.deleteAlbumsWithGrants(where),
       workflows: (await this.prisma.workflow.deleteMany({ where })).count,
     };
+  }
+
+  /**
+   * Deletes albums and, in the same transaction, their grants (RETRO-I6, #588):
+   * a grant has no foreign key to its polymorphic record.
+   */
+  private async deleteAlbumsWithGrants(where: { circleId: { in: string[] } }): Promise<number> {
+    const ids = (await this.prisma.album.findMany({ where, select: { id: true } })).map((row) => row.id);
+    if (ids.length === 0) return 0;
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.album.deleteMany({ where: { id: { in: ids } } });
+      await deleteGrantsForResources(tx, 'album', ids);
+      return count;
+    });
   }
 
   /**
