@@ -56,7 +56,7 @@ describe('COLLECTIONS registry', () => {
       expect(primaryKeys).toEqual(['albums', 'people', 'places', 'memories', 'map']);
     });
 
-    it('declares the secondary three after the primary five, in the documented order: favorites, archive, trash', () => {
+    it('declares the secondary four after the primary five, in the documented order: favorites, shared, archive, trash', () => {
       const keys = COLLECTIONS.map((c) => c.key);
       expect(keys).toEqual([
         'albums',
@@ -65,6 +65,7 @@ describe('COLLECTIONS registry', () => {
         'memories',
         'map',
         'favorites',
+        'shared',
         'archive',
         'trash',
       ]);
@@ -78,10 +79,10 @@ describe('COLLECTIONS registry', () => {
       expect(groups.slice(firstSecondaryIndex).every((g) => g === 'secondary')).toBe(true);
     });
 
-    it('has exactly 8 entries — five primary, three secondary', () => {
-      expect(COLLECTIONS).toHaveLength(8);
+    it('has exactly 9 entries — five primary, four secondary (Shared with me, RETRO-I6 #588)', () => {
+      expect(COLLECTIONS).toHaveLength(9);
       expect(COLLECTIONS.filter((c) => c.group === 'primary')).toHaveLength(5);
-      expect(COLLECTIONS.filter((c) => c.group === 'secondary')).toHaveLength(3);
+      expect(COLLECTIONS.filter((c) => c.group === 'secondary')).toHaveLength(4);
     });
   });
 
@@ -150,9 +151,9 @@ describe('COLLECTIONS registry', () => {
       });
     });
 
-    it('Map, Favorites, Archive, and Trash carry no source — they are icon-only entries', () => {
+    it('Map, Favorites, Shared with me, Archive, and Trash carry no source — they are icon-only entries', () => {
       const sourceless = COLLECTIONS.filter((c) => c.source === null).map((c) => c.key);
-      expect(sourceless.sort()).toEqual(['archive', 'favorites', 'map', 'trash']);
+      expect(sourceless.sort()).toEqual(['archive', 'favorites', 'map', 'shared', 'trash']);
     });
   });
 });

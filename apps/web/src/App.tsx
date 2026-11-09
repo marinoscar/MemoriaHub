@@ -155,6 +155,7 @@ const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHub
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
 const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
 const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
+const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
 const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
 const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));
@@ -724,6 +725,8 @@ function AppRoutes() {
                 <Route path="/location-suggestion-runs/:runId" element={<LocationSuggestionRunRedirect />} />
                 <Route path="/review-runs/:runId" element={<ReviewRunPage />} />
                 <Route path="/archive" element={<ArchivePage />} />
+                {/* Shared with me (RETRO-I6, #588): records granted to the caller. */}
+                <Route path="/shared" element={<SharedWithMePage />} />
                 <Route path="/trash" element={<TrashPage />} />
                 <Route path="/trash/runs/:runId" element={<TrashEmptyRunPage />} />
                 {/* The map owns the whole content area: it asks the shell for the

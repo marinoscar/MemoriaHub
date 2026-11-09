@@ -49,6 +49,7 @@ export const DESTINATION_ROUTES: Record<DestinationKey, readonly string[]> = {
     '/archive',
     '/trash',
     '/tags',
+    '/shared',
   ],
   search: ['/search'],
   review: [

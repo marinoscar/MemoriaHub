@@ -21,7 +21,7 @@
  * cover art for a breakpoint that does not need it.
  *
  * Ordering and grouping here are authoritative for BOTH surfaces: the primary
- * five, then a divider, then Favorites / Archive / Trash. The secondary three
+ * five, then a divider, then Favorites / Shared with me / Archive / Trash. The secondary three
  * are lower-frequency, and Trash in particular should never read as a primary
  * browse target.
  */
@@ -35,6 +35,7 @@ import MapIcon from '@mui/icons-material/Map';
 import StarIcon from '@mui/icons-material/Star';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
+import FolderSharedIcon from '@mui/icons-material/FolderShared';
 
 /** Stable identifiers. These are also the `pinned` keys in `user_settings.navigation`. */
 export type CollectionKey =
@@ -45,7 +46,8 @@ export type CollectionKey =
   | 'map'
   | 'favorites'
   | 'archive'
-  | 'trash';
+  | 'trash'
+  | 'shared';
 
 /** Which cover/count source a card draws on, or `null` for an icon-only entry. */
 export type CollectionSource = 'albums' | 'people' | 'places' | 'memories' | null;
@@ -146,6 +148,18 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     // issue. Nothing is unreachable in the meantime — Favorites still
     // navigates and still filters correctly.
     path: '/media?favorite=1',
+    source: null,
+    flag: null,
+    group: 'secondary',
+  },
+  {
+    // Shared with me (RETRO-I6, #588): albums and photos granted to the caller
+    // through the sharing slice, from any library. Icon-only (no cover source):
+    // the page owns its own lists.
+    key: 'shared',
+    label: 'Shared with me',
+    Icon: FolderSharedIcon,
+    path: '/shared',
     source: null,
     flag: null,
     group: 'secondary',

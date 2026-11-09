@@ -386,6 +386,33 @@ export async function listAlbums(params?: AlbumQueryParams): Promise<AlbumListRe
   return api.get<AlbumListResponse>(`/media/albums${qs ? `?${qs}` : ''}`);
 }
 
+// ---------------------------------------------------------------------------
+// Shared with me (RETRO-I6, #588): records granted to the caller, across libraries
+// ---------------------------------------------------------------------------
+
+export interface SharedWithMeParams {
+  page?: number;
+  pageSize?: number;
+}
+
+function sharedQuery(params?: SharedWithMeParams): string {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.pageSize) sp.set('pageSize', String(params.pageSize));
+  const qs = sp.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** The media items shared with the caller through grants (`GET /api/media/shared-with-me`). */
+export async function listSharedMedia(params?: SharedWithMeParams): Promise<MediaListResponse> {
+  return api.get<MediaListResponse>(`/media/shared-with-me${sharedQuery(params)}`);
+}
+
+/** The albums shared with the caller through grants (`GET /api/media/albums/shared-with-me`). */
+export async function listSharedAlbums(params?: SharedWithMeParams): Promise<AlbumListResponse> {
+  return api.get<AlbumListResponse>(`/media/albums/shared-with-me${sharedQuery(params)}`);
+}
+
 export async function createAlbum(dto: CreateAlbumDto): Promise<Album> {
   return api.post<Album>('/media/albums', dto);
 }
