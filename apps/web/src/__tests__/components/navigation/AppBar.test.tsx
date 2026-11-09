@@ -86,7 +86,7 @@ describe('AppBar (packaged ShellAppBar binding)', () => {
   it('carries the logo, the circle chip, the bell and Upload at desktop width', () => {
     renderBar('/', 1280);
     expect(screen.getByRole('img', { name: APP_NAME })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Active circle: Family Circle/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Active library: Family Circle/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Notifications' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload media' })).toHaveTextContent('Upload');
     expect(screen.getByRole('button', { name: 'toggle theme' })).toBeInTheDocument();
@@ -106,7 +106,7 @@ describe('AppBar (packaged ShellAppBar binding)', () => {
 
   it('opening the circle chip does not navigate home (the brand click is contained)', () => {
     renderBar('/albums', 1280);
-    fireEvent.click(screen.getByRole('button', { name: /Active circle/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Active library/ }));
     expect(screen.getByTestId('location')).toHaveTextContent('/albums');
   });
 
@@ -114,7 +114,7 @@ describe('AppBar (packaged ShellAppBar binding)', () => {
     it('shows Back and the resolved title on an admin page, and drops chip / upload / search', () => {
       renderBar('/admin/settings/jobs', 390);
       expect(screen.getByText('Jobs')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Active circle/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Active library/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Upload media' })).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Search your photos')).not.toBeInTheDocument();
       // The bell stays in both treatments.

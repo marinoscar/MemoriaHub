@@ -33,6 +33,8 @@ const NOT_CARDS = new Set([
   '/admin/settings/nodes/:id/backup',
   '/admin/settings/backup',
   '/admin/settings/storage/providers',
+  // RETRO-I6 (#588): one group's page, reached from the Groups card's list.
+  '/settings/groups/:id',
 ]);
 
 /**

@@ -353,7 +353,15 @@ export const handlers = [
     return HttpResponse.json({ ...body, id: 'test-id', updatedAt: new Date().toISOString() });
   }),
 
-  // Circles endpoints
+  // Owner scopes (RETRO-I6, #588): "My library" and the caller's groups.
+  http.get(`${API_BASE}/users/me/library`, () => {
+    return HttpResponse.json({ data: { id: 'circle-1', name: 'My library' } });
+  }),
+  http.get(`${API_BASE}/groups`, () => {
+    return HttpResponse.json({ data: { items: [], page: 1, pageSize: 100, total: 0, totalPages: 0 } });
+  }),
+
+  // Circles endpoints (the admin Memories backfill picker)
   http.get(`${API_BASE}/circles`, () => {
     return HttpResponse.json({
       items: [

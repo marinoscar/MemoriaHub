@@ -126,7 +126,7 @@ describe('HomePage', () => {
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(
-        screen.getByText(/select or create a circle to get started/i),
+        screen.getByText(/select or create a library to get started/i),
       ).toBeInTheDocument();
     });
 
@@ -164,7 +164,7 @@ describe('HomePage', () => {
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
       expect(
-        screen.queryByText(/select or create a circle to get started/i),
+        screen.queryByText(/select or create a library to get started/i),
       ).not.toBeInTheDocument();
     });
 
@@ -192,14 +192,14 @@ describe('HomePage', () => {
   });
 
   // -------------------------------------------------------------------------
-  // d) "Go to Circles" link in no-circle alert
+  // d) "Go to Groups" link in no-circle alert
   // -------------------------------------------------------------------------
-  describe('Go to Circles link', () => {
-    it('renders a "Go to Circles" link in the no-circle alert', () => {
+  describe('Go to Groups link', () => {
+    it('renders a "Go to Groups" link in the no-circle alert', () => {
       setupNoCircle();
       render(<HomePage />, { wrapperOptions: { authenticated: true, user: mockUser } });
 
-      expect(screen.getByRole('link', { name: /go to circles/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /go to groups/i })).toBeInTheDocument();
     });
   });
 

@@ -32,6 +32,8 @@ describe('USER_SETTINGS_SECTIONS', () => {
       '/settings/webhooks',
       // RETRO-H2 (#596): the `Your data` group, before the Danger Zone.
       '/settings/data-export',
+      // RETRO-I6 (#588): the `Sharing` group (the platform groups page), before the Danger Zone.
+      '/settings/groups',
       // RETRO-H1 (#591): the pinned-last Danger Zone group.
       '/settings/danger-zone',
     ]);
@@ -51,19 +53,25 @@ describe('USER_SETTINGS_SECTIONS', () => {
     }
   });
 
-  it('gates only Media sync (media:read) and Webhooks (webhooks:read), each on its controller’s string', () => {
+  it('gates only Media sync (media:read), Webhooks (webhooks:read) and Groups (groups:read), each on its controller’s string', () => {
     const gated = cards.filter((c) => c.permission !== undefined);
     expect(gated.map((c) => [c.path, c.permission])).toEqual([
       ['/settings/media-sync', 'media:read'],
       ['/settings/webhooks', 'webhooks:read'],
+      ['/settings/groups', 'groups:read'],
     ]);
+  });
+
+  it('spreads the sharing slice’s groups card under Sharing, gated on groups:read', () => {
+    const sharing = USER_SETTINGS_SECTIONS.find((section) => section.label === 'Sharing')!;
+    expect(sharing.cards.map((c) => [c.path, c.permission])).toEqual([['/settings/groups', 'groups:read']]);
   });
 
   it('shows Media sync and Webhooks only to holders of their permission; every other card to everyone', () => {
     expect(titlesFor([])).not.toContain('Media sync');
     expect(titlesFor(['media:read'])).toContain('Media sync');
     expect(titlesFor(['webhooks:read'])).toContain('Webhooks');
-    expect(titlesFor([])).toHaveLength(cards.length - 2);
+    expect(titlesFor([])).toHaveLength(cards.length - 3);
   });
 
   it('routes every card under the hub', () => {

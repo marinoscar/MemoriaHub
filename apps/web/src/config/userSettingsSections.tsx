@@ -34,6 +34,7 @@ import { dangerZoneSettingsPage } from '@marinoscar/platform-web/user-data/ui';
 import { gettingStartedSettingsPage } from '@marinoscar/platform-web/onboarding/ui';
 import { webhooksUserSettingsSections } from '@marinoscar/platform-web/webhooks/ui';
 import { dataExportSettingsPage } from '@marinoscar/platform-web/exports/ui';
+import { groupsSettingsPage } from '@marinoscar/platform-web/sharing/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
 
@@ -136,6 +137,14 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
     // source (`user-data` on `user_settings:read`, MemoriaHub's on `media:read`, both every role).
     label: 'Your data',
     cards: [{ ...dataExportSettingsPage.card, Icon: dataExportSettingsPage.Icon }],
+  },
+  {
+    // RETRO-I6 (#588): `Groups` (`/settings/groups`), the sharing slice's card and pages as data:
+    // the shared libraries that were circles. `groups:read` is the string `GET /api/groups`
+    // enforces (every role holds it); create, rename, members and invites are gated inside the
+    // pages (`groups:write`, the group's admin role). Added BEFORE the pinned-last Danger Zone.
+    label: 'Sharing',
+    cards: [{ ...groupsSettingsPage.card, Icon: groupsSettingsPage.Icon }],
   },
   {
     // RETRO-H1 (#591). `Danger Zone`, PINNED LAST: the one documented exception to

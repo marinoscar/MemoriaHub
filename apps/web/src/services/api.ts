@@ -3,6 +3,8 @@ import {
   reportMaintenanceBlock,
 } from '@marinoscar/platform-web/host/headless';
 
+import { rewriteBody, rewriteEndpoint } from './ownerScopeParams';
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 interface RequestOptions extends RequestInit {
@@ -50,6 +52,8 @@ class ApiService {
     options: RequestOptions = {},
   ): Promise<T> {
     const { skipAuth = false, ...fetchOptions } = options;
+    // RETRO-I6 (#588): `circleId` goes out as `ownerGroupId` / `scope=me`.
+    endpoint = rewriteEndpoint(endpoint);
 
     const headers: HeadersInit = {
       ...fetchOptions.headers,
@@ -204,7 +208,7 @@ class ApiService {
     return this.request<T>(endpoint, {
       ...options,
       method: 'POST',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? JSON.stringify(rewriteBody(endpoint, body)) : undefined,
     });
   }
 
@@ -212,7 +216,7 @@ class ApiService {
     return this.request<T>(endpoint, {
       ...options,
       method: 'PUT',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? JSON.stringify(rewriteBody(endpoint, body)) : undefined,
     });
   }
 
@@ -220,7 +224,7 @@ class ApiService {
     return this.request<T>(endpoint, {
       ...options,
       method: 'PATCH',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? JSON.stringify(rewriteBody(endpoint, body)) : undefined,
     });
   }
 

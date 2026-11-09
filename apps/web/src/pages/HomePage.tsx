@@ -30,6 +30,7 @@ import { Link as RouterLink } from 'react-router-dom';
 import { useCircle } from '../hooks/useCircle';
 import { MediaGallery } from '../components/media/MediaGallery';
 import { MemoriesCarousel } from '../components/memories/MemoriesCarousel';
+import { HomeGroupInvites } from '../components/sharing/HomeGroupInvites';
 
 export default function HomePage() {
   const { activeCircle, activeCircleId, activeCircleRole, loading: circleLoading } = useCircle();
@@ -68,13 +69,16 @@ export default function HomePage() {
       {showNoCircle && (
         <Box sx={{ p: { xs: 2, md: 3 } }}>
           <Alert severity="info">
-            Select or create a circle to get started.{' '}
-            <Link component={RouterLink} to="/circles" underline="always">
-              Go to Circles
+            Select or create a library to get started.{' '}
+            <Link component={RouterLink} to="/settings/groups" underline="always">
+              Go to Groups
             </Link>
           </Alert>
         </Box>
       )}
+
+      {/* RETRO-I6 (#588): pending group invitations, self-hiding. */}
+      <HomeGroupInvites />
 
       {/* Memories row — self-hiding; see the header comment. */}
       <MemoriesCarousel circleId={activeCircleId} />

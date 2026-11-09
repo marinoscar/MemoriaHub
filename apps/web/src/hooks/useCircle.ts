@@ -1,2 +1,2 @@
-// Re-export useCircleContext as useCircle for convenience
-export { useCircleContext as useCircle } from '../contexts/CircleContext';
+// @deprecated RETRO-I6 (#588): read `useOwnerScope` (hooks/useOwnerScope.ts). Same value.
+export { useOwnerScope as useCircle } from '../contexts/OwnerScopeContext';

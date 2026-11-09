@@ -244,9 +244,9 @@ export default function MemoriesPage() {
     return (
       <Box sx={{ p: { xs: 2, md: 3 } }}>
         <Alert severity="info">
-          Select a circle to see its memories.{' '}
-          <Link component={RouterLink} to="/circles" underline="always">
-            Go to Circles
+          Select a library to see its memories.{' '}
+          <Link component={RouterLink} to="/settings/groups" underline="always">
+            Go to Groups
           </Link>
         </Alert>
       </Box>

@@ -35,7 +35,7 @@ import { APP_NAVIGATION } from '../../config/shell';
 import { useCircle } from '../../hooks/useCircle';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { UserMenu } from './UserMenu';
-import { CircleChip } from './CircleChip';
+import { OwnerScopeChip } from './OwnerScopeChip';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { TopbarSearch } from '../search/TopbarSearch';
 import { MediaUploadDialog } from '../media/MediaUploadDialog';
@@ -66,7 +66,7 @@ function Brand() {
         {APP_NAME}
       </Typography>
       <Box onClick={stopPropagation} sx={{ display: 'flex', minWidth: 0, cursor: 'default' }}>
-        <CircleChip />
+        <OwnerScopeChip />
       </Box>
     </Box>
   );
