@@ -60,6 +60,7 @@ import { userDataModule } from './platform/user-data/user-data.config';
 import { onboardingModule } from './platform/onboarding/onboarding.config';
 import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
 import { sharingModule } from './platform/sharing/sharing.config';
+import { PersonalLibraryModule } from './platform/sharing/personal-library.controller';
 import { exportsModule } from './platform/exports/exports.config';
 
 import configuration from './config/configuration';
@@ -214,6 +215,8 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // Public shares are link grants since RETRO-I4; circles keep deciding the rest of access
     // until RETRO-I3/I5 (mapping: docs/platform-adoption/circles-to-groups.md). Binding: `platform/sharing/`.
     sharingModule,
+    // RETRO-I6 (#588): GET /api/users/me/library, "My library" in the web owner switcher.
+    PersonalLibraryModule,
     // Data export (RETRO-H2, #596): @marinoscar/platform-api/exports. "Download your data"
     // (`/api/exports`, the `export.run` / `export.purge` jobs, the daily expiry cron): the
     // platform's `user-data` and `org-data` sources plus MemoriaHub's media, albums, memories and

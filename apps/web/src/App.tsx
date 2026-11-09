@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { CircleProvider } from './contexts/CircleContext';
+import { OwnerScopeProvider } from './contexts/OwnerScopeContext';
 // The packaged shell theme (RETRO-F1, #571): `ShellRoot` is the theme-mode
 // provider plus MUI's ThemeProvider and CssBaseline, under the same
 // `theme_mode` key.
@@ -58,8 +58,14 @@ const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
 const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
-const CircleListPage = lazy(() => import('./pages/Circles/CircleListPage'));
-const CircleDetailPage = lazy(() => import('./pages/Circles/CircleDetailPage'));
+// RETRO-I6 (#588): circles are platform groups; the packaged pages manage them.
+const GroupsPage = lazy(() =>
+  import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.GroupsPage })),
+);
+const GroupDetailPage = lazy(() =>
+  import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.GroupDetailPage })),
+);
+const LegacyCircleRedirect = lazy(() => import('./pages/LegacyCircleRedirect'));
 const DbBackupPage = lazy(() => import('./platform/db-backup/DbBackupPage'));
 // RETRO-H1 (#591): the platform user-data slice's two pages. The Danger Zone deletes the
 // caller's own data (`/api/user-data/*`, `user_settings:write`, every role); the factory
@@ -258,8 +264,27 @@ function AppRoutes() {
                     still resolves. */}
                 <Route path="/profile" element={<Navigate to="/settings/profile" replace />} />
                 <Route path="/media" element={<MediaLibraryPage />} />
-                <Route path="/circles" element={<CircleListPage />} />
-                <Route path="/circles/:id" element={<CircleDetailPage />} />
+                {/* RETRO-I6 (#588): shared libraries are platform groups, managed on the
+                    packaged pages behind `groups:read` (the string `/api/groups` enforces;
+                    writes are gated inside the pages). The former circle URLs redirect. */}
+                <Route
+                  path="/settings/groups"
+                  element={
+                    <RequirePermission permission="groups:read" fallback={<Navigate to="/settings" replace />}>
+                      <GroupsPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route
+                  path="/settings/groups/:id"
+                  element={
+                    <RequirePermission permission="groups:read" fallback={<Navigate to="/settings" replace />}>
+                      <GroupDetailPage />
+                    </RequirePermission>
+                  }
+                />
+                <Route path="/circles" element={<Navigate to="/settings/groups" replace />} />
+                <Route path="/circles/:id" element={<LegacyCircleRedirect />} />
                 {/* Settings Hub */}
                 <Route path="/admin/settings" element={<SettingsHubPage />} />
                 <Route
@@ -733,9 +758,9 @@ export default function App() {
           <IdentityWebAdaptersProvider adapters={appIdentityAdapters}>
             <JobsWebAdaptersProvider adapters={appJobsAdapters}>
               <TelemetryWebAdaptersProvider adapters={appTelemetryAdapters}>
-                <CircleProvider>
+                <OwnerScopeProvider>
                   <AppRoutes />
-                </CircleProvider>
+                </OwnerScopeProvider>
               </TelemetryWebAdaptersProvider>
             </JobsWebAdaptersProvider>
           </IdentityWebAdaptersProvider>

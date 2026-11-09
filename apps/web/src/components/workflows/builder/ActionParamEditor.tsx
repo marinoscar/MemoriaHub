@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import {
   TextField,
   Box,
@@ -17,10 +16,9 @@ import {
 } from '@mui/material';
 import { LocationPickerMap } from '../../media/LocationPickerMap';
 import { usePeople } from '../../../hooks/usePeople';
-import { listCircles } from '../../../services/circles';
+import { useCircle } from '../../../hooks/useCircle';
 import type { ExploreItem } from '../../../services/media';
 import type { Album } from '../../../types/media';
-import type { Circle } from '../../../types/circles';
 import type { WorkflowActionInstance } from '../../../types/workflows';
 import { paramKindFor, RERUN_KINDS } from '../../../constants/workflowActionMeta';
 
@@ -51,18 +49,10 @@ export function ActionParamEditor({
   const { data: peopleData } = usePeople(
     kind === 'person' ? circleId : null,
   );
-  const [circles, setCircles] = useState<Circle[]>([]);
-
-  useEffect(() => {
-    if (kind !== 'circle') return;
-    let active = true;
-    void listCircles()
-      .then((resp) => active && setCircles(resp.items))
-      .catch(() => active && setCircles([]));
-    return () => {
-      active = false;
-    };
-  }, [kind]);
+  // RETRO-I6 (#588): the destination libraries are the owner scopes ("My library" and the
+  // caller's groups) where the caller may write; the API re-checks editor on BOTH scopes.
+  const { circles: scopes } = useCircle();
+  const circles = scopes.filter((c) => c.memberRole === 'collaborator' || c.memberRole === 'circle_admin');
 
   switch (kind) {
     case 'none':

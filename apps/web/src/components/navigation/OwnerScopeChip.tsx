@@ -1,5 +1,8 @@
 /**
- * CircleChip — the active-circle switcher, promoted into the top bar.
+ * OwnerScopeChip — the active-library switcher in the top bar (RETRO-I6, #588:
+ * formerly `CircleChip`). It lists "My library" and the caller's groups
+ * (`OwnerScopeContext`) and links to the packaged groups page
+ * (`/settings/groups`).
  *
  * Spec §3.3 / §4.1: the active circle is the app's most important state and was
  * previously two taps deep inside the avatar menu (open avatar → pick circle).
@@ -17,11 +20,11 @@
 import { useState, useCallback } from 'react';
 import { Box, Button, Divider, ListItemText, Menu, MenuItem } from '@mui/material';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import GroupWorkIcon from '@mui/icons-material/GroupWork';
+import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import { useNavigate } from 'react-router-dom';
 import { useCircle } from '../../hooks/useCircle';
 
-export function CircleChip() {
+export function OwnerScopeChip() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const { circles, activeCircle, setActiveCircle } = useCircle();
   const navigate = useNavigate();
@@ -44,7 +47,7 @@ export function CircleChip() {
 
   const handleManage = useCallback(() => {
     handleClose();
-    navigate('/circles');
+    navigate('/settings/groups');
   }, [handleClose, navigate]);
 
   // Before CircleContext resolves (and for a user who somehow has no circle)
@@ -60,8 +63,8 @@ export function CircleChip() {
         endIcon={<ArrowDropDownIcon />}
         aria-haspopup="true"
         aria-expanded={open ? 'true' : undefined}
-        aria-controls={open ? 'circle-chip-menu' : undefined}
-        aria-label={`Active circle: ${activeCircle.name}. Change circle.`}
+        aria-controls={open ? 'owner-scope-menu' : undefined}
+        aria-label={`Active library: ${activeCircle.name}. Change library.`}
         sx={{
           // `minWidth: 0` + `flexShrink: 1` + a capped `maxWidth` are the three
           // halves of one rule: a long circle name must never widen the
@@ -100,7 +103,7 @@ export function CircleChip() {
       </Button>
 
       <Menu
-        id="circle-chip-menu"
+        id="owner-scope-menu"
         anchorEl={anchorEl}
         open={open}
         onClose={handleClose}
@@ -126,8 +129,8 @@ export function CircleChip() {
         <Divider />
 
         <MenuItem onClick={handleManage}>
-          <ListItemText primary="Manage Circles" />
-          <GroupWorkIcon fontSize="small" sx={{ ml: 2, color: 'text.secondary' }} />
+          <ListItemText primary="Manage groups" />
+          <GroupsOutlinedIcon fontSize="small" sx={{ ml: 2, color: 'text.secondary' }} />
         </MenuItem>
       </Menu>
     </>

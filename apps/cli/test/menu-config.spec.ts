@@ -128,7 +128,7 @@ describe('menu tree (platform helpers)', () => {
     it('within Settings when logged in, all settings leaves are visible', () => {
       expect(labels(visible('settings', true))).toEqual([
         'Manage folders',
-        'Manage circles',
+        'Manage groups',
         'App settings',
         'Login / Change server',
         'Android app (build, publish, releases)',

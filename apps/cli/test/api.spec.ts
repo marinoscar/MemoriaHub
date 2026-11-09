@@ -147,38 +147,50 @@ describe('ApiClient putPart (issue #506)', () => {
   });
 });
 
-describe('ApiClient listCircles', () => {
-  it('unwraps the paginated { data: { items } } envelope to an array', async () => {
-    mockFetchSequence([
+describe('ApiClient listOwnerScopes (RETRO-I6, #588)', () => {
+  it('lists "My library" first, then the groups by name', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(JSON.stringify({ data: { id: 'lib-1', name: 'My library' } }), { status: 200 }),
       () =>
         new Response(
-          JSON.stringify({
-            data: { items: [{ id: 'c1' }, { id: 'c2' }], total: 2 },
-          }),
+          JSON.stringify({ data: { items: [{ id: 'g2', name: 'Zeta' }, { id: 'g1', name: 'Alpha' }], total: 2 } }),
           { status: 200 },
         ),
     ]);
     const api = makeClient();
-    const circles = await api.listCircles();
-    expect(Array.isArray(circles)).toBe(true);
-    expect(circles.map((c) => c.id)).toEqual(['c1', 'c2']);
+    const scopes = await api.listCircles();
+    expect(scopes).toEqual([
+      { id: 'lib-1', name: 'My library', isPersonal: true },
+      { id: 'g1', name: 'Alpha', isPersonal: false },
+      { id: 'g2', name: 'Zeta', isPersonal: false },
+    ]);
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toEqual([
+      'https://example.test/api/users/me/library',
+      'https://example.test/api/groups?scope=mine&pageSize=100',
+    ]);
   });
 
-  it('tolerates a bare array response', async () => {
-    mockFetchSequence([
-      () => new Response(JSON.stringify({ data: [{ id: 'c1' }] }), { status: 200 }),
+  it('falls back to GET /api/circles on a server without /api/users/me/library', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 }),
+      () =>
+        new Response(JSON.stringify({ data: { items: [{ id: 'c1', name: 'Mine', isPersonal: true }], total: 1 } }), {
+          status: 200,
+        }),
     ]);
     const api = makeClient();
-    const circles = await api.listCircles();
-    expect(circles.map((c) => c.id)).toEqual(['c1']);
+    await expect(api.listOwnerScopes()).resolves.toEqual([{ id: 'c1', name: 'Mine', isPersonal: true }]);
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://example.test/api/circles');
   });
 
-  it('returns an empty array when items is absent', async () => {
+  it('omits "My library" when the account has none', async () => {
     mockFetchSequence([
+      () => new Response(JSON.stringify({ data: { id: null, name: 'My library' } }), { status: 200 }),
       () => new Response(JSON.stringify({ data: { total: 0 } }), { status: 200 }),
     ]);
     const api = makeClient();
-    await expect(api.listCircles()).resolves.toEqual([]);
+    await expect(api.listOwnerScopes()).resolves.toEqual([]);
   });
 });
 

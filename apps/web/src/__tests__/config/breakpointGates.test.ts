@@ -72,7 +72,7 @@ const CHROME = [
   'components/navigation/BottomNav.tsx',
   'components/navigation/NavContextPane.tsx',
   'components/navigation/UserMenu.tsx',
-  'components/navigation/CircleChip.tsx',
+  'components/navigation/OwnerScopeChip.tsx',
   'config/shell.ts',
   'config/destinations.ts',
   'config/adminSections.tsx',

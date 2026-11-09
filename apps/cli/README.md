@@ -172,7 +172,7 @@ Since 1.5 the menu, the navigation and every screen run on the platform TUI fram
        Date Inference ▸
   7. Settings ▸
        Manage folders
-       Manage circles
+       Manage groups 
        App settings
        Login / Change server
        Android app (build, publish, releases)
@@ -352,7 +352,7 @@ Defaults of the old installer are preserved for `deploy install`: `--root /opt/i
 | `import <folder>` | `-r, --recursive` / `--dry-run` | One-shot import alias for `sync <folder>` (legacy back-compat) | — |
 | `menu` | (none) | Launch the interactive terminal UI (requires a TTY) | — |
 
-`circles list` / `circles use <id>` (set the active circle for uploads) are available as direct commands and are reachable interactively via Settings ▸ Manage circles.
+`groups list` / `groups use <id|me>` (set the library uploads go to: `me` is your personal library, "My library"; any other id is one of your groups, the shared libraries that were circles) are available as direct commands and are reachable interactively via Settings ▸ Manage groups. Since CLI 1.5.2 (RETRO-I6, [#588](https://github.com/marinoscar/MemoriaHub/issues/588)) `circles list|use` is a hidden alias that prints a deprecation notice; it will be removed in a later release. A group's id is the former circle's id, so the stored active library and every registered folder keep uploading to the same owner, with no local migration.
 
 ---
 

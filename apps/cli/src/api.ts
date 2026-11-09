@@ -22,6 +22,10 @@ export interface ApiClientOptions {
   cooldownGate?: CooldownGate;
 }
 
+/** The display name of the personal library (RETRO-I6, #588). */
+export const MY_LIBRARY_NAME = 'My library';
+
+/** A library the caller may upload into: their personal library or a group (RETRO-I6, #588). */
 export interface Circle {
   id: string;
   name: string;
@@ -808,10 +812,45 @@ export class ApiClient {
     });
   }
 
-  async listCircles(): Promise<Circle[]> {
+  /**
+   * The caller's libraries (RETRO-I6, #588): "My library" (`GET /api/users/me/library`,
+   * the personal library, `isPersonal: true`) then the caller's groups
+   * (`GET /api/groups?scope=mine`, the shared libraries that were circles; a group's id IS
+   * the former circle id). The ids are the same scope ids the CLI has always stored per
+   * folder and in `activeCircleId`, so existing folders keep uploading to the same owner.
+   *
+   * A server older than RETRO-I6 has no `/api/users/me/library` (404): the list then comes
+   * from the legacy `GET /api/circles`, unchanged.
+   */
+  async listOwnerScopes(): Promise<Circle[]> {
+    let library: { id: string | null; name?: string } | null;
+    try {
+      library = await this.get<{ id: string | null; name?: string }>('/api/users/me/library');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return this.listLegacyCircles();
+      throw err;
+    }
+    const groups = await this.get<{ items?: { id: string; name: string }[] } | { id: string; name: string }[]>(
+      '/api/groups?scope=mine&pageSize=100',
+    );
+    const items = Array.isArray(groups) ? groups : groups?.items ?? [];
+    const scopes: Circle[] = [];
+    if (library?.id) scopes.push({ id: library.id, name: MY_LIBRARY_NAME, isPersonal: true });
+    for (const g of [...items].sort((a, b) => a.name.localeCompare(b.name))) {
+      scopes.push({ id: g.id, name: g.name, isPersonal: false });
+    }
+    return scopes;
+  }
+
+  /** @deprecated RETRO-I6 (#588): the libraries are {@link listOwnerScopes}; same shape. */
+  listCircles(): Promise<Circle[]> {
+    return this.listOwnerScopes();
+  }
+
+  /** The pre-RETRO-I6 list (`GET /api/circles`), for an older server. */
+  private async listLegacyCircles(): Promise<Circle[]> {
     // GET /api/circles returns a paginated envelope: { data: { items, total, … } }.
     // parseOk() unwraps `data`, leaving the pagination object — so pull `items`.
-    // Tolerate a bare array too, in case the endpoint is ever simplified.
     const res = await this.get<Circle[] | { items?: Circle[] }>('/api/circles');
     if (Array.isArray(res)) return res;
     return res?.items ?? [];

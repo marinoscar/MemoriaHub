@@ -11,7 +11,7 @@ import { convertCommand } from './commands/convert.js';
 import { dateInferCommand } from './commands/date-infer.js';
 import { statusCommand } from './commands/status.js';
 import { foldersCommand } from './commands/folders.js';
-import { circlesCommand } from './commands/circles.js';
+import { circlesAliasCommand, groupsCommand } from './commands/groups.js';
 import { retryCommand } from './commands/retry.js';
 import { settingsCommand } from './commands/settings.js';
 import { backupCommand } from './commands/backup.js';
@@ -96,7 +96,7 @@ export const APP_COMMAND_FACTORIES: readonly (() => Command)[] = [
   dateInferCommand,
   statusCommand,
   foldersCommand,
-  circlesCommand,
+  groupsCommand,
   retryCommand,
   settingsCommand,
   backupCommand,
@@ -113,6 +113,11 @@ function register(factory: () => Command): CliCommandRegistration {
   };
 }
 
+/** `memoriahub circles`, the hidden one-release alias of `groups` (RETRO-I6, #588). */
+const CIRCLES_ALIAS: CliCommandRegistration = (program) => {
+  program.addCommand(circlesAliasCommand(), { hidden: true });
+};
+
 export const APP_CLI_OPTIONS: CreateCliOptions = {
   identity: {
     name: 'memoriahub',
@@ -123,7 +128,7 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
   version: readVersion(),
   // `android` is the platform's group since RETRO-D5 (#586), registered after the 1.3 commands
   // (so `--help` lists it after `menu`); see extensions/android.ts.
-  extraCommands: [...APP_COMMAND_FACTORIES.map(register), APP_ANDROID_COMMAND],
+  extraCommands: [...APP_COMMAND_FACTORIES.map(register), CIRCLES_ALIAS, APP_ANDROID_COMMAND],
   // The TUI: MemoriaHub's menu tree, screens, header chip and shared data (RETRO-F4, #582).
   tuiScreens: [...APP_TUI_SCREENS],
   tuiMenu: [...APP_TUI_MENU],

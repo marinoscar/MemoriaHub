@@ -119,7 +119,7 @@ export const APP_TUI_MENU: readonly TuiMenuNode[] = [
 
   section('settings', undefined, 'Settings', 8),
   entry('folders', 'settings', 'Manage folders', 1, 'folders'),
-  entry('circles', 'settings', 'Manage circles', 2, 'circles'),
+  entry('circles', 'settings', 'Manage groups', 2, 'circles'),
   entry('app-settings', 'settings', 'App settings', 3, 'app-settings'),
   // Root hides Login once logged in; it stays reachable here to re-authenticate or switch server.
   entry('login-settings', 'settings', 'Login / Change server', 4, 'memoriahub-login'),

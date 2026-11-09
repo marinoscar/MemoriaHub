@@ -47,7 +47,7 @@ jest.unstable_mockModule('../../src/config.js', () => ({
 // Dynamic imports AFTER mocks
 // ---------------------------------------------------------------------------
 const { render, cleanup } = await import('ink-testing-library');
-const { CircleManager } = await import('../../src/tui/CircleManager.js');
+const { GroupManager } = await import('../../src/tui/GroupManager.js');
 
 const BASE_CONFIG = { serverUrl: 'https://test.server', pat: 'pat-123' };
 
@@ -56,13 +56,13 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-describe('CircleManager — set active circle', () => {
+describe('GroupManager — set active circle', () => {
   it('persists AND propagates the selected circle to the parent', async () => {
     mockListCircles.mockResolvedValue(FAKE_CIRCLES);
     const onConfigChange = jest.fn();
 
     const { lastFrame, stdin } = render(
-      <CircleManager
+      <GroupManager
         config={BASE_CONFIG}
         onConfigChange={onConfigChange}
         onBack={() => {}}
@@ -87,7 +87,7 @@ describe('CircleManager — set active circle', () => {
     const onConfigChange = jest.fn();
 
     const { lastFrame, stdin } = render(
-      <CircleManager
+      <GroupManager
         config={BASE_CONFIG}
         onConfigChange={onConfigChange}
         onBack={() => {}}
@@ -121,7 +121,7 @@ describe('CircleManager — set active circle', () => {
     mockListCircles.mockResolvedValue(FAKE_CIRCLES);
 
     const { lastFrame, stdin } = render(
-      <CircleManager config={BASE_CONFIG} onBack={() => {}} />,
+      <GroupManager config={BASE_CONFIG} onBack={() => {}} />,
     );
 
     await waitForFrame(lastFrame, (f) => f.includes('Personal'));

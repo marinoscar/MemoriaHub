@@ -272,10 +272,10 @@ export function LinkedPersonCard({
     if (!hasCircles) {
       return (
         <Alert severity="info">
-          You are not a member of any circle yet, so there are no people to link
+          You are not a member of any library yet, so there are no people to link
           to.{' '}
-          <Link component={RouterLink} to="/circles">
-            Create or join a circle
+          <Link component={RouterLink} to="/settings/groups">
+            Create or join a group
           </Link>{' '}
           to get started.
         </Alert>

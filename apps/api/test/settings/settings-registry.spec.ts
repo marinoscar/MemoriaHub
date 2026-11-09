@@ -38,7 +38,7 @@ const SYSTEM_KEYS = [
 ];
 const USER_KEYS = [
   'dataTables', 'navigation', 'notifications', // the platform's (notifications: RETRO-D3)
-  'search', 'memories', 'timezone', 'memoriahubNotifications', 'onboarding',
+  'search', 'memories', 'timezone', 'memoriahubNotifications', 'onboarding', 'activeOwnerScope',
 ];
 
 describe('settings registry', () => {

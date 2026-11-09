@@ -30,6 +30,9 @@ export const mockPrisma = prismaMock;
 export function installOrgScopeMocks(mock: any = prismaMock): void {
   mock.forOrg.mockImplementation(() => mock);
   mock.runInOrg.mockImplementation((_orgId: string, fn: (tx: unknown) => unknown) => fn(mock));
+  // RETRO-I6 (#588): media and album hard deletes also delete the record's grants through the
+  // sharing slice's `deleteGrantsForResources`, which reads `{ count }` off `grant.deleteMany`.
+  mock.grant.deleteMany.mockResolvedValue({ count: 0 });
 }
 
 installOrgScopeMocks();
@@ -63,5 +66,9 @@ export function mockPrismaTransaction(): void {
  * Creates a fresh mock PrismaService for unit tests
  */
 export function createMockPrismaService(): MockPrismaService {
-  return mockDeep<PrismaClient>();
+  const prisma = mockDeep<PrismaClient>();
+  // RETRO-I6 (#588): every media/album hard delete also deletes the record's grants through the
+  // sharing slice's `deleteGrantsForResources`, which reads `{ count }` off `grant.deleteMany`.
+  prisma.grant.deleteMany.mockResolvedValue({ count: 0 } as never);
+  return prisma;
 }

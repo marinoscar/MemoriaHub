@@ -1,5 +1,5 @@
 /**
- * Tests for CircleChip (issue #389, epic #388, spec §3.3/§4.1).
+ * Tests for OwnerScopeChip (issue #389, epic #388, spec §3.3/§4.1).
  *
  * The active-circle switcher promoted into the top bar. `useCircle` is
  * mocked directly (the same pattern AppBar.test.tsx and the former
@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
-import { CircleChip } from '../../../components/navigation/CircleChip';
+import { OwnerScopeChip } from '../../../components/navigation/OwnerScopeChip';
 import type { Circle } from '../../../types/circles';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ function makeCircleDefaults(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('CircleChip', () => {
+describe('OwnerScopeChip', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseCircle.mockReturnValue(makeCircleDefaults());
@@ -91,7 +91,7 @@ describe('CircleChip', () => {
     it('renders null when there is no active circle', () => {
       mockUseCircle.mockReturnValue(makeCircleDefaults({ activeCircle: null, activeCircleId: null }));
 
-      const { container } = render(<CircleChip />);
+      const { container } = render(<OwnerScopeChip />);
 
       expect(container).toBeEmptyDOMElement();
     });
@@ -103,35 +103,35 @@ describe('CircleChip', () => {
 
   describe('rendering', () => {
     it('renders the active circle name as its visible label', () => {
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
       expect(screen.getByText('Personal Library')).toBeInTheDocument();
     });
 
     it('renders as a real <button>, not a div-with-role', () => {
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      const chip = screen.getByRole('button', { name: /active circle/i });
+      const chip = screen.getByRole('button', { name: /active library/i });
       expect(chip.tagName).toBe('BUTTON');
     });
 
     it('sets an accessible name that carries the full circle name', () => {
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
       expect(
-        screen.getByRole('button', { name: 'Active circle: Personal Library. Change circle.' }),
+        screen.getByRole('button', { name: 'Active library: Personal Library. Change library.' }),
       ).toBeInTheDocument();
     });
 
     it('re-renders the accessible name when the active circle changes', () => {
-      const { rerender } = render(<CircleChip />);
-      expect(screen.getByRole('button', { name: /Active circle: Personal Library/ })).toBeInTheDocument();
+      const { rerender } = render(<OwnerScopeChip />);
+      expect(screen.getByRole('button', { name: /Active library: Personal Library/ })).toBeInTheDocument();
 
       mockUseCircle.mockReturnValue(makeCircleDefaults({ activeCircle: mockCircle2, activeCircleId: 'circle-2' }));
-      rerender(<CircleChip />);
+      rerender(<OwnerScopeChip />);
 
-      expect(screen.getByRole('button', { name: /Active circle: Family Circle/ })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Active circle: Personal Library/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Active library: Family Circle/ })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Active library: Personal Library/ })).not.toBeInTheDocument();
     });
   });
 
@@ -141,18 +141,18 @@ describe('CircleChip', () => {
 
   describe('menu interaction', () => {
     it('is closed by default (aria-expanded absent)', () => {
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      const chip = screen.getByRole('button', { name: /active circle/i });
+      const chip = screen.getByRole('button', { name: /active library/i });
       expect(chip).not.toHaveAttribute('aria-expanded');
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 
     it('opens the menu on click and flips aria-expanded to true', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      const chip = screen.getByRole('button', { name: /active circle/i });
+      const chip = screen.getByRole('button', { name: /active library/i });
       await user.click(chip);
 
       await waitFor(() => {
@@ -161,24 +161,24 @@ describe('CircleChip', () => {
       expect(screen.getByRole('menu')).toBeInTheDocument();
     });
 
-    it('lists every member circle plus a "Manage Circles" item', async () => {
+    it('lists every member circle plus a "Manage groups" item', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      await user.click(screen.getByRole('button', { name: /active library/i }));
 
       await waitFor(() => {
         expect(screen.getByRole('menuitem', { name: 'Personal Library' })).toBeInTheDocument();
       });
       expect(screen.getByRole('menuitem', { name: 'Family Circle' })).toBeInTheDocument();
-      expect(screen.getByRole('menuitem', { name: /manage circles/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /manage groups/i })).toBeInTheDocument();
     });
 
     it('closes the menu when a circle is picked', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      await user.click(screen.getByRole('button', { name: /active library/i }));
       const familyItem = await screen.findByRole('menuitem', { name: 'Family Circle' });
       await user.click(familyItem);
 
@@ -198,9 +198,9 @@ describe('CircleChip', () => {
       mockUseCircle.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
 
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      await user.click(screen.getByRole('button', { name: /active library/i }));
       const familyItem = await screen.findByRole('menuitem', { name: 'Family Circle' });
       await user.click(familyItem);
 
@@ -211,9 +211,9 @@ describe('CircleChip', () => {
 
     it('marks the currently active circle as selected in the menu', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
+      await user.click(screen.getByRole('button', { name: /active library/i }));
 
       const activeItem = await screen.findByRole('menuitem', { name: 'Personal Library' });
       expect(activeItem.classList.contains('Mui-selected')).toBe(true);
@@ -224,29 +224,29 @@ describe('CircleChip', () => {
   });
 
   // =========================================================================
-  // Manage Circles
+  // Manage groups
   // =========================================================================
 
-  describe('Manage Circles', () => {
-    it('navigates to /circles when clicked', async () => {
+  describe('Manage groups', () => {
+    it('navigates to /settings/groups when clicked', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
-      const manageItem = await screen.findByRole('menuitem', { name: /manage circles/i });
+      await user.click(screen.getByRole('button', { name: /active library/i }));
+      const manageItem = await screen.findByRole('menuitem', { name: /manage groups/i });
       await user.click(manageItem);
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/circles');
+        expect(mockNavigate).toHaveBeenCalledWith('/settings/groups');
       });
     });
 
     it('closes the menu after navigating', async () => {
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
-      const manageItem = await screen.findByRole('menuitem', { name: /manage circles/i });
+      await user.click(screen.getByRole('button', { name: /active library/i }));
+      const manageItem = await screen.findByRole('menuitem', { name: /manage groups/i });
       await user.click(manageItem);
 
       await waitFor(() => {
@@ -254,18 +254,18 @@ describe('CircleChip', () => {
       });
     });
 
-    it('does NOT call setActiveCircle when only "Manage Circles" is clicked', async () => {
+    it('does NOT call setActiveCircle when only "Manage groups" is clicked', async () => {
       const setActiveCircle = vi.fn().mockResolvedValue(undefined);
       mockUseCircle.mockReturnValue(makeCircleDefaults({ setActiveCircle }));
 
       const user = userEvent.setup();
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
-      await user.click(screen.getByRole('button', { name: /active circle/i }));
-      const manageItem = await screen.findByRole('menuitem', { name: /manage circles/i });
+      await user.click(screen.getByRole('button', { name: /active library/i }));
+      const manageItem = await screen.findByRole('menuitem', { name: /manage groups/i });
       await user.click(manageItem);
 
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/circles'));
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/settings/groups'));
       expect(setActiveCircle).not.toHaveBeenCalled();
     });
   });
@@ -280,7 +280,7 @@ describe('CircleChip', () => {
         makeCircleDefaults({ activeCircle: LONG_NAME_CIRCLE, activeCircleId: LONG_NAME_CIRCLE.id }),
       );
 
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
       const chip = screen.getByRole('button', { name: new RegExp(LONG_NAME_CIRCLE.name) });
       // The button itself is capped so a long name cannot widen the toolbar.
@@ -300,11 +300,11 @@ describe('CircleChip', () => {
         makeCircleDefaults({ activeCircle: LONG_NAME_CIRCLE, activeCircleId: LONG_NAME_CIRCLE.id }),
       );
 
-      render(<CircleChip />);
+      render(<OwnerScopeChip />);
 
       expect(
         screen.getByRole('button', {
-          name: `Active circle: ${LONG_NAME_CIRCLE.name}. Change circle.`,
+          name: `Active library: ${LONG_NAME_CIRCLE.name}. Change library.`,
         }),
       ).toBeInTheDocument();
     });

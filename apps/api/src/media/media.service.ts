@@ -19,6 +19,7 @@ import {
   StorageProvider,
 } from '@marinoscar/platform-api/storage';
 import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
+import { deleteGrantsForResources } from '@marinoscar/platform-api/sharing';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { CreateMediaDto } from './dto/create-media.dto';
 import { UpdateMediaDto } from './dto/update-media.dto';
@@ -1446,8 +1447,13 @@ export class MediaService {
       // swallowed — feed bookkeeping only
     }
 
-    // Cascade in the schema deletes AlbumItems when Album is deleted
-    await this.prisma.album.delete({ where: { id } });
+    // Cascade in the schema deletes AlbumItems when Album is deleted. The
+    // album's grants (user, group and link) go in the SAME transaction: a grant
+    // has no foreign key to its record (RETRO-I6, #588).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.album.delete({ where: { id } });
+      await deleteGrantsForResources(tx, 'album', [id]);
+    });
 
     await this.mediaTouch.touchMediaItems(memberIds);
 
@@ -2526,6 +2532,30 @@ export class MediaService {
    * Each item is processed independently — failures are logged and skipped
    * rather than aborting the entire batch.
    */
+  /**
+   * Hard-deletes media item rows and, in the same transaction, every grant on
+   * them (user, group and link; RETRO-I6, #588): a grant has no foreign key to
+   * its polymorphic record, so a deleted item must never leave one behind. The
+   * slice's daily `sharing.grants.prune` catches anything older.
+   *
+   * @returns how many media item rows were deleted.
+   */
+  private async deleteMediaRowsWithGrants(ids: readonly string[], mode: 'one' | 'many' = 'one'): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.prisma.$transaction(async (tx) => {
+      // `one` keeps `delete` (it throws on a missing row, which the per-item callers rely on).
+      let count: number;
+      if (mode === 'one' && ids.length === 1) {
+        await tx.mediaItem.delete({ where: { id: ids[0] } });
+        count = 1;
+      } else {
+        ({ count } = await tx.mediaItem.deleteMany({ where: { id: { in: [...ids] } } }));
+      }
+      await deleteGrantsForResources(tx, 'media_item', ids);
+      return count;
+    });
+  }
+
   async purgeMediaItems(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
@@ -2543,7 +2573,7 @@ export class MediaService {
     const deletedRows: { id: string; circleId: string }[] = [];
     for (const item of items) {
       try {
-        await this.prisma.mediaItem.delete({ where: { id: item.id } });
+        await this.deleteMediaRowsWithGrants([item.id]);
         deletedRows.push({ id: item.id, circleId: item.circleId });
 
         if (item.storageObject?.storageKey) {
@@ -2622,8 +2652,7 @@ export class MediaService {
     //    back to per-item deletes so a single bad row doesn't strand the batch
     //    and we can report exactly which ids failed.
     try {
-      const res = await this.prisma.mediaItem.deleteMany({ where: { id: { in: itemIds } } });
-      deleted = res.count;
+      deleted = await this.deleteMediaRowsWithGrants(itemIds, 'many');
     } catch (batchErr) {
       const batchMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
       this.logger.warn(
@@ -2631,7 +2660,7 @@ export class MediaService {
       );
       for (const id of itemIds) {
         try {
-          await this.prisma.mediaItem.delete({ where: { id } });
+          await this.deleteMediaRowsWithGrants([id]);
           deleted++;
         } catch (perErr) {
           const msg = perErr instanceof Error ? perErr.message : String(perErr);

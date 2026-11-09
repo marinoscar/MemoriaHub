@@ -420,6 +420,8 @@ A related but distinct gap is a `StorageObject` that reaches `status IN ('ready'
 - `DELETE /api/pat/{id}` - Revoke a token
 
 ### Family Circles (circles:read / circles:write)
+**Clients are on platform groups since RETRO-I6 (#588).** The web lists "My library" (`GET /api/users/me/library`: the caller's personal library scope id; authentication only) plus the caller's groups (`GET /api/groups?scope=mine`) in `OwnerScopeChip`, persists the choice in `user_settings.activeOwnerScope` (`{ kind: 'me' } | { kind: 'group', groupId }`, UX state only, absent means `me`), and manages groups on the packaged `/settings/groups[/:id]` pages (`groups:read`); `/circles[/:id]` redirect. `services/api.ts` sends `ownerGroupId` / `scope=me` for the pages' `circleId`. The CLI has `memoriahub groups list|use <id|me>` (`circles` is a hidden alias). Media item and album hard deletes delete their grants (`deleteGrantsForResources`) in the same transaction. The routes below stay for the Android Hub (`GET /api/circles/:id`), the admin Memories picker and older CLIs; what remains is in [circles-to-groups.md §0d](docs/platform-adoption/circles-to-groups.md).
+
 Face recognition, auto-tagging, and burst detection are global feature toggles (`features.faceRecognition`, `features.autoTagging`, `features.burstDetection`) controlled in Admin Settings — no longer per-circle opt-ins.
 - `POST /api/circles` - Create a circle
 - `GET /api/circles` - List circles the caller is a member of

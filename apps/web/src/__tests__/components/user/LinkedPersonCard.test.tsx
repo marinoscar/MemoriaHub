@@ -150,7 +150,7 @@ describe('LinkedPersonCard', () => {
       ).not.toThrow();
 
       expect(
-        screen.getByText(/not a member of any circle yet/i),
+        screen.getByText(/not a member of any library yet/i),
       ).toBeInTheDocument();
       // With no circles, the picker never even tries to load people.
       expect(mockListPeople).not.toHaveBeenCalled();

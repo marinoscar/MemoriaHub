@@ -1,5 +1,7 @@
 /**
- * tui/CircleManager.tsx — Interactive circle selector.
+ * tui/GroupManager.tsx — Interactive library selector (RETRO-I6, #588; formerly
+ * CircleManager): "My library" and the caller's groups, from ApiClient.listOwnerScopes.
+ * The menu node id stays `circles`, so existing menu paths still work.
  *
  * Fetches the user's circles from the server and lets them:
  *   up/down — navigate rows
@@ -16,7 +18,7 @@ import { saveConfig, type CliConfig } from '../config.js';
 // Types
 // ---------------------------------------------------------------------------
 
-interface CircleManagerProps {
+interface GroupManagerProps {
   config: CliConfig;
   /**
    * Called after the active circle is changed and persisted, with the updated
@@ -35,7 +37,7 @@ type LoadState = 'loading' | 'ready' | 'error';
 // Component
 // ---------------------------------------------------------------------------
 
-export function CircleManager({ config, onConfigChange, onBack }: CircleManagerProps): React.ReactElement {
+export function GroupManager({ config, onConfigChange, onBack }: GroupManagerProps): React.ReactElement {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [circles, setCircles]     = useState<Circle[]>([]);
   const [errorMsg, setErrorMsg]   = useState('');
@@ -90,7 +92,7 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
       // Propagate to the parent so the in-memory session config matches what we
       // just wrote to disk; otherwise the sync dashboard keeps the stale config.
       onConfigChange?.(newConfig);
-      setStatusMsg(`Active circle set to: ${circle.name}`);
+      setStatusMsg(`Active library set to: ${circle.name}`);
       return;
     }
   });
@@ -99,9 +101,9 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
   if (loadState === 'loading') {
     return (
       <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="cyan">Circles</Text>
+        <Text bold color="cyan">Libraries</Text>
         <Box marginTop={1}>
-          <Text dimColor>Loading circles…</Text>
+          <Text dimColor>Loading libraries…</Text>
         </Box>
       </Box>
     );
@@ -111,7 +113,7 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
   if (loadState === 'error') {
     return (
       <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={2} paddingY={1}>
-        <Text bold color="red">Circles — Error</Text>
+        <Text bold color="red">Libraries — Error</Text>
         <Box marginTop={1}>
           <Text color="red">{errorMsg}</Text>
         </Box>
@@ -125,11 +127,11 @@ export function CircleManager({ config, onConfigChange, onBack }: CircleManagerP
   // ---- Ready ----
   return (
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={2} paddingY={1}>
-      <Text bold color="cyan">Circles ({circles.length})</Text>
+      <Text bold color="cyan">Libraries ({circles.length})</Text>
 
       {circles.length === 0 ? (
         <Box marginTop={1}>
-          <Text dimColor>No circles found. Create one on the web app first.</Text>
+          <Text dimColor>No libraries found. Create a group on the web app first.</Text>
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>

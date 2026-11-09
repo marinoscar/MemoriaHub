@@ -47,7 +47,7 @@ import BackupIcon from '@mui/icons-material/SettingsBackupRestore';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useNodeBackup } from '../../hooks/useNodeBackup';
-import { useCircles } from '../../hooks/useCircles';
+import { useCircle } from '../../hooks/useCircle';
 import type { NodeBackupRunDto } from '../../services/nodeBackup';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import {
@@ -118,7 +118,8 @@ function timestampOrNever(iso: string | null): string {
 function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
   const { config, configLoaded, runs, loading, saving, error, refresh, saveConfig } =
     useNodeBackup(nodeId, { autoRefresh: true });
-  const { circles, fetchCircles } = useCircles();
+  // RETRO-I6 (#588): the node owner's libraries are the owner scopes ("My library" + their groups).
+  const { circles } = useCircle();
 
   // --- Form state ------------------------------------------------------------
   const browserTz = useMemo(
@@ -140,10 +141,6 @@ function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    void fetchCircles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Initialize the form ONCE from the first loaded config — the 15s poll keeps
   // refreshing the status card, but must never clobber an in-progress edit.

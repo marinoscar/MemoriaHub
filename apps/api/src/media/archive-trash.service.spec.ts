@@ -578,6 +578,19 @@ describe('MediaService — archive & trash methods', () => {
       expect(result).toEqual({ deleted: 1, failedIds: [] });
     });
 
+    it('deletes the grants of the deleted items in the same transaction (RETRO-I6, #588)', async () => {
+      const item = makeMediaItem({ id: 'item-1', storageObjectId: null, storageObject: null });
+      mockPrisma.mediaItem.findMany.mockResolvedValue([item] as any);
+      mockPrisma.mediaItem.deleteMany.mockResolvedValue({ count: 1 } as any);
+
+      await service.purgeMediaItemsBatched(['item-1']);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.grant.deleteMany).toHaveBeenCalledWith({
+        where: { resourceType: 'media_item', resourceId: { in: ['item-1'] } },
+      });
+    });
+
     it('groups blob deletes by (storageProvider, bucket) and calls each resolved provider\'s deleteMany once per group', async () => {
       const soA1 = makeStorageObject({ storageKey: 'a1.jpg', storageProvider: 's3', bucket: 'bucket-a' });
       const soA2 = makeStorageObject({ storageKey: 'a2.jpg', storageProvider: 's3', bucket: 'bucket-a' });
