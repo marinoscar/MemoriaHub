@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { MAX_APK_BYTES } from '../../src/android-app/releases/android-release.constants';
+import { MAX_APK_BYTES } from '@marinoscar/platform-contract/android-app';
 
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 

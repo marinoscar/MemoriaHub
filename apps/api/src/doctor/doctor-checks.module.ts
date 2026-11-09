@@ -22,7 +22,6 @@
 import { Module } from '@nestjs/common';
 
 import { AiModule } from '../ai/ai.module';
-import { AndroidAppModule } from '../android-app/android-app.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { FaceModule } from '../face/face.module';
 import { GeoModule } from '../geo/geo.module';
@@ -40,10 +39,6 @@ import { DuplicateDetectionDoctorCheck } from './checks/ai/duplicate-detection.d
 import { PictureEnhancerDoctorCheck } from './checks/ai/picture-enhancer.doctor-check';
 import { SocialMediaDoctorCheck } from './checks/ai/social-media.doctor-check';
 import { VideoTaggingDoctorCheck } from './checks/ai/video-tagging.doctor-check';
-import { AndroidAssetLinksDoctorCheck } from './checks/android/assetlinks.doctor-check';
-import { AndroidMediaSyncDoctorCheck } from './checks/android/media-sync.doctor-check';
-import { AndroidReleasesDoctorCheck } from './checks/android/releases.doctor-check';
-import { AndroidUploadPathDoctorCheck } from './checks/android/upload-path.doctor-check';
 import { AppUrlDoctorCheck } from './checks/core/app-url.doctor-check';
 import { PgvectorDoctorCheck } from './checks/core/pgvector.doctor-check';
 import { FaceDetectionDoctorCheck } from './checks/face/detection.doctor-check';
@@ -56,11 +51,15 @@ import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.do
 import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
 import { NodesStaleLeasesDoctorCheck } from './checks/nodes/stale-leases.doctor-check';
 import { WorkflowsStateDoctorCheck } from './checks/workflows/state.doctor-check';
+// Media Sync's two checks live with their domain (RETRO-D5, #586).
+import { AndroidMediaSyncDoctorCheck } from '../media-sync/doctor/media-sync.doctor-check';
+import { AndroidUploadPathDoctorCheck } from '../media-sync/doctor/upload-path.doctor-check';
 
 /**
- * The 29 `memoriahub.*` checks: the 35 documented ones minus the 3 the host core retired, the 2 the
- * jobs slice retired (RETRO-C1) and `core.pg-client-version`, which the db-backup slice's
- * `backup.pg-client` replaced (RETRO-D4).
+ * The `memoriahub.*` checks: the 35 documented ones minus the 3 the host core retired, the 2 the
+ * jobs slice retired (RETRO-C1), `core.pg-client-version`, which the db-backup slice's
+ * `backup.pg-client` replaced (RETRO-D4), the two storage checks (RETRO-D1) and
+ * `android.assetlinks` / `android.releases`, which the android-app slice ships (RETRO-D5).
  */
 export const MEMORIAHUB_DOCTOR_CHECKS = [
   // core
@@ -95,9 +94,8 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   NodesCapabilityHealthDoctorCheck,
   // workflows
   WorkflowsStateDoctorCheck,
-  // android
-  AndroidAssetLinksDoctorCheck,
-  AndroidReleasesDoctorCheck,
+  // android (`android.assetlinks` and `android.releases` are the android-app slice's since
+  // RETRO-D5; Media Sync keeps its two)
   AndroidMediaSyncDoctorCheck,
   AndroidUploadPathDoctorCheck,
 ];
@@ -111,7 +109,6 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
     MediaProcessingModule,
     SocialMediaModule,
     DedupModule,
-    AndroidAppModule,
   ],
   providers: MEMORIAHUB_DOCTOR_CHECKS,
 })

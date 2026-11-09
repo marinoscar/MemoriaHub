@@ -5,8 +5,8 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { PrismaService } from '../../../prisma/prisma.service';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
+import { PrismaService } from '../../prisma/prisma.service';
+import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../../doctor/checks/outcome';
 import {
   ANDROID_DEVICE_STALE_HOURS,
   ANDROID_LIST_LIMIT_DEVICES,

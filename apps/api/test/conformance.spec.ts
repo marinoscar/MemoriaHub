@@ -76,6 +76,7 @@ import { join } from 'node:path';
 import { permissionRegistry, roleRegistry, userOwnedModelRegistry } from '@marinoscar/platform-api/core';
 
 import '@marinoscar/platform-api/ai/testing';
+import '@marinoscar/platform-api/android-app/testing';
 import '@marinoscar/platform-api/alerts/testing';
 import '@marinoscar/platform-api/credentials/testing';
 import '@marinoscar/platform-api/db-backup/testing';
@@ -124,6 +125,8 @@ import '../src/platform/exports/exports.config';
 import '../src/platform/onboarding/onboarding.manifest';
 // The sharing slice's registrations (RETRO-I1); AppModule imports them too.
 import '../src/app-registrations/sharing';
+// The android-app slice's composition: the Media Sync device source it reads (RETRO-D5; AppModule imports it too).
+import '../src/platform/android-app/android-app.config';
 import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
@@ -205,6 +208,12 @@ runPlatformConformance({
     // and seeded disabled, the one-open-incident index on the raw-SQL list, no transaction around a
     // dispatch, the node-event listener doing no I/O, two evaluations leaving one incident.
     alerts: { rawSqlIndexNames: PLATFORM_RAW_SQL_INDEX_NAMES },
+
+    // The android-app slice (RETRO-D5, #586): assetlinks public and read-only, the signed download
+    // the only other public route, admin routes on exactly system_settings:read/write, the
+    // one-current index on the platform's raw-SQL list, `android-releases/` kept by the factory
+    // reset and the `android_app` channel registered covered by push.
+    androidApp: { rawSqlIndexNames: PLATFORM_RAW_SQL_INDEX_NAMES },
 
     // MaintenanceGuard is the application's only global guard: MemoriaHub has no
     // global JWT guard (every route declares its own @Auth()/@Public()) and no

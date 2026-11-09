@@ -5,8 +5,8 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { AndroidReleaseService } from '../../../android-app/releases/android-release.service';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass } from '../outcome';
+import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
+import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass } from '../../doctor/checks/outcome';
 
 // Ported from `DoctorService.checkAndroidUploadPath` (key `android.uploadPath`).
 // READ-ONLY: resolves the active storage provider's capabilities; no object is
@@ -14,8 +14,10 @@ import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass } from '../outcome';
 //
 // The ACTIVE storage provider can take a phone's multipart upload: presigned
 // part URLs (S3/R2), or the API part route (`PUT /api/storage/objects/:id/upload/parts/:n`,
-// #506) for local disk. Reuses the APK upload's own "is storage configured"
-// resolution so the two can never disagree. Not skipped without devices: it
+// #506) for local disk. Since RETRO-D5 (#586) the APK upload is the android-app
+// slice's, so this check resolves the active driver itself (the same rule the
+// app's release upload applied: built, and a bucket unless it is `local`). Not
+// skipped without devices: it
 // answers whether a phone COULD upload before anyone pairs one.
 // Domain check: stays an app check (Media Sync is MemoriaHub's domain).
 
@@ -51,17 +53,6 @@ export function decideAndroidUploadPath(f: UploadPathFacts): DoctorCheckOutcome 
   );
 }
 
-/** The provider key carried in a `STORAGE_NOT_CONFIGURED` refusal's details, else 'unknown'. */
-export function providerFromError(err: unknown): string {
-  const response =
-    err && typeof err === 'object' && 'getResponse' in err && typeof err.getResponse === 'function'
-      ? (err.getResponse() as unknown)
-      : null;
-  const details = response && typeof response === 'object' ? (response as Record<string, unknown>)['details'] : null;
-  const provider = details && typeof details === 'object' ? (details as Record<string, unknown>)['provider'] : null;
-  return typeof provider === 'string' && provider.length > 0 ? provider : 'unknown';
-}
-
 @Injectable()
 export class AndroidUploadPathDoctorCheck implements DoctorCheck, OnModuleInit {
   readonly id = checkId('android', 'upload-path');
@@ -72,7 +63,7 @@ export class AndroidUploadPathDoctorCheck implements DoctorCheck, OnModuleInit {
 
   constructor(
     private readonly registry: DoctorCheckRegistry,
-    private readonly androidReleases: AndroidReleaseService,
+    private readonly storage: StorageProviderResolver,
   ) {}
 
   onModuleInit(): void {
@@ -80,11 +71,14 @@ export class AndroidUploadPathDoctorCheck implements DoctorCheck, OnModuleInit {
   }
 
   async run(): Promise<DoctorCheckOutcome> {
-    let target: Awaited<ReturnType<AndroidReleaseService['resolveUploadTarget']>>;
+    let target: Awaited<ReturnType<StorageProviderResolver['getActiveProvider']>>;
     try {
-      target = await this.androidReleases.resolveUploadTarget();
-    } catch (err) {
-      return decideAndroidUploadPath({ providerId: null, missingProvider: providerFromError(err) });
+      target = await this.storage.getActiveProvider();
+    } catch {
+      return decideAndroidUploadPath({ providerId: null, missingProvider: 'unknown' });
+    }
+    if (target.id !== 'local' && !target.provider.getBucket()) {
+      return decideAndroidUploadPath({ providerId: null, missingProvider: target.id });
     }
     return decideAndroidUploadPath({
       providerId: target.id,
