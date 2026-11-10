@@ -1,0 +1,37 @@
+// Fixture host schema: the models the domain migrations reference.
+model User {
+  id    String @id @db.Uuid
+  email String @unique
+
+  @@map("users")
+}
+
+model Organization {
+  id String @id @db.Uuid
+
+  @@map("organizations")
+}
+
+model Group {
+  id String @id @db.Uuid
+
+  @@map("groups")
+}
+
+model StorageObject {
+  id String @id @db.Uuid
+
+  @@map("storage_objects")
+}
+
+model WorkerNode {
+  id String @id @db.Uuid
+
+  @@map("worker_nodes")
+}
+
+model PersonalAccessToken {
+  id String @id @db.Uuid
+
+  @@map("personal_access_tokens")
+}
