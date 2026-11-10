@@ -30,7 +30,7 @@ import type { CliConfig } from '../config.js';
 import { ApiClient } from '../api.js';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { isDaemonRunning } from '../node/ipc-client.js';
+import { isDaemonRunning } from '../backup/ipc-client.js';
 import { executeRun } from '../backup/execute-run.js';
 import { resolveRunKind } from '../backup/reconcile.js';
 import {
@@ -43,6 +43,7 @@ import {
   daemonBackupControl,
   embeddedBackupControl,
   embeddedBackupFeed,
+  hydrateFromBackupSnapshot,
   initialBackupDashboardState,
   makeBackupLogEntry,
   probeBackupDaemon,
@@ -230,7 +231,14 @@ export function BackupDashboard({
 
     if (choice.mode === 'attached') {
       controlRef.current = daemonBackupControl();
-      setSource(createBackupSource(backupDaemonFeed()));
+      // Seeded from the probe's snapshot, so the first frame shows the catalog and any run in flight
+      // while the channel feed connects (it then re-hydrates from the channel's own snapshot).
+      setSource(
+        createBackupSource(
+          backupDaemonFeed(),
+          hydrateFromBackupSnapshot(initialBackupDashboardState(), choice.snapshot, Date.now()),
+        ),
+      );
     } else {
       controlRef.current = embeddedBackupControl({
         start: (kind) => void startEmbeddedRun(kind),

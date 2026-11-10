@@ -23,7 +23,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import type { NodeBackupConfig, NodeBackupRunSummary } from '../api.js';
 import { ApiError } from '../api.js';
-import type { DaemonClient } from '../node/ipc-client.js';
+import type { DaemonClient } from './ipc-client.js';
 import { openCatalogDb } from './catalog-db.js';
 import { CatalogRepo, type CatalogRun, type CatalogStats } from './catalog-repo.js';
 import { CHECKPOINT_CURSOR_KEY } from './backup-engine.js';

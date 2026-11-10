@@ -1,5 +1,5 @@
-// PLATFORM-ADOPTION-SHIM(RETRO-C10): the `node` rule is removed when the executors move onto the
-// platform engine. (The `menu` rule is permanent: `menu` is the 1.3 spelling of a bare `memoriahub`.)
+// (The `menu` rule is permanent: `menu` is the 1.3 spelling of a bare `memoriahub`. The `node` rule was
+// removed by RETRO-C10: the platform `node` group runs MemoriaHub's executors.)
 
 // =============================================================================
 // Legacy spellings, translated in one place  (issue #577, RETRO-F3)
@@ -25,7 +25,6 @@
 //   no-color      IGNORE       `--no-color` anywhere              stripped; NO_COLOR=1
 //   short-version ALIAS        `-V` (before any command)          `--version`
 //   menu          ALIAS        `menu` (alone)                      a bare `memoriahub` (the platform TUI)
-//   node-group    PORT         `node ...` (every subcommand/flag)  the 1.3 `node` command, untouched
 //   deploy-env    ALIAS        MEMORIAHUB_DOMAIN/PORT/HOME/REF/REPO  --domain/--port/--root/--ref/--repo
 //   deploy-defaults ALIAS      `deploy install` without them      --root /opt/infra/apps/memoriahub, --port 8328,
 //                                                                  --domain memoriahub.marin.cr (the old installer's defaults)
@@ -44,14 +43,12 @@ export const LEGACY_DEPLOY_DEFAULTS = Object.freeze({
 
 /** The outcome of translating one invocation. */
 export interface LegacyPlan {
-  /** The arguments to hand on (the platform CLI, or the legacy `node` command). */
+  /** The arguments to hand on to the platform CLI. */
   argv: string[];
   /** Environment variables the caller must set before running (never read from here). */
   env: Record<string, string>;
   /** One-line notices for stderr. */
   notes: string[];
-  /** True when the invocation belongs to the 1.3 `node` command group. */
-  legacyNode: boolean;
   /** Set when a legacy spelling has no equivalent; print it and exit with a usage error. */
   refuse?: string;
   /** Ids of the rules that fired, for tests and diagnostics. */
@@ -83,7 +80,7 @@ function commandIndex(argv: readonly string[]): number {
  */
 export function translateLegacyArgs(argv: readonly string[], context: LegacyContext): LegacyPlan {
   const env = context.env;
-  const plan: LegacyPlan = { argv: [...argv], env: {}, notes: [], legacyNode: false, applied: [] };
+  const plan: LegacyPlan = { argv: [...argv], env: {}, notes: [], applied: [] };
 
   // --- no-color: IGNORE -------------------------------------------------------
   // Honoured before anything else so chalk picks it up; stripped because the
@@ -110,16 +107,6 @@ export function translateLegacyArgs(argv: readonly string[], context: LegacyCont
   if (plan.argv.length === 1 && plan.argv[0] === 'menu') {
     plan.argv = [];
     plan.applied.push('menu');
-    return plan;
-  }
-
-  // --- node-group: PORT -------------------------------------------------------
-  // The platform's own `node` engine cannot run MemoriaHub's executors until
-  // RETRO-C10 moves them, so the whole group stays the 1.3 implementation.
-  // PLATFORM-ADOPTION-SHIM(RETRO-C10)
-  if (plan.argv[0] === 'node') {
-    plan.legacyNode = true;
-    plan.applied.push('node-group');
     return plan;
   }
 

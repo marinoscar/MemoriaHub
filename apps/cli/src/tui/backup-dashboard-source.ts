@@ -30,9 +30,15 @@ import {
   type DashboardReducer,
 } from '@marinoscar/platform-cli/tui';
 
-import { connectToDaemon } from '../node/ipc-client.js';
-import { nodeSocketPath } from '../paths.js';
-import { legacyDaemonConnect, parseLegacyEvent, sendDaemonCommand } from './legacy-daemon.js';
+import { connectToDaemon, sendBackupCommand } from '../backup/ipc-client.js';
+import { nodeSocketPathOf } from '../executors/state-dir.js';
+
+/** What a backup channel `event` frame carries: the host's `{ ev, payload }`. */
+function parseLegacyEvent(frame: unknown): { ev: string; payload: unknown } | undefined {
+  if (frame === null || typeof frame !== 'object') return undefined;
+  const { ev, payload } = frame as { ev?: unknown; payload?: unknown };
+  return typeof ev === 'string' && ev.length > 0 ? { ev, payload } : undefined;
+}
 import { BACKUP_EV } from '../backup/events.js';
 import type { BackupTypedEmitter } from '../backup/events.js';
 
@@ -514,8 +520,8 @@ export function backupDashboardReducer(
 }
 
 /** Attach (read-only, reconnecting) to the worker daemon's backup channel. */
-export function backupDaemonFeed(socketPath: string = nodeSocketPath()): DashboardFeed<BackupDashEvent> {
-  return daemonAttachFeed<BackupDashEvent>({ socketPath, channel: 'backup', connect: legacyDaemonConnect('backup') as never });
+export function backupDaemonFeed(socketPath: string = nodeSocketPathOf()): DashboardFeed<BackupDashEvent> {
+  return daemonAttachFeed<BackupDashEvent>({ socketPath, channel: 'backup' });
 }
 
 /** What the embedded feed needs from an in-process engine. */
@@ -568,9 +574,9 @@ export interface BackupControl {
 }
 
 /** Controls for a daemon: each command goes over its own short-lived connection. */
-export function daemonBackupControl(socketPath: string = nodeSocketPath()): BackupControl {
+export function daemonBackupControl(socketPath?: string): BackupControl {
   const send = (command: Record<string, unknown>): void => {
-    void sendDaemonCommand(command, { socketPath }).catch(() => undefined);
+    void sendBackupCommand(command, { socketPath }).catch(() => undefined);
   };
   return {
     runNow: (kind = 'incremental') => send({ cmd: 'backup-run-now', kind }),

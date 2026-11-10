@@ -12,14 +12,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { render, cleanup } from 'ink-testing-library';
 
-import type { DaemonClient, DaemonMessage } from '../../src/node/ipc-client.js';
+import type { DaemonClient, DaemonMessage } from '../../src/backup/ipc-client.js';
 import { waitForFrame } from './wait-for.js';
 
 const isDaemonRunningMock = jest.fn<() => Promise<boolean>>(async () => false);
 const connectToDaemonMock = jest.fn<(...args: unknown[]) => Promise<DaemonClient>>();
-jest.unstable_mockModule('../../src/node/ipc-client.js', () => ({
+jest.unstable_mockModule('../../src/backup/ipc-client.js', () => ({
   isDaemonRunning: isDaemonRunningMock,
   connectToDaemon: connectToDaemonMock,
+  sendBackupCommand: jest.fn(async () => null),
 }));
 
 const state = fs.mkdtempSync(path.join(os.tmpdir(), 'mh-backup-dash-'));

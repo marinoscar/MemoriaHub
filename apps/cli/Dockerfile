@@ -13,9 +13,12 @@
 # lines up once apps/cli lands at /app/apps/cli. The worker stage keeps WORKDIR
 # /app and invokes the built CLI by absolute path.
 #
-# This image runs the existing CLI worker headlessly (`node start --headless`):
-# SIGTERM drains in-flight jobs without deregistering, and the node self-
-# registers (register-or-reattach) from MEMORIAHUB_* env on start. See
+# This image runs the PLATFORM worker engine (@marinoscar/platform-cli's `node`
+# group) with MemoriaHub's executors (apps/cli/src/executors), headlessly
+# (`node start --headless`): SIGTERM drains in-flight jobs without
+# deregistering, and the node self-registers (register-or-reattach) from
+# MEMORIAHUB_* env on start (RETRO-C10, #616). The memory valve exits 75 after
+# a clean drain; compose's `restart: unless-stopped` restarts it. See
 # docs/worker-node-setup.md and docs/specs/distributed-nodes.md.
 # =============================================================================
 
@@ -143,24 +146,26 @@ COPY --from=build /app/apps/cli/dist /app/apps/cli/dist
 COPY --from=build /app/apps/cli/package.json /app/apps/cli/package.json
 COPY --from=models /app/models /app/models
 
-# Headless container config. MEMORIAHUB_STATE_DIR relocates the writable state
-# (pidfile/socket/logs/local sqlite) off the read-only image into a per-replica
-# dir; MODELS_DIR points at the baked models so ensureModels verifies them in
-# place instead of re-downloading; MEMORIAHUB_HEADLESS makes `node start`
-# self-register and drain-without-deregister on SIGTERM.
-# SHARP_FORCE_GLOBAL_LIBVIPS: keep set at runtime too so sharp resolves the
-# system HEIF-enabled libvips (matches the deps stage that built its addon), and
-# any runtime `npm rebuild` keeps building against global libvips (issue #128).
-ENV MEMORIAHUB_STATE_DIR=/data \
+# Headless container config (the platform engine's variables, see
+# apps/cli/src/worker-env.ts). MEMORIAHUB_STATE_DIR is the node's writable state
+# (pidfile, socket, logs, the node id) off the read-only image, per replica;
+# MEMORIAHUB_MODELS_DIR (and MODELS_DIR, which the API and the compute libraries
+# read) point at the baked models so the startup check verifies them in place
+# instead of downloading; MEMORIAHUB_HEADLESS makes `node start` self-register
+# and drain-without-deregister on SIGTERM. SHARP_FORCE_GLOBAL_LIBVIPS: keep set
+# at runtime too so sharp resolves the system HEIF-enabled libvips (matches the
+# deps stage that built its addon), and any runtime `npm rebuild` keeps building
+# against global libvips (issue #128).
+ENV MEMORIAHUB_STATE_DIR=/var/lib/worker \
+    MEMORIAHUB_MODELS_DIR=/app/models \
     MODELS_DIR=/app/models \
-    MEMORIAHUB_HEADLESS=1 \
+    MEMORIAHUB_HEADLESS=true \
     NODE_ENV=production \
     SHARP_FORCE_GLOBAL_LIBVIPS=1
 
 # Per-replica writable state dir, owned by the unprivileged runtime user. The
-# baked models must also be writable by that user because ensureModels may
-# repair/rewrite a file in place during verification.
-RUN mkdir -p /data && chown -R node:node /data /app/models
+# baked models stay owned by it too, so a model pull can repair a file in place.
+RUN mkdir -p /var/lib/worker && chown -R node:node /var/lib/worker /app/models
 USER node
 
 # SIGTERM (Docker's default stop signal) reaches PID 1 directly with the exec
@@ -169,3 +174,9 @@ USER node
 # the server lease reaper.
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["node", "/app/apps/cli/dist/cli.js", "node", "start", "--headless"]
+
+# -----------------------------------------------------------------------------
+# `production` is the target name the platform's generated worker.build.compose.yml
+# builds; it is the same image as `worker`.
+# -----------------------------------------------------------------------------
+FROM worker AS production

@@ -9,7 +9,7 @@
  * not be misattributed), and the connection-closed failure.
  */
 
-import type { DaemonClient, DaemonMessage } from '../../src/node/ipc-client.js';
+import type { DaemonClient, DaemonMessage } from '../../src/backup/ipc-client.js';
 import {
   runViaDaemon,
   shouldDelegateToDaemon,

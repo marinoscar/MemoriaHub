@@ -243,6 +243,22 @@ jobs:
             memoriahub-worker:parity-gate \
             --test test/golden.test.mjs
 
+      - name: Worker engine smoke (inside the worker image)
+        # The platform node engine runs MemoriaHub's executors: the baked CLIP
+        # model verifies in place (sha256 and size), and `node config` resolves
+        # the headless settings from the image's environment alone (RETRO-C10).
+        run: |
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node models status
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node config
+
       - name: Build and push Worker image (multi-arch)
         uses: docker/build-push-action@v7
         with:

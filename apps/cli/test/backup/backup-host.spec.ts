@@ -26,10 +26,10 @@ import { BACKUP_EV, BackupTypedEmitter, emptyStats } from '../../src/backup/even
 import { openCatalogDb } from '../../src/backup/catalog-db.js';
 import { CatalogRepo } from '../../src/backup/catalog-repo.js';
 import { CHECKPOINT_CURSOR_KEY } from '../../src/backup/backup-engine.js';
-import type { NodeLogger } from '../../src/node/logger.js';
+import type { BackupLogger } from '../../src/backup/logger.js';
 import type { SettingsRepo } from '../../src/repo/settings.js';
 
-function stubLogger(): NodeLogger & { lines: string[] } {
+function stubLogger(): BackupLogger & { lines: string[] } {
   const lines: string[] = [];
   return {
     lines,

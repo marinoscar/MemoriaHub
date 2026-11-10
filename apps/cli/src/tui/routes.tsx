@@ -38,17 +38,6 @@ import { FactoryResetScreen } from './FactoryResetScreen.js';
 import { FolderManager } from './FolderManager.js';
 import { JobsDashboard } from './JobsDashboard.js';
 import { LoginScreen } from './LoginScreen.js';
-import { NodeConfig } from './NodeConfig.js';
-import { NodeDashboard } from './NodeDashboard.js';
-import { NodeDoctor } from './NodeDoctor.js';
-import { NodeEnroll } from './NodeEnroll.js';
-import { NodeInstallDeps } from './NodeInstallDeps.js';
-import { NodeList } from './NodeList.js';
-import { NodeLogs } from './NodeLogs.js';
-import { NodeRegister } from './NodeRegister.js';
-import { NodeService } from './NodeService.js';
-import { NodeStart } from './NodeStart.js';
-import { NodeStop } from './NodeStop.js';
 import { OrganizeScreen } from './OrganizeScreen.js';
 import { PickFolders } from './PickFolders.js';
 import { ReportView } from './ReportView.js';
@@ -353,105 +342,6 @@ export function BackupRoute({ onDone }: TuiScreenProps): ReactElement {
       }
     </RequireConfig>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Worker node
-// ---------------------------------------------------------------------------
-
-type NodeView = 'dashboard' | 'config' | 'start';
-
-export function NodeDashboardRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config, setConfig] = useCliConfig();
-  const steps = useViewStack<NodeView>('dashboard', onDone);
-  return (
-    <RequireConfig config={config} onDone={onDone}>
-      {(cfg) =>
-        steps.view === 'config' ? (
-          <NodeConfig config={cfg} onSaved={setConfig} onBack={steps.pop} />
-        ) : (
-          <NodeDashboard config={cfg} onBack={steps.pop} onOpenConfig={() => steps.push('config')} />
-        )
-      }
-    </RequireConfig>
-  );
-}
-
-export function NodeStartRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config] = useCliConfig();
-  const [started, setStarted] = useState(false);
-  return (
-    <RequireConfig config={config} onDone={onDone}>
-      {(cfg) =>
-        started ? (
-          // Start worker -> dashboard on success (the 1.3 `replaceTop`), Esc then leaves to the menu.
-          <NodeDashboard config={cfg} onBack={onDone} />
-        ) : (
-          <NodeStart config={cfg} onStarted={() => setStarted(true)} onBack={onDone} />
-        )
-      }
-    </RequireConfig>
-  );
-}
-
-export function NodeStopRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config] = useCliConfig();
-  return <NodeStop config={config} onBack={onDone} />;
-}
-
-export function NodeLogsRoute({ onDone }: TuiScreenProps): ReactElement {
-  return <NodeLogs onBack={onDone} />;
-}
-
-export function NodeDoctorRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config] = useCliConfig();
-  return <RequireConfig config={config} onDone={onDone}>{(cfg) => <NodeDoctor config={cfg} onBack={onDone} />}</RequireConfig>;
-}
-
-export function NodeEnrollRoute({ onDone }: TuiScreenProps): ReactElement {
-  const { session } = useTuiApp();
-  const [config] = useCliConfig();
-  return (
-    <NodeEnroll
-      config={config}
-      onEnrolled={() => {
-        void session.refresh();
-        onDone();
-      }}
-      onBack={onDone}
-    />
-  );
-}
-
-export function NodeInstallDepsRoute({ onDone }: TuiScreenProps): ReactElement {
-  return <NodeInstallDeps onBack={onDone} />;
-}
-
-export function NodeRegisterRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config, setConfig] = useCliConfig();
-  return (
-    <RequireConfig config={config} onDone={onDone}>
-      {(cfg) => <NodeRegister config={cfg} onRegistered={setConfig} onBack={onDone} />}
-    </RequireConfig>
-  );
-}
-
-export function NodeConfigRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config, setConfig] = useCliConfig();
-  return (
-    <RequireConfig config={config} onDone={onDone}>
-      {(cfg) => <NodeConfig config={cfg} onSaved={setConfig} onBack={onDone} />}
-    </RequireConfig>
-  );
-}
-
-export function NodeListRoute({ onDone }: TuiScreenProps): ReactElement {
-  const [config] = useCliConfig();
-  return <RequireConfig config={config} onDone={onDone}>{(cfg) => <NodeList config={cfg} onBack={onDone} />}</RequireConfig>;
-}
-
-export function NodeServiceRoute({ onDone }: TuiScreenProps): ReactElement {
-  return <NodeService onBack={onDone} />;
 }
 
 // ---------------------------------------------------------------------------

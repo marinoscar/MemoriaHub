@@ -61,15 +61,13 @@ describe('runApp', () => {
     expect(cfg.pat).toBeUndefined();
   });
 
-  it('routes the node group to the 1.3 implementation, never to the platform', async () => {
-    const legacy: string[][] = [];
-    const code = await runApp(['node', 'start', '--headless'], {
-      stderr, env, createCli: fakeCli(),
-      runLegacyNode: async (argv) => { legacy.push(argv); return 0; },
-    });
+  it('hands the node group to the platform CLI and mirrors the 1.3 worker variables', async () => {
+    env['MEMORIAHUB_SHARP_CONCURRENCY'] = '3';
+    const code = await runApp(['node', 'start', '--headless'], { stderr, env, createCli: fakeCli() });
     expect(code).toBe(0);
-    expect(legacy).toEqual([['node', 'start', '--headless']]);
-    expect(handed).toEqual([]);
+    expect(handed).toEqual([['node', 'start', '--headless']]);
+    expect(env['MEMORIAHUB_NATIVE_THREADS']).toBe('3');
+    expect(err).toContain('MEMORIAHUB_SHARP_CONCURRENCY is deprecated');
   });
 
   it('prints notes on stderr and applies deploy defaults', async () => {

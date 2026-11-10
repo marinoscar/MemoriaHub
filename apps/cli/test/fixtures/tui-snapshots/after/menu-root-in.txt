@@ -14,7 +14,7 @@
 │  ❯ 1. Sync ▸                                                                                     │
 │    2. Scan ▸                                                                                     │
 │    3. Backup                                                                                     │
-│    4. Worker Node ▸                                                                              │
+│    4. Worker Node                                                                                │
 │    5. Reports ▸                                                                                  │
 │    6. File Tools ▸                                                                               │
 │    7. Settings ▸                                                                                 │

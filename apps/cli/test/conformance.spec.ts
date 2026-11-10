@@ -8,7 +8,6 @@ import { resetCliForTests, runPlatformConformance } from '@marinoscar/platform-c
 import { APP_CLI_OPTIONS } from '../src/app.js';
 import { backupDashboardReducer } from '../src/tui/backup-dashboard-source.js';
 import { jobsDashboardReducer } from '../src/tui/jobs-dashboard-source.js';
-import { nodeDashboardReducer } from '../src/tui/node-dashboard-source.js';
 
 // The platform CLI's conformance suites over MemoriaHub's composition (#577):
 // env template hygiene, executor credential hygiene, deploy registrations.
@@ -38,16 +37,6 @@ runPlatformConformance({
     tui: {
       // Each dashboard's reducer folds its events into a frozen initial state without changing it.
       dashboards: [
-        {
-          id: 'node',
-          reducer: nodeDashboardReducer(1, ['face_detection']),
-          events: [
-            { ev: 'job:start', payload: { jobId: 'j1', type: 'face_detection' }, atMs: 1 },
-            { ev: 'job:done', payload: { jobId: 'j1', type: 'face_detection', durationMs: 5 }, atMs: 2 },
-            { ev: 'heartbeat:ok', payload: {}, atMs: 3 },
-          ],
-          snapshot: { nodeId: 'n1', concurrency: 2, eligibleTypes: ['face_detection'] },
-        },
         {
           id: 'backup',
           reducer: backupDashboardReducer(),

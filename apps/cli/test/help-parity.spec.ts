@@ -7,7 +7,6 @@ import { resetCliForTests } from '@marinoscar/platform-cli/testing';
 import type { Command } from 'commander';
 
 import { APP_CLI_OPTIONS } from '../src/app.js';
-import { nodeCommand } from '../src/commands/node.js';
 
 // =============================================================================
 // Zero feature loss, mechanically  (issue #577)
@@ -62,7 +61,6 @@ function declaredFlags(cmd: Command): string[] {
 
 resetCliForTests();
 const platform = createCli(APP_CLI_OPTIONS).program;
-const legacyNode = nodeCommand();
 
 const files = readdirSync(DIR).filter((f) => f !== '_root.txt');
 
@@ -75,10 +73,7 @@ describe('every 1.3.4 command path survives the cutover', () => {
     const path = file.replace(/\.txt$/, '').split('__');
     it(`memoriahub ${path.join(' ')}`, () => {
       const before = readFileSync(join(DIR, file), 'utf8');
-      // `node` stays the 1.3 implementation (legacy-flags rule node-group).
-      const cmd = path[0] === 'node'
-        ? resolve({ commands: [legacyNode] } as unknown as Command, path)
-        : resolve(platform, path);
+      const cmd = resolve(platform, path);
       expect(cmd).toBeDefined();
       const have = declaredFlags(cmd!);
       for (const flag of flagsOf(before)) {

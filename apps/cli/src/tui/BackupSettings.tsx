@@ -27,7 +27,7 @@ import type { CliConfig } from '../config.js';
 import { ApiClient, ApiError, type NodeBackupConfig } from '../api.js';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
+import { connectToDaemon, isDaemonRunning } from '../backup/ipc-client.js';
 
 // ---------------------------------------------------------------------------
 // Schedule presets (a custom cron is always available too)

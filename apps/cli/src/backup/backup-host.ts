@@ -41,7 +41,7 @@ import {
   type CooldownGateConfig,
 } from '../http/cooldown-gate.js';
 import type { RetryConfig } from '../http/retry.js';
-import type { NodeLogger } from '../node/logger.js';
+import type { BackupLogger } from './logger.js';
 import type { SettingsRepo } from '../repo/settings.js';
 import { openCatalogDb } from './catalog-db.js';
 import { CatalogRepo, type CatalogRun, type CatalogStats } from './catalog-repo.js';
@@ -118,7 +118,7 @@ export type BackupHostApi = BackupApi & BackupSchedulerApi;
 
 export interface BackupHostDeps {
   settings: SettingsRepo;
-  logger: NodeLogger;
+  logger: BackupLogger;
   retry?: RetryConfig;
   cooldown?: CooldownGateConfig;
   /** Injectable API client (tests); default: an OWN ApiClient (see header). */
@@ -155,7 +155,7 @@ interface ActiveRun {
 export class BackupHost extends EventEmitter {
   private readonly cfg: BackupHostConfig;
   private readonly settings: SettingsRepo;
-  private readonly logger: NodeLogger;
+  private readonly logger: BackupLogger;
   private readonly api: BackupHostApi;
   private readonly runBackupFn: (ctx: BackupRunContext) => Promise<BackupRunOutcome>;
   private readonly openDb: (root: string) => BetterSqlite3.Database;

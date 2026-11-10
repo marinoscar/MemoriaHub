@@ -16,7 +16,7 @@ import { collectBackupStatus, type CollectBackupStatusDeps } from '../../src/bac
 import { CHECKPOINT_CURSOR_KEY } from '../../src/backup/backup-engine.js';
 import { openCatalogDb } from '../../src/backup/catalog-db.js';
 import { CatalogRepo } from '../../src/backup/catalog-repo.js';
-import type { DaemonClient, DaemonMessage } from '../../src/node/ipc-client.js';
+import type { DaemonClient, DaemonMessage } from '../../src/backup/ipc-client.js';
 import type { NodeBackupConfig, NodeBackupRunSummary } from '../../src/api.js';
 
 function settingsStub(root: string | null, nodeId: string | null): CollectBackupStatusDeps['settings'] {

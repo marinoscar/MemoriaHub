@@ -29,6 +29,10 @@ import { APP_TUI_SCREENS } from './tui/screens.js';
 import { APP_TUI_SELECTIONS, APP_TUI_STATE_LOADERS } from './tui/app-state.js';
 import { BRAND_HEX } from './brand.js';
 import { APP_ANDROID_COMMAND } from './extensions/android.js';
+import { APP_NODE_EXECUTORS, registerNodeExtensions } from './executors/index.js';
+import { MEMORY_VALVE_EXIT_CODE, WORKER_ENV_ALIASES } from './worker-env.js';
+import { APP_NODE_LIST_COMMAND } from './extensions/node-list.js';
+import { APP_NODE_OPTIONS } from './extensions/node-options.js';
 
 // =============================================================================
 // MemoriaHub's CLI, composed on the platform engine  (issue #577, RETRO-F3)
@@ -40,10 +44,9 @@ import { APP_ANDROID_COMMAND } from './extensions/android.js';
 // deploy steps/checks that are MemoriaHub's, the stream routes of the host
 // proxy, the metadata of the app's `.env` keys and the start-up update notice.
 //
-// The `node` group is NOT here: the platform has a built-in `node` and a name
-// may be registered once. Until RETRO-C10 moves MemoriaHub's executors onto the
-// platform engine, `run.ts` routes `memoriahub node ...` to the 1.3 command
-// (extensions/legacy-flags.ts, rule `node-group`).
+// The `node` group is the platform's (RETRO-C10, #616): MemoriaHub contributes its
+// executors, capability probes, model and install steps (src/executors) and one
+// subcommand, `node list` (extensions/node-list.ts).
 // =============================================================================
 
 /** The repository slug (`packages/shared/identity.json` `repoSlug`). */
@@ -118,6 +121,9 @@ const CIRCLES_ALIAS: CliCommandRegistration = (program) => {
   program.addCommand(circlesAliasCommand(), { hidden: true });
 };
 
+// The registrations the node engine reads; before createCli freezes the registries.
+registerNodeExtensions();
+
 export const APP_CLI_OPTIONS: CreateCliOptions = {
   identity: {
     name: 'memoriahub',
@@ -128,7 +134,9 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
   version: readVersion(),
   // `android` is the platform's group since RETRO-D5 (#586), registered after the 1.3 commands
   // (so `--help` lists it after `menu`); see extensions/android.ts.
-  extraCommands: [...APP_COMMAND_FACTORIES.map(register), CIRCLES_ALIAS, APP_ANDROID_COMMAND],
+  extraCommands: [...APP_COMMAND_FACTORIES.map(register), CIRCLES_ALIAS, APP_ANDROID_COMMAND, APP_NODE_LIST_COMMAND, APP_NODE_OPTIONS],
+  nodeExecutors: [...APP_NODE_EXECUTORS],
+  node: { envAliases: WORKER_ENV_ALIASES, memoryValveExitCode: MEMORY_VALVE_EXIT_CODE },
   // The TUI: MemoriaHub's menu tree, screens, header chip and shared data (RETRO-F4, #582).
   tuiScreens: [...APP_TUI_SCREENS],
   tuiMenu: [...APP_TUI_MENU],

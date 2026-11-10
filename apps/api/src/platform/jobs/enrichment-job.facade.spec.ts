@@ -158,6 +158,38 @@ describe('EnrichmentJobService (the enqueue facade over JobsService)', () => {
   });
 });
 
+describe('EnrichmentJobService geocode payload (RETRO-C10)', () => {
+  const jobs = {
+    enqueue: jest.fn().mockImplementation(async (input) => platformJob({ type: input.type, payload: input.payload ?? null })),
+    recordProvider: jest.fn(),
+  };
+  const org = { get: async () => ORG } as never;
+
+  beforeEach(() => jobs.enqueue.mockClear());
+
+  it('adds the item coordinates to a geocode job so a node can look them up', async () => {
+    const prisma = { mediaItem: { findUnique: jest.fn().mockResolvedValue({ takenLat: 9.9, takenLng: -84.1 }) } };
+    await new EnrichmentJobService(jobs as never, org, prisma as never).enqueue({
+      type: 'geocode', mediaItemId: MEDIA, circleId: CIRCLE, reason: JobReason.rerun,
+    });
+    expect(jobs.enqueue.mock.calls[0][0].payload).toEqual({ lat: 9.9, lng: -84.1, circleId: CIRCLE });
+  });
+
+  it('leaves other types, an item without coordinates and a failed read alone', async () => {
+    const prisma = { mediaItem: { findUnique: jest.fn().mockResolvedValue({ takenLat: null, takenLng: null }) } };
+    const svc = new EnrichmentJobService(jobs as never, org, prisma as never);
+    await svc.enqueue({ type: 'geocode', mediaItemId: MEDIA, circleId: CIRCLE, reason: JobReason.rerun });
+    expect(jobs.enqueue.mock.calls[0][0].payload).toEqual({ circleId: CIRCLE });
+    await svc.enqueue({ type: 'face_detection', mediaItemId: MEDIA, circleId: CIRCLE, reason: JobReason.upload });
+    expect(prisma.mediaItem.findUnique).toHaveBeenCalledTimes(1);
+    const failing = { mediaItem: { findUnique: jest.fn().mockRejectedValue(new Error('db')) } };
+    await new EnrichmentJobService(jobs as never, org, failing as never).enqueue({
+      type: 'geocode', mediaItemId: MEDIA, circleId: CIRCLE, reason: JobReason.rerun,
+    });
+    expect(jobs.enqueue.mock.calls[2][0].payload).toEqual({ circleId: CIRCLE });
+  });
+});
+
 describe('LegacyJobSettledBridge', () => {
   it('re-emits a terminal platform event as the legacy enrichment event, with the legacy shape', () => {
     const emit = jest.fn();
