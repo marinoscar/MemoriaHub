@@ -3,13 +3,11 @@
  * (docs/platform-adoption/circles-to-groups.md §8) sees exactly the platform
  * groups plus personal content, and grants add records on top.
  *
- * The admin backfills and the location rebuild list their groups through
- * `GroupsService.listForSystem` (RETRO-N29, platform next.29; case 1b). The
- * other sweeps of §8 (memories generation and digest, the review-queue
- * reconcile, the node backup scope) still iterate the app's `circles` /
- * `circle_members`, and the RETRO-I2 triggers keep the two equal. This spec
- * pins that equality on the real schema, as the application role
- * (NOSUPERUSER NOBYPASSRLS):
+ * Every sweep of §8 (the admin backfills, the location rebuild, memories generation and digest,
+ * the review-queue reconcile, the node backup scope) reads the platform groups
+ * (`GroupsService.listForSystem`, `GroupMembershipService.membersForSystem`) and the personal
+ * libraries (RETRO-K1, RETRO-K2: `personal_libraries`; there is no `circles` table). This spec
+ * proves it on the real schema, as the application role (NOSUPERUSER NOBYPASSRLS):
  *
  *   1. the owner scopes a sweep iterates = the default organization's groups
  *      plus one personal library per user, whose content the user owns;
@@ -41,6 +39,10 @@ import {
 import type { UserPrincipal } from '@marinoscar/platform-api/core';
 import { Client } from 'pg';
 
+import { createPersonalLibrary, createSharedLibrary, dropLibraries } from '../helpers/library';
+import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../../src/platform/sharing/owner-scope-sweep.service';
+import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
 import { RecordAccessService } from '../../src/platform/sharing/record-access';
@@ -79,6 +81,9 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
   let groups: PrincipalGroupsProvider;
   let policy: AccessPolicy;
   let records: RecordAccessService;
+  let store: PersonalLibraryStore;
+  let directory: OwnerScopeSweepService;
+  let access: OwnerAccessService;
   let orgId: string;
 
   const principal = (userId: string, permissions: string[] = []): UserPrincipal => ({
@@ -118,30 +123,19 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     for (const [key, id] of Object.entries(users)) {
       await admin.query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
     }
-    for (const key of ['a', 'b', 'c'] as const) {
-      await admin.query(`INSERT INTO circles (id, name, owner_id, is_personal, updated_at) VALUES ($1, $2, $3, false, now())`, [
-        circles[key],
-        `Circle ${key.toUpperCase()} ${tag}`,
-        users.v,
-      ]);
+    for (const [key, members] of [
+      ['a', [[users.u, 'editor'], [users.v, 'admin'], [users.w, 'viewer']]],
+      ['b', [[users.u, 'viewer'], [users.v, 'admin']]],
+      ['c', [[users.w, 'admin']]],
+    ] as const) {
+      await createSharedLibrary(admin, {
+        id: circles[key],
+        name: `Circle ${key.toUpperCase()} ${tag}`,
+        createdById: users.v,
+        members: members.map(([userId, groupRole]) => ({ userId, role: groupRole })),
+      });
     }
-    await admin.query(`INSERT INTO circles (id, name, owner_id, is_personal, updated_at) VALUES ($1, $2, $3, true, now())`, [
-      circles.p,
-      `Library ${tag}`,
-      users.u,
-    ]);
-    const memberships: Array<[string, string, string]> = [
-      [circles.a, users.u, 'collaborator'],
-      [circles.a, users.v, 'circle_admin'],
-      [circles.a, users.w, 'viewer'],
-      [circles.b, users.u, 'viewer'],
-      [circles.b, users.v, 'circle_admin'],
-      [circles.c, users.w, 'circle_admin'],
-      [circles.p, users.u, 'circle_admin'],
-    ];
-    for (const [circleId, userId, circleRole] of memberships) {
-      await admin.query(`INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, $3)`, [circleId, userId, circleRole]);
-    }
+    await createPersonalLibrary(admin, { id: circles.p, userId: users.u });
     for (const key of Object.keys(circles) as Array<keyof typeof circles>) {
       items[key] = await insertItem(circles[key], key === 'p' ? users.u : users.v);
     }
@@ -155,6 +149,21 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     groups = new PrincipalGroupsProvider(data, options);
     policy = new AccessPolicy(data, groups);
     records = new RecordAccessService(policy, groups, data, { get: async () => orgId } as never);
+
+    // The scope directory of the sweeps, over the REAL slice services and the personal-library store.
+    // The system client: a transaction with the transaction-local bypass (what PrismaSystemService does).
+    const systemData = new SharingDataAdapter(app as never, {
+      runAsSystem: (_reason: string, fn: (tx: unknown) => Promise<unknown>) =>
+        app.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.rls_bypass', 'on', true)`;
+          return fn(tx);
+        }),
+    } as never);
+    const membership = new GroupMembershipService(systemData, options, {} as never, {} as never);
+    const groupsService = new GroupsService(systemData, options, membership, {} as never);
+    store = new PersonalLibraryStore(app as never);
+    directory = new OwnerScopeSweepService(groupsService, membership, store, app as never, { get: async () => orgId } as never);
+    access = new OwnerAccessService(store, groups, { get: async () => orgId } as never);
   }, 120_000);
 
   afterAll(async () => {
@@ -164,8 +173,7 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
       await admin.query(`DELETE FROM grants WHERE resource_id = ANY($1::uuid[])`, [Object.values(items)]).catch(() => undefined);
       await admin.query(`DELETE FROM media_items WHERE circle_id = ANY($1::uuid[])`, [all]).catch(() => undefined);
       await admin.query(`DELETE FROM storage_objects WHERE storage_key LIKE 'seed/i3b/%'`).catch(() => undefined);
-      await admin.query(`DELETE FROM circles WHERE id = ANY($1::uuid[])`, [all]).catch(() => undefined);
-      await admin.query(`DELETE FROM groups WHERE id = ANY($1::uuid[])`, [all]).catch(() => undefined);
+      await dropLibraries(admin, all).catch(() => undefined);
       await admin.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
       await admin.query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
       await admin.query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
@@ -175,18 +183,20 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
 
   it('1. the owner scopes a sweep iterates are the groups plus one personal library per user', async () => {
     // The sweeps' own read (memories generation / digest, reconcile, backfills).
-    const swept = (await app.circle.findMany({ where: { id: { in: Object.values(circles) } }, select: { id: true } })).map((c) => c.id);
-    const groupIds = (
-      await admin.query(`SELECT id::text AS id FROM groups WHERE org_id = $1 AND id = ANY($2::uuid[])`, [orgId, Object.values(circles)])
-    ).rows.map((r) => r.id);
-    expect(new Set(groupIds)).toEqual(new Set([circles.a, circles.b, circles.c]));
-    expect(new Set(swept)).toEqual(new Set([...groupIds, circles.p]));
+    const swept = new Set((await directory.allScopeIds(OWNER_SCOPE_SWEEP_REASON)));
+    for (const id of Object.values(circles)) expect(swept.has(id)).toBe(true);
+    const scopes = (await directory.allScopes()).filter((scope) => (Object.values(circles) as string[]).includes(scope.id));
+    expect(scopes.filter((scope) => scope.kind === 'group').map((scope) => scope.id).sort()).toEqual([circles.a, circles.b, circles.c].sort());
+    expect(scopes.find((scope) => scope.kind === 'personal')).toMatchObject({ id: circles.p, ownerId: users.u });
     // The personal library's content is user-owned: no group behind it.
     const personal = (await admin.query(`SELECT owner_user_id::text AS u, owner_group_id FROM media_items WHERE id = $1`, [items.p])).rows[0];
     expect(personal).toEqual({ u: users.u, owner_group_id: null });
+    // A group's content is owned by the group, derived from circle_id by the trigger.
+    const group = (await admin.query(`SELECT owner_group_id::text AS g, owner_user_id FROM media_items WHERE id = $1`, [items.a])).rows[0];
+    expect(group).toEqual({ g: circles.a, owner_user_id: null });
   });
 
-  it('1b. GroupsService.listForSystem lists exactly the groups the circle mirror holds', async () => {
+  it('1b. GroupsService.listForSystem lists exactly the groups, never a personal library', async () => {
     const options = resolveSharingModuleOptions({ ...SHARING_MODULE_OPTIONS });
     const membership = new GroupMembershipService(data, options, {} as never, {} as never);
     const service = new GroupsService(data, options, membership, {} as never);
@@ -205,22 +215,27 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
 
   it.each(['a', 'b', 'c'] as const)('2. circle %s: reconcile audience = group editor+admin, digest audience = all members', async (key) => {
     const circleId = circles[key];
-    const reconcile = await app.circleMember.findMany({
-      where: { circleId, role: { in: ['collaborator', 'circle_admin'] } },
-      select: { userId: true },
-    });
+    const reconcile = await directory.membersOf(circleId, ['admin', 'editor']);
     const editors = await admin.query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1 AND role IN ('editor', 'admin')`, [
       circleId,
     ]);
     expect(new Set(reconcile.map((m) => m.userId))).toEqual(new Set(editors.rows.map((r) => r.u)));
 
-    const digest = await app.circleMember.findMany({ where: { circleId }, select: { userId: true } });
+    const digest = await directory.membersOf(circleId);
     const everyone = await admin.query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1`, [circleId]);
     expect(new Set(digest.map((m) => m.userId))).toEqual(new Set(everyone.rows.map((r) => r.u)));
   });
 
+  it('2b. a personal library has one member, its owner, as admin; existence covers both kinds', async () => {
+    await expect(directory.membersOf(circles.p)).resolves.toEqual([{ userId: users.u, role: 'admin' }]);
+    await expect(directory.membersOf(circles.p, ['editor'])).resolves.toEqual([]);
+    await expect(directory.exists(circles.p)).resolves.toBe(true);
+    await expect(directory.exists(circles.a)).resolves.toBe(true);
+    await expect(directory.exists(randomUUID())).resolves.toBe(false);
+  });
+
   it("3. a user's node backup scope = their group memberships plus their personal library", async () => {
-    const scope = (await app.circleMember.findMany({ where: { userId: users.u }, select: { circleId: true } })).map((m) => m.circleId);
+    const scope = await access.scopesOf(users.u);
     const memberOf = (await groups.groupsFor(principal(users.u))).map((g) => g.groupId);
     expect(new Set(scope)).toEqual(new Set([...memberOf, circles.p]));
     expect(new Set(memberOf)).toEqual(new Set([circles.a, circles.b]));

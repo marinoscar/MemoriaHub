@@ -7,7 +7,6 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { OnboardingRequestContext } from '@marinoscar/platform-api/onboarding';
-import { CircleRole } from '@prisma/client';
 
 import {
   ALBUM_COUNTS_FACT,
@@ -23,6 +22,7 @@ import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { OwnerScopeSweepService } from '../../src/platform/sharing/owner-scope-sweep.service';
 import { buildOwnerAccessService } from '../helpers/owner-access';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
+import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -55,11 +55,7 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
     const stamp = Date.now();
     userId = (await prisma.user.create({ data: { email: `onboarding-a-${stamp}@example.test` } })).id;
     otherId = (await prisma.user.create({ data: { email: `onboarding-b-${stamp}@example.test` } })).id;
-    const circle = await prisma.circle.create({
-      data: { name: `Circle ${randomUUID()}`, ownerId: userId, isPersonal: false },
-    });
-    circleId = circle.id;
-    await prisma.circleMember.create({ data: { circleId, userId, role: CircleRole.circle_admin } });
+    circleId = (await newLibrary(prisma, { ownerId: userId })).id;
     await prisma.album.create({ data: { circleId, addedById: otherId, name: 'Album X' } });
   });
 
@@ -67,8 +63,7 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
     // Children first: `albums` and `people` reference the circle and the users without a cascade.
     await prisma.person.deleteMany({ where: { circleId } });
     await prisma.album.deleteMany({ where: { circleId } });
-    await prisma.circleMember.deleteMany({ where: { circleId } });
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherId] } } });
     await prisma.$disconnect();
   });

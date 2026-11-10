@@ -19,8 +19,9 @@ import { JobHandlerRegistry, type Job, type JobHandler } from '@marinoscar/platf
 
 import { MemoryDigestHandler } from './memory-digest.handler';
 import { MEMORY_DIGEST_JOB_TYPE, MemoryDigestService } from './memory-digest.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { circleJob, subjectPrisma } from '../../../test/helpers/platform-job';
+import { circleJob, subjectPrisma, subjectScopes } from '../../../test/helpers/platform-job';
 
 function job(overrides: Partial<Job> = {}): Job {
   return circleJob(MEMORY_DIGEST_JOB_TYPE, 'circle-1', overrides);
@@ -51,6 +52,7 @@ describe('MemoryDigestHandler', () => {
         { provide: MemoryDigestService, useValue: digest },
         { provide: JobHandlerRegistry, useValue: registry },
         { provide: PrismaService, useValue: subjectPrisma() },
+        { provide: OwnerScopeSweepService, useValue: subjectScopes(['circle-1']) },
       ],
     }).compile();
 

@@ -96,11 +96,11 @@ describe('OwnerAccessService decision matrix (RETRO-I3)', () => {
       groups: { ...SHARING_MODULE_OPTIONS.groups, membershipCacheTtlSeconds: 0 },
     });
     const prisma = {
-      circle: {
-        // The PersonalLibraryStore (RETRO-K1): only a personal circle is a personal library.
-        findFirst: async ({ where }: { where: { id: string } }) => {
+      personalLibrary: {
+        // The PersonalLibraryStore (RETRO-K2): only a personal circle is a personal library.
+        findUnique: async ({ where }: { where: { id: string } }) => {
           const row = circles[where.id];
-          return row && row.isPersonal ? row : null;
+          return row && row.isPersonal ? { userId: row.ownerId } : null;
         },
       },
     };

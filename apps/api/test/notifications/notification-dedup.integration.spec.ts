@@ -65,6 +65,7 @@
 // regression; check the actual error object shape and adjust
 // `expectUniqueViolation` below rather than deleting the assertion.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -498,23 +499,9 @@ async function seedFixtures(prisma: PrismaClient): Promise<void> {
     skipDuplicates: true,
   });
 
-  await prisma.circle.createMany({
-    data: [
-      {
-        id: CIRCLE_1_ID,
-        name: `Notification Dedup Test Circle 1 (${RUN_ID})`,
-        ownerId: USER_1_ID,
-        isPersonal: false,
-      },
-      {
-        id: CIRCLE_2_ID,
-        name: `Notification Dedup Test Circle 2 (${RUN_ID})`,
-        ownerId: USER_1_ID,
-        isPersonal: false,
-      },
-    ],
-    skipDuplicates: true,
-  });
+  await dropLibraries(prisma, [CIRCLE_1_ID, CIRCLE_2_ID]);
+  await createSharedLibrary(prisma, { id: CIRCLE_1_ID, name: `Notification Dedup Test Circle 1 (${RUN_ID})`, createdById: USER_1_ID });
+  await createSharedLibrary(prisma, { id: CIRCLE_2_ID, name: `Notification Dedup Test Circle 2 (${RUN_ID})`, createdById: USER_1_ID });
 }
 
 async function cleanupFixtures(prisma: PrismaClient): Promise<void> {
@@ -524,6 +511,6 @@ async function cleanupFixtures(prisma: PrismaClient): Promise<void> {
   await prisma.mhLegacyNotification.deleteMany({
     where: { userId: { in: [USER_1_ID, USER_2_ID] } },
   });
-  await prisma.circle.deleteMany({ where: { id: { in: [CIRCLE_1_ID, CIRCLE_2_ID] } } });
+  await dropLibraries(prisma, [CIRCLE_1_ID, CIRCLE_2_ID]);
   await prisma.user.deleteMany({ where: { id: { in: [USER_1_ID, USER_2_ID] } } });
 }

@@ -53,6 +53,7 @@
 // unique violations wrap to a generic "Unique constraint failed on the
 // fields: (...)" message without the index name.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -116,9 +117,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
     await prisma.user.create({
       data: { id: userId, email: `review-runs-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Review Runs Test Circle', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Review Runs Test Circle', createdById: userId });
     await prisma.storageObject.create({
       data: {
         orgId: await defaultOrgId(prisma),
@@ -157,7 +156,7 @@ describeDb('Review Runs — DB constraints (DB_GATED: real PostgreSQL)', () => {
     await prisma.burstGroup.deleteMany({ where: { circleId } });
     await prisma.mediaItem.deleteMany({ where: { id: mediaItemId } });
     await prisma.storageObject.deleteMany({ where: { id: storageObjectId } });
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

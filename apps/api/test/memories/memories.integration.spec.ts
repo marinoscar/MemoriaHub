@@ -42,6 +42,7 @@
 // `.env.test`'s POSTGRES_PORT=5433 default — most local `npm test` runs too,
 // mirroring every other DB_GATED suite in this repo).
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -78,9 +79,7 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
     await prisma.user.create({
       data: { id: userId, email: `memories-test-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories Test Circle', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories Test Circle', createdById: userId });
     await prisma.storageObject.create({
       data: {
         orgId: await defaultOrgId(prisma),
@@ -115,7 +114,7 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
     await prisma.memory.deleteMany({ where: { circleId } }).catch(() => undefined);
     await prisma.mediaItem.deleteMany({ where: { id: mediaItemId } });
     await prisma.storageObject.deleteMany({ where: { id: storageObjectId } });
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);
@@ -369,19 +368,17 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
   });
 
   // ===========================================================================
-  // 6. Circle cascade
+  // 6. Library deletion (RETRO-K2: no circle cascade; a group's content keys are RESTRICT)
   // ===========================================================================
 
-  describe('Circle deletion cascades all its Memory rows', () => {
-    it('deleting a Circle removes every Memory scoped to it', async () => {
+  describe('A library that still has a Memory cannot be deleted', () => {
+    it('refuses to delete a group while a Memory is scoped to it, and deletes it once the Memory is gone', async () => {
       const localUserId = randomUUID();
       const localCircleId = randomUUID();
       await prisma.user.create({
-        data: { id: localUserId, email: `memories-circle-cascade-${localUserId}@example.test` },
+        data: { id: localUserId, email: `memories-circle-restrict-${localUserId}@example.test` },
       });
-      await prisma.circle.create({
-        data: { id: localCircleId, name: 'Circle Cascade Test', ownerId: localUserId },
-      });
+      await createSharedLibrary(prisma, { id: localCircleId, name: 'Circle Restrict Test', createdById: localUserId });
       const memory = await prisma.memory.create({
         data: {
           circleId: localCircleId,
@@ -398,11 +395,11 @@ describeMaybeDb('Memories — DB constraints and cascades (DB_GATED: real Postgr
         },
       });
 
-      await prisma.circle.delete({ where: { id: localCircleId } });
+      await expect(prisma.$executeRawUnsafe(`DELETE FROM groups WHERE id = $1::uuid`, localCircleId)).rejects.toBeDefined();
+      expect(await prisma.memory.findUnique({ where: { id: memory.id } })).not.toBeNull();
 
-      const found = await prisma.memory.findUnique({ where: { id: memory.id } });
-      expect(found).toBeNull(); // Cascade
-
+      await prisma.memory.delete({ where: { id: memory.id } });
+      await dropLibraries(prisma, [localCircleId]);
       await prisma.user.deleteMany({ where: { id: localUserId } });
     });
   });

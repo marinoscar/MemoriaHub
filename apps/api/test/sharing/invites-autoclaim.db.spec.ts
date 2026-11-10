@@ -14,8 +14,7 @@
  *     (`GroupInvitesService.mine`);
  *   - a NEW user signing up with an invited address (the slice's `InviteAutoAcceptListener` on
  *     `identity.user.created`, `groups.autoAcceptInvitesOnSignup`) is a group member immediately,
- *     with the mapped role, and the app's `GroupMemberMirrorListener` puts the circle_members row
- *     back (the circle list still reads it);
+ *     with the mapped role (the circle tables are gone since RETRO-K2: no mirror to a circle_members row);
  *   - an existing member's next sign-in (`identity.login.succeeded`, `autoAcceptInvitesOnSignIn`)
  *     UPGRADES a lower role and never downgrades a higher one.
  *
@@ -41,7 +40,6 @@ import {
 } from '@marinoscar/platform-api/sharing';
 import { Client } from 'pg';
 
-import { GroupMemberMirrorListener } from '../../src/circles/group-member-mirror.listener';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SINGLE_TENANCY } from '../../src/platform/sharing/sharing-host.module';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
@@ -93,7 +91,6 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
   let prisma: PrismaClient;
   let invites: GroupInvitesService;
   let autoAccept: InviteAutoAcceptListener;
-  let mirror: GroupMemberMirrorListener;
   const events: Array<{ name: string; payload: any }> = [];
 
   let orgId: string;
@@ -119,15 +116,6 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
   });
   const memberRole = async (groupId: string, userId: string): Promise<string | null> =>
     (await q(`SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`, [groupId, userId]))[0]?.role ?? null;
-
-  /** Delivers the slice's captured events to the app's mirror listener, as EventEmitter2 would. */
-  async function deliver(): Promise<void> {
-    for (const { name, payload } of events.splice(0)) {
-      if (name === 'sharing.group.member_added') await mirror.onMemberAdded(payload);
-      if (name === 'sharing.group.member_role_changed') await mirror.onMemberRoleChanged(payload);
-      if (name === 'sharing.group.invite_auto_accepted') await mirror.onInviteAutoAccepted(payload);
-    }
-  }
 
   beforeAll(async () => {
     admin = new Client(connection(process.env.POSTGRES_DB || 'appdb'));
@@ -187,7 +175,6 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
     const membership = new GroupMembershipService(data, options, new MemberLookupThrottle(), effects);
     invites = new GroupInvitesService(data, options, membership, effects, SINGLE_TENANCY);
     autoAccept = new InviteAutoAcceptListener(invites, options);
-    mirror = new GroupMemberMirrorListener(prisma as never, { notifyAddress: jest.fn() } as never, { get: jest.fn() } as never);
   }, 300_000);
 
   afterAll(async () => {
@@ -240,12 +227,6 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
       expect.arrayContaining(['sharing.group.member_added', 'sharing.group.invite_auto_accepted']),
     );
 
-    // The app mirrors the membership into circle_members (the circle list still reads it).
-    await deliver();
-    expect(await q(`SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2`, [alpha.id, userId])).toEqual([
-      { role: 'collaborator' },
-    ]);
-    expect(await memberRole(alpha.id, userId)).toBe('editor');
   });
 
   it('an existing member\'s next sign-in upgrades a lower role', async () => {
@@ -254,10 +235,6 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
     await autoAccept.onLoginSucceeded({ userId: userC.id, provider: 'google', isNewUser: false } as never);
 
     expect(await memberRole(alpha.id, userC.id)).toBe('admin');
-    await deliver();
-    expect((await one(`SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2`, [alpha.id, userC.id])).role).toBe(
-      'circle_admin',
-    );
   });
 
   it('never downgrades: an editor invited as viewer stays editor', async () => {
@@ -276,9 +253,5 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
     await autoAccept.onLoginSucceeded({ userId: userB.id, provider: 'google', isNewUser: false } as never);
 
     expect(await memberRole(alpha.id, userB.id)).toBe('editor');
-    await deliver();
-    expect((await one(`SELECT role FROM circle_members WHERE circle_id = $1 AND user_id = $2`, [alpha.id, userB.id])).role).toBe(
-      'collaborator',
-    );
   });
 });

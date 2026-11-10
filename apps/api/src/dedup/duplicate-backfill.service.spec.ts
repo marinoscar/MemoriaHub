@@ -19,12 +19,16 @@ import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.se
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
+/** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
+const scopeFindMany = jest.fn();
+
 describe('DuplicateBackfillService', () => {
   let service: DuplicateBackfillService;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
+    scopeFindMany.mockReset().mockResolvedValue([]);
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
@@ -32,11 +36,11 @@ describe('DuplicateBackfillService', () => {
       providers: [
         DuplicateBackfillService,
         { provide: PrismaService, useValue: mockPrisma },
-        // The sweep helper (groups through the slice, personal libraries through `circles`) is
-        // stood in for by the mocked `circle.findMany`, which each case fills with the scope ids.
+        // The sweep helper (groups through the slice, personal libraries through the store) is
+        // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
           provide: OwnerScopeSweepService,
-          useValue: { allScopeIds: async () => ((await mockPrisma.circle.findMany({})) as { id: string }[]).map((c) => c.id) },
+          useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
@@ -59,7 +63,7 @@ describe('DuplicateBackfillService', () => {
 
   describe('chunking (100 ids per job)', () => {
     it('slices a page of 250 ids into 3 chunks (100, 100, 50)', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       // First page: 250 ids (< PAGE_SIZE of 5000, so loop ends after one page)
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce(idsPage(250));
 
@@ -75,7 +79,7 @@ describe('DuplicateBackfillService', () => {
     });
 
     it('produces exactly 1 chunk for a page smaller than 100', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce(idsPage(42));
 
       const result = await service.backfillAllCircles({});
@@ -86,7 +90,7 @@ describe('DuplicateBackfillService', () => {
     });
 
     it('produces zero jobs for an empty page', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       const result = await service.backfillAllCircles({});
@@ -103,7 +107,7 @@ describe('DuplicateBackfillService', () => {
 
   describe('circle isolation', () => {
     it('processes each circle independently — every enqueued job carries a single circleId', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-a' },
         { id: 'circle-b' },
       ] as any);
@@ -138,7 +142,7 @@ describe('DuplicateBackfillService', () => {
     });
 
     it('returns { circles: 0, enqueued: 0, estimatedItems: 0 } when there are no circles', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([]);
+      scopeFindMany.mockResolvedValue([]);
 
       const result = await service.backfillAllCircles({});
 
@@ -153,7 +157,7 @@ describe('DuplicateBackfillService', () => {
 
   describe('enqueue call shape', () => {
     it('every enqueue call sets skipDedup:true, priority:100, reason:backfill, type:duplicate_detection_batch', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce(idsPage(5));
 
       await service.backfillAllCircles({});
@@ -177,7 +181,7 @@ describe('DuplicateBackfillService', () => {
 
   describe('force flag', () => {
     it('force=false (default): the eligibility SQL includes a NOT EXISTS media_visual_embedding guard', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       await service.backfillAllCircles({});
@@ -189,7 +193,7 @@ describe('DuplicateBackfillService', () => {
     });
 
     it('force=true: the eligibility SQL omits the NOT EXISTS embedding guard', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       await service.backfillAllCircles({ force: true });
@@ -200,7 +204,7 @@ describe('DuplicateBackfillService', () => {
     });
 
     it('always filters to type=photo, deleted_at IS NULL, archived_at IS NULL regardless of force', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }] as any);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }] as any);
       (mockPrisma.$queryRaw as jest.Mock).mockResolvedValueOnce([]);
 
       await service.backfillAllCircles({ force: true });
@@ -219,7 +223,7 @@ describe('DuplicateBackfillService', () => {
 
   describe('return shape', () => {
     it('returns { enqueued, circles, estimatedItems } summed across all circles', async () => {
-      mockPrisma.circle.findMany.mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-a' },
         { id: 'circle-b' },
       ] as any);

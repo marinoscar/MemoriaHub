@@ -53,6 +53,7 @@ import {
 } from '@marinoscar/platform-api/jobs';
 
 import { resolveCircleJob } from '../../platform/jobs/media-item-job';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_DIGEST_JOB_TYPE, MemoryDigestService } from './memory-digest.service';
 
@@ -74,6 +75,7 @@ export class MemoryDigestHandler implements JobHandler, OnModuleInit {
   constructor(
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly digest: MemoryDigestService,
     // App metrics (RETRO-T3, #628): `app.memories.digest.sent`. Optional for hand-built tests.
     @Optional() private readonly metrics?: AppMetricsService,
@@ -85,7 +87,7 @@ export class MemoryDigestHandler implements JobHandler, OnModuleInit {
 
   async process(job: Job): Promise<void> {
     // A digest is per circle by construction: the circle is the job's subject.
-    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    const circleId = await resolveCircleJob(this.scopes, job, this.logger);
     if (!circleId) return;
 
     const result = await this.digest.sendForCircle(circleId);

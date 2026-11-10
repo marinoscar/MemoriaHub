@@ -13,6 +13,7 @@
  */
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { newLibrary } from '../helpers/library';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { buildOwnerAccessService } from '../helpers/owner-access';
 import { MediaSyncService } from '../../src/media-sync/media-sync.service';
@@ -51,9 +52,7 @@ describeMaybeDb('Media Sync (DB_GATED: real PostgreSQL)', () => {
 
     const user = await prisma.user.create({ data: { email: `media-sync-db-${Date.now()}@example.test` } });
     userId = user.id;
-    const circle = await prisma.circle.create({ data: { name: 'Personal', ownerId: userId, isPersonal: true } });
-    circleId = circle.id;
-    await prisma.circleMember.create({ data: { circleId, userId, role: 'circle_admin' } });
+    circleId = (await newLibrary(prisma, { ownerId: userId, personal: true })).id;
     const token = await prisma.personalAccessToken.create({
       data: {
         userId,
@@ -71,7 +70,7 @@ describeMaybeDb('Media Sync (DB_GATED: real PostgreSQL)', () => {
   afterAll(async () => {
     await prisma.mediaSyncDevice.deleteMany({ where: { userId } });
     await prisma.personalAccessToken.deleteMany({ where: { userId } });
-    await prisma.circle.deleteMany({ where: { ownerId: userId } });
+    await prisma.personalLibrary.deleteMany({ where: { userId } });
     await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
     await prisma.$disconnect();
   });

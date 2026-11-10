@@ -70,25 +70,24 @@ export function systemJob(type: string, overrides: Partial<Job> = {}): Job {
   return platformJob({ type, ...overrides });
 }
 
-/** A Prisma double answering the subject lookups of `resolveMediaItemJob` / `resolveCircleJob`. */
+/** A Prisma double answering the media-item subject lookup of `resolveMediaItemJob`. */
 export function subjectPrisma(
-  existing: { mediaItems?: Record<string, string>; circles?: string[] } = {
+  existing: { mediaItems?: Record<string, string> } = {
     mediaItems: { 'media-1': 'circle-1' },
-    circles: ['circle-1'],
   },
 ) {
   const mediaItems = existing.mediaItems ?? {};
-  const circles = new Set(existing.circles ?? []);
   return {
     mediaItem: {
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
         where.id in mediaItems ? { id: where.id, circleId: mediaItems[where.id] } : null,
       ),
     },
-    circle: {
-      findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
-        circles.has(where.id) ? { id: where.id } : null,
-      ),
-    },
   };
+}
+
+/** The scope directory double the `circle` job resolvers read (`OwnerScopeSweepService.exists`). */
+export function subjectScopes(circles: string[] = ['circle-1']) {
+  const known = new Set(circles);
+  return { exists: jest.fn(async (id: string) => known.has(id)) };
 }

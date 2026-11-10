@@ -35,7 +35,7 @@ import type {
   MemoryCurator,
   MemoryCuratorContext,
 } from '../../src/memories/curators/memory-curator.interface';
-import { subjectPrisma } from '../helpers/platform-job';
+import { subjectPrisma, subjectScopes } from '../helpers/platform-job';
 
 const registry = { register: jest.fn() } as unknown as JobHandlerRegistry;
 
@@ -78,7 +78,8 @@ function buildMemoryGeneration(): MemoryGenerationHandler {
   const notifications = { recordGeneratedAsync: () => undefined };
   return new MemoryGenerationHandler(
     registry,
-    subjectPrisma({ circles: [CIRCLE] }) as never,
+    subjectPrisma() as never,
+    subjectScopes([CIRCLE]) as never,
     settings as never,
     titles as never,
     notifications as never,
@@ -175,7 +176,8 @@ function buildMemoryDigest(): MemoryDigestHandler {
   };
   return new MemoryDigestHandler(
     registry,
-    subjectPrisma({ circles: [CIRCLE] }) as never,
+    subjectPrisma() as never,
+    subjectScopes([CIRCLE]) as never,
     digest as never
   );
 }

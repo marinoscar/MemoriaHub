@@ -433,7 +433,6 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
         (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
-        (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
         return cb(mockPrisma);
       });
@@ -452,7 +451,6 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 2 });
         (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 5 });
-        (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
         return cb(mockPrisma);
       });
@@ -479,7 +477,6 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 1 });
         (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
-        (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
         return cb(mockPrisma);
       });
@@ -500,7 +497,6 @@ describe('FaceDetectionController', () => {
         (mockPrisma.person.deleteMany as jest.Mock).mockResolvedValue({ count: 3 });
         (mockPrisma.job.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
         (mockPrisma.mediaFaceStatus.deleteMany as jest.Mock).mockResolvedValue({ count: 7 });
-        (mockPrisma.circle.update as jest.Mock).mockResolvedValue({});
         (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
         return cb(mockPrisma);
       });

@@ -84,7 +84,7 @@ describe('MemoriaHub user-data registrations', () => {
   });
 
   it('lists what is kept on both pages', () => {
-    expect(userDataKeptLines()).toContain('Your circle memberships, and what you added to circles shared with others');
+    expect(userDataKeptLines()).toContain('Your personal library, and what you added to libraries shared with others');
     expect(factoryResetKeptLines()).toEqual(
       expect.arrayContaining(['The AI tag vocabulary', 'Location groups and their aliases', 'Android app releases and their APK files']),
     );

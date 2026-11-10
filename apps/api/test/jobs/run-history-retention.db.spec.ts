@@ -9,6 +9,7 @@
  * Needs a database migrated to the latest schema (`npm run prisma:migrate`). Skips
  * (reported as skipped, never passed) when nothing listens on the port.
  */
+import { dropLibraries, newLibrary } from '../helpers/library';
 import { Logger } from '@nestjs/common';
 import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
@@ -43,8 +44,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     await prisma.$connect();
     const user = await prisma.user.create({ data: { email: `retention-${Date.now()}@example.test` } });
     userId = user.id;
-    const circle = await prisma.circle.create({ data: { name: 'Circle Alpha', ownerId: userId } });
-    circleId = circle.id;
+    circleId = (await newLibrary(prisma, { ownerId: userId, name: 'Circle Alpha' })).id;
     const workflow = await prisma.workflow.create({
       data: { circleId, name: 'Workflow A', subjectType: 'media_item', trigger: 'manual', definition: {} },
     });
@@ -52,7 +52,11 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
   });
 
   afterAll(async () => {
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    // No circle cascade any more (RETRO-K2): the library's rows go first.
+    await prisma.reviewRun.deleteMany({ where: { circleId } });
+    await prisma.trashEmptyRun.deleteMany({ where: { circleId } });
+    await prisma.workflow.deleteMany({ where: { circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     jest.restoreAllMocks();
     await prisma.$disconnect();

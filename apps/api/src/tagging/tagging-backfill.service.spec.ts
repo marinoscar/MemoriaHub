@@ -15,6 +15,9 @@ import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.se
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
+/** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
+const scopeFindMany = jest.fn();
+
 describe('TaggingBackfillService', () => {
   let service: TaggingBackfillService;
   let mockPrisma: MockPrismaService;
@@ -28,6 +31,7 @@ describe('TaggingBackfillService', () => {
     mockEnrichmentJobService.enqueue.mock.calls.map((c: any[]) => c[0].type as string);
 
   beforeEach(async () => {
+    scopeFindMany.mockReset().mockResolvedValue([]);
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-x' }) };
     (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
@@ -37,11 +41,11 @@ describe('TaggingBackfillService', () => {
       providers: [
         TaggingBackfillService,
         { provide: PrismaService, useValue: mockPrisma },
-        // The sweep helper (groups through the slice, personal libraries through `circles`) is
-        // stood in for by the mocked `circle.findMany`, which each case fills with the scope ids.
+        // The sweep helper (groups through the slice, personal libraries through the store) is
+        // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
           provide: OwnerScopeSweepService,
-          useValue: { allScopeIds: async () => ((await mockPrisma.circle.findMany({})) as { id: string }[]).map((c) => c.id) },
+          useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
@@ -138,7 +142,7 @@ describe('TaggingBackfillService', () => {
 
   describe('backfillAllCircles', () => {
     it('forwards mediaTypes to every circle', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-1' },
         { id: 'circle-2' },
       ]);
@@ -154,7 +158,7 @@ describe('TaggingBackfillService', () => {
     });
 
     it('still defaults to photos only across every circle', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([{ id: 'circle-1' }]);
+      scopeFindMany.mockResolvedValue([{ id: 'circle-1' }]);
 
       await service.backfillAllCircles({});
 

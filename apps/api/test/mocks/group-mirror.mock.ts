@@ -21,11 +21,11 @@
 const ROLE_MAP: Record<string, string> = { viewer: 'viewer', collaborator: 'editor', circle_admin: 'admin' };
 
 function lastLookedUpCircleId(prisma: any): string | undefined {
-  // `OwnerAccessService` asks the PersonalLibraryStore (`circle.findFirst`, RETRO-K1) or, in older
-  // suites, `circle.findUnique`; the most recent call of either names the scope.
+  // `OwnerAccessService` asks the PersonalLibraryStore (`personalLibrary.findUnique`, RETRO-K2) which
+  // scope an id is; the most recent lookup names the scope (older suites seed `circle.*`, kept for them).
   let best: { order: number; id: string } | undefined;
-  for (const name of ['findUnique', 'findFirst']) {
-    const mock = prisma.circle?.[name]?.mock;
+  for (const [delegate, name] of [['personalLibrary', 'findUnique'], ['circle', 'findUnique'], ['circle', 'findFirst']] as const) {
+    const mock = prisma[delegate]?.[name]?.mock;
     const calls: any[][] = mock?.calls ?? [];
     const orders: number[] = mock?.invocationCallOrder ?? [];
     for (let i = 0; i < calls.length; i += 1) {

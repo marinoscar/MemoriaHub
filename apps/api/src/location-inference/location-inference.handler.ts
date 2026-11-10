@@ -6,6 +6,7 @@ import {
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
 import { resolveCircleJob, resolveMediaItemJob } from '../platform/jobs/media-item-job';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationInferenceService } from './location-inference.service';
 
@@ -40,6 +41,7 @@ export class LocationInferenceHandler implements JobHandler, OnModuleInit {
   constructor(
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly locationInferenceService: LocationInferenceService,
   ) {}
 
@@ -64,7 +66,7 @@ export class LocationInferenceHandler implements JobHandler, OnModuleInit {
       return;
     }
 
-    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    const circleId = await resolveCircleJob(this.scopes, job, this.logger);
     if (!circleId) return;
 
     const payload = (job.payload ?? null) as LocationInferenceSweepPayload | null;

@@ -17,7 +17,7 @@ import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
 import { DuplicateDetectionService } from './duplicate-detection.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { circleJob, subjectPrisma } from '../../test/helpers/platform-job';
+import { circleJob, subjectPrisma, subjectScopes } from '../../test/helpers/platform-job';
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return circleJob('duplicate_detection_batch', 'circle-1', {
@@ -41,6 +41,7 @@ describe('DuplicateDetectionBatchHandler', () => {
     handler = new DuplicateDetectionBatchHandler(
       mockRegistry as unknown as JobHandlerRegistry,
       subjectPrisma() as unknown as PrismaService,
+      subjectScopes(['circle-1']) as never,
       mockDuplicateDetectionService as unknown as DuplicateDetectionService,
     );
   });

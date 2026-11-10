@@ -19,7 +19,8 @@
  */
 
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { CircleRole, TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
+import { TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
+import { CircleRole } from '../../../test/helpers/circle-role';
 import { randomUUID } from 'crypto';
 import { TrashEmptyRunService } from './trash-empty-run.service';
 import { PrismaService } from '../../prisma/prisma.service';

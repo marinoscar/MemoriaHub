@@ -37,13 +37,8 @@
  */
 
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import {
-  CircleRole,
-  ReviewRunAction,
-  ReviewRunItemStatus,
-  ReviewRunStatus,
-  ReviewRunSubject,
-} from '@prisma/client';
+import { ReviewRunAction, ReviewRunItemStatus, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 import { randomUUID } from 'crypto';
 import {
   ACTIVE_RUN_STATUSES,

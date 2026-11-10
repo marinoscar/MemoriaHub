@@ -8,8 +8,8 @@ type Row = Record<string, unknown>;
 export function sqlScopeDirectory(prisma: PrismaClient) {
   const personal = async (): Promise<Row[]> =>
     (await prisma.$queryRawUnsafe(
-      `SELECT c.id, c.owner_id AS "ownerId", u.email, u.display_name AS "displayName"
-         FROM circles c JOIN users u ON u.id = c.owner_id WHERE c.is_personal ORDER BY c.id`,
+      `SELECT p.id, p.user_id AS "ownerId", u.email, u.display_name AS "displayName"
+         FROM personal_libraries p JOIN users u ON u.id = p.user_id ORDER BY p.id`,
     )) as Row[];
   return {
     async allScopes() {
@@ -30,6 +30,10 @@ export function sqlScopeDirectory(prisma: PrismaClient) {
     },
     async summary(id: string) {
       return (await this.allScopes()).find((s) => s.id === id) ?? null;
+    },
+    async removeGroup(id: string) {
+      await prisma.$executeRawUnsafe(`DELETE FROM group_members WHERE group_id = $1::uuid`, id);
+      await prisma.$executeRawUnsafe(`DELETE FROM groups WHERE id = $1::uuid`, id);
     },
     async exists(id: string) {
       return (await this.summary(id)) !== null;

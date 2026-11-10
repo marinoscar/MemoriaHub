@@ -25,6 +25,7 @@
 //   4. THE ZERO-COST CONTRACT: with `features.memories` off (the default) and
 //      with `MEMORIES_ENABLED=false`, a tick writes NO rows at all.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient, JobStatus } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { JobsService } from '@marinoscar/platform-api/jobs';
@@ -82,12 +83,8 @@ describeMaybeDb(
       await prisma.user.create({
         data: { id: userId, email: `memories-sched-${userId}@example.test` },
       });
-      await prisma.circle.createMany({
-        data: [
-          { id: circleAId, name: 'Memories Sched A', ownerId: userId },
-          { id: circleBId, name: 'Memories Sched B', ownerId: userId },
-        ],
-      });
+      await createSharedLibrary(prisma, { id: circleAId, name: 'Memories Sched A', createdById: userId });
+      await createSharedLibrary(prisma, { id: circleBId, name: 'Memories Sched B', createdById: userId });
     }, 30000);
 
     afterAll(async () => {
@@ -95,7 +92,7 @@ describeMaybeDb(
       await prisma.job
         .deleteMany({ where: ourCircleJobs })
         .catch(() => undefined);
-      await prisma.circle.deleteMany({ where: { id: ourCircles } });
+      await dropLibraries(prisma, [circleAId, circleBId]);
       await prisma.user.deleteMany({ where: { id: userId } });
       await prisma.$disconnect();
 

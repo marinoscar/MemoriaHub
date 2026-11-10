@@ -110,13 +110,6 @@ describe('WorkflowsService — hard_delete trigger-compat guard', () => {
 
     service = module.get(WorkflowsService);
 
-    prisma.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID } as any);
-    prisma.circleMember.findUnique.mockResolvedValue({
-      circleId: CIRCLE_ID,
-      userId: USER_ID,
-      role: 'collaborator',
-      joinedAt: new Date(),
-    } as any);
     prisma.workflow.count.mockResolvedValue(0);
     (prisma.workflow.create as jest.Mock).mockImplementation(async ({ data }: any) => ({
       ...makeWorkflowRow(),
@@ -300,13 +293,6 @@ describe('WorkflowsService — scheduling (cron min-interval + next_run_at)', ()
 
     service = module.get(WorkflowsService);
 
-    prisma.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID } as any);
-    prisma.circleMember.findUnique.mockResolvedValue({
-      circleId: CIRCLE_ID,
-      userId: USER_ID,
-      role: 'collaborator',
-      joinedAt: new Date(),
-    } as any);
     prisma.workflow.count.mockResolvedValue(0);
     (prisma.workflow.create as jest.Mock).mockImplementation(async ({ data }: any) => ({
       ...makeWorkflowRow(),

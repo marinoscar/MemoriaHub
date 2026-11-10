@@ -95,7 +95,8 @@ describe('toEnrichmentJob (the inverse of the facade mapping)', () => {
 describe('LegacyEnrichmentHandlerAdapter', () => {
   let platform: JobHandlerRegistry;
   let throttle: ProviderThrottleService;
-  let prisma: { mediaItem: { findUnique: jest.Mock }; circle: { findUnique: jest.Mock } };
+  let prisma: { mediaItem: { findUnique: jest.Mock } };
+  let scopes: { exists: jest.Mock };
   let legacy: EnrichmentHandlerRegistry;
 
   function register(handler: Partial<EnrichmentHandler> & { type: string }): ReturnType<JobHandlerRegistry['get']> {
@@ -108,10 +109,10 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
     throttle = new ProviderThrottleService(new ConfigService());
     prisma = {
       mediaItem: { findUnique: jest.fn().mockResolvedValue({ id: MEDIA_ID }) },
-      circle: { findUnique: jest.fn().mockResolvedValue({ id: CIRCLE_ID }) },
     };
+    scopes = { exists: jest.fn().mockResolvedValue(true) };
     legacy = new EnrichmentHandlerRegistry(
-      new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma as never),
+      new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma as never, scopes as never),
     );
   });
 
@@ -142,7 +143,7 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
     });
 
     it('a job whose circle was deleted settles as a no-op success', async () => {
-      prisma.circle.findUnique.mockResolvedValue(null);
+      scopes.exists.mockResolvedValue(false);
       const process = jest.fn();
       const handler = register({ type: 'x_type', process });
       await expect(
