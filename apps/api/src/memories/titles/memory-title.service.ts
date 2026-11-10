@@ -48,10 +48,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MediaTagSource, MemoryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AiSettingsService } from '../../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
-import type { ChatStreamEvent } from '../../ai-port/legacy-ai-provider.types';
-import { classifyRateLimit } from '../../enrichment/rate-limit.error';
+import { AiError, AiService, type AiStreamEvent } from '@marinoscar/platform-api/ai';
+import { MEMORIAHUB_AI_FEATURES } from '../../ai-port/ai-features';
+import { aiRateLimit, systemScope } from '../../ai-port/ai-calls';
+import { MemoriaHubAiSettings } from '../../ai-port/memoriahub-ai-settings';
 import { parseMemoryTitleResponse } from './memory-title.parse';
 import {
   MAX_PROMPT_DESCRIPTIONS,
@@ -111,8 +111,9 @@ class MemoryTitleTimeoutError extends Error {
  * underlying generator can release its HTTP connection.
  */
 async function collectChatText(
-  stream: AsyncIterable<ChatStreamEvent>,
+  stream: AsyncIterable<AiStreamEvent>,
   timeoutMs: number,
+  abort?: AbortController,
 ): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   const iterator = stream[Symbol.asyncIterator]();
@@ -122,6 +123,8 @@ async function collectChatText(
   const close = (): void => {
     if (closed) return;
     closed = true;
+    // Stop the provider call itself (a recorded `cancelled` usage row), not only the read.
+    abort?.abort();
     void Promise.resolve(iterator.return?.(undefined)).catch(() => undefined);
   };
 
@@ -137,7 +140,7 @@ async function collectChatText(
         timer.unref?.();
       });
 
-      let step: IteratorResult<ChatStreamEvent>;
+      let step: IteratorResult<AiStreamEvent>;
       try {
         step = await Promise.race([iterator.next(), timeout]);
       } finally {
@@ -146,13 +149,17 @@ async function collectChatText(
 
       if (step.done) break;
       const event = step.value;
-      if (event.type === 'text') {
-        text += event.text;
+      if (event.type === 'output_text.delta') {
+        text += event.delta;
         if (text.length > MAX_RESPONSE_CHARS) {
           throw new Error(`Memory title response exceeded ${MAX_RESPONSE_CHARS} characters`);
         }
-      } else if (event.type === 'done') {
+      } else if (event.type === 'response.completed') {
         break;
+      } else if (event.type === 'error') {
+        // An in-band failure after the stream opened (a throttle among them): thrown as the
+        // `AiError` it is, so `generate` classifies it and degrades to the template.
+        throw new AiError(event.code, event.message);
       }
     }
   } finally {
@@ -182,8 +189,8 @@ export class MemoryTitleService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiSettings: AiSettingsService,
-    private readonly registry: AiProviderRegistry,
+    private readonly aiSettings: MemoriaHubAiSettings,
+    private readonly ai: AiService,
   ) {}
 
   /**
@@ -240,33 +247,9 @@ export class MemoryTitleService {
       return null;
     }
 
-    const config = await this.aiSettings.resolveMemoriesConfig();
+    const config = await this.aiSettings.selection('memories');
     if (!config) {
       this.logger.debug('No ai.features.memories provider configured; using template titles');
-      return null;
-    }
-
-    let creds: { apiKey: string; baseUrl?: string };
-    try {
-      // Throws (400) when the provider row is absent or disabled — exactly the
-      // "credential missing/disabled" degradation path.
-      creds = await this.aiSettings.resolveCredentials(config.provider);
-    } catch (err) {
-      this.logger.debug(
-        `Memory AI titling: no usable credential for provider "${config.provider}" ` +
-          `(${err instanceof Error ? err.message : String(err)}); using template titles`,
-      );
-      return null;
-    }
-
-    let provider;
-    try {
-      provider = this.registry.get(config.provider);
-    } catch (err) {
-      this.logger.debug(
-        `Memory AI titling: unknown provider "${config.provider}" ` +
-          `(${err instanceof Error ? err.message : String(err)}); using template titles`,
-      );
       return null;
     }
 
@@ -290,18 +273,27 @@ export class MemoryTitleService {
     run.aiCalls += 1;
 
     let raw: string;
+    const abort = new AbortController();
     try {
+      // A system call (no acting user): the organization's or the deployment's key, never a
+      // user's; a missing key, a disabled model or the kill switch is an `AiError` that lands
+      // on the template below, exactly like a provider failure.
       raw = await collectChatText(
-        provider.chat(creds, {
-          model: config.model,
-          system: MEMORY_TITLE_SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: userPrompt }],
-          temperature: MEMORY_TITLE_TEMPERATURE,
-        }),
+        this.ai.forSystem(systemScope(MEMORIAHUB_AI_FEATURES.memoryTitles)).stream(
+          {
+            provider: config.provider,
+            model: config.model,
+            instructions: MEMORY_TITLE_SYSTEM_PROMPT,
+            input: userPrompt,
+            temperature: MEMORY_TITLE_TEMPERATURE,
+          },
+          { signal: abort.signal },
+        ),
         MEMORY_TITLE_TIMEOUT_MS,
+        abort,
       );
     } catch (err) {
-      const rateLimit = classifyRateLimit(err);
+      const rateLimit = aiRateLimit(err);
       if (rateLimit) {
         run.stopped = true;
         run.stopReason = 'rate_limited';

@@ -96,7 +96,8 @@ describe('platform AI slice mount (RETRO-E1)', () => {
   });
 
   it('serves the MemoriaHub model listing at /api/admin/memoriahub-ai/models behind ai_config:read', async () => {
-    (context.prismaMock.aiProviderCredential.findUnique as jest.Mock).mockResolvedValue(null);
+    // An empty platform catalogue: the picker offers the curated starter list (RETRO-E2).
+    (context.prismaMock.aiModel.findMany as jest.Mock).mockResolvedValue([]);
 
     const viewer = await createMockViewerUser(context);
     const denied = await request(context.app.getHttpServer())
@@ -112,6 +113,21 @@ describe('platform AI slice mount (RETRO-E1)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual(['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1']);
+  });
+
+  it('lists the enabled catalogue models of the capability once the catalogue has rows (RETRO-E2)', async () => {
+    (context.prismaMock.aiModel.findMany as jest.Mock).mockResolvedValue([
+      { modelId: 'gpt-4o-transcribe', capabilities: { capabilities: ['audio_transcription'] } },
+    ]);
+
+    const admin = await createMockAdminUser(context);
+    grant(admin.id, ['ai_config:read']);
+    const res = await request(context.app.getHttpServer())
+      .get('/api/admin/memoriahub-ai/models?provider=openai&capability=transcription')
+      .set(authHeader(admin.accessToken));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(['gpt-4o-transcribe']);
   });
 
   it('retired the old AI admin routes (RETRO-E4): /api/ai/settings is not routed', async () => {

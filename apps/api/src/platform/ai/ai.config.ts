@@ -15,10 +15,10 @@
 //
 // THE KILL SWITCH IS OFF BY DEFAULT (`ai.enabled: false`): every consumer route answers 403
 // `AI_DISABLED` until an administrator turns it on. MemoriaHub's own AI features (tagging, search,
-// memories, the enhancer, transcription) do NOT go through the platform runtime yet: they call the
-// legacy provider adapter (`src/ai-port/`, PLATFORM-ADOPTION-SHIM(#595)) under the legacy keys, so
-// they keep working exactly as before. RETRO-E2 registers the features and moves each call to
-// `AiService.forUser`; RETRO-E3 imports the keys; RETRO-E4 swaps the admin pages.
+// memories, the enhancer, transcription) go through this runtime too (RETRO-E2, #601): each is a
+// registered feature (`app-registrations/ai.ts`), routed to its `ai.features.*` selection by
+// `MemoriaHubAiTargetResolver`, so they need the switch ON, a model ENABLED in the catalogue and
+// the deployment key imported (RETRO-E3: `npm run ai:migrate-keys`).
 //
 // ORDER: `app-registrations/ai.ts` registers the AI features, and the registry freezes when the
 // application bootstraps, so it is imported HERE, at module load, never from a service. The

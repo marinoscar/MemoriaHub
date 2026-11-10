@@ -12,7 +12,7 @@ import { FeaturesModule } from './settings/features.module';
 import { MediaProcessingModule } from './media-processing/media-processing.module';
 import { MediaModule } from './media/media.module';
 import { CirclesModule } from './circles/circles.module';
-import { LegacyAiModule } from './ai-port/legacy-ai.module';
+import { AiPortModule } from './ai-port/ai-port.module';
 import { aiModule } from './platform/ai/ai.config';
 import { FaceModule } from './face/face.module';
 import { EnrichmentModule } from './enrichment/enrichment.module';
@@ -137,10 +137,10 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     MediaProcessingModule,
     MediaModule,
     CirclesModule,
-    LegacyAiModule,
-    // The platform AI slice (RETRO-E1, #595). `LegacyAiModule` above is MemoriaHub's legacy AI call
-    // path (the provider registry, the feature selections and their admin routes under
-    // /api/admin/memoriahub-ai, RETRO-E4), kept until RETRO-E2 moves the features to AiService.
+    AiPortModule,
+    // The platform AI slice (RETRO-E1, #595). `AiPortModule` above is MemoriaHub's AI port
+    // (RETRO-E2, #601): the feature selections, their admin routes under /api/admin/memoriahub-ai
+    // and the re-export of this slice's `AiService` every model call goes through.
     aiModule,
     FaceModule,
     EnrichmentModule,

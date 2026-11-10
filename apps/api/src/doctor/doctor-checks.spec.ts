@@ -25,7 +25,7 @@ import type { DoctorCheck as PlatformDoctorCheck } from '@marinoscar/platform-ap
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AppSystemSettings } from '../settings/app-settings.types';
 import type { AiSettingsService } from '../ai-port/ai-settings.service';
-import type { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import type { AiProviderRegistry } from '@marinoscar/platform-api/ai';
 import type { FaceSettingsService } from '../face/face-settings.service';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
 import type { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -303,11 +303,11 @@ describe('MemoriaHub Doctor checks', () => {
     };
     mockSocialMediaOcr = { getStatus: jest.fn() };
     mockVisualEmbeddingService = { isAvailable: jest.fn().mockReturnValue(true) };
-    // OpenAI implements transcribeAudio; Anthropic deliberately does not (the
-    // ai.videoTagging check reports the latter as a visual-only warning).
+    // The platform registry's adapters: OpenAI carries a speech-to-text port; Anthropic
+    // deliberately does not (the ai.videoTagging check reports the latter as a visual-only warning).
     mockAiProviderRegistry = {
       get: jest.fn().mockImplementation((key: string) =>
-        key === 'anthropic' ? { key } : { key, transcribeAudio: jest.fn() },
+        key === 'anthropic' ? { id: key } : { id: key, audio: { transcribe: jest.fn() } },
       ),
     };
 

@@ -81,7 +81,7 @@ export class SearchService {
 
     // --- Semantic search path ---
     if (semanticQuery && semanticQuery.trim().length > 0) {
-      const vec = await this.semanticSearch.embedQuery(semanticQuery.trim());
+      const vec = await this.semanticSearch.embedQuery(semanticQuery.trim(), userId);
 
       if (vec === null) {
         // Embedding unavailable or failed — fall back to normal filter-only path

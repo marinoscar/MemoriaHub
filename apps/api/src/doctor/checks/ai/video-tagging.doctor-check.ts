@@ -6,7 +6,7 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { AiSettingsService } from '../../../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../../../ai-port/legacy-ai-provider.registry';
+import { AiProviderRegistry } from '@marinoscar/platform-api/ai';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 
@@ -151,10 +151,16 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
     return decideVideoTagging(input);
   }
 
-  /** The registry throws for an unknown key; a check reports a misconfiguration rather than becoming one. */
+  /**
+   * The platform registry's adapter for `providerKey`, or null for an unknown one; a check reports
+   * a misconfiguration rather than becoming one. `transcribeAudio` mirrors whether the adapter
+   * carries a speech-to-text port (OpenAI only in v1).
+   */
   private safeGetAiProvider(providerKey: string): { transcribeAudio?: unknown } | null {
     try {
-      return this.aiProviderRegistry.get(providerKey) as { transcribeAudio?: unknown };
+      const adapter = this.aiProviderRegistry.get(providerKey);
+      if (!adapter) return null;
+      return adapter.audio?.transcribe ? { transcribeAudio: adapter.audio.transcribe } : {};
     } catch {
       return null;
     }

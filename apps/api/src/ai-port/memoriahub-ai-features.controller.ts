@@ -34,10 +34,11 @@ import {
 // and `/api/ai/settings/models`, with the same bodies and answers; their permission pair is the
 // platform's `ai_config:read|write` (the old app pair is retired).
 //
-// NOT BEHIND `AiEnabledGuard` (admin routes never are, AI rule 4), and the feature selections
-// serve MemoriaHub's legacy call path (`AiSettingsService`, PLATFORM-ADOPTION-SHIM(#601)), which
-// the platform kill switch does not govern until RETRO-E2 moves each feature to `AiService`.
-// RETRO-E2 replaces these routes with the platform feature registry.
+// NOT BEHIND `AiEnabledGuard` (admin routes never are, AI rule 4), so an administrator can always
+// set up a feature before AI is on. Since RETRO-E2 (#601) every selection routes a registered AI
+// feature (`MemoriaHubAiTargetResolver`) and every MemoriaHub model call goes through the platform
+// `AiService`, so the platform kill switch and key policy govern them. These routes stay: the
+// platform pages have no word for WHICH model serves a feature.
 // ⚠ NO ROUTE HERE ACCEPTS OR RETURNS A KEY: keys go through
 // `PUT|DELETE /api/admin/ai/providers/:provider/key`.
 // =============================================================================
@@ -69,8 +70,9 @@ export class MemoriaHubAiFeaturesController {
     summary: 'List the models a provider offers for one MemoriaHub feature kind (Admin)',
     description:
       'Replaces `GET /api/ai/settings/models`. `capability`: `chat` (default), `embedding`, ' +
-      '`image` (the Picture Enhancer) or `transcription`. A provider without the capability ' +
-      'answers an empty list.',
+      '`image` (the Picture Enhancer) or `transcription`. The enabled platform-catalogue models ' +
+      'that declare the capability (a curated starter list before the catalogue has been ' +
+      'refreshed); a provider without the capability answers an empty list.',
   })
   @ApiQuery({ name: 'provider', required: true })
   @ApiQuery({ name: 'capability', required: false, enum: ['chat', 'embedding', 'image', 'transcription'] })
@@ -86,7 +88,9 @@ export class MemoriaHubAiFeaturesController {
   @Auth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiOperation({
     summary: 'Test a provider and model on the MemoriaHub call path (Admin)',
-    description: 'Replaces `POST /api/ai/test`. `{ ok, error? }`; spends one small provider call.',
+    description:
+      'Replaces `POST /api/ai/test`. One small call through the platform `AiService` (the key a job ' +
+      'would use). `{ ok, error? }`; spends one small provider call.',
   })
   @ApiResponse({ status: 201, description: '{ ok, error? }' })
   async testProvider(@Body() dto: TestAiProviderDto) {

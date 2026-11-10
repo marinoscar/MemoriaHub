@@ -11,8 +11,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, BadRequestException } from '@nestjs/common';
 import { SearchAgentService, AgentSseEvent } from './search-agent.service';
-import { AiSettingsService } from '../../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
+import { AiService, type AiStreamEvent } from '@marinoscar/platform-api/ai';
+import { MemoriaHubAiSettings } from '../../ai-port/memoriahub-ai-settings';
 import { SearchService } from '../search.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -62,6 +62,26 @@ function makeTwoRoundChatFactory(
   };
 }
 
+/**
+ * The scripted events below read like the old provider's chat stream (`text`, `tool_call`,
+ * `done`); the agent now reads the platform's (`output_text.delta`, `output_item.done`,
+ * `response.completed`), so the mocked `openStream` maps one onto the other.
+ */
+async function* toPlatformStream(events: AsyncIterable<any>): AsyncGenerator<AiStreamEvent> {
+  for await (const e of events) {
+    if (e.type === 'text') {
+      yield { type: 'output_text.delta', delta: e.text };
+    } else if (e.type === 'tool_call') {
+      yield {
+        type: 'output_item.done',
+        item: { type: 'function_call', callId: e.id, name: e.name, arguments: JSON.stringify(e.input) },
+      } as AiStreamEvent;
+    } else if (e.type === 'done') {
+      yield { type: 'response.completed', response: { output: [] } } as unknown as AiStreamEvent;
+    }
+  }
+}
+
 // Chat generator that returns done immediately (for missing config / forbidden tests)
 async function* mockChatGeneratorEmpty() {
   yield { type: 'done' as const, stopReason: 'end_turn' };
@@ -75,8 +95,12 @@ describe('SearchAgentService', () => {
   let mockAiSettings: {
     getSettings: jest.Mock;
     resolveCredentials: jest.Mock;
+    selection: jest.Mock;
   };
+  /** `get()` answers the scripted chat source: `{ chat(request) }`. */
   let mockRegistry: { get: jest.Mock };
+  let mockOpenStream: jest.Mock;
+  let mockForUser: jest.Mock;
   let mockSearchService: { runSearch: jest.Mock };
   let mockPrisma: { person: { findMany: jest.Mock } };
 
@@ -84,10 +108,17 @@ describe('SearchAgentService', () => {
     mockAiSettings = {
       getSettings: jest.fn(),
       resolveCredentials: jest.fn(),
+      // `selection('search')` answers the saved provider/model, or null when half-filled.
+      selection: jest.fn(async () => {
+        const chosen = (await mockAiSettings.getSettings())?.features?.search;
+        return chosen?.provider && chosen?.model ? chosen : null;
+      }),
     };
     mockRegistry = {
       get: jest.fn(),
     };
+    mockOpenStream = jest.fn(async (request: unknown) => toPlatformStream(mockRegistry.get().chat(request)));
+    mockForUser = jest.fn().mockReturnValue({ openStream: mockOpenStream });
     mockSearchService = {
       runSearch: jest.fn(),
     };
@@ -100,8 +131,8 @@ describe('SearchAgentService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SearchAgentService,
-        { provide: AiSettingsService, useValue: mockAiSettings },
-        { provide: AiProviderRegistry, useValue: mockRegistry },
+        { provide: MemoriaHubAiSettings, useValue: mockAiSettings },
+        { provide: AiService, useValue: { forUser: mockForUser } },
         { provide: SearchService, useValue: mockSearchService },
         { provide: PrismaService, useValue: mockPrisma },
       ],
@@ -335,8 +366,14 @@ describe('SearchAgentService', () => {
 
       await collectEvents(gen);
 
-      // chat was called once; the messages array passed in should contain all 3 entries
+      // The stream was opened once, as the caller and under the search_agent feature, and the
+      // request carried all 3 turns in order, the instructions and the search_media tool.
+      expect(mockForUser).toHaveBeenCalledWith('user-test', { feature: 'search_agent' });
       expect(capturedArgs.length).toBeGreaterThan(0);
+      const request = (capturedArgs[0] as any[])[0];
+      expect(request).toMatchObject({ provider: 'openai', model: 'gpt-4o' });
+      expect(request.tools.map((t: { name: string }) => t.name)).toEqual(['search_media']);
+      expect(request.input.map((i: { role: string }) => i.role)).toEqual(['user', 'assistant', 'user']);
     });
 
     it('populates finalText with narration from a text-only response (no tool call)', async () => {

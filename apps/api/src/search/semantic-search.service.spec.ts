@@ -7,41 +7,38 @@
  * pgvector extension — those are integration tests only and are NOT run here.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { AiService } from '@marinoscar/platform-api/ai';
 import { SemanticSearchService } from './semantic-search.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 // ---------------------------------------------------------------------------
 // Test setup
 // ---------------------------------------------------------------------------
 
+/** A `vector(1536)`-sized embedding, the only size `media_item_embedding` holds. */
+const vec1536 = (): number[] => Array.from({ length: 1536 }, (_, i) => i / 1536);
+
 describe('SemanticSearchService', () => {
   let service: SemanticSearchService;
   let mockPrisma: MockPrismaService;
-  let mockAiSettings: {
-    resolveEmbeddingConfig: jest.Mock;
-    resolveCredentials: jest.Mock;
-  };
-  let mockRegistry: { get: jest.Mock };
-  let mockEmbedProvider: { embedText: jest.Mock };
+  let mockAiSettings: { selection: jest.Mock };
+  let mockEmbed: jest.Mock;
+  let mockForUser: jest.Mock;
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockEmbedProvider = { embedText: jest.fn() };
-    mockRegistry = { get: jest.fn().mockReturnValue(mockEmbedProvider) };
-    mockAiSettings = {
-      resolveEmbeddingConfig: jest.fn(),
-      resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }),
-    };
+    mockAiSettings = { selection: jest.fn() };
+    mockEmbed = jest.fn();
+    mockForUser = jest.fn().mockReturnValue({ embed: mockEmbed });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SemanticSearchService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: AiSettingsService, useValue: mockAiSettings },
-        { provide: AiProviderRegistry, useValue: mockRegistry },
+        { provide: MemoriaHubAiSettings, useValue: mockAiSettings },
+        { provide: AiService, useValue: { forUser: mockForUser } },
       ],
     }).compile();
 
@@ -53,53 +50,41 @@ describe('SemanticSearchService', () => {
   // -------------------------------------------------------------------------
 
   describe('embedQuery — null when unconfigured', () => {
-    it('returns null when resolveEmbeddingConfig returns null (no provider configured)', async () => {
-      mockAiSettings.resolveEmbeddingConfig.mockResolvedValue(null);
+    it('returns null when no embedding selection is saved', async () => {
+      mockAiSettings.selection.mockResolvedValue(null);
 
-      const result = await service.embedQuery('find my sunset photos');
+      const result = await service.embedQuery('find my sunset photos', 'user-1');
 
       expect(result).toBeNull();
-      expect(mockEmbedProvider.embedText).not.toHaveBeenCalled();
+      expect(mockEmbed).not.toHaveBeenCalled();
     });
 
-    it('returns null and does not throw when resolveEmbeddingConfig throws', async () => {
-      mockAiSettings.resolveEmbeddingConfig.mockRejectedValue(new Error('Settings DB error'));
+    it('returns null and does not throw when reading the selection throws', async () => {
+      mockAiSettings.selection.mockRejectedValue(new Error('Settings DB error'));
 
-      await expect(service.embedQuery('test query')).resolves.toBeNull();
-      expect(mockEmbedProvider.embedText).not.toHaveBeenCalled();
+      await expect(service.embedQuery('test query', 'user-1')).resolves.toBeNull();
+      expect(mockEmbed).not.toHaveBeenCalled();
     });
 
-    it('returns null when resolveCredentials throws (credentials missing)', async () => {
-      mockAiSettings.resolveEmbeddingConfig.mockResolvedValue({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
-      mockAiSettings.resolveCredentials.mockRejectedValue(new Error('No credentials for openai'));
+    it('returns null when the platform refuses the call (no key, kill switch, model not enabled)', async () => {
+      mockAiSettings.selection.mockResolvedValue({ provider: 'openai', model: 'text-embedding-3-small' });
+      mockEmbed.mockRejectedValue(new Error('No API key available'));
 
-      await expect(service.embedQuery('test query')).resolves.toBeNull();
-      expect(mockEmbedProvider.embedText).not.toHaveBeenCalled();
+      await expect(service.embedQuery('test query', 'user-1')).resolves.toBeNull();
     });
 
-    it('returns null when the provider does not implement embedText', async () => {
-      mockAiSettings.resolveEmbeddingConfig.mockResolvedValue({
-        provider: 'anthropic',
-        model: 'embed-v1',
-      });
-      mockAiSettings.resolveCredentials.mockResolvedValue({ apiKey: 'anthropic-key' });
-      // Provider without embedText method
-      mockRegistry.get.mockReturnValue({ analyzeImage: jest.fn() });
+    it('returns null when the model answers vectors the storage cannot hold (dimension guard)', async () => {
+      mockAiSettings.selection.mockResolvedValue({ provider: 'openai', model: 'text-embedding-3-large' });
+      mockEmbed.mockResolvedValue({ vectors: [Array.from({ length: 3072 }, () => 0.1)] });
 
-      await expect(service.embedQuery('test query')).resolves.toBeNull();
+      await expect(service.embedQuery('test query', 'user-1')).resolves.toBeNull();
     });
 
-    it('returns null when embedText throws (e.g. API rate limit)', async () => {
-      mockAiSettings.resolveEmbeddingConfig.mockResolvedValue({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
-      mockEmbedProvider.embedText.mockRejectedValue(new Error('Rate limit exceeded'));
+    it('returns null when the provider throws (e.g. API rate limit)', async () => {
+      mockAiSettings.selection.mockResolvedValue({ provider: 'openai', model: 'text-embedding-3-small' });
+      mockEmbed.mockRejectedValue(new Error('Rate limit exceeded'));
 
-      await expect(service.embedQuery('test query')).resolves.toBeNull();
+      await expect(service.embedQuery('test query', 'user-1')).resolves.toBeNull();
     });
   });
 
@@ -108,64 +93,39 @@ describe('SemanticSearchService', () => {
   // -------------------------------------------------------------------------
 
   describe('embedQuery — returns vector on success', () => {
-    const expectedVector = [0.1, 0.2, 0.3, 0.4, 0.5];
-
     beforeEach(() => {
-      mockAiSettings.resolveEmbeddingConfig.mockResolvedValue({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
-      mockEmbedProvider.embedText.mockResolvedValue(expectedVector);
+      mockAiSettings.selection.mockResolvedValue({ provider: 'openai', model: 'text-embedding-3-small' });
+      mockEmbed.mockResolvedValue({ vectors: [vec1536()] });
     });
 
-    it('returns the embedding vector from the provider', async () => {
-      const result = await service.embedQuery('family at the beach');
+    it('returns the embedding vector from the platform AiService', async () => {
+      const result = await service.embedQuery('family at the beach', 'user-1');
 
-      expect(result).toEqual(expectedVector);
+      expect(result).toEqual(vec1536());
     });
 
-    it('calls resolveEmbeddingConfig once', async () => {
-      await service.embedQuery('query text');
+    it('reads the embedding selection once', async () => {
+      await service.embedQuery('query text', 'user-1');
 
-      expect(mockAiSettings.resolveEmbeddingConfig).toHaveBeenCalledTimes(1);
+      expect(mockAiSettings.selection).toHaveBeenCalledTimes(1);
+      expect(mockAiSettings.selection).toHaveBeenCalledWith('embedding');
     });
 
-    it('calls resolveCredentials with the configured provider key', async () => {
-      await service.embedQuery('query text');
+    it('calls the platform as the caller, under the semantic_embedding feature', async () => {
+      await service.embedQuery('query text', 'user-1');
 
-      expect(mockAiSettings.resolveCredentials).toHaveBeenCalledWith('openai');
+      expect(mockForUser).toHaveBeenCalledWith('user-1', { feature: 'semantic_embedding' });
     });
 
-    it('calls registry.get with the configured provider key', async () => {
-      await service.embedQuery('query text');
-
-      expect(mockRegistry.get).toHaveBeenCalledWith('openai');
-    });
-
-    it('calls embedText with the resolved credentials, model, and trimmed text', async () => {
-      await service.embedQuery('  family at the beach  ');
+    it('embeds the text as-is with the saved provider and model', async () => {
+      await service.embedQuery('  family at the beach  ', 'user-1');
 
       // SemanticSearchService passes the text as-is (trimming is done in SearchService)
-      expect(mockEmbedProvider.embedText).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 'test-key' }),
-        'text-embedding-3-small',
-        '  family at the beach  ',
-      );
-    });
-
-    it('passes baseUrl from credentials to embedText', async () => {
-      mockAiSettings.resolveCredentials.mockResolvedValue({
-        apiKey: 'test-key',
-        baseUrl: 'https://custom.openai.endpoint',
+      expect(mockEmbed).toHaveBeenCalledWith({
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+        input: '  family at the beach  ',
       });
-
-      await service.embedQuery('test');
-
-      expect(mockEmbedProvider.embedText).toHaveBeenCalledWith(
-        expect.objectContaining({ baseUrl: 'https://custom.openai.endpoint' }),
-        expect.any(String),
-        expect.any(String),
-      );
     });
   });
 

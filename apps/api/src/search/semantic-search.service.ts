@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AiService } from '@marinoscar/platform-api/ai';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
+import { assertEmbeddingDimensions } from '../ai-port/ai-calls';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 
 @Injectable()
 export class SemanticSearchService {
@@ -9,21 +11,22 @@ export class SemanticSearchService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiSettings: AiSettingsService,
-    private readonly registry: AiProviderRegistry,
+    private readonly aiSettings: MemoriaHubAiSettings,
+    private readonly ai: AiService,
   ) {}
 
   /**
-   * Embed a query string using the configured embedding provider + model.
+   * Embed a query string for `userId` using the `semantic_embedding` feature (the model saved in
+   * `ai.features.embedding`), through the platform `AiService`.
    * Returns null (graceful degradation) when:
    *   - No embedding feature is configured
-   *   - The provider does not implement embedText
-   *   - Any error occurs during embedding
+   *   - The model does not return the 1536-d vectors `media_item_embedding` holds
+   *   - Any error occurs during embedding (the key, the model, the kill switch, the provider)
    */
-  async embedQuery(text: string): Promise<number[] | null> {
+  async embedQuery(text: string, userId: string): Promise<number[] | null> {
     let config: { provider: string; model: string } | null = null;
     try {
-      config = await this.aiSettings.resolveEmbeddingConfig();
+      config = await this.aiSettings.selection('embedding');
     } catch (err) {
       this.logger.warn(`SemanticSearchService: failed to resolve embedding config: ${String(err)}`);
       return null;
@@ -34,30 +37,15 @@ export class SemanticSearchService {
       return null;
     }
 
-    const { provider: providerKey, model } = config;
-
-    let creds: { apiKey: string; baseUrl?: string };
     try {
-      creds = await this.aiSettings.resolveCredentials(providerKey);
-    } catch (err) {
-      this.logger.warn(`SemanticSearchService: failed to resolve credentials for provider "${providerKey}": ${String(err)}`);
-      return null;
-    }
-
-    const provider = this.registry.get(providerKey);
-
-    if (typeof provider.embedText !== 'function') {
-      this.logger.warn(
-        `SemanticSearchService: provider "${providerKey}" does not implement embedText; skipping semantic search`,
-      );
-      return null;
-    }
-
-    try {
-      const vector = await provider.embedText(creds, model, text);
+      const result = await this.ai
+        .forUser(userId, { feature: MEMORIAHUB_AI_FEATURES.semanticEmbedding })
+        .embed({ provider: config.provider, model: config.model, input: text });
+      const vector = result.vectors[0] ?? [];
+      assertEmbeddingDimensions(vector, config.model);
       return vector;
     } catch (err) {
-      this.logger.warn(`SemanticSearchService: embedText failed for provider "${providerKey}": ${String(err)}`);
+      this.logger.warn(`SemanticSearchService: embedding failed for provider "${config.provider}": ${String(err)}`);
       return null;
     }
   }

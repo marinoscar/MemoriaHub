@@ -40,6 +40,7 @@ import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { RateLimitError } from '@marinoscar/platform-api/jobs';
+import { AiError } from '@marinoscar/platform-api/ai';
 import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
 import type { Job } from '@marinoscar/platform-api/jobs';
 import { platformJob } from '../../test/helpers/platform-job';
@@ -126,9 +127,10 @@ describe('PictureEnhancementHandler', () => {
   let mockObjectProvider: { download: jest.Mock };
   let mockActiveProvider: { upload: jest.Mock; getBucket: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock; getActiveProvider: jest.Mock };
-  let mockAiSettings: { resolveCredentials: jest.Mock };
+  /** The scripted model: `mockEnhanceImage` answers the edit the platform `editImageInline` returns. */
   let mockEnhanceImage: jest.Mock;
-  let mockAiProviderRegistry: { get: jest.Mock };
+  let mockForSystem: jest.Mock;
+  let mockAi: { forSystem: jest.Mock };
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockApplyCarryover: jest.Mock;
   let mockExifCarryover: { applyCarryover: jest.Mock };
@@ -178,17 +180,33 @@ describe('PictureEnhancementHandler', () => {
       }),
     };
 
-    mockAiSettings = {
-      resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'sk-test' }),
-    };
-
     mockEnhanceImage = jest.fn().mockResolvedValue({
       imageBase64: Buffer.from('enhanced-jpeg-bytes').toString('base64'),
       mimeType: 'image/jpeg',
     });
-    mockAiProviderRegistry = {
-      get: jest.fn().mockReturnValue({ enhanceImage: mockEnhanceImage }),
-    };
+    // The platform AiService, as a system call. The request is read back as the legacy edit
+    // request (`imageBase64`, `inputFidelity`, ...) the assertions below were written against.
+    mockForSystem = jest.fn().mockReturnValue({
+      editImageInline: jest.fn(async (req: any) => {
+        const image = req.images[0];
+        const out = await mockEnhanceImage(
+          {},
+          {
+            model: req.model,
+            prompt: req.prompt,
+            imageBase64: Buffer.from(image.data).toString('base64'),
+            mimeType: image.mimeType,
+            size: req.size,
+            quality: req.quality,
+            inputFidelity: req.providerOptions?.openai?.input_fidelity,
+            outputFormat: req.outputFormat,
+            outputCompression: req.providerOptions?.openai?.output_compression,
+          },
+        );
+        return { images: [{ data: new Uint8Array(Buffer.from(out.imageBase64, 'base64')), mimeType: out.mimeType }] };
+      }),
+    });
+    mockAi = { forSystem: mockForSystem };
 
     mockSystemSettings = {
       getSettings: jest.fn().mockResolvedValue({
@@ -207,8 +225,7 @@ describe('PictureEnhancementHandler', () => {
       mockThrottle as any,
       mockPrisma as any,
       mockResolver as any,
-      mockAiSettings as any,
-      mockAiProviderRegistry as any,
+      mockAi as any,
       mockSystemSettings as any,
       mockExifCarryover as any,
     );
@@ -343,7 +360,7 @@ describe('PictureEnhancementHandler', () => {
           data: expect.objectContaining({ status: MediaEnhancementStatus.processing }),
         }),
       );
-      expect(mockAiProviderRegistry.get).not.toHaveBeenCalled();
+      expect(mockForSystem).not.toHaveBeenCalled();
       expect(mockEnhanceImage).not.toHaveBeenCalled();
       expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
       expect(mockDownload).not.toHaveBeenCalled();
@@ -410,10 +427,10 @@ describe('PictureEnhancementHandler', () => {
     it('calls provider.enhanceImage with the compiled prompt, resolved size, and quality', async () => {
       await handler.process(makeJob());
 
-      expect(mockAiProviderRegistry.get).toHaveBeenCalledWith('openai');
-      expect(mockAiSettings.resolveCredentials).toHaveBeenCalledWith('openai');
+      // A system call under the picture_enhance feature, on the job, for the row's provider.
+      expect(mockForSystem).toHaveBeenCalledWith({ orgId: null, feature: 'picture_enhance', jobId: 'job-1' });
       expect(mockEnhanceImage).toHaveBeenCalledWith(
-        { apiKey: 'sk-test' },
+        expect.anything(),
         expect.objectContaining({
           model: 'gpt-image-1',
           prompt: 'Enhance this photograph...',
@@ -589,8 +606,10 @@ describe('PictureEnhancementHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('provider errors', () => {
-    it('fails when the resolved provider does not implement enhanceImage', async () => {
-      mockAiProviderRegistry.get.mockReturnValue({ /* no enhanceImage */ });
+    it('fails when the platform refuses a model without the image_edit capability', async () => {
+      mockEnhanceImage.mockRejectedValue(
+        new AiError('AI_CAPABILITY_UNSUPPORTED', 'The model does not support image enhancement.'),
+      );
 
       // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS) — retryable, so the
       // row goes back to pending rather than failed (see commit fixing this).
@@ -671,7 +690,7 @@ describe('PictureEnhancementHandler', () => {
     });
 
     it('defers to pending and throws a RateLimitError on a rate-limited failure (non-final attempt)', async () => {
-      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      const rateLimitErr = new AiError('AI_RATE_LIMITED', 'Too Many Requests', { retryAfterMs: 15_000 });
       mockEnhanceImage.mockRejectedValue(rateLimitErr);
 
       await expect(
@@ -692,7 +711,7 @@ describe('PictureEnhancementHandler', () => {
     });
 
     it('marks the row failed when rate-limit deferrals are exhausted (rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS)', async () => {
-      const rateLimitErr = Object.assign(new Error('Too Many Requests'), { status: 429 });
+      const rateLimitErr = new AiError('AI_RATE_LIMITED', 'Too Many Requests', { retryAfterMs: 15_000 });
       mockEnhanceImage.mockRejectedValue(rateLimitErr);
 
       await expect(
@@ -735,8 +754,7 @@ describe('PictureEnhancementHandler', () => {
         mockThrottle as any,
         mockPrisma as any,
         mockResolver as any,
-        mockAiSettings as any,
-        mockAiProviderRegistry as any,
+        mockAi as any,
         mockSystemSettings as any,
         mockExifCarryover as any,
       );

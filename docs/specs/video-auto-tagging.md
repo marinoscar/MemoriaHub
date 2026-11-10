@@ -387,3 +387,7 @@ Recorded explicitly, because each is the kind of thing a future contributor woul
 **Reusing `face.video.*` for the frame budget.** See §13 — the right values are an order of magnitude apart.
 
 **Full-text search over transcripts.** Out of scope: the transcript folds into the *existing* `media_item_embedding` text, so it becomes semantically searchable for free. A dedicated search field, index, and UI is a clean follow-up.
+
+## Platform AI runtime (RETRO-E2, #601)
+
+Feature `video_tagging / video_transcription`. The multi-image vision call is a system call under the `video_tagging` feature (frames as ordered `data:` URLs after the text, images first for Anthropic; output budget `VIDEO_TAGGING_MAX_TOKENS`), and the transcript is `transcribeInline` under `video_transcription` on the ffmpeg audio extract the handler already holds (no storage object, no second queued run). A model without `audio_transcription` is refused by the platform and lands on the visual-only path; a rate-limited transcription is rethrown so the job is deferred whole. Both read the `ai.features.tagging` / `ai.features.transcription` selections. See [CLAUDE.md](../../CLAUDE.md) ("Every MemoriaHub model call is a registered AI feature") for the seven features and the operator prerequisites (kill switch, imported key, enabled catalogue model).

@@ -16,9 +16,10 @@ import { StorageProviderRouter, type StorageProvider } from '@marinoscar/platfor
 // platform's own reference adapter does. `@marinoscar/platform-api/ai` ships no
 // adapter of its own, so the host keeps this small class.
 //
-// Nothing in MemoriaHub calls the platform's media runs yet (the kill switch is
-// off by default and no feature is registered until RETRO-E2), so this port is
-// bound because the slice requires it, not because a run uses it today.
+// MemoriaHub's own AI features call the platform's SYNCHRONOUS entry points
+// (`editImageInline`, `transcribeInline`: the bytes are already in the job), not its queued media
+// runs, so this port is bound because the slice requires it; a run (the platform Playground,
+// `/api/ai/images`) is the only thing that writes through it.
 // =============================================================================
 
 /** Where an administrator configures object storage (the remedy a run reports). */
