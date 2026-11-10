@@ -35,8 +35,10 @@ import { ThemeCurator } from './theme.curator.js';
 import { TripCurator } from './trip.curator.js';
 import { YearInReviewCurator } from './year-in-review.curator.js';
 
+/** memoryCuratorsProvider: memory curators provider. @stability experimental */
 export const memoryCuratorsProvider = {
   provide: MEMORY_CURATORS,
+  /** Builds the ordered curator list handed to `MemoryGenerationHandler`. */
   useFactory: (
     onThisDay: OnThisDayCurator,
     trip: TripCurator,

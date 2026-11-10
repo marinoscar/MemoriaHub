@@ -71,43 +71,79 @@ import {
   UpsertMemoryResult,
 } from './memory-curation.types.js';
 
-/** A `media_items` `where`, as the host's client takes it. */
-type MediaItemWhere = Record<string, unknown>;
+/**
+ * A `media_items` `where`, as the host's client takes it.
+ *
+ * @stability experimental
+ */
+export type MediaItemWhere = Record<string, unknown>;
 
 // --- Scoring weights (epic #300 / issue #303) --------------------------------
 
-/** A user-marked favorite is the strongest signal the library has. */
+/**
+ * A user-marked favorite is the strongest signal the library has.
+ *
+ * @stability experimental
+ */
 export const FAVORITE_BONUS = 3.0;
-/** A face belonging to a Person the user marked favorite. */
+/**
+ * A face belonging to a Person the user marked favorite.
+ *
+ * @stability experimental
+ */
 export const FAVORITE_PERSON_BONUS = 1.0;
-/** Evidence auto-tagging actually found content (description or >= 1 AI tag). */
+/**
+ * Evidence auto-tagging actually found content (description or >= 1 AI tag).
+ *
+ * @stability experimental
+ */
 export const AI_CONTENT_BONUS = 0.25;
-/** Variance-of-Laplacian value that maps to a full 1.0 sharpness contribution. */
+/**
+ * Variance-of-Laplacian value that maps to a full 1.0 sharpness contribution.
+ *
+ * @stability experimental
+ */
 export const SHARPNESS_FULL_SCALE = 1000;
 /**
  * Sharpness stand-in for an item that was never scored (video, pre-feature
  * import, failed processing). Neutral 0.5 rather than 0: a missing measurement
  * is not evidence of a blurry photo, and scoring it as one would push every
  * un-analyzed item out of every memory.
+  *
+  * @stability experimental
  */
 export const NEUTRAL_SHARPNESS = 0.5;
 
 // --- Video policy ------------------------------------------------------------
 
-/** Hard cap on videos in one memory — a memory is a photo story with punctuation. */
+/**
+ * Hard cap on videos in one memory — a memory is a photo story with punctuation.
+ *
+ * @stability experimental
+ */
 export const MAX_VIDEOS_PER_MEMORY = 3;
-/** Videos at or under this length are preferred; longer ones are penalized. */
+/**
+ * Videos at or under this length are preferred; longer ones are penalized.
+ *
+ * @stability experimental
+ */
 export const PREFERRED_VIDEO_MAX_MS = 60_000;
 /**
  * Selection-time penalty for a long (or unknown-duration) video. Applied to
  * `selectionScore` only — the persisted `MemoryItem.score` stays the pure
  * quality score, so the penalty never masquerades as "this clip is bad".
+  *
+  * @stability experimental
  */
 export const LONG_VIDEO_PENALTY = 0.5;
 
 // --- Streaming / batching ----------------------------------------------------
 
-/** Rows per keyset page while streaming candidates. */
+/**
+ * Rows per keyset page while streaming candidates.
+ *
+ * @stability experimental
+ */
 export const CANDIDATE_PAGE_SIZE = 500;
 /**
  * Hard ceiling on resident candidates for one curation pass. At ~200 bytes per
@@ -115,6 +151,8 @@ export const CANDIDATE_PAGE_SIZE = 500;
  * cap that bites introduces selection bias (we would silently curate only the
  * chronologically earliest slice). It exists as a crash guard, not a tuning
  * knob; a curator that routinely hits it is asking the wrong question.
+  *
+  * @stability experimental
  */
 export const DEFAULT_MAX_CANDIDATES = 20_000;
 /** Chunk size for `id IN (...)` lookups so a wide page never builds a huge query. */
@@ -125,6 +163,8 @@ const IN_CHUNK = 1_000;
 /**
  * Jaccard DISTANCE at or above which a refresh counts as material: the titles
  * are reset to templates and `materiallyChanged` is reported to callers.
+  *
+  * @stability experimental
  */
 export const MATERIAL_CHANGE_THRESHOLD = 0.3;
 
@@ -133,6 +173,8 @@ export const MATERIAL_CHANGE_THRESHOLD = 0.3;
  * selection algorithm changes in a way that would produce a different item set
  * from identical inputs — it is the only way to tell, after the fact, which
  * algorithm produced a given memory.
+  *
+  * @stability experimental
  */
 export const MEMORY_GENERATOR_VERSION = 1;
 
@@ -160,6 +202,8 @@ interface CandidateRow {
  * whose equal thirds land two buckets inside the same busy year; bucketing on
  * the calendar unit itself is the only way to guarantee "each year is
  * represented" rather than "each equal slice of elapsed time is".
+  *
+  * @stability experimental
  */
 export interface BucketPolicy {
   /** Bucket identity for a candidate. Buckets are visited in ascending order. */
@@ -168,7 +212,11 @@ export interface BucketPolicy {
   maxPerBucket?: number;
 }
 
-/** Options accepted by `loadCandidates` / `curate`. */
+/**
+ * Options accepted by `loadCandidates` / `curate`.
+ *
+ * @stability experimental
+ */
 export interface CurateOptions {
   /** Hard cap on items in the produced memory (`memories.maxItemsPerMemory`). */
   maxItems: number;
@@ -184,6 +232,8 @@ export interface CurateOptions {
 /**
  * THE curation base filter, in one expression. Applied by `loadCandidates` to
  * every curator's slice — see this file's header, property 1.
+  *
+  * @stability experimental
  */
 export function memoryCandidateBaseWhere(circleId: string): MediaItemWhere {
   return {
@@ -195,7 +245,11 @@ export function memoryCandidateBaseWhere(circleId: string): MediaItemWhere {
   };
 }
 
-/** The epic's quality formula. Pure — exported for direct unit testing. */
+/**
+ * The epic's quality formula. Pure — exported for direct unit testing.
+ *
+ * @stability experimental
+ */
 export function scoreCandidate(candidate: MemoryCandidate): number {
   let score = 0;
   if (candidate.favorite) score += FAVORITE_BONUS;
@@ -213,7 +267,11 @@ export function scoreCandidate(candidate: MemoryCandidate): number {
   return score;
 }
 
-/** True for a video that is long, or whose duration we simply do not know. */
+/**
+ * True for a video that is long, or whose duration we simply do not know.
+ *
+ * @stability experimental
+ */
 export function isLongVideo(candidate: MemoryCandidate): boolean {
   return (
     candidate.type === MediaType.video &&
@@ -221,7 +279,11 @@ export function isLongVideo(candidate: MemoryCandidate): boolean {
   );
 }
 
-/** Attach `score` and `selectionScore`. Pure — exported for unit testing. */
+/**
+ * Attach `score` and `selectionScore`. Pure — exported for unit testing.
+ *
+ * @stability experimental
+ */
 export function scoreCandidates(candidates: MemoryCandidate[]): ScoredCandidate[] {
   return candidates.map((c) => {
     const score = scoreCandidate(c);
@@ -255,6 +317,8 @@ function compareForSelection(a: ScoredCandidate, b: ScoredCandidate): number {
  * duplicate-detection section) — an item in a burst group is not supposed to be
  * in a duplicate group at all, and if a race left it in both, the burst grouping
  * is the authoritative one.
+  *
+  * @stability experimental
  */
 export function collapseKey(candidate: MemoryCandidate): string {
   if (candidate.burstGroupId) return `b:${candidate.burstGroupId}`;
@@ -268,6 +332,8 @@ export function collapseKey(candidate: MemoryCandidate): string {
  *
  * Pure (the suggested-best map is resolved by the caller) so the interesting
  * behavior is unit-testable without a database.
+  *
+  * @stability experimental
  */
 export function collapseGroups(
   scored: ScoredCandidate[],
@@ -308,6 +374,8 @@ export function collapseGroups(
  * pass rather than shrinking the memory.
  *
  * Pure — exported for unit testing.
+  *
+  * @stability experimental
  */
 export function selectDiverse(scored: ScoredCandidate[], maxItems: number): ScoredCandidate[] {
   if (scored.length === 0 || maxItems <= 0) return [];
@@ -379,6 +447,8 @@ export function selectDiverse(scored: ScoredCandidate[], maxItems: number): Scor
  * candidate.
  *
  * Pure — exported for unit testing.
+  *
+  * @stability experimental
  */
 export function selectByBuckets(
   scored: ScoredCandidate[],
@@ -442,6 +512,8 @@ export function selectByBuckets(
  * ascending positions, and a cover that is never a video.
  *
  * Pure — exported for unit testing.
+  *
+  * @stability experimental
  */
 export function finalizeSelection(
   chosen: ScoredCandidate[],
@@ -487,6 +559,8 @@ export function finalizeSelection(
  *
  * Two empty sets are defined as distance 0 (nothing changed), which keeps a
  * degenerate refresh from being reported as material.
+  *
+  * @stability experimental
  */
 export function membershipDistance(before: Iterable<string>, after: Iterable<string>): number {
   const a = new Set(before);
@@ -505,6 +579,7 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+/** MemoryCurationService: memory curation service. @stability experimental */
 @Injectable()
 export class MemoryCurationService {
   private readonly logger = new Logger(MemoryCurationService.name);

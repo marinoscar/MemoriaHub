@@ -56,9 +56,12 @@ import { utcYear, yearBucket } from './period-windows.js';
  * `person_over_years` memory per person, so the period carries no information
  * and the subject (`personId`) is the whole identity — see the `MemoryType`
  * enum comment in schema.prisma.
+  *
+  * @stability experimental
  */
 export const PERSON_OVER_YEARS_PERIOD_KEY = 'all';
 
+/** PersonOverYearsCurator: person over years curator. @stability experimental */
 @Injectable()
 export class PersonOverYearsCurator implements MemoryCurator {
   readonly name = 'person_over_years';

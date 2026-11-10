@@ -78,10 +78,16 @@ const MEMORY_TITLES_AI_FEATURE = 'memory_titles';
  * Bounds the WHOLE stream, not each chunk: a provider that dribbles one token
  * every nine seconds is just as effective a stall as one that never answers,
  * and `memory_generation` shares the enrichment worker's slots with real work.
+  *
+  * @stability experimental
  */
 export const MEMORY_TITLE_TIMEOUT_MS = 10_000;
 
-/** Moderate creativity — these are warm titles, not deterministic extraction. */
+/**
+ * Moderate creativity — these are warm titles, not deterministic extraction.
+ *
+ * @stability experimental
+ */
 export const MEMORY_TITLE_TEMPERATURE = 0.7;
 
 /**
@@ -92,6 +98,8 @@ export const MEMORY_TITLE_TEMPERATURE = 0.7;
  * Beyond the cap everything is templated, and the next scheduled run titles
  * more (each run gets a fresh budget), so the library converges instead of
  * billing for itself all at once.
+  *
+  * @stability experimental
  */
 export const BACKFILL_AI_TITLE_CAP = 100;
 

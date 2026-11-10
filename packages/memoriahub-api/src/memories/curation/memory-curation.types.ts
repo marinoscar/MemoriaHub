@@ -20,6 +20,8 @@ import type { MemoryTitleRun } from '../titles/memory-title.types.js';
  * candidate. `capturedAt` is non-nullable because the curation base filter
  * (`capturedAt IS NOT NULL`) makes it so — a candidate can never reach this
  * type with a null capture date.
+  *
+  * @stability experimental
  */
 export interface MemoryCandidate {
   id: string;
@@ -36,7 +38,11 @@ export interface MemoryCandidate {
   hasFavoritePersonFace: boolean;
 }
 
-/** A candidate plus its computed scores. */
+/**
+ * A candidate plus its computed scores.
+ *
+ * @stability experimental
+ */
 export interface ScoredCandidate extends MemoryCandidate {
   /**
    * The pure quality score from the epic's formula. This is what gets
@@ -53,14 +59,22 @@ export interface ScoredCandidate extends MemoryCandidate {
   selectionScore: number;
 }
 
-/** One chosen item, in final chronological order. */
+/**
+ * One chosen item, in final chronological order.
+ *
+ * @stability experimental
+ */
 export interface CuratedItem {
   mediaItemId: string;
   position: number;
   score: number;
 }
 
-/** The full output of a curation pass over one candidate set. */
+/**
+ * The full output of a curation pass over one candidate set.
+ *
+ * @stability experimental
+ */
 export interface CuratedSelection {
   /** Chronologically ascending, `position` 0..n-1. */
   items: CuratedItem[];
@@ -75,7 +89,11 @@ export interface CuratedSelection {
   truncated: boolean;
 }
 
-/** Input to the idempotent `upsertMemory` helper every curator funnels through. */
+/**
+ * Input to the idempotent `upsertMemory` helper every curator funnels through.
+ *
+ * @stability experimental
+ */
 export interface UpsertMemoryInput {
   circleId: string;
   type: MemoryType;
@@ -115,7 +133,11 @@ export interface UpsertMemoryInput {
   titling?: MemoryTitleRun;
 }
 
-/** Outcome of one `upsertMemory` call. */
+/**
+ * Outcome of one `upsertMemory` call.
+ *
+ * @stability experimental
+ */
 export interface UpsertMemoryResult {
   /** The live row, or null when the upsert was refused by the tombstone. */
   memoryId: string | null;

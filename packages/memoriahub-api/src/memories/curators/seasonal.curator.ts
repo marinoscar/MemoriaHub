@@ -54,6 +54,7 @@ import {
   seasonWindow,
 } from './period-windows.js';
 
+/** SeasonalCurator: seasonal curator. @stability experimental */
 @Injectable()
 export class SeasonalCurator implements MemoryCurator {
   readonly name = 'seasonal';

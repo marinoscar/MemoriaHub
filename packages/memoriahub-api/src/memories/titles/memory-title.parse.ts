@@ -17,7 +17,11 @@
 import { z } from 'zod';
 import { NARRATIVE_MAX_CHARS, SUBTITLE_MAX_CHARS, TITLE_MAX_CHARS } from './memory-title.prompts.js';
 
-/** A validated, length-capped titling result. `title` is always non-empty. */
+/**
+ * A validated, length-capped titling result. `title` is always non-empty.
+ *
+ * @stability experimental
+ */
 export interface ParsedMemoryTitle {
   title: string;
   subtitle: string | null;
@@ -47,6 +51,8 @@ const responseSchema = z.object({
  *     "Sure, here you go:" and a trailing sign-off in one step.
  *
  * Returns null when there is no brace pair at all.
+  *
+  * @stability experimental
  */
 export function extractJsonObject(raw: string): string | null {
   let text = raw.trim();
@@ -64,6 +70,8 @@ export function extractJsonObject(raw: string): string | null {
  * Collapse whitespace, then hard-cap length with an ellipsis so the result is
  * ALWAYS <= `maxChars` — the caps are a storage/UI contract, not a hint to the
  * model, so they are enforced here regardless of what came back.
+  *
+  * @stability experimental
  */
 export function capText(value: string, maxChars: number): string {
   const flat = value.replace(/\s+/g, ' ').trim();
@@ -81,6 +89,8 @@ function optional(value: string | null | undefined, maxChars: number): string | 
 /**
  * Parse, validate and cap. Returns `null` for every failure mode: unparseable
  * text, valid JSON of the wrong shape, or a blank title.
+  *
+  * @stability experimental
  */
 export function parseMemoryTitleResponse(raw: string): ParsedMemoryTitle | null {
   const json = extractJsonObject(raw);

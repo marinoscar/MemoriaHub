@@ -19,6 +19,8 @@ import { MemoryType } from '../data/memories-enums.js';
  * makes the privacy boundary reviewable in one place. `circleId`, `userId`,
  * `personId`, storage keys and file names are absent BY CONSTRUCTION — see
  * memory-title.prompts.ts.
+  *
+  * @stability experimental
  */
 export interface MemoryTitleRequest {
   type: MemoryType;
@@ -33,7 +35,11 @@ export interface MemoryTitleRequest {
   periodEnd: Date | null;
 }
 
-/** A successful AI titling result, ready to write onto the `Memory` row. */
+/**
+ * A successful AI titling result, ready to write onto the `Memory` row.
+ *
+ * @stability experimental
+ */
 export interface MemoryAiTitle {
   title: string;
   subtitle: string | null;
@@ -56,6 +62,8 @@ export interface MemoryAiTitle {
  * A missing run means NO AI titling at all. That default is deliberately
  * fail-safe: a curator (or a test) that forgets to thread it degrades to the
  * documented template floor rather than making unbudgeted, uncapped model calls.
+  *
+  * @stability experimental
  */
 export interface MemoryTitleRun {
   /** `memories.aiTitles.enabled`, resolved once per job. False ⇒ no call ever. */
@@ -71,4 +79,5 @@ export interface MemoryTitleRun {
   stopReason: MemoryTitleStopReason | null;
 }
 
+/** MemoryTitleStopReason: memory title stop reason. @stability experimental */
 export type MemoryTitleStopReason = 'rate_limited' | 'budget_exhausted';

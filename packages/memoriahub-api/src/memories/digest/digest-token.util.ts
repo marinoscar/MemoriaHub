@@ -170,6 +170,8 @@ function expiryInDays(days: number): number {
  * @param ttlDays `memories.digest.imageTokenTtlDays` (bounded 7–90 by the
  *                settings schema). Sending an image token that outlives the
  *                mail's usefulness is the whole reason the setting exists.
+  *
+  * @stability experimental
  */
 export function signDigestImageToken(keyOf: DigestKeyOf, mediaItemId: string, ttlDays: number): string {
   const payload: ImageTokenPayload = {
@@ -180,7 +182,11 @@ export function signDigestImageToken(keyOf: DigestKeyOf, mediaItemId: string, tt
   return sign(keyOf, DIGEST_IMAGE_PURPOSE, payload);
 }
 
-/** Verify an image token; returns the media item id or `null`. */
+/**
+ * Verify an image token; returns the media item id or `null`.
+ *
+ * @stability experimental
+ */
 export function verifyDigestImageToken(keyOf: DigestKeyOf, token: unknown): string | null {
   const payload = verify<ImageTokenPayload>(keyOf, DIGEST_IMAGE_PURPOSE, token);
   if (!payload) return null;
@@ -191,7 +197,11 @@ export function verifyDigestImageToken(keyOf: DigestKeyOf, token: unknown): stri
 // Unsubscribe tokens
 // -----------------------------------------------------------------------------
 
-/** Mint a login-free unsubscribe capability for one user. */
+/**
+ * Mint a login-free unsubscribe capability for one user.
+ *
+ * @stability experimental
+ */
 export function signDigestUnsubscribeToken(
   keyOf: DigestKeyOf,
   userId: string,
@@ -205,7 +215,11 @@ export function signDigestUnsubscribeToken(
   return sign(keyOf, DIGEST_UNSUBSCRIBE_PURPOSE, payload);
 }
 
-/** Verify an unsubscribe token; returns the user id or `null`. */
+/**
+ * Verify an unsubscribe token; returns the user id or `null`.
+ *
+ * @stability experimental
+ */
 export function verifyDigestUnsubscribeToken(keyOf: DigestKeyOf, token: unknown): string | null {
   const payload = verify<UnsubscribeTokenPayload>(keyOf, DIGEST_UNSUBSCRIBE_PURPOSE, token);
   if (!payload) return null;

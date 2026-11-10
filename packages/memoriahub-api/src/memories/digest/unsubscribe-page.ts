@@ -46,6 +46,8 @@ function page(bodyHtml: string): string {
 /**
  * Step 1: ask. `token` MUST already be URL-encoded and MUST already have had
  * its signature verified by the caller.
+  *
+  * @stability experimental
  */
 export function unsubscribeConfirmPage(encodedToken: string): string {
   return page(`
@@ -67,6 +69,8 @@ export function unsubscribeConfirmPage(encodedToken: string): string {
  * user or resource it names exists. It is HTML rather than the API's JSON error
  * envelope because the reader is a human who just clicked a link in an email
  * client, not a client library.
+  *
+  * @stability experimental
  */
 export function invalidLinkPage(): string {
   return page(`
@@ -75,7 +79,11 @@ export function invalidLinkPage(): string {
   `);
 }
 
-/** Step 2: done. Reached by the form POST and by RFC 8058 one-click alike. */
+/**
+ * Step 2: done. Reached by the form POST and by RFC 8058 one-click alike.
+ *
+ * @stability experimental
+ */
 export function unsubscribeDonePage(): string {
   return page(`
     <h1>You're unsubscribed</h1>

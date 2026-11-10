@@ -50,6 +50,7 @@ export class AdminMemoriesController {
     private readonly memories: MemoriesSettingsService,
   ) {}
 
+  /** `AdminMemoriesController.libraries`: libraries (route handler or service operation). @stability experimental */
   @Get('libraries')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [SYSTEM_SETTINGS_READ] })
   @ApiOperation({
@@ -64,6 +65,7 @@ export class AdminMemoriesController {
     return { data: { items: await this.backfillService.listLibraries() } };
   }
 
+  /** `AdminMemoriesController.backfill`: backfill (route handler or service operation). @stability experimental */
   @Post('backfill')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)

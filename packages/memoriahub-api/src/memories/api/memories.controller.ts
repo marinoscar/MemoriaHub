@@ -72,6 +72,7 @@ export class MemoriesController {
   // GET /api/memories
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.list`: list (route handler or service operation). @stability experimental */
   @Get()
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -122,6 +123,7 @@ export class MemoriesController {
   // GET /api/memories/feed   (before :id — static routes must not be shadowed)
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.feed`: feed (route handler or service operation). @stability experimental */
   @Get('feed')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -144,6 +146,7 @@ export class MemoriesController {
   // GET /api/memories/:id
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.detail`: detail (route handler or service operation). @stability experimental */
   @Get(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -167,6 +170,7 @@ export class MemoriesController {
   // Per-user state — membership only, scoped to the JWT user
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.markSeen`: mark seen (route handler or service operation). @stability experimental */
   @Post(':id/seen')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -185,6 +189,7 @@ export class MemoriesController {
     await this.memoriesService.markSeen(id, user.id, user.permissions);
   }
 
+  /** `MemoriesController.hide`: hide (route handler or service operation). @stability experimental */
   @Post(':id/hide')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -203,6 +208,7 @@ export class MemoriesController {
     await this.memoriesService.hide(id, user.id, user.permissions);
   }
 
+  /** `MemoriesController.unhide`: unhide (route handler or service operation). @stability experimental */
   @Delete(':id/hide')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -216,6 +222,7 @@ export class MemoriesController {
     await this.memoriesService.unhide(id, user.id, user.permissions);
   }
 
+  /** `MemoriesController.favorite`: favorite (route handler or service operation). @stability experimental */
   @Post(':id/favorite')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -229,6 +236,7 @@ export class MemoriesController {
     await this.memoriesService.favorite(id, user.id, user.permissions);
   }
 
+  /** `MemoriesController.unfavorite`: unfavorite (route handler or service operation). @stability experimental */
   @Delete(':id/favorite')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -246,6 +254,7 @@ export class MemoriesController {
   // POST /api/memories/:id/save-album
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.saveAsAlbum`: save as album (route handler or service operation). @stability experimental */
   @Post(':id/save-album')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.CREATED)
@@ -271,6 +280,7 @@ export class MemoriesController {
   // DELETE /api/memories/:id — circle-level tombstone
   // ---------------------------------------------------------------------------
 
+  /** `MemoriesController.remove`: remove (route handler or service operation). @stability experimental */
   @Delete(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)

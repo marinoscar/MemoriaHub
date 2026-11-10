@@ -30,28 +30,58 @@ import { MemoryType } from '../data/memories-enums.js';
 
 // --- Output caps (mirrored in the system prompt AND enforced on parse) -------
 
-/** Hard cap on the generated title. */
+/**
+ * Hard cap on the generated title.
+ *
+ * @stability experimental
+ */
 export const TITLE_MAX_CHARS = 60;
-/** Hard cap on the generated subtitle. */
+/**
+ * Hard cap on the generated subtitle.
+ *
+ * @stability experimental
+ */
 export const SUBTITLE_MAX_CHARS = 80;
-/** Hard cap on the generated narrative blurb. */
+/**
+ * Hard cap on the generated narrative blurb.
+ *
+ * @stability experimental
+ */
 export const NARRATIVE_MAX_CHARS = 240;
 
 // --- Input caps --------------------------------------------------------------
 
-/** Most AI tags described to the model, highest count first. */
+/**
+ * Most AI tags described to the model, highest count first.
+ *
+ * @stability experimental
+ */
 export const MAX_PROMPT_TAGS = 10;
-/** Most item descriptions included. */
+/**
+ * Most item descriptions included.
+ *
+ * @stability experimental
+ */
 export const MAX_PROMPT_DESCRIPTIONS = 5;
-/** Each description is truncated to this many characters. */
+/**
+ * Each description is truncated to this many characters.
+ *
+ * @stability experimental
+ */
 export const DESCRIPTION_MAX_CHARS = 200;
-/** Most person names included. */
+/**
+ * Most person names included.
+ *
+ * @stability experimental
+ */
 export const MAX_PROMPT_PERSON_NAMES = 5;
 
 /**
  * The system prompt. One exported constant, per #306 — the tone rules are a
  * product decision, not an implementation detail, and they belong somewhere a
  * reviewer can find without reading the service.
+  *
+  * @stability experimental
  */
 export const MEMORY_TITLE_SYSTEM_PROMPT = [
   'You write titles for a private family photo app. A "memory" is a small,',
@@ -94,6 +124,8 @@ const TYPE_LABELS: Record<MemoryType, string> = {
  * Every field is optional-by-emptiness rather than optional-by-absence, so the
  * renderer never has to distinguish "not applicable to this type" from "we have
  * no value" — both simply omit the line.
+  *
+  * @stability experimental
  */
 export interface MemoryTitleFacts {
   type: MemoryType;
@@ -138,6 +170,8 @@ function condense(text: string, maxChars: number): string {
  * The input caps (`MAX_PROMPT_TAGS`, `MAX_PROMPT_DESCRIPTIONS`,
  * `DESCRIPTION_MAX_CHARS`, `MAX_PROMPT_PERSON_NAMES`) are applied HERE rather
  * than by the caller, so no call site can widen what gets sent.
+  *
+  * @stability experimental
  */
 export function buildMemoryTitleUserPrompt(facts: MemoryTitleFacts): string {
   const lines: string[] = [];

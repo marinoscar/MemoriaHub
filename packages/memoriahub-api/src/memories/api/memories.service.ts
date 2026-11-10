@@ -274,6 +274,7 @@ export class MemoriesService {
   // GET /api/memories
   // ===========================================================================
 
+  /** `MemoriesService.list`: list (route handler or service operation). @stability experimental */
   async list(
     query: MemoryListQueryDto,
     userId: string,
@@ -581,21 +582,25 @@ export class MemoriesService {
     await this.setUserStateTimestamp(id, userId, 'seenAt');
   }
 
+  /** `MemoriesService.hide`: hide (route handler or service operation). @stability experimental */
   async hide(id: string, userId: string, permissions: string[]): Promise<void> {
     await this.requireMemberMemory(id, userId, permissions);
     await this.setUserStateTimestamp(id, userId, 'hiddenAt');
   }
 
+  /** `MemoriesService.unhide`: unhide (route handler or service operation). @stability experimental */
   async unhide(id: string, userId: string, permissions: string[]): Promise<void> {
     await this.requireMemberMemory(id, userId, permissions);
     await this.clearUserStateTimestamp(id, userId, 'hiddenAt');
   }
 
+  /** `MemoriesService.favorite`: favorite (route handler or service operation). @stability experimental */
   async favorite(id: string, userId: string, permissions: string[]): Promise<void> {
     await this.requireMemberMemory(id, userId, permissions);
     await this.setUserStateTimestamp(id, userId, 'favoritedAt');
   }
 
+  /** `MemoriesService.unfavorite`: unfavorite (route handler or service operation). @stability experimental */
   async unfavorite(id: string, userId: string, permissions: string[]): Promise<void> {
     await this.requireMemberMemory(id, userId, permissions);
     await this.clearUserStateTimestamp(id, userId, 'favoritedAt');

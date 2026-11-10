@@ -24,7 +24,11 @@
 // UTC, so formatting must agree.
 // =============================================================================
 
-/** A rendered template result. `subtitle` is null when the type has none. */
+/**
+ * A rendered template result. `subtitle` is null when the type has none.
+ *
+ * @stability experimental
+ */
 export interface MemoryTitleParts {
   title: string;
   subtitle: string | null;
@@ -37,6 +41,8 @@ export interface MemoryTitleParts {
  * Jun–Aug Summer, Sep–Nov Fall), per the epic. Centralized deliberately: a
  * future hemisphere/locale configuration only has to replace this table, not
  * hunt for month arithmetic scattered through the seasonal curator (#305).
+  *
+  * @stability experimental
  */
 export const SEASON_LABELS = {
   winter: 'Winter',
@@ -45,6 +51,7 @@ export const SEASON_LABELS = {
   fall: 'Fall',
 } as const;
 
+/** SeasonKey: season key. @stability experimental */
 export type SeasonKey = keyof typeof SEASON_LABELS;
 
 /**
@@ -55,6 +62,8 @@ export type SeasonKey = keyof typeof SEASON_LABELS;
  * can legitimately disagree with a naive `getUTCFullYear()` of a January photo.
  * That reconciliation belongs to the curator (#305); this function answers only
  * "which season is month N".
+  *
+  * @stability experimental
  */
 export function seasonForMonth(month1Based: number): SeasonKey {
   if (month1Based === 12 || month1Based <= 2) return 'winter';
@@ -63,7 +72,11 @@ export function seasonForMonth(month1Based: number): SeasonKey {
   return 'fall';
 }
 
-/** `1 → "1 year"`, `6 → "6 years"`. */
+/**
+ * `1 → "1 year"`, `6 → "6 years"`.
+ *
+ * @stability experimental
+ */
 export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -86,12 +99,20 @@ const monthOnly = new Intl.DateTimeFormat('en', {
   timeZone: 'UTC',
 });
 
-/** `"March 12, 2023"` — always UTC. */
+/**
+ * `"March 12, 2023"` — always UTC.
+ *
+ * @stability experimental
+ */
 export function formatLongDate(date: Date): string {
   return monthDayYear.format(date);
 }
 
-/** `"March 2023"` — always UTC. */
+/**
+ * `"March 2023"` — always UTC.
+ *
+ * @stability experimental
+ */
 export function formatMonthYear(date: Date): string {
   return monthYear.format(date);
 }
@@ -102,6 +123,8 @@ export function formatMonthYear(date: Date): string {
  * Word-wise rather than sentence-case because tags are labels, not prose, and
  * the vocabulary is admin-curated so an all-lowercase entry is the norm. An
  * already-capitalized or acronym-ish tag is left alone beyond its first letter.
+  *
+  * @stability experimental
  */
 export function titleCaseTag(tag: string): string {
   return tag
@@ -116,6 +139,8 @@ export function titleCaseTag(tag: string): string {
  *
  * @param yearsAgo  how far back the source photos are (>= 1)
  * @param sourceDate any instant within the source day; formatted in UTC
+  *
+  * @stability experimental
  */
 export function onThisDayTitle(yearsAgo: number, sourceDate: Date): MemoryTitleParts {
   return {
@@ -130,6 +155,8 @@ export function onThisDayTitle(yearsAgo: number, sourceDate: Date): MemoryTitleP
  * The place is whatever the trip curator (#304) resolved as dominant, already
  * narrowed to locality → admin1 → country by the caller; this function does not
  * re-derive it.
+  *
+  * @stability experimental
  */
 export function tripTitle(place: string, start: Date, end: Date): MemoryTitleParts {
   const sameMonth =
@@ -159,6 +186,8 @@ export function tripTitle(place: string, start: Date, end: Date): MemoryTitlePar
  * "Best moments together" with no name at all.
  *
  * @param year the highlight year, or null for an all-time collection
+  *
+  * @stability experimental
  */
 export function personHighlightsTitle(
   name: string | null | undefined,
@@ -175,6 +204,8 @@ export function personHighlightsTitle(
  * `person_over_years` — "Camila through the years" / "2016–2025".
  *
  * The unnamed-person fallback mirrors personHighlightsTitle's rationale.
+  *
+  * @stability experimental
  */
 export function personOverYearsTitle(
   name: string | null | undefined,
@@ -189,7 +220,11 @@ export function personOverYearsTitle(
   };
 }
 
-/** `theme` — "Golden Sunsets" / "14 favorite moments". */
+/**
+ * `theme` — "Golden Sunsets" / "14 favorite moments".
+ *
+ * @stability experimental
+ */
 export function themeTitle(tag: string, count: number): MemoryTitleParts {
   return {
     title: titleCaseTag(tag),
@@ -197,12 +232,20 @@ export function themeTitle(tag: string, count: number): MemoryTitleParts {
   };
 }
 
-/** `seasonal` — "Summer 2025". No subtitle: the title already says everything. */
+/**
+ * `seasonal` — "Summer 2025". No subtitle: the title already says everything.
+ *
+ * @stability experimental
+ */
 export function seasonalTitle(season: SeasonKey, year: number): MemoryTitleParts {
   return { title: `${SEASON_LABELS[season]} ${year}`, subtitle: null };
 }
 
-/** `year_in_review` — "Your 2025 in review" / "42 highlights from the year". */
+/**
+ * `year_in_review` — "Your 2025 in review" / "42 highlights from the year".
+ *
+ * @stability experimental
+ */
 export function yearInReviewTitle(year: number, count: number): MemoryTitleParts {
   return {
     title: `Your ${year} in review`,

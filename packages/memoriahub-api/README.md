@@ -4,7 +4,7 @@ The NestJS side of the MemoriaHub domain: the **host ports** (injection tokens a
 
 ## Purpose and scope
 
-MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media`, `face`, `tagging` and `search` are moved so far (media partly). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
+MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media`, `face`, `tagging`, `search` and `memories` are moved so far (media partly). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
 
 The package carries the ports, the module, the testing kit and the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job), the `face` slice (detection in photos and videos, matching, clustering, people, auto-archive), the `tagging` slice (photo and video auto-tagging, the transcript, the tag vocabulary and the backfill) and the `search` slice (deterministic, semantic and agentic search). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
 
@@ -29,6 +29,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/tagging/testing`: `describeTaggingSliceConformance` and the in-memory store behind it ([slice README](src/tagging/README.md#entry-point)).
 - `@marinoscar/memoriahub-api/search`: the search slice, `SearchModule.forRoot`, deterministic, semantic and agentic search and the `SEARCHABLE_FIELDS` registry ([slice README](src/search/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/search/testing`: `describeSearchSliceConformance` and the in-memory store behind it ([slice README](src/search/README.md#entry-point)).
+- `@marinoscar/memoriahub-api/memories`: the memories slice, `MemoriesModule.forRoot`, the curators, AI titles, the generation and digest jobs and the read API ([slice README](src/memories/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/memories/testing`: `describeMemoriesSliceConformance` ([slice README](src/memories/README.md#extension-point-catalog)).
 
 ## Install and peer dependencies
 
@@ -99,6 +101,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
 | `FACE_CONFIG`, `FACE_PERSON_AVATARS`, `FACE_STORAGE_ORG` | token | the face slice's three host hooks: the configuration reader, the account-avatar code and the organization of a derived storage row |
+| `MEMORIES_OPTIONS`, `MEMORIES_ALBUMS`, `MEMORIES_EMAIL_READINESS`, `MEMORIES_GENERATION_HOOK` | token | the memories slice's host hooks: the resolved options (digest signing key), save-as-album over the host's album code, e-mail readiness, and the after-generation hook |
 
 ## Data
 

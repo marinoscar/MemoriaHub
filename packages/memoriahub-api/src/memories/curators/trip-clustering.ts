@@ -20,6 +20,7 @@
 
 import { haversineKm } from '../../location/index.js';
 
+/** MS_PER_DAY: m s_ p e r_ d a y. @stability experimental */
 export const MS_PER_DAY = 86_400_000;
 
 /**
@@ -31,6 +32,8 @@ export const MS_PER_DAY = 86_400_000;
  * months silently re-infers home from one quarter's photos, which is exactly
  * when a long vacation can outvote the house. Two years is long enough that no
  * single trip can be modal and short enough to follow a real relocation.
+  *
+  * @stability experimental
  */
 export const HOME_WINDOW_MONTHS = 24;
 
@@ -42,16 +45,24 @@ export const HOME_WINDOW_MONTHS = 24;
  * from" a place that is not home — producing a wall of bogus trips. Skipping
  * the circle entirely is the correct answer, and it is the epic's stated
  * failure-mode behavior for "no geo data".
+  *
+  * @stability experimental
  */
 export const HOME_MIN_SHARE = 0.3;
 
-/** Minimum candidate photos on a day before it can be classified at all. */
+/**
+ * Minimum candidate photos on a day before it can be classified at all.
+ *
+ * @stability experimental
+ */
 export const MIN_DAY_PHOTOS = 3;
 
 /**
  * Gap days tolerated inside one trip. A single photo-less (or unclassifiable)
  * day in the middle of a week away is a day you did not take pictures, not the
  * end of the trip.
+  *
+  * @stability experimental
  */
 export const MAX_GAP_DAYS = 1;
 
@@ -59,10 +70,16 @@ export const MAX_GAP_DAYS = 1;
  * Day-range overlap at or above which a re-detected trip is considered THE SAME
  * trip as an existing memory. See `dayRangeOverlapRatio` for the denominator
  * choice, which is the load-bearing part.
+  *
+  * @stability experimental
  */
 export const TRIP_OVERLAP_MATCH_RATIO = 0.5;
 
-/** Title place-name of last resort, when a trip has coordinates but no geocode. */
+/**
+ * Title place-name of last resort, when a trip has coordinates but no geocode.
+ *
+ * @stability experimental
+ */
 export const UNKNOWN_TRIP_PLACE = 'a new place';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +94,8 @@ export const UNKNOWN_TRIP_PLACE = 'a new place';
  * the run has qualified, so holding tens of thousands of ids through the scan
  * would be memory spent on a set that is thrown away for every day that turns
  * out to be at home.
+  *
+  * @stability experimental
  */
 export interface DayAggregate {
   /** `YYYY-MM-DD`, UTC. */
@@ -94,21 +113,34 @@ export interface DayAggregate {
   countryCounts: Map<string, number>;
 }
 
-/** UTC midnight day index (days since epoch) for an instant. */
+/**
+ * UTC midnight day index (days since epoch) for an instant.
+ *
+ * @stability experimental
+ */
 export function toDayIndex(date: Date): number {
   return Math.floor(date.getTime() / MS_PER_DAY);
 }
 
-/** `YYYY-MM-DD` for a day index. */
+/**
+ * `YYYY-MM-DD` for a day index.
+ *
+ * @stability experimental
+ */
 export function dayIndexToKey(dayIndex: number): string {
   return new Date(dayIndex * MS_PER_DAY).toISOString().slice(0, 10);
 }
 
-/** UTC midnight `Date` for a day index. */
+/**
+ * UTC midnight `Date` for a day index.
+ *
+ * @stability experimental
+ */
 export function dayIndexToDate(dayIndex: number): Date {
   return new Date(dayIndex * MS_PER_DAY);
 }
 
+/** create day aggregate. @stability experimental */
 export function createDayAggregate(dayIndex: number): DayAggregate {
   return {
     dayKey: dayIndexToKey(dayIndex),
@@ -122,14 +154,22 @@ export function createDayAggregate(dayIndex: number): DayAggregate {
   };
 }
 
-/** Increment a string tally, ignoring null/blank values. */
+/**
+ * Increment a string tally, ignoring null/blank values.
+ *
+ * @stability experimental
+ */
 export function tally(counts: Map<string, number>, value: string | null | undefined): void {
   const trimmed = value?.trim();
   if (!trimmed) return;
   counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
 }
 
-/** The most frequent key, ties broken alphabetically so runs are reproducible. */
+/**
+ * The most frequent key, ties broken alphabetically so runs are reproducible.
+ *
+ * @stability experimental
+ */
 export function modalKey(counts: Map<string, number>): string | null {
   let best: string | null = null;
   let bestCount = 0;
@@ -142,7 +182,11 @@ export function modalKey(counts: Map<string, number>): string | null {
   return best;
 }
 
-/** Sum several tallies into one (used to fold a run's days together). */
+/**
+ * Sum several tallies into one (used to fold a run's days together).
+ *
+ * @stability experimental
+ */
 export function mergeCounts(sources: Iterable<Map<string, number>>): Map<string, number> {
   const out = new Map<string, number>();
   for (const source of sources) {
@@ -156,6 +200,8 @@ export function mergeCounts(sources: Iterable<Map<string, number>>): Map<string,
  * middle values rather than their mean — a coordinate that an item actually
  * reported is a better representative than an average of two, which can land in
  * the sea between two islands.
+  *
+  * @stability experimental
  */
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -167,14 +213,22 @@ export function median(values: number[]): number | null {
 // Home inference
 // ---------------------------------------------------------------------------
 
-/** Running totals for one candidate home place. */
+/**
+ * Running totals for one candidate home place.
+ *
+ * @stability experimental
+ */
 export interface HomePlaceStats {
   count: number;
   latSum: number;
   lngSum: number;
 }
 
-/** Everything the 24-month scan accumulates for home inference. */
+/**
+ * Everything the 24-month scan accumulates for home inference.
+ *
+ * @stability experimental
+ */
 export interface HomeStats {
   /** Geocoded (coordinate-bearing) items seen in the window. */
   geocodedCount: number;
@@ -184,6 +238,7 @@ export interface HomeStats {
   admin1ByLocality: Map<string, Map<string, number>>;
 }
 
+/** create home stats. @stability experimental */
 export function createHomeStats(): HomeStats {
   return {
     geocodedCount: 0,
@@ -216,6 +271,8 @@ function accumulatePlace(
  * calling in, so every place name that reaches this module is already
  * collapsed. The parameter names are kept for continuity with the columns they
  * originate from; this module does no resolution of its own.
+  *
+  * @stability experimental
  */
 export function accumulateHomeSample(
   stats: HomeStats,
@@ -238,7 +295,11 @@ export function accumulateHomeSample(
   }
 }
 
-/** The inferred home of a circle. */
+/**
+ * The inferred home of a circle.
+ *
+ * @stability experimental
+ */
 export interface HomeLocation {
   /** Which column the inference landed on. */
   level: 'locality' | 'admin1';
@@ -269,6 +330,8 @@ export interface HomeLocation {
  * The admin1 fallback intentionally reuses the SAME share floor rather than a
  * looser one: a coarser geography is easier to be modal in, so if it cannot even
  * clear 30% there is genuinely no home here.
+  *
+  * @stability experimental
  */
 export function inferHome(stats: HomeStats, minShare = HOME_MIN_SHARE): HomeLocation | null {
   if (stats.geocodedCount === 0) return null;
@@ -321,9 +384,12 @@ export function inferHome(stats: HomeStats, minShare = HOME_MIN_SHARE): HomeLoca
  *               gap, it is a contradiction.
  * - `neutral` — not enough evidence either way. Consumes gap budget but never
  *               splits a trip on its own.
+  *
+  * @stability experimental
  */
 export type DayClass = 'away' | 'home' | 'neutral';
 
+/** ClassifiedDay. @stability experimental */
 export interface ClassifiedDay extends DayAggregate {
   dayClass: DayClass;
   /** Distance from home to this day's median coordinate; null with no coordinates. */
@@ -345,6 +411,8 @@ export interface ClassifiedDay extends DayAggregate {
  * KNOWN GAP: a day whose photos straddle the ±180° antimeridian gets a
  * meaningless median longitude. Documented rather than solved — see
  * docs/specs/memories.md §4.8.
+  *
+  * @stability experimental
  */
 export function classifyDay(
   day: DayAggregate,
@@ -387,7 +455,11 @@ export function classifyDay(
 // Run assembly
 // ---------------------------------------------------------------------------
 
-/** One contiguous stretch away from home, before it is checked against minDays. */
+/**
+ * One contiguous stretch away from home, before it is checked against minDays.
+ *
+ * @stability experimental
+ */
 export interface AwayRun {
   startDayIndex: number;
   endDayIndex: number;
@@ -410,6 +482,8 @@ export interface AwayRun {
  * positive evidence that the trip ended, not merely an absence of evidence, and
  * treating it as a gap would fuse a weekend away, a week at home with one quiet
  * day, and the next weekend away into one eleven-day "trip".
+  *
+  * @stability experimental
  */
 export function mergeAwayRuns(
   classified: ClassifiedDay[],
@@ -478,7 +552,11 @@ export function mergeAwayRuns(
   return runs;
 }
 
-/** Resolve a run's display place: locality → admin1 → country, else null. */
+/**
+ * Resolve a run's display place: locality → admin1 → country, else null.
+ *
+ * @stability experimental
+ */
 export function dominantPlace(run: AwayRun): {
   locality: string | null;
   admin1: string | null;
@@ -498,6 +576,8 @@ export function dominantPlace(run: AwayRun): {
  * all land on stable ASCII — a subjectKey is an identity, and one that changes
  * when a reverse-geocoding provider starts returning a differently-accented
  * spelling of the same town would silently create a duplicate memory.
+  *
+  * @stability experimental
  */
 export function slugifyPlace(value: string | null | undefined): string {
   if (!value) return '';
@@ -514,7 +594,11 @@ export function slugifyPlace(value: string | null | undefined): string {
 // Refresh matching
 // ---------------------------------------------------------------------------
 
-/** An inclusive day-index range. */
+/**
+ * An inclusive day-index range.
+ *
+ * @stability experimental
+ */
 export interface DayRange {
   startDayIndex: number;
   endDayIndex: number;
@@ -532,6 +616,8 @@ export interface DayRange {
  * The trade is that a short range fully contained in a much longer one always
  * matches. That is accepted: a 2-day run inside an existing 30-day trip really
  * is part of that trip.
+  *
+  * @stability experimental
  */
 export function dayRangeOverlapRatio(a: DayRange, b: DayRange): number {
   const start = Math.max(a.startDayIndex, b.startDayIndex);
@@ -544,7 +630,11 @@ export function dayRangeOverlapRatio(a: DayRange, b: DayRange): number {
   return shorter <= 0 ? 0 : overlap / shorter;
 }
 
-/** An existing `trip` memory, reduced to what overlap matching needs. */
+/**
+ * An existing `trip` memory, reduced to what overlap matching needs.
+ *
+ * @stability experimental
+ */
 export interface ExistingTrip extends DayRange {
   id: string;
   periodKey: string;
@@ -559,6 +649,8 @@ export interface ExistingTrip extends DayRange {
  * overlap order rather than run order, so when boundary drift makes two runs
  * both plausible matches for one memory, the better fit wins instead of whoever
  * happened to be chronologically first.
+  *
+  * @stability experimental
  */
 export function matchRunsToExisting<T extends DayRange>(
   runs: T[],

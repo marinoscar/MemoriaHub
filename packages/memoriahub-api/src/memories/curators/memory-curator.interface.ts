@@ -18,10 +18,18 @@
 import type { MemoriesSettingsValue } from '../memories-settings.util.js';
 import type { MemoryTitleRun } from '../titles/memory-title.types.js';
 
-/** DI token for the ordered curator registry. */
+/**
+ * DI token for the ordered curator registry.
+ *
+ * @stability experimental
+ */
 export const MEMORY_CURATORS = Symbol('MEMORY_CURATORS');
 
-/** Everything a curator needs for one circle's generation pass. */
+/**
+ * Everything a curator needs for one circle's generation pass.
+ *
+ * @stability experimental
+ */
 export interface MemoryCuratorContext {
   circleId: string;
   /**
@@ -65,7 +73,11 @@ export interface MemoryCuratorContext {
   titling?: MemoryTitleRun;
 }
 
-/** What one curator did, for logging and the handler's run summary. */
+/**
+ * What one curator did, for logging and the handler's run summary.
+ *
+ * @stability experimental
+ */
 export interface MemoryCuratorResult {
   created: number;
   refreshed: number;
@@ -75,10 +87,12 @@ export interface MemoryCuratorResult {
   tombstoned: number;
 }
 
+/** empty curator result. @stability experimental */
 export function emptyCuratorResult(): MemoryCuratorResult {
   return { created: 0, refreshed: 0, skipped: 0, tombstoned: 0 };
 }
 
+/** MemoryCurator: memory curator. @stability experimental */
 export interface MemoryCurator {
   /** Stable identifier used in logs and error messages. */
   readonly name: string;

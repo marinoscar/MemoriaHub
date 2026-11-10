@@ -281,7 +281,7 @@ export class MemoryDigestService {
 
   /**
    * Evaluate every deployment-wide gate (2–5) against the settings (read here, through the host's
-   * cache) and the already-read email readiness ({@link emailReady}). Both the task and the handler
+   * cache) and the already-read email readiness (`emailReady`). Both the task and the handler
    * call it, so neither can disagree with the other about whether the digest is live.
    *
    * @param emailReady - whether the deployment can deliver mail.

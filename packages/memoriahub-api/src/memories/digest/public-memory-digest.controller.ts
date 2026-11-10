@@ -96,7 +96,10 @@ export interface PublicDigestReply {
   /** Sets a response header. */
   header(name: string, value: string): unknown;
   /** Sets the status code. */
-  status(code: number): { send(payload: unknown): unknown };
+  status(code: number): {
+    /** Sends the payload with the status set. */
+    send(payload: unknown): unknown;
+  };
   /** Sends the payload. */
   send(payload: unknown): unknown;
 }

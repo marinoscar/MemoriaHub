@@ -59,6 +59,8 @@ const DECEMBER = 11;
  * Pure — exported for unit testing, because "December of Y and all of January
  * Y+1" is exactly the kind of boundary rule that is easier to get wrong than to
  * test.
+  *
+  * @stability experimental
  */
 export function scheduledReviewYear(now: Date): number | null {
   const month = now.getUTCMonth();
@@ -74,6 +76,8 @@ export function scheduledReviewYear(now: Date): number | null {
  * once December has arrived — the same completeness rule the scheduled window
  * encodes, applied to backfill so a mid-year backfill does not mint a
  * three-month "Your 2026 in review" that then churns for the rest of the year.
+  *
+  * @stability experimental
  */
 export function isReviewYearEligible(year: number, now: Date): boolean {
   const currentYear = now.getUTCFullYear();
@@ -81,6 +85,7 @@ export function isReviewYearEligible(year: number, now: Date): boolean {
   return year === currentYear && now.getUTCMonth() === DECEMBER;
 }
 
+/** YearInReviewCurator: year in review curator. @stability experimental */
 @Injectable()
 export class YearInReviewCurator implements MemoryCurator {
   readonly name = 'year_in_review';

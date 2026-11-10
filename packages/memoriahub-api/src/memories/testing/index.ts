@@ -1,1 +1,1 @@
-export {};
+export * from './memories-conformance.js';

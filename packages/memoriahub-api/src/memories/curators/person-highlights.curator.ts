@@ -49,6 +49,7 @@ import {
 } from './person-candidates.js';
 import { yearWindow } from './period-windows.js';
 
+/** PersonHighlightsCurator: person highlights curator. @stability experimental */
 @Injectable()
 export class PersonHighlightsCurator implements MemoryCurator {
   readonly name = 'person_highlights';

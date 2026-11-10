@@ -12,7 +12,11 @@
 // nothing about the sharding below leaks into it.
 // =============================================================================
 
-/** Payload shape for a `memory_generation` enrichment job. */
+/**
+ * Payload shape for a `memory_generation` enrichment job.
+ *
+ * @stability experimental
+ */
 export interface MemoryGenerationPayload {
   /**
    * Admin library backfill (#315): widen every curator from "what matters
@@ -65,6 +69,8 @@ function isCalendarMonth(value: unknown): value is number {
  * Every malformed field degrades to "absent", i.e. to the full unsharded
  * behaviour, rather than throwing: a payload problem must never cost a job its
  * retry budget over what is, in the worst case, doing MORE work than asked.
+  *
+  * @stability experimental
  */
 export function parseMemoryGenerationPayload(raw: unknown): MemoryGenerationPayload {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};

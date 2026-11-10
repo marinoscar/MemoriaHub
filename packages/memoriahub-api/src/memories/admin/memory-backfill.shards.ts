@@ -57,7 +57,11 @@
 import { BACKFILL_AI_TITLE_CAP } from '../titles/memory-title.service.js';
 import { MemoryGenerationPayload } from '../memory-generation.payload.js';
 
-/** One bounded unit of a circle's library backfill. */
+/**
+ * One bounded unit of a circle's library backfill.
+ *
+ * @stability experimental
+ */
 export interface MemoryBackfillShard {
   /** Stable identifier, used only in logs. */
   readonly label: string;
@@ -84,6 +88,8 @@ const SINGLE_SHARD_CURATORS = [
  * Order matters — it is the order the rows are created in, and the queue claims
  * equal-priority jobs oldest-first, so the calendar months (the content users
  * see on Home first) run before the long-tail types.
+  *
+  * @stability experimental
  */
 export const MEMORY_BACKFILL_SHARDS: readonly MemoryBackfillShard[] = [
   ...Array.from({ length: 12 }, (_unused, index): MemoryBackfillShard => {
@@ -105,6 +111,8 @@ export const MEMORY_BACKFILL_SHARDS: readonly MemoryBackfillShard[] = [
  *
  * Floored at 1 so a plan with more shards than the cap still lets every shard
  * title at least one memory rather than silently disabling AI titles wholesale.
+  *
+  * @stability experimental
  */
 export const MEMORY_BACKFILL_AI_TITLE_CAP_PER_SHARD = Math.max(
   1,
@@ -117,6 +125,8 @@ export const MEMORY_BACKFILL_AI_TITLE_CAP_PER_SHARD = Math.max(
  * Returned as `MemoryGenerationPayload & Record<string, unknown>` because
  * `enqueue()` types `payload` as an open record (it is JSONB) while the shape
  * above is a closed interface, which TypeScript will not widen on its own.
+  *
+  * @stability experimental
  */
 export function memoryBackfillPayload(
   shard: MemoryBackfillShard,

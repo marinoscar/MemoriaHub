@@ -28,13 +28,21 @@
 
 import { SeasonKey, seasonForMonth } from '../curation/memory-title-templates.js';
 
-/** A half-open `[start, endExclusive)` instant range. */
+/**
+ * A half-open `[start, endExclusive)` instant range.
+ *
+ * @stability experimental
+ */
 export interface PeriodWindow {
   start: Date;
   endExclusive: Date;
 }
 
-/** A season pinned to the calendar year it STARTS in. */
+/**
+ * A season pinned to the calendar year it STARTS in.
+ *
+ * @stability experimental
+ */
 export interface SeasonPeriod {
   /** The year the season begins — December's winter is `winter` of THAT year. */
   year: number;
@@ -59,12 +67,20 @@ const SEASON_START_MONTH: Record<SeasonKey, number> = {
   winter: 12,
 };
 
-/** UTC calendar year of an instant. */
+/**
+ * UTC calendar year of an instant.
+ *
+ * @stability experimental
+ */
 export function utcYear(date: Date): number {
   return date.getUTCFullYear();
 }
 
-/** `[Jan 1 year, Jan 1 year+1)` in UTC. */
+/**
+ * `[Jan 1 year, Jan 1 year+1)` in UTC.
+ *
+ * @stability experimental
+ */
 export function yearWindow(year: number): PeriodWindow {
   return {
     start: new Date(Date.UTC(year, 0, 1)),
@@ -79,17 +95,27 @@ export function yearWindow(year: number): PeriodWindow {
  * even if a caller ever hands it a range wider than one year — a bucket policy
  * that silently merged January 2024 with January 2025 would be a subtle bug in
  * exactly the kind of period this file exists to describe.
+  *
+  * @stability experimental
  */
 export function monthBucket(date: Date): number {
   return date.getUTCFullYear() * 12 + date.getUTCMonth();
 }
 
-/** Bucket key for `person_over_years`' year diversity. */
+/**
+ * Bucket key for `person_over_years`' year diversity.
+ *
+ * @stability experimental
+ */
 export function yearBucket(date: Date): number {
   return date.getUTCFullYear();
 }
 
-/** Which season an instant belongs to, with the December→next-year fold applied. */
+/**
+ * Which season an instant belongs to, with the December→next-year fold applied.
+ *
+ * @stability experimental
+ */
 export function seasonOf(date: Date): SeasonPeriod {
   const month = date.getUTCMonth() + 1;
   const season = seasonForMonth(month);
@@ -99,12 +125,20 @@ export function seasonOf(date: Date): SeasonPeriod {
   return { year, season };
 }
 
-/** Monotonic ordinal so seasons can be compared and stepped through. */
+/**
+ * Monotonic ordinal so seasons can be compared and stepped through.
+ *
+ * @stability experimental
+ */
 export function seasonOrdinal(period: SeasonPeriod): number {
   return period.year * SEASON_ORDER.length + SEASON_ORDER.indexOf(period.season);
 }
 
-/** Inverse of `seasonOrdinal`. */
+/**
+ * Inverse of `seasonOrdinal`.
+ *
+ * @stability experimental
+ */
 export function seasonFromOrdinal(ordinal: number): SeasonPeriod {
   const size = SEASON_ORDER.length;
   // Floor division, correct for negative ordinals too (year 0 is not special).
@@ -112,7 +146,11 @@ export function seasonFromOrdinal(ordinal: number): SeasonPeriod {
   return { year, season: SEASON_ORDER[ordinal - year * size]! };
 }
 
-/** The season immediately before `period`. */
+/**
+ * The season immediately before `period`.
+ *
+ * @stability experimental
+ */
 export function previousSeason(period: SeasonPeriod): SeasonPeriod {
   return seasonFromOrdinal(seasonOrdinal(period) - 1);
 }
@@ -124,12 +162,18 @@ export function previousSeason(period: SeasonPeriod): SeasonPeriod {
  * generated in July would be a partial summer, and the next refresh would
  * rewrite it — churning the item set (and, from #306, an AI title) every single
  * generation run for three months.
+  *
+  * @stability experimental
  */
 export function mostRecentCompletedSeason(now: Date): SeasonPeriod {
   return previousSeason(seasonOf(now));
 }
 
-/** `[first day of the season, first day of the next season)` in UTC. */
+/**
+ * `[first day of the season, first day of the next season)` in UTC.
+ *
+ * @stability experimental
+ */
 export function seasonWindow(period: SeasonPeriod): PeriodWindow {
   const startMonth = SEASON_START_MONTH[period.season];
   const start = new Date(Date.UTC(period.year, startMonth - 1, 1));
@@ -140,7 +184,11 @@ export function seasonWindow(period: SeasonPeriod): PeriodWindow {
   return { start, endExclusive };
 }
 
-/** `"2025-summer"` — the `seasonal` `periodKey` form. */
+/**
+ * `"2025-summer"` — the `seasonal` `periodKey` form.
+ *
+ * @stability experimental
+ */
 export function seasonPeriodKey(period: SeasonPeriod): string {
   return `${period.year}-${period.season}`;
 }
@@ -150,6 +198,8 @@ export function seasonPeriodKey(period: SeasonPeriod): string {
  *
  * Returns empty when `to` precedes `from`, which is what a circle whose only
  * photos are in the still-running season produces.
+  *
+  * @stability experimental
  */
 export function enumerateSeasons(from: SeasonPeriod, to: SeasonPeriod): SeasonPeriod[] {
   const first = seasonOrdinal(from);

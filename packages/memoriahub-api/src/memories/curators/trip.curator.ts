@@ -129,7 +129,11 @@ interface ScanResult {
   truncated: boolean;
 }
 
-/** UTC instant `months` before `from`. */
+/**
+ * UTC instant `months` before `from`.
+ *
+ * @stability experimental
+ */
 export function subtractMonthsUtc(from: Date, months: number): Date {
   return new Date(
     Date.UTC(
@@ -144,6 +148,7 @@ export function subtractMonthsUtc(from: Date, months: number): Date {
   );
 }
 
+/** TripCurator: trip curator. @stability experimental */
 @Injectable()
 export class TripCurator implements MemoryCurator {
   readonly name = 'trip';

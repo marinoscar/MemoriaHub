@@ -58,6 +58,8 @@ const MS_PER_DAY = 86_400_000;
  * and the memory is legitimately a new one. Keeping tombstones forever would
  * mean an unbounded row per (day × year) accumulating for the life of the
  * deployment, for content nobody can ever see again.
+  *
+  * @stability experimental
  */
 export const ON_THIS_DAY_RETENTION_DAYS = 30;
 
@@ -74,12 +76,20 @@ const MAX_ANCHOR_ROWS = 20_000;
 /** Farthest ahead `nextAnchorOccurrence` will look — covers Feb 29's 8-year gap. */
 const MAX_ANCHOR_LOOKAHEAD_YEARS = 8;
 
-/** UTC midnight of the day containing `date`. */
+/**
+ * UTC midnight of the day containing `date`.
+ *
+ * @stability experimental
+ */
 export function startOfUtcDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-/** `2026-08-09` — the `periodKey` form for an anchor day. */
+/**
+ * `2026-08-09` — the `periodKey` form for an anchor day.
+ *
+ * @stability experimental
+ */
 export function toIsoDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -92,6 +102,8 @@ export function toIsoDateKey(date: Date): string {
  * implementation would generate a "February 29" memory keyed to March 1 in
  * three years out of four. The round-trip check rejects the rollover and the
  * loop walks forward to the next leap year.
+  *
+  * @stability experimental
  */
 export function nextAnchorOccurrence(now: Date, month: number, day: number): Date | null {
   const today = startOfUtcDay(now).getTime();
@@ -104,6 +116,7 @@ export function nextAnchorOccurrence(now: Date, month: number, day: number): Dat
   return null;
 }
 
+/** OnThisDayCurator: on this day curator. @stability experimental */
 @Injectable()
 export class OnThisDayCurator implements MemoryCurator {
   readonly name = 'on_this_day';

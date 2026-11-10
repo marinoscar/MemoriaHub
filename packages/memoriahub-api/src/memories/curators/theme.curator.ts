@@ -59,6 +59,8 @@ import { yearWindow } from './period-windows.js';
  * concepts whose photos are artifacts rather than moments. Compared
  * case-insensitively against the tag name. Documented in
  * docs/specs/memories.md §4.10.
+  *
+  * @stability experimental
  */
 export const THEME_TAG_DENYLIST: ReadonlySet<string> = new Set([
   'screenshot',
@@ -69,7 +71,11 @@ export const THEME_TAG_DENYLIST: ReadonlySet<string> = new Set([
   'whiteboard',
 ]);
 
-/** The `periodKey` for a theme spanning the circle's whole history. */
+/**
+ * The `periodKey` for a theme spanning the circle's whole history.
+ *
+ * @stability experimental
+ */
 export const THEME_ALL_PERIOD_KEY = 'all';
 
 /**
@@ -91,13 +97,18 @@ interface ThemePeriod {
   year: number | null;
 }
 
-/** Census row: distinct qualifying items for one `(tag, year)`. */
-interface TagYearCount {
+/**
+ * Census row: distinct qualifying items for one `(tag, year)`.
+ *
+ * @stability experimental
+ */
+export interface TagYearCount {
   tag: string;
   year: number;
   count: number;
 }
 
+/** ThemeCurator: theme curator. @stability experimental */
 @Injectable()
 export class ThemeCurator implements MemoryCurator {
   readonly name = 'theme';
@@ -284,6 +295,8 @@ export class ThemeCurator implements MemoryCurator {
  * all-history set with no overlap to correct for.
  *
  * Pure — exported for unit testing.
+  *
+  * @stability experimental
  */
 export function rankTagsForPeriod(
   census: TagYearCount[],

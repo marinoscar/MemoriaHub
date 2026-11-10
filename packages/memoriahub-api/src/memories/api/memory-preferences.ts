@@ -44,6 +44,8 @@ export interface PreferenceFilterableMemory {
  *
  * `hiddenPersonIds` becomes a Set (membership, not scan) and each date range
  * becomes a half-open `[startMs, endExclusiveMs)` millisecond interval.
+  *
+  * @stability experimental
  */
 export interface ResolvedMemoryPreferences {
   hiddenPersonIds: Set<string>;
@@ -83,6 +85,8 @@ export function preferencesAreEmpty(prefs: ResolvedMemoryPreferences): boolean {
  * A `YYYY-MM-DD` range is inclusive of both endpoints, so `to` is expanded to
  * the START of the following day and the comparison is half-open — the same
  * trick `expiresAt` uses for an anchor day (see on-this-day.curator.ts).
+  *
+  * @stability experimental
  */
 export function resolveMemoryPreferences(
   stored: MemoriesPreferencesValue | undefined | null,
@@ -125,6 +129,8 @@ export function resolveMemoryPreferences(
  *   2. its covered capture window OVERLAPS a sensitive range. Overlap, not
  *      containment: a trip that merely crosses a hidden anniversary is exactly
  *      the case the user is trying not to be shown, so a partial hit counts.
+  *
+  * @stability experimental
  */
 export function isMemoryHiddenByPreferences(
   memory: PreferenceFilterableMemory,

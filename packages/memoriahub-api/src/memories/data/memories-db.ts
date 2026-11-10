@@ -69,6 +69,8 @@ export type MemoriesTx = MemoriesModels & Pick<MemoriahubPrismaClientLike, '$que
  * A Prisma unique-constraint violation (`P2002`), seen structurally.
  *
  * @param error - the thrown value.
+  *
+  * @stability experimental
  */
 export function isUniqueViolation(error: unknown): boolean {
   return (
