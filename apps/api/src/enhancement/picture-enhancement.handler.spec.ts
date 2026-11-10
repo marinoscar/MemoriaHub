@@ -9,7 +9,7 @@
  *   - PrismaService, StorageProviderResolver, AiSettingsService,
  *     AiProviderRegistry, and AppSystemSettingsService are plain jest mocks
  *     (constructed directly, no NestJS TestingModule needed since the handler
- *     has no other DI surface besides EnrichmentHandlerRegistry.register()).
+ *     has no other DI surface besides JobHandlerRegistry.register()).
  *
  * Covers:
  *   - type + registration
@@ -35,44 +35,36 @@ jest.mock('../media-processing/image-orientation.util', () => ({
 
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaEnhancementStatus, MediaType } from '@prisma/client';
+import { MediaEnhancementStatus, MediaType } from '@prisma/client';
 import { PictureEnhancementHandler } from './picture-enhancement.handler';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import { RateLimitError } from '../enrichment/rate-limit.error';
-import {
-  ENRICHMENT_MAX_ATTEMPTS,
-  ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../platform/jobs/queue-limits';
+import { RateLimitError } from '@marinoscar/platform-api/jobs';
+import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
+import type { Job } from '@marinoscar/platform-api/jobs';
+import { platformJob } from '../../test/helpers/platform-job';
+
+/** The handler's own budget (`profile.maxAttempts`). */
+const ENRICHMENT_MAX_ATTEMPTS = 3;
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return platformJob({
     type: 'picture_enhancement',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.rerun,
+    subjectType: 'media_item',
+    subjectId: 'media-1',
+    status: 'running',
+    reason: 'rerun',
     priority: 0,
     providerKey: 'openai',
     modelVersion: 'gpt-image-1',
-    payload: { enhancementId: 'enh-1' },
+    payload: { enhancementId: 'enh-1', circleId: 'circle-1' },
     attempts: 1,
-    lastError: null,
     startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 function makeEnhancementRow(overrides: Record<string, any> = {}) {
@@ -123,6 +115,7 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
 describe('PictureEnhancementHandler', () => {
   let handler: PictureEnhancementHandler;
   let mockRegistry: { register: jest.Mock };
+  let mockThrottle: { registerProviderKey: jest.Mock };
   let mockPrisma: {
     mediaEnhancement: { findUnique: jest.Mock; update: jest.Mock };
     mediaEnhancementBatch: { findUnique: jest.Mock };
@@ -149,6 +142,7 @@ describe('PictureEnhancementHandler', () => {
     });
 
     mockRegistry = { register: jest.fn() };
+    mockThrottle = { registerProviderKey: jest.fn() };
 
     mockPrisma = {
       mediaEnhancement: {
@@ -210,6 +204,7 @@ describe('PictureEnhancementHandler', () => {
 
     handler = new PictureEnhancementHandler(
       mockRegistry as any,
+      mockThrottle as any,
       mockPrisma as any,
       mockResolver as any,
       mockAiSettings as any,
@@ -227,9 +222,37 @@ describe('PictureEnhancementHandler', () => {
     expect(handler.type).toBe('picture_enhancement');
   });
 
-  it('registers itself with the EnrichmentHandlerRegistry on module init', () => {
+  it('registers itself with the JobHandlerRegistry and the `enhance` throttle gate on module init', () => {
     handler.onModuleInit();
     expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockThrottle.registerProviderKey).toHaveBeenCalledWith('picture_enhancement', 'enhance');
+  });
+
+  it('is server-only (AI rule 3): no node pair, a 10-minute / 3-attempt profile', () => {
+    expect((handler as any).nodeResultSchema).toBeUndefined();
+    expect((handler as any).persistNodeResult).toBeUndefined();
+    expect(handler.profile).toEqual({ maxRuntimeMs: 600_000, maxAttempts: 3 });
+  });
+
+  describe('canDelete', () => {
+    it('refuses to delete a pending job of an active batch', async () => {
+      (mockPrisma.mediaEnhancement.findUnique as jest.Mock).mockResolvedValue({
+        status: MediaEnhancementStatus.pending,
+        batchId: 'batch-1',
+        batch: { cancelledAt: null },
+      });
+      await expect(handler.canDelete(makeJob({ status: 'pending' }))).resolves.toContain('batch-1');
+    });
+
+    it.each([
+      ['a running job', { status: 'running' as const }, null],
+      ['a single-item (batchless) enhancement', { status: 'pending' as const }, { status: 'pending', batchId: null, batch: null }],
+      ['a cancelled batch', { status: 'pending' as const }, { status: 'pending', batchId: 'b', batch: { cancelledAt: new Date() } }],
+      ['a row no longer pending', { status: 'pending' as const }, { status: 'ready', batchId: 'b', batch: { cancelledAt: null } }],
+    ])('allows deleting %s', async (_name, jobOverrides, row) => {
+      (mockPrisma.mediaEnhancement.findUnique as jest.Mock).mockResolvedValue(row);
+      await expect(handler.canDelete(makeJob(jobOverrides))).resolves.toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -709,6 +732,7 @@ describe('PictureEnhancementHandler', () => {
 
       handlerWithCarryover = new PictureEnhancementHandler(
         mockRegistry as any,
+        mockThrottle as any,
         mockPrisma as any,
         mockResolver as any,
         mockAiSettings as any,

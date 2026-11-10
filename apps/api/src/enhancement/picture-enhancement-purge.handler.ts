@@ -9,20 +9,27 @@
 // =============================================================================
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, MediaEnhancementStatus } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { MediaEnhancementStatus } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
-export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModuleInit {
+export class PictureEnhancementPurgeHandler implements JobHandler, OnModuleInit {
   readonly type = 'picture_enhancement_purge';
+  readonly label = 'AI picture enhancer purge';
+  /** Housekeeping: a read, a few deletes per row. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 2 };
   private readonly logger = new Logger(PictureEnhancementPurgeHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
     private readonly systemSettings: AppSystemSettingsService,
@@ -32,7 +39,7 @@ export class PictureEnhancementPurgeHandler implements EnrichmentHandler, OnModu
     this.registry.register(this);
   }
 
-  async process(_job: EnrichmentJob): Promise<void> {
+  async process(_job: Job): Promise<void> {
     // Fallback mirrors settings.schema.ts / DEFAULT_SYSTEM_SETTINGS (168h = 7d).
     const retentionHours =
       (await this.systemSettings.getSettingValue<number>(

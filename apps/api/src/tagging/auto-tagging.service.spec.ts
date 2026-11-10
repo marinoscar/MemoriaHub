@@ -1184,7 +1184,11 @@ describe('AutoTaggingService', () => {
   // above via processMediaItem.
   // -------------------------------------------------------------------------
 
-  describe('persistAutoTagging (direct / node-result path)', () => {
+  describe('persistAutoTagging (the persist half)', () => {
+    const USED = { providerKey: 'anthropic', modelVersion: 'claude-3-5-sonnet' };
+    const persist = (job: ReturnType<typeof makeJob>, result: { rawText: string }) =>
+      service.persistAutoTagging(job, result, USED);
+
     function makeNodeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
       // A node-result job already has providerKey/modelVersion recorded by
       // NodesService.getJobCredentials (via recordModel) before the node
@@ -1200,7 +1204,7 @@ describe('AutoTaggingService', () => {
     }
 
     it('upserts only vocabulary-matched labels; drops unrecognised items (identical to the in-process path)', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: JSON.stringify({ tags: ['Beach', 'Sunset', 'Nonexistent Label'], description: 'Sun and water.' }),
       });
 
@@ -1212,7 +1216,7 @@ describe('AutoTaggingService', () => {
     });
 
     it('normalizes label case (case-insensitive vocabulary match) to the original TagLabel name', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: JSON.stringify({ tags: ['beach', 'SUNSET'], description: 'Sand.' }),
       });
 
@@ -1222,7 +1226,7 @@ describe('AutoTaggingService', () => {
     });
 
     it('strips ```json code fences before parsing', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: '```json\n{"tags":["Beach","Sunset"],"description":"Sand and waves."}\n```',
       });
 
@@ -1234,7 +1238,7 @@ describe('AutoTaggingService', () => {
     });
 
     it('extracts the JSON object via regex when the response has leading prose', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: 'Here is my analysis: {"tags":["Beach","Mountain"],"description":"Rocks and waves."}',
       });
 
@@ -1244,7 +1248,7 @@ describe('AutoTaggingService', () => {
     it('truncates description at 8192 characters', async () => {
       const longDescription = 'a'.repeat(9000);
 
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: JSON.stringify({ tags: ['Beach'], description: longDescription }),
       });
 
@@ -1253,8 +1257,8 @@ describe('AutoTaggingService', () => {
       expect(updateCall.data.description).toBe(longDescription.slice(0, 8192));
     });
 
-    it('sets MediaTagStatus to processed with providerKey/modelVersion read off the job row', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+    it('sets MediaTagStatus to processed with the providerKey/modelVersion the compute half resolved', async () => {
+      await persist(makeNodeJob(), {
         rawText: JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
       });
 
@@ -1266,7 +1270,7 @@ describe('AutoTaggingService', () => {
     });
 
     it('performs no image download and no provider call (node already computed rawText)', async () => {
-      await service.persistAutoTagging(makeNodeJob(), {
+      await persist(makeNodeJob(), {
         rawText: JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
       });
 
@@ -1274,19 +1278,11 @@ describe('AutoTaggingService', () => {
       expect(mockProvider.analyzeImage).not.toHaveBeenCalled();
     });
 
-    it('throws when job.providerKey/modelVersion are missing (recordModel must run first)', async () => {
-      const job = makeNodeJob({ providerKey: null, modelVersion: null });
-
-      await expect(
-        service.persistAutoTagging(job, { rawText: JSON.stringify({ tags: [], description: null }) }),
-      ).rejects.toThrow(/providerKey\/modelVersion/);
-    });
-
     it('throws when job.mediaItemId is missing', async () => {
       const job = makeNodeJob({ mediaItemId: null });
 
       await expect(
-        service.persistAutoTagging(job, { rawText: JSON.stringify({ tags: [], description: null }) }),
+        persist(job, { rawText: JSON.stringify({ tags: [], description: null }) }),
       ).rejects.toThrow(/missing mediaItemId/);
     });
 
@@ -1294,7 +1290,7 @@ describe('AutoTaggingService', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.persistAutoTagging(makeNodeJob(), {
+        persist(makeNodeJob(), {
           rawText: JSON.stringify({ tags: [], description: null }),
         }),
       ).rejects.toThrow(/not found/);
@@ -1310,19 +1306,19 @@ describe('AutoTaggingService', () => {
     // modelVersion" on every in-process run.
     // -----------------------------------------------------------------------
 
-    it('regression: processMediaItem mutates job.providerKey/modelVersion in-memory so persistAutoTagging can read them', async () => {
+    it('regression: processMediaItem hands the resolved provider/model to the persist half explicitly', async () => {
       const job = makeJob();
-      expect(job.providerKey).toBeNull();
-      expect(job.modelVersion).toBeNull();
-
       mockProvider.analyzeImage.mockResolvedValue(
         JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
       );
 
       await service.processMediaItem(job);
 
-      expect(job.providerKey).toBe('openai');
-      expect(job.modelVersion).toBe('gpt-4o');
+      const statusCalls = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = statusCalls[statusCalls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
+      expect(finalUpsert.create.providerKey).toBe('openai');
+      expect(finalUpsert.create.modelVersion).toBe('gpt-4o');
     });
   });
 });

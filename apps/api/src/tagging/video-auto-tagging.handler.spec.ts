@@ -1,142 +1,67 @@
 /**
- * Unit tests for VideoAutoTaggingHandler (epic #452, issue #455).
- *
- * Covers the registration surface and the node-result path. The persist half
- * is deliberately delegated to AutoTaggingService, so what these tests protect
- * is that the delegation actually happens (and in the right order) rather than
- * a second copy of parsing/vocabulary validation growing here.
+ * Unit tests for VideoAutoTaggingHandler (epic #452; native platform JobHandler
+ * since RETRO-C4 #590). Server-only (AI rule 3): no node pair; ffmpeg reads the
+ * video on the API host.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
-import { videoAutoTaggingResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { RateLimitError as PlatformRateLimitError } from '@marinoscar/platform-api/jobs';
 import { VideoAutoTaggingHandler } from './video-auto-tagging.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { AutoTaggingService } from './auto-tagging.service';
-import { VideoAutoTaggingService } from './video-auto-tagging.service';
-
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'video_auto_tagging',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 20,
-    providerKey: 'openai',
-    modelVersion: 'gpt-4o',
-    payload: null,
-    attempts: 1,
-    lastError: null,
-    startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
-}
+import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
+import { mediaItemJob, subjectPrisma } from '../../test/helpers/platform-job';
 
 describe('VideoAutoTaggingHandler', () => {
-  let handler: VideoAutoTaggingHandler;
   let registry: { register: jest.Mock };
-  let videoService: { processMediaItem: jest.Mock; persistNodeTranscript: jest.Mock };
-  let autoTaggingService: { persistAutoTagging: jest.Mock };
+  let throttle: { registerProviderKey: jest.Mock };
+  let videoService: { processMediaItem: jest.Mock };
+  let handler: VideoAutoTaggingHandler;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     registry = { register: jest.fn() };
-    videoService = {
-      processMediaItem: jest.fn().mockResolvedValue(undefined),
-      persistNodeTranscript: jest.fn().mockResolvedValue(undefined),
-    };
-    autoTaggingService = { persistAutoTagging: jest.fn().mockResolvedValue(undefined) };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        VideoAutoTaggingHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: registry },
-        { provide: VideoAutoTaggingService, useValue: videoService },
-        { provide: AutoTaggingService, useValue: autoTaggingService },
-      ],
-    }).compile();
-
-    handler = module.get(VideoAutoTaggingHandler);
+    throttle = { registerProviderKey: jest.fn() };
+    videoService = { processMediaItem: jest.fn().mockResolvedValue(undefined) };
+    handler = new VideoAutoTaggingHandler(
+      registry as never,
+      throttle as never,
+      subjectPrisma({ mediaItems: { 'media-1': 'circle-1' } }) as never,
+      videoService as never,
+    );
   });
 
-  it('registers itself under a job type DISTINCT from auto_tagging', () => {
+  it('registers under a job type DISTINCT from auto_tagging, sharing its `tagging` gate', () => {
     handler.onModuleInit();
-
-    // The distinct type is what gives video jobs the 20-minute timeout bucket
-    // and the ffmpeg node requirement without imposing either on photos.
     expect(handler.type).toBe('video_auto_tagging');
     expect(handler.type).not.toBe('auto_tagging');
     expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(throttle.registerProviderKey).toHaveBeenCalledWith('video_auto_tagging', 'tagging');
   });
 
-  it('exposes the shared node result schema', () => {
-    expect(handler.nodeResultSchema).toBe(videoAutoTaggingResultSchema);
+  it('declares the 20-minute video profile (duration-independent ceiling)', () => {
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
   });
 
-  it('delegates process() to VideoAutoTaggingService', async () => {
-    const job = makeJob();
-    await handler.process(job);
-
-    expect(videoService.processMediaItem).toHaveBeenCalledWith(job);
+  it('is server-only: no node pair (AI rule 3)', () => {
+    expect((handler as unknown as Record<string, unknown>)['nodeResultSchema']).toBeUndefined();
+    expect((handler as unknown as Record<string, unknown>)['persistNodeResult']).toBeUndefined();
   });
 
-  it('persists a node result through the SAME persist half the photo path uses', async () => {
-    const job = makeJob();
-
-    await handler.persistNodeResult(job, {
-      rawText: '{"tags":["Beach"],"description":"d"}',
-      frameCount: 6,
-      sampledTimestampsMs: [2500, 7500],
-    });
-
-    expect(autoTaggingService.persistAutoTagging).toHaveBeenCalledWith(job, {
-      rawText: '{"tags":["Beach"],"description":"d"}',
+  it('delegates process() to VideoAutoTaggingService with the media-item context', async () => {
+    await handler.process(mediaItemJob('video_auto_tagging', 'media-1', 'circle-1', { id: 'job-3' }));
+    expect(videoService.processMediaItem).toHaveBeenCalledWith({
+      id: 'job-3',
+      mediaItemId: 'media-1',
+      circleId: 'circle-1',
     });
   });
 
-  it('persists a node-submitted transcript BEFORE the tags, so the embedding includes it', async () => {
-    const order: string[] = [];
-    videoService.persistNodeTranscript.mockImplementation(async () => {
-      order.push('transcript');
-    });
-    autoTaggingService.persistAutoTagging.mockImplementation(async () => {
-      order.push('tags');
-    });
-
-    await handler.persistNodeResult(makeJob(), {
-      rawText: '{}',
-      frameCount: 2,
-      sampledTimestampsMs: [0, 1000],
-      transcript: { text: 'happy birthday', leadSeconds: 30 },
-    });
-
-    expect(order).toEqual(['transcript', 'tags']);
+  it('settles as a no-op for a media item that no longer exists', async () => {
+    await handler.process(mediaItemJob('video_auto_tagging', 'gone'));
+    expect(videoService.processMediaItem).not.toHaveBeenCalled();
   });
 
-  it('rejects a payload that fails nodeResultSchema before touching the database', async () => {
-    await expect(
-      handler.persistNodeResult(makeJob(), { rawText: 123, frameCount: 'six' }),
-    ).rejects.toThrow();
-
-    expect(autoTaggingService.persistAutoTagging).not.toHaveBeenCalled();
-  });
-
-  it('accepts a visual-only result (no transcript key at all)', async () => {
-    await expect(
-      handler.persistNodeResult(makeJob(), {
-        rawText: '{}',
-        frameCount: 3,
-        sampledTimestampsMs: [0, 1000, 2000],
-      }),
-    ).resolves.toBeUndefined();
+  it('defers on a provider throttle through the platform RateLimitError', async () => {
+    videoService.processMediaItem.mockRejectedValue(new LegacyRateLimitError('busy', 4_000, 'openai'));
+    const error = await handler.process(mediaItemJob('video_auto_tagging', 'media-1')).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PlatformRateLimitError);
+    expect(error).toMatchObject({ retryAfterMs: 4_000 });
   });
 });
