@@ -1,7 +1,7 @@
 # Changesets
 
 This folder holds the pending release notes of the `@marinoscar/memoriahub-*`
-packages (today `memoriahub-compute`; the contract, db, api and web packages
+packages (today `memoriahub-compute` and `memoriahub-contract`; the db, api and web packages
 join the `fixed` group in [`config.json`](config.json) as the issues that create
 them land), which always share one version. The standard, the checks and the
 release procedure are in [`docs/PACKAGES.md`](../docs/PACKAGES.md) and

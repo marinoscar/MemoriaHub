@@ -1,11 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { listWorkflowsQuerySchema } from '@marinoscar/memoriahub-contract/workflows';
 
-/** GET /api/workflows query params. */
-export const listWorkflowsQuerySchema = z.object({
-  circleId: z.string().uuid(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-});
+export { listWorkflowsQuerySchema };
 
 export class ListWorkflowsQueryDto extends createZodDto(listWorkflowsQuerySchema) {}

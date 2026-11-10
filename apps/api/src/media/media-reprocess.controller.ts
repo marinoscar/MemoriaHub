@@ -1,7 +1,6 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { JobsService, type Job } from '@marinoscar/platform-api/jobs';
 import {
@@ -12,25 +11,16 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
+import { reprocessBodySchema, reprocessStuckBodySchema, reprocessFailedBodySchema } from '@marinoscar/memoriahub-contract/media';
 
 // .default({}) on all three so a bodyless POST parses as {} — see issue #289
 // (app.module.ts).
-const reprocessBodySchema = z.object({
-  circleId: z.string().uuid().optional(),
-  all: z.boolean().optional(),
-}).default({});
 
 export class ReprocessBodyDto extends createZodDto(reprocessBodySchema) {}
 
-const reprocessStuckBodySchema = z.object({
-  olderThanMinutes: z.number().int().positive().optional(),
-}).default({});
 
 export class ReprocessStuckBodyDto extends createZodDto(reprocessStuckBodySchema) {}
 
-const reprocessFailedBodySchema = z.object({
-  limit: z.number().int().positive().optional(),
-}).default({});
 
 export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySchema) {}
 

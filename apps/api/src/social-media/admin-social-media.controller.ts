@@ -15,7 +15,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { adminSocialMediaBackfillSchema } from '@marinoscar/memoriahub-contract/social';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
@@ -23,16 +23,6 @@ import { SocialMediaBackfillService } from './social-media-backfill.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
-const adminSocialMediaBackfillSchema = z.object({
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-  // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
-  // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
-}).prefault({});
 class AdminSocialMediaBackfillDto extends createZodDto(
   adminSocialMediaBackfillSchema,
 ) {}

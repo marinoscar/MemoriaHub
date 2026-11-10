@@ -26,6 +26,7 @@
 // =============================================================================
 
 import { BadRequestException } from '@nestjs/common';
+import { isSupportedTimeZone } from '@marinoscar/memoriahub-contract/primitives';
 
 /** Civil (wall-clock) date/time parts of an instant, in a given zone. */
 export interface CivilParts {
@@ -37,60 +38,11 @@ export interface CivilParts {
   second: number;
 }
 
-/**
- * Valid IANA timezone names. Built lazily; 'UTC' is added explicitly since some
- * runtimes canonicalize it out of Intl.supportedValuesOf('timeZone').
- */
-let timezoneSet: Set<string> | null = null;
-
-/**
- * Does `Intl` know this zone?
- *
- * TWO CHECKS, IN THIS ORDER, AND THE SECOND IS NOT A FALLBACK FOR OLD RUNTIMES
- * — it is the one that makes this correct for real client-reported zones:
- *
- *   1. `Intl.supportedValuesOf('timeZone')` — fast, and the authoritative list
- *      where it exists. But it returns only CANONICAL names, so on a given ICU
- *      build it can omit live IANA aliases that `Intl` itself accepts happily:
- *      Node 22 lists `Asia/Calcutta` but not `Asia/Kolkata`, `Europe/Kiev` but
- *      not `Europe/Kyiv`, and (see below) `UTC` at all. Those are exactly the
- *      strings a browser hands us from
- *      `Intl.DateTimeFormat().resolvedOptions().timeZone`, so treating a miss
- *      here as "invalid" would 400 a user in Kolkata or Kyiv for reporting
- *      their real zone.
- *
- *   2. Constructing a formatter, which throws `RangeError` for a genuinely
- *      unknown zone. This is the ACTUAL predicate we care about: "will every
- *      downstream `Intl` call in this codebase accept the value?" It correctly
- *      rejects `Etc/Unknown`, `Mars/Olympus`, and the empty string.
- *
- * So step 1 is a cache in front of step 2, never a veto over it. 'UTC' is also
- * added to the set explicitly, both because several runtimes canonicalize it
- * out of the list and because it is `databaseBackup.timezone`'s own default.
- */
-export function isSupportedTimeZone(timezone: string): boolean {
-  if (!timezone) return false;
-
-  const supportedValuesOf = (Intl as any).supportedValuesOf as
-    | ((key: string) => string[])
-    | undefined;
-
-  if (supportedValuesOf) {
-    if (!timezoneSet) {
-      timezoneSet = new Set([...supportedValuesOf('timeZone'), 'UTC']);
-    }
-    if (timezoneSet.has(timezone)) return true;
-    // Fall through — an alias this ICU build canonicalizes away is still a
-    // zone every Intl call in this codebase will accept.
-  }
-
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
+// `isSupportedTimeZone` (the IANA-zone predicate, with the canonical-list and
+// `UTC` notes above) lives in `@marinoscar/memoriahub-contract/primitives`, where
+// the wire schemas that validate a `timezone` field use it; re-exported here so
+// every caller keeps this import path.
+export { isSupportedTimeZone };
 
 /** Reject a `timezone` that `Intl` does not know. */
 export function assertSupportedTimeZone(timezone: string): void {

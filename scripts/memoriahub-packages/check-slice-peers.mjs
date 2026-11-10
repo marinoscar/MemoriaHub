@@ -53,6 +53,7 @@
 //                    for rule 5 only; the app must then really not install it.
 //
 //   6. host-neutral  No file under packages/memoriahub-compute/src/**,
+//                    packages/memoriahub-contract/src/**,
 //                    packages/memoriahub-api/src/** or packages/memoriahub-web/src/**
 //                    imports @marinoscar/platform-*, except the exact specifiers
 //                    listed in HOST_NEUTRAL_ALLOWED / HOST_NEUTRAL_SLICE_ALLOWED
@@ -118,11 +119,12 @@ export const SLICES_FILE = 'packages/memoriahub-slices.json';
 export const PEERS_FILE = 'packages/memoriahub-slice-peers.json';
 /**
  * Packages whose `src/` may not import the platform (rule 6). `memoriahub-compute`
- * is platform-free by design (a worker node installs it without any platform
- * package); J2-J4 and J11 add the contract, db, api and web packages here when
- * they decide their own platform allowances.
+ * and `memoriahub-contract` are platform-free by design (a worker node or a
+ * client installs them without any platform package; the contract imports only
+ * zod); J3, J4 and J11 add the db, api and web packages here when they decide
+ * their own platform allowances.
  */
-export const HOST_NEUTRAL_PACKAGES = Object.freeze(['memoriahub-compute', 'memoriahub-api', 'memoriahub-web']);
+export const HOST_NEUTRAL_PACKAGES = Object.freeze(['memoriahub-compute', 'memoriahub-contract', 'memoriahub-api', 'memoriahub-web']);
 /**
  * The platform specifiers a host-neutral package may import anyway, matched
  * EXACTLY (rule 6). Empty today: every platform specifier is a violation.

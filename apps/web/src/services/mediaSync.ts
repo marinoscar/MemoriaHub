@@ -8,89 +8,50 @@
  */
 import { api, ApiError } from './api';
 
-export type MediaSyncNetworkPolicy = 'wifi' | 'any';
-export type MediaSyncUploadExisting = 'all' | 'from_pairing';
-export type MediaSyncPermission = 'full' | 'partial' | 'denied';
-export type MediaSyncNetworkState = 'wifi' | 'cellular' | 'none';
-export type MediaSyncDeviceStatus = 'active' | 'revoked';
-export type MediaSyncRunStatus = 'ok' | 'partial' | 'failed' | 'skipped' | 'paused';
-export type MediaSyncTrigger = 'periodic' | 'content_trigger' | 'manual' | 'app_open' | 'initial';
-export type MediaSyncCommand = 'pause' | 'resume' | 'retry_failed' | 'sync_now';
+import type {
+  ConfigResult,
+  DeviceView,
+  InventoryFolder,
+  MediaSyncCommand,
+  MediaSyncConfig,
+  MediaSyncDeviceStatus,
+  MediaSyncFailedFile,
+  MediaSyncNetworkPolicy,
+  MediaSyncNetworkState,
+  MediaSyncPerFolder,
+  MediaSyncPermission,
+  MediaSyncRunStatus,
+  MediaSyncStats,
+  MediaSyncTrigger,
+  MediaSyncUploadExisting,
+  ReportSummaryView,
+  ReportView,
+  RunView,
+} from '@marinoscar/memoriahub-contract/media-sync';
 
-export interface MediaSyncFolder {
-  bucketId: string;
-  name: string;
-}
+// The vocabulary and the device, config, run and report shapes are the wire
+// schemas of `@marinoscar/memoriahub-contract/media-sync`; this file only adds the client calls.
+export type {
+  MediaSyncCommand,
+  MediaSyncConfig,
+  MediaSyncDeviceStatus,
+  MediaSyncFailedFile,
+  MediaSyncNetworkPolicy,
+  MediaSyncNetworkState,
+  MediaSyncPermission,
+  MediaSyncRunStatus,
+  MediaSyncStats,
+  MediaSyncTrigger,
+  MediaSyncUploadExisting,
+};
 
-/** The desired configuration the server holds for one phone (spec §5.1). */
-export interface MediaSyncConfig {
-  targetCircleId: string;
-  folders: MediaSyncFolder[];
-  includePhotos: boolean;
-  includeVideos: boolean;
-  network: MediaSyncNetworkPolicy;
-  requireCharging: boolean;
-  paused: boolean;
-  uploadExisting: MediaSyncUploadExisting;
-  retryFailedGeneration: number;
-  syncNowGeneration: number;
-}
+export type MediaSyncFolder = MediaSyncConfig['folders'][number];
 
 /** One media folder the phone reported. */
-export interface MediaSyncInventoryFolder {
-  bucketId: string;
-  name: string;
-  relativePath?: string | null;
-  photoCount: number;
-  videoCount: number;
-  bytes: number;
-}
+export type MediaSyncInventoryFolder = InventoryFolder;
 
-/** Counts from the phone's file ledger, authoritative per file. */
-export interface MediaSyncStats {
-  eligible: number;
-  uploaded: number;
-  deduplicated: number;
-  pending: number;
-  uploading: number;
-  failed: number;
-  blocked: number;
-  bytesPending: number;
-  bytesUploaded: number;
-}
-
-export interface MediaSyncDevice {
-  id: string;
-  installationId: string;
-  name: string;
-  manufacturer: string | null;
-  model: string | null;
-  androidVersion: string | null;
-  sdkInt: number | null;
-  appVersion: string | null;
-  appVersionCode: number | null;
-  packageName: string | null;
-  timezone: string | null;
-  latestVersionCode: number | null;
-  updateAvailable: boolean;
-  status: MediaSyncDeviceStatus;
-  config: MediaSyncConfig;
-  configVersion: number;
-  appliedConfigVersion: number;
-  configPending: boolean;
-  inventory: MediaSyncInventoryFolder[] | null;
-  stats: MediaSyncStats | null;
-  permission: MediaSyncPermission | null;
-  networkState: MediaSyncNetworkState | null;
-  batteryOptimized: boolean | null;
-  lastSeenAt: string | null;
-  lastSyncAt: string | null;
-  lastSyncStatus: MediaSyncRunStatus | null;
-  lastError: string | null;
-  tokenExpiresAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+/** One device as the API lists it. */
+export type MediaSyncDevice = DeviceView;
 
 /** The editable part of the config (commands own `paused` and the generations). */
 export interface MediaSyncConfigPatch {
@@ -103,49 +64,16 @@ export interface MediaSyncConfigPatch {
   uploadExisting?: MediaSyncUploadExisting;
 }
 
-export interface MediaSyncConfigResult {
-  config: MediaSyncConfig;
-  configVersion: number;
-}
+export type MediaSyncConfigResult = ConfigResult;
 
-export interface MediaSyncFailedFile {
-  name: string;
-  relativePath?: string | null;
-  sizeBytes: number;
-  attempts: number;
-  lastError?: string | null;
-}
+/** One sync pass; `details` narrows the wire's generic JSON object to what a check-in reports. */
+export type MediaSyncRun = Omit<RunView, 'details'> & {
+  details: { failedSample?: MediaSyncFailedFile[]; perFolder?: MediaSyncPerFolder[] } | null;
+};
 
-export interface MediaSyncRun {
-  id: string;
-  deviceId: string;
-  trigger: MediaSyncTrigger;
-  status: MediaSyncRunStatus;
-  startedAt: string;
-  finishedAt: string;
-  filesUploaded: number;
-  filesFailed: number;
-  filesDeduplicated: number;
-  /** Decimal string (64-bit counter). */
-  bytesUploaded: string;
-  errorCode: string | null;
-  details: {
-    failedSample?: MediaSyncFailedFile[];
-    perFolder?: Array<{ bucketId: string; uploaded?: number; failed?: number; deduplicated?: number }>;
-  } | null;
-  createdAt: string;
-}
+export type MediaSyncReportSummary = ReportSummaryView;
 
-export interface MediaSyncReportSummary {
-  id: string;
-  deviceId: string;
-  summary: string | null;
-  createdAt: string;
-}
-
-export interface MediaSyncReport extends MediaSyncReportSummary {
-  report: Record<string, unknown>;
-}
+export type MediaSyncReport = ReportView;
 
 // ---------------------------------------------------------------------------
 // API

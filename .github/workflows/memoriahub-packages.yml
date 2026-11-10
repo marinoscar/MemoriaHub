@@ -106,6 +106,13 @@ jobs:
           done
           node -e "require('@marinoscar/memoriahub-compute')"
           node --input-type=module -e "await import('@marinoscar/memoriahub-compute')"
+          # The contract: every slice is a subpath of the same name.
+          for slice in $(node -p "Object.keys(require('./packages/memoriahub-slices.json')['memoriahub-contract']).join(' ')"); do
+            node -e "require('@marinoscar/memoriahub-contract/$slice')"
+            node --input-type=module -e "await import('@marinoscar/memoriahub-contract/$slice')"
+          done
+          node -e "require('@marinoscar/memoriahub-contract')"
+          node --input-type=module -e "await import('@marinoscar/memoriahub-contract')"
 
   package-docs:
     name: Package docs

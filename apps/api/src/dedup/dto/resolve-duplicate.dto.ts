@@ -1,9 +1,5 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { resolveDuplicateSchema } from '@marinoscar/memoriahub-contract/dedup';
 
-const schema = z.object({
-  keepIds: z.array(z.string().uuid()).min(1),
-  action: z.enum(['archive', 'trash']),
-});
 
-export class ResolveDuplicateDto extends createZodDto(schema) {}
+export class ResolveDuplicateDto extends createZodDto(resolveDuplicateSchema) {}

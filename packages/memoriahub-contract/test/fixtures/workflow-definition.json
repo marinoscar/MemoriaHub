@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "subject": "media_item",
+  "match": "all",
+  "conditions": [
+    { "field": "type", "op": "equals", "value": "photo" },
+    { "match": "any", "conditions": [ { "field": "tag", "op": "contains", "value": "screenshot" }, { "field": "favorite", "op": "equals", "value": false } ] }
+  ],
+  "actions": [ { "type": "add_to_album", "createAlbumNamed": "Sample album" } ],
+  "options": { "maxItems": 500, "requirePreview": true }
+}

@@ -1,9 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { bulkDeleteSchema } from '@marinoscar/memoriahub-contract/media';
 
-export const bulkDeleteSchema = z.object({
-  circleId: z.string().uuid(),
-  ids: z.array(z.string().uuid()).min(1).max(500),
-});
+export { bulkDeleteSchema };
 
 export class BulkDeleteDto extends createZodDto(bulkDeleteSchema) {}

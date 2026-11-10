@@ -1,11 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { bulkDismissDuplicateThresholdSchema } from '@marinoscar/memoriahub-contract/dedup';
 
-export const bulkDismissDuplicateThresholdSchema = z.object({
-  circleId: z.string().uuid(),
-  threshold: z.coerce.number().int().min(0).max(100),
-});
+export { bulkDismissDuplicateThresholdSchema };
 
-export class BulkDismissDuplicateThresholdDto extends createZodDto(
-  bulkDismissDuplicateThresholdSchema,
-) {}
+export class BulkDismissDuplicateThresholdDto extends createZodDto(bulkDismissDuplicateThresholdSchema) {}

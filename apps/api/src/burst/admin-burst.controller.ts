@@ -9,20 +9,13 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 import { BurstService } from './burst.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { adminBurstBackfillSchema } from '@marinoscar/memoriahub-contract/burst';
 
-const adminBurstBackfillSchema = z.object({
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
-  force: z.boolean().optional().default(false),
-  // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
-  // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
-}).prefault({});
 class AdminBurstBackfillDto extends createZodDto(adminBurstBackfillSchema) {}
 
 @ApiTags('Admin: Bursts')

@@ -1,0 +1,14 @@
+{
+  "id": "00000000-0000-4000-8000-0000000000a1",
+  "type": "trip",
+  "title": "Weekend by the lake",
+  "subtitle": null,
+  "itemCount": 24,
+  "periodStart": "2025-07-04T00:00:00.000Z",
+  "periodEnd": "2025-07-06T23:59:59.000Z",
+  "coverMediaItemId": "00000000-0000-4000-8000-0000000000b1",
+  "coverThumbnailUrl": "https://example.test/thumb.jpg",
+  "meta": null,
+  "myState": { "seen": false, "favorited": true },
+  "generatedAt": "2025-07-08T08:00:00.000Z"
+}
