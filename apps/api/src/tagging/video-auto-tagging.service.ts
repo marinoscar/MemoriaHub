@@ -61,18 +61,28 @@ import {
 } from '@memoriahub/enrichment-compute/ai';
 import { PrismaService } from '../prisma/prisma.service';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
-import type {
-  AiProvider,
-  AiProviderCredentials,
-  AnalyzeImageInputImage,
-} from '../ai-port/legacy-ai-provider.types';
+import { AiService, type AiContentPart } from '@marinoscar/platform-api/ai';
+import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
+import { aiRateLimit, asJobError, systemScope, visionCallOptions } from '../ai-port/ai-calls';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { AutoTaggingService } from './auto-tagging.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
+
+/** Container extension the audio format is inferred from, keyed by MIME. */
+const AUDIO_EXT_BY_MIME: Record<string, string> = {
+  'audio/mp4': 'm4a',
+  'audio/m4a': 'm4a',
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/flac': 'flac',
+};
+const audioExtension = (mimeType: string): string => AUDIO_EXT_BY_MIME[mimeType] ?? 'm4a';
 
 /** Long-edge cap per frame — same env var and default as the photo path. */
 const TAG_MAX_DIM = (): number => parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '1568', 10);
@@ -114,8 +124,8 @@ export class VideoAutoTaggingService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiSettingsService: AiSettingsService,
-    private readonly aiProviderRegistry: AiProviderRegistry,
+    private readonly aiSettings: MemoriaHubAiSettings,
+    private readonly ai: AiService,
     private readonly videoInput: VideoInputResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly autoTaggingService: AutoTaggingService,
@@ -224,9 +234,7 @@ export class VideoAutoTaggingService {
     });
 
     // --- Provider/model + credentials ---
-    const taggingConfig = settingsValue?.ai?.features?.tagging as
-      | { provider?: string; model?: string }
-      | undefined;
+    const taggingConfig = await this.aiSettings.selection('tagging');
     const provider = taggingConfig?.provider;
     const model = taggingConfig?.model;
 
@@ -239,17 +247,8 @@ export class VideoAutoTaggingService {
 
     await this.enrichmentJobService.recordModel(job.id, provider, model);
 
-    let creds: AiProviderCredentials;
-    try {
-      creds = await this.aiSettingsService.resolveCredentials(provider);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`VideoAutoTagJob ${job.id}: failed to resolve credentials: ${errMsg}`);
-      await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
-      return;
-    }
-
-    const aiProvider = this.aiProviderRegistry.get(provider);
+    // The key is the platform's to resolve per call (`AiService`); a missing or disabled key
+    // surfaces from the call below as an `AiError`, which fails the item.
 
     const tagLabels = await this.prisma.tagLabel.findMany({
       where: { enabled: true },
@@ -322,9 +321,7 @@ export class VideoAutoTaggingService {
           labelNames,
           peopleNames,
           model,
-          creds,
-          aiProvider,
-          providerKey: provider,
+          provider,
           jobId: job.id,
         });
       } finally {
@@ -373,9 +370,8 @@ export class VideoAutoTaggingService {
       labelNames: string[];
       peopleNames: string[];
       model: string;
-      creds: AiProviderCredentials;
-      aiProvider: AiProvider;
-      providerKey: string;
+      /** Provider id of the tagging selection. */
+      provider: string;
       jobId: string;
     },
   ): Promise<VideoAutoTaggingResult> {
@@ -395,7 +391,7 @@ export class VideoAutoTaggingService {
     // --- 2. Prepare each frame, exactly as the photo path prepares its one
     // image (EXIF/orientation parity, same TAG_MAX_IMAGE_DIM budget). ---
     const maxDim = TAG_MAX_DIM();
-    const images: AnalyzeImageInputImage[] = [];
+    const images: Array<{ base64: string; mimeType: string }> = [];
     const sampledTimestampsMs: number[] = [];
     let totalBytes = 0;
 
@@ -439,17 +435,33 @@ export class VideoAutoTaggingService {
       transcript?.text ?? null,
     );
 
+    const imageParts: AiContentPart[] = images.map((image) => ({
+      type: 'image',
+      url: `data:${image.mimeType};base64,${image.base64}`,
+    }));
+    const text: AiContentPart = { type: 'text', text: prompt };
+
     let rawText: string;
     try {
-      rawText = await ctx.aiProvider.analyzeImage(ctx.creds, {
-        model: ctx.model,
-        system,
-        prompt,
-        images,
-        maxTokens: VIDEO_TAGGING_MAX_TOKENS,
-      });
+      const response = await this.ai
+        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.videoTagging, ctx.jobId))
+        .respond({
+          provider: ctx.provider,
+          model: ctx.model,
+          instructions: system,
+          // Text first, then the ordered frames (OpenAI); Anthropic reads the frames first.
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: ctx.provider === 'anthropic' ? [...imageParts, text] : [text, ...imageParts],
+            },
+          ],
+          ...visionCallOptions(ctx.provider, ctx.model, VIDEO_TAGGING_MAX_TOKENS),
+        });
+      rawText = response.outputText;
     } catch (providerErr) {
-      throw this.asRateLimitIfThrottled(providerErr, ctx.providerKey);
+      throw asJobError(providerErr);
     }
 
     return {
@@ -509,7 +521,7 @@ export class VideoAutoTaggingService {
     if (!params.transcriptionEnabled) return null;
 
     try {
-      const config = await this.aiSettingsService.resolveTranscriptionConfig();
+      const config = await this.aiSettings.selection('transcription');
       if (!config) {
         this.logger.warn(
           `VideoAutoTagJob ${jobId}: transcription is enabled but ai.features.transcription is unset; tagging visual-only`,
@@ -517,21 +529,22 @@ export class VideoAutoTaggingService {
         return null;
       }
 
-      const provider = this.aiProviderRegistry.get(config.provider);
-      if (typeof provider.transcribeAudio !== 'function') {
-        this.logger.warn(
-          `VideoAutoTagJob ${jobId}: provider ${config.provider} has no audio capability; tagging visual-only`,
-        );
-        return null;
-      }
-
-      const creds = await this.aiSettingsService.resolveCredentials(config.provider);
+      // An in-job synchronous transcription (`transcribeInline`): the audio is the ffmpeg extract
+      // this handler already holds, so no storage object and no second queued run. A model without
+      // `audio_transcription` is refused by the platform (`AI_CAPABILITY_UNSUPPORTED`) and lands on
+      // the visual-only path below.
       const audio = await extractAudioLead(videoPath, { leadSeconds: params.leadSeconds });
-      const result = await provider.transcribeAudio(creds, {
-        model: config.model,
-        audio: audio.buffer,
-        mimeType: audio.mimeType,
-      });
+      const result = await this.ai
+        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.videoTranscription, jobId))
+        .transcribeInline({
+          provider: config.provider,
+          model: config.model,
+          audio: {
+            data: new Uint8Array(audio.buffer),
+            mimeType: audio.mimeType,
+            filename: `audio.${audioExtension(audio.mimeType)}`,
+          },
+        });
 
       const text = result.text?.trim() ?? '';
       if (!text) return null;
@@ -539,7 +552,7 @@ export class VideoAutoTaggingService {
     } catch (err) {
       // A throttled transcription provider is the queue's problem, not a
       // reason to silently produce a worse description.
-      const rateLimited = err instanceof RateLimitError ? err : classifyRateLimit(err);
+      const rateLimited = aiRateLimit(err);
       if (rateLimited) throw rateLimited;
 
       this.logger.warn(
@@ -563,7 +576,7 @@ export class VideoAutoTaggingService {
     // The lead the transcript covers (an upper bound for a clip shorter than the lead); in-process and node alike.
     this.metrics?.add('aiAudioSeconds', computed.transcript.leadSeconds, { feature: 'transcription' });
 
-    const config = await this.aiSettingsService.resolveTranscriptionConfig().catch(() => null);
+    const config = await this.aiSettings.selection('transcription').catch(() => null);
     const data = {
       text: computed.transcript.text,
       language: computed.transcript.language ?? null,
@@ -596,35 +609,6 @@ export class VideoAutoTaggingService {
       select: { person: { select: { name: true } } },
     });
     return [...new Set(faces.map((f) => f.person?.name).filter((n): n is string => !!n))];
-  }
-
-  /**
-   * Convert a provider 429/529 into the queue's RateLimitError so the job is
-   * DEFERRED rather than counted as a normal failed attempt. Byte-for-byte
-   * the same classification the photo path applies.
-   */
-  private asRateLimitIfThrottled(providerErr: unknown, providerKey: string): unknown {
-    const e = providerErr as Record<string, unknown> | null;
-    const httpStatus = typeof e?.['status'] === 'number' ? e['status'] : undefined;
-    // 529 = Anthropic "Overloaded" — transient, treated the same as 429.
-    if (httpStatus !== 429 && httpStatus !== 529) return providerErr;
-
-    const headers = e?.['headers'] as Record<string, unknown> | undefined;
-    const responseHeaders = (e?.['response'] as Record<string, unknown> | undefined)?.['headers'] as
-      | Record<string, unknown>
-      | undefined;
-    const retryHeader =
-      typeof headers?.['retry-after'] === 'string'
-        ? (headers['retry-after'] as string)
-        : typeof responseHeaders?.['retry-after'] === 'string'
-          ? (responseHeaders['retry-after'] as string)
-          : undefined;
-
-    return new RateLimitError(
-      typeof e?.['message'] === 'string' ? e['message'] : 'AI provider rate limit exceeded (429)',
-      parseRetryAfterMs(retryHeader) ?? undefined,
-      providerKey,
-    );
   }
 
   private async markFailed(

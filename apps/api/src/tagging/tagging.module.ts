@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { LegacyAiModule } from '../ai-port/legacy-ai.module';
+import { AiPortModule } from '../ai-port/ai-port.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
@@ -17,7 +17,7 @@ import { TaggingBackfillService } from './tagging-backfill.service';
 import { AdminTaggingController } from './admin-tagging.controller';
 
 @Module({
-  imports: [EnrichmentModule, LegacyAiModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaTouchModule],
+  imports: [EnrichmentModule, AiPortModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaTouchModule],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
   providers: [
     AutoTaggingHandler,

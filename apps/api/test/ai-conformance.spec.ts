@@ -21,12 +21,10 @@
 //
 // SCOPE, WRITTEN DOWN: these suites cover the PLATFORM AI surface (`/api/ai/*`, `/api/admin/ai/*`,
 // the `ai.*` jobs). MemoriaHub's own AI features (tagging, video tagging, search, memories, the
-// enhancer, transcription) still run on the legacy adapter under the deployment key
-// (PLATFORM-ADOPTION-SHIM(#601), until RETRO-E2), and their node-claimable types `auto_tagging` and
-// `video_auto_tagging` (plus `geocode`) still receive a transient per-job key on a worker node
-// (PLATFORM-ADOPTION-SHIM(#1083): the platform's node credential delivery, EnterpriseAppBase
-// #1083, is unreleased). Neither is an `ai.*` type nor an `/api/ai` route, so no suite here sees
-// them; their key handling is pinned by src/nodes/nodes.service.credentials.spec.ts.
+// enhancer, transcription) are registered AI features called through `AiService` (RETRO-E2, #601);
+// their job types `auto_tagging`, `video_auto_tagging` and `picture_enhancement` are server-only
+// native handlers (RETRO-C4) and are neither `ai.*` types nor `/api/ai` routes, so no suite here
+// sees them (their pins: test/jobs, src/*/ specs).
 // =============================================================================
 
 import { join } from 'node:path';

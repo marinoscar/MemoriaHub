@@ -11,12 +11,12 @@ import {
 } from '@marinoscar/platform-api/jobs';
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { RateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
+import { AiService } from '@marinoscar/platform-api/ai';
+import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
+import { aiRateLimit, systemScope } from '../ai-port/ai-calls';
 import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import {
@@ -60,8 +60,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
     private readonly throttle: ProviderThrottleService,
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
-    private readonly aiSettings: AiSettingsService,
-    private readonly aiProviderRegistry: AiProviderRegistry,
+    private readonly ai: AiService,
     private readonly systemSettings: AppSystemSettingsService,
     // Optional by TYPE only — Nest always injects it (EnhancementModule provides
     // it). Marked `?` so the metadata stamp is structurally non-essential: a
@@ -181,12 +180,6 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
         );
       }
 
-      const provider = this.aiProviderRegistry.get(row.provider);
-      if (typeof provider.enhanceImage !== 'function') {
-        throw new Error(`Provider "${row.provider}" does not support image enhancement`);
-      }
-      const creds = await this.aiSettings.resolveCredentials(row.provider);
-
       // Download original bytes, then auto-orient (deterministic pre-pass).
       const objectProvider = await this.resolver.getProviderFor(
         mediaItem.storageObject.storageProvider,
@@ -218,19 +211,36 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
         preserveFaces || strength !== 'strong' ? 'high' : 'low';
       const size = closestSupportedSize(mediaItem.width, mediaItem.height);
 
-      const result = await provider.enhanceImage(creds, {
-        model: row.model,
-        imageBase64: inputBuffer.toString('base64'),
-        mimeType: inputMime,
-        prompt: row.prompt ?? '',
-        size,
-        quality: quality as 'low' | 'medium' | 'high',
-        inputFidelity,
-        outputFormat: 'jpeg',
-        outputCompression: 90,
-      });
+      // One synchronous image edit through the platform `AiService` (`editImageInline`: this
+      // handler already runs inside its own server-only job and holds the bytes, so no second
+      // queued run and no copy under `ai-outputs/`). A system call: no acting user, the
+      // organization's or the deployment's key. `input_fidelity` and `output_compression` have no
+      // neutral field, so they ride the OpenAI `providerOptions` escape hatch.
+      const edited = await this.ai
+        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.pictureEnhance, job.id))
+        .editImageInline({
+          provider: row.provider,
+          model: row.model,
+          prompt: row.prompt ?? '',
+          images: [
+            {
+              data: new Uint8Array(inputBuffer),
+              mimeType: inputMime,
+              filename: `input.${inputMime === 'image/png' ? 'png' : 'jpg'}`,
+            },
+          ],
+          size,
+          quality: quality as 'low' | 'medium' | 'high',
+          outputFormat: 'jpeg',
+          n: 1,
+          providerOptions: { openai: { input_fidelity: inputFidelity, output_compression: 90 } },
+        });
+      const image = edited.images[0];
+      if (!image || image.data.byteLength === 0) {
+        throw new Error('The image edit returned no image data');
+      }
 
-      const enhancedBuffer = Buffer.from(result.imageBase64, 'base64');
+      const enhancedBuffer = Buffer.from(image.data);
 
       // The model does not always return the exact canvas we asked for, so the
       // REAL pixel dimensions come from the returned bytes; sizeToDims(size) is
@@ -320,8 +330,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       // Classify the failure the SAME way EnrichmentTerminalService will, so
       // the row's next state always agrees with the job's next state.
       // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
-      const rl =
-        err instanceof PlatformRateLimitError || err instanceof RateLimitError ? err : classifyRateLimit(err);
+      const rl = err instanceof PlatformRateLimitError ? err : aiRateLimit(err);
 
       // Does the queue requeue this job, or is this its last breath?
       //
@@ -372,7 +381,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       // Rethrow the NORMALIZED RateLimitError so the queue takes its deferral
       // path (backoff + no attempt charged) rather than the retry path; any
       // other error is rethrown untouched for normal retry/backoff.
-      if (rl) throw rl instanceof PlatformRateLimitError ? rl : new PlatformRateLimitError(rl.message, rl.retryAfterMs);
+      if (rl) throw rl;
       throw err;
     }
   }

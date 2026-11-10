@@ -303,3 +303,7 @@ The `media_item_embedding` table is fixed at `vector(1536)`. Changing the embedd
 ### pgvector Index
 
 An HNSW index is created on `embedding` for efficient approximate nearest-neighbor search. For very large libraries (millions of items) the index build time and memory requirements should be planned ahead of enabling the feature.
+
+## Platform AI runtime (RETRO-E2, #601)
+
+Feature `semantic_embedding`. `SemanticSearchService.embedQuery(text, userId)` is `AiService.forUser(userId, { feature: 'semantic_embedding' }).embed(...)` with the `ai.features.embedding` model: usage is attributed to the searching user, and any refusal (no selection, no key, kill switch, model not enabled, a vector that is not 1536-d) degrades to filter-only search. The vectors written by tagging come from the same feature as a system call. `POST /api/admin/memoriahub-ai/test/embedding` keeps its `warning` when the model's dimension is not 1536. See [CLAUDE.md](../../CLAUDE.md) ("Every MemoriaHub model call is a registered AI feature") for the seven features and the operator prerequisites (kill switch, imported key, enabled catalogue model).

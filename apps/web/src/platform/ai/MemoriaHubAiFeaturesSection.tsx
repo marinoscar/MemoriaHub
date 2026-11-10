@@ -10,10 +10,9 @@
  * `/api/admin/memoriahub-ai/*` (`ai_config:read` to see, `ai_config:write` to change; the controls
  * are disabled without the write permission, the API enforces it).
  *
- * THE PLATFORM SWITCH DOES NOT GOVERN THESE FEATURES YET: they run on MemoriaHub's own call path
- * (PLATFORM-ADOPTION-SHIM(#601)) with the deployment key saved above, whether or not "AI enabled"
- * is on, until RETRO-E2 moves each one to the platform runtime. The section says so, and is drawn
- * in the page's bottom `Sections` slot, so it stays reachable while AI is off.
+ * THESE FEATURES RUN THROUGH THE PLATFORM AI RUNTIME (RETRO-E2, #601): the deployment key saved above,
+ * the "AI enabled" switch, the key policy and the AI Models catalogue all govern them. The section says
+ * so, and is drawn in the page's bottom `Sections` slot, so it stays reachable while AI is off.
  *
  * Not `DefaultAiModelPicker`: that card is the per-user default (a fixed "Default model" title,
  * responses-capable models only), while a MemoriaHub feature needs embedding, image-edit and
@@ -349,8 +348,9 @@ export function MemoriaHubAiFeaturesSection() {
         Enhancer, Memories) are on their own settings pages.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
-        These features use the deployment key saved above, and still run while &ldquo;AI enabled&rdquo; is off: the
-        switch governs the platform AI routes only, until each feature moves onto the platform runtime.
+        These features run through the platform AI runtime: they use the deployment key saved above, are governed by
+        &ldquo;AI enabled&rdquo; and the key policy, and the model chosen here must be enabled on the AI Models page.
+        Every call is recorded on the AI Usage page under the feature&rsquo;s name.
       </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>

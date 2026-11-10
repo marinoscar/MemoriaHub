@@ -4,11 +4,16 @@ import {
   AI_METRICS,
   AI_OBJECT_STORE,
   AI_SYSTEM_PRISMA,
+  AI_TARGET_RESOLVER,
+  AiCoreModule,
+  DefaultAiTargetResolver,
   type AiSystemPrisma,
 } from '@marinoscar/platform-api/ai';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { StorageProvidersModule } from '@marinoscar/platform-api/storage';
 
+import { MemoriaHubAiSettings } from '../../ai-port/memoriahub-ai-settings';
+import { MemoriaHubAiTargetResolver } from '../../ai-port/memoriahub-ai-target-resolver';
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { AiObjectStoreAdapter } from './ai-object-store.adapter';
 
@@ -26,8 +31,8 @@ import { AiObjectStoreAdapter } from './ai-object-store.adapter';
 // AI_SYSTEM_PRISMA: the system client's separate pool (RETRO-D1): every operation runs in a
 // transaction whose FIRST statement is `set_config('app.rls_bypass', 'on', true)`.
 //
-// `AI_TARGET_RESOLVER` is not bound: the platform's default order applies until RETRO-E2
-// registers MemoriaHub's features and decides how each picks its model.
+//   AI_TARGET_RESOLVER -> MemoriaHubAiTargetResolver          (RETRO-E2: the feature -> `ai.features.*`
+//                         selection routing; `DefaultAiTargetResolver` answers every other feature)
 //
 // `@Global()` because every sub-module of the AI slice injects the ports.
 // =============================================================================
@@ -35,7 +40,7 @@ import { AiObjectStoreAdapter } from './ai-object-store.adapter';
 @Global()
 @Module({
   // The platform storage slice's static provider module (`StorageProviderRouter`).
-  imports: [StorageProvidersModule],
+  imports: [AiCoreModule, StorageProvidersModule],
   providers: [
     {
       provide: AI_SYSTEM_PRISMA,
@@ -46,7 +51,11 @@ import { AiObjectStoreAdapter } from './ai-object-store.adapter';
     },
     { provide: AI_OBJECT_STORE, useClass: AiObjectStoreAdapter },
     { provide: AI_METRICS, useExisting: AppMetricsService },
+    DefaultAiTargetResolver,
+    MemoriaHubAiSettings,
+    MemoriaHubAiTargetResolver,
+    { provide: AI_TARGET_RESOLVER, useExisting: MemoriaHubAiTargetResolver },
   ],
-  exports: [AI_SYSTEM_PRISMA, AI_OBJECT_STORE, AI_METRICS],
+  exports: [AI_SYSTEM_PRISMA, AI_OBJECT_STORE, AI_METRICS, AI_TARGET_RESOLVER, MemoriaHubAiSettings],
 })
 export class AiHostModule {}

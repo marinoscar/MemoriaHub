@@ -29,8 +29,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import { AiError, AiService } from '@marinoscar/platform-api/ai';
+import { RateLimitError as PlatformRateLimitError } from '@marinoscar/platform-api/jobs';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import {
@@ -47,7 +48,6 @@ import {
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { MediaTouchService } from '../media/media-touch.service';
-import { RateLimitError } from '../enrichment/rate-limit.error';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -116,6 +116,22 @@ function makeSystemSettings(provider: string | null = 'openai', model: string | 
   };
 }
 
+/** A `vector(1536)`-sized embedding, the only size `media_item_embedding` holds. */
+const VEC = Array.from({ length: 1536 }, (_, i) => i / 1536);
+
+/**
+ * The platform `respond` request, read back as the vision request the old provider took
+ * (`model`, `system`, `prompt`, `imageBase64`, `mimeType`), so the assertions below keep
+ * describing WHAT the model is asked, not how the request is shaped.
+ */
+function toVisionView(req: any) {
+  const content = req.input[0].content as Array<{ type: string; text?: string; url?: string }>;
+  const image = content.find((part) => part.type === 'image')!;
+  const text = content.find((part) => part.type === 'text')!;
+  const match = /^data:([^;]+);base64,(.*)$/.exec(image.url!)!;
+  return { model: req.model, system: req.instructions, prompt: text.text, imageBase64: match[2], mimeType: match[1] };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -123,9 +139,10 @@ function makeSystemSettings(provider: string | null = 'openai', model: string | 
 describe('AutoTaggingService', () => {
   let service: AutoTaggingService;
   let mockPrisma: MockPrismaService;
-  let mockAiSettingsService: { resolveCredentials: jest.Mock; resolveEmbeddingConfig: jest.Mock };
-  let mockRegistry: { get: jest.Mock };
+  let mockAiSettingsService: { selection: jest.Mock; resolveEmbeddingConfig: jest.Mock };
+  /** The scripted model: `analyzeImage` answers the text the vision call returns. */
   let mockProvider: { analyzeImage: jest.Mock };
+  let mockForSystem: jest.Mock;
   let mockStorageProvider: { download: jest.Mock };
   let mockResolver: { getProviderFor: jest.Mock };
   let mockDetectImageMime: jest.Mock;
@@ -152,14 +169,27 @@ describe('AutoTaggingService', () => {
 
     mockPrisma = createMockPrismaService();
     mockProvider = { analyzeImage: jest.fn() };
-    mockAiProviderForEmbedding = { embedText: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]) };
-    // By default, registry.get returns the main tagging provider.
-    // Tests that need the embedding provider can override mockRegistry.get.
-    mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
+    mockAiProviderForEmbedding = { embedText: jest.fn().mockResolvedValue(VEC) };
     mockAiSettingsService = {
-      resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }),
       resolveEmbeddingConfig: jest.fn().mockResolvedValue(null),
+      // `selection('tagging')` reads the saved row the tests stage in `systemSettings`;
+      // `selection('embedding')` answers `resolveEmbeddingConfig`.
+      selection: jest.fn(async (key: string) => {
+        if (key === 'embedding') return mockAiSettingsService.resolveEmbeddingConfig();
+        const row: any = await (mockPrisma.systemSettings.findUnique as jest.Mock)();
+        const chosen = row?.value?.ai?.features?.[key];
+        return chosen?.provider && chosen?.model ? chosen : null;
+      }),
     };
+    // The platform AiService, as a system call: `respond` returns the scripted text, `embed` the scripted vector.
+    mockForSystem = jest.fn().mockReturnValue({
+      respond: jest.fn(async (req: any) => ({
+        outputText: await mockProvider.analyzeImage({}, toVisionView(req)),
+      })),
+      embed: jest.fn(async (req: any) => ({
+        vectors: [await mockAiProviderForEmbedding.embedText({}, req.model, req.input)],
+      })),
+    });
     mockStorageProvider = {
       download: jest.fn().mockResolvedValue(makeReadable()),
     };
@@ -209,8 +239,8 @@ describe('AutoTaggingService', () => {
       providers: [
         AutoTaggingService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: AiSettingsService, useValue: mockAiSettingsService },
-        { provide: AiProviderRegistry, useValue: mockRegistry },
+        { provide: MemoriaHubAiSettings, useValue: mockAiSettingsService },
+        { provide: AiService, useValue: { forSystem: mockForSystem } },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
@@ -465,35 +495,52 @@ describe('AutoTaggingService', () => {
   // Credential resolution failure → markFailed + return (no throw)
   // -------------------------------------------------------------------------
 
-  describe('credential resolution failure', () => {
-    it('marks status failed and returns when resolveCredentials throws', async () => {
-      mockAiSettingsService.resolveCredentials.mockRejectedValue(
-        new Error('No credentials configured for openai'),
+  describe('the platform refuses the call (no key, model not enabled, kill switch)', () => {
+    it('marks status failed with the platform message and rethrows (the queue retries)', async () => {
+      mockProvider.analyzeImage.mockRejectedValue(
+        new AiError('AI_KEY_REQUIRED', 'No API key is available for provider "openai".'),
       );
 
-      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+      await expect(service.processMediaItem(makeJob())).rejects.toBeInstanceOf(AiError);
 
       expect(mockPrisma.mediaTagStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.objectContaining({
             status: MediaTagStatusType.failed,
-            lastError: 'No credentials configured for openai',
+            lastError: 'No API key is available for provider "openai".',
           }),
         }),
       );
     });
 
-    it('includes providerKey in markFailed call when credentials fail', async () => {
-      mockAiSettingsService.resolveCredentials.mockRejectedValue(
-        new Error('creds missing'),
-      );
+    it('includes providerKey in the failed status', async () => {
+      mockProvider.analyzeImage.mockRejectedValue(new AiError('AI_KEY_REQUIRED', 'creds missing'));
 
-      await service.processMediaItem(makeJob());
+      await expect(service.processMediaItem(makeJob())).rejects.toBeDefined();
 
       const failCall = (mockPrisma.mediaTagStatus.upsert as jest.Mock).mock.calls.find(
         (c: any[]) => c[0].create.status === MediaTagStatusType.failed,
       );
       expect(failCall![0].create.providerKey).toBe('openai');
+    });
+
+    it('defers (platform RateLimitError) on a provider throttle instead of failing the attempt', async () => {
+      mockProvider.analyzeImage.mockRejectedValue(
+        new AiError('AI_RATE_LIMITED', 'Too many requests', { retryAfterMs: 30_000 }),
+      );
+
+      const err = await service.processMediaItem(makeJob()).catch((e) => e);
+
+      expect(err).toBeInstanceOf(PlatformRateLimitError);
+      expect((err as PlatformRateLimitError).retryAfterMs).toBe(30_000);
+    });
+
+    it('calls the platform as a system call under the media_tagging feature, on the job', async () => {
+      mockProvider.analyzeImage.mockResolvedValue(JSON.stringify({ tags: [], description: 'x' }));
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockForSystem).toHaveBeenCalledWith({ orgId: null, feature: 'media_tagging', jobId: 'job-1' });
     });
   });
 
@@ -957,15 +1004,7 @@ describe('AutoTaggingService', () => {
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      // On second call to resolveCredentials (for embedding), return different creds
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' }) // tagging creds
-        .mockResolvedValueOnce({ apiKey: 'embedding-key' }); // embedding creds
-      // registry.get returns tagging provider first, then embedding provider
-      mockRegistry.get
-        .mockReturnValueOnce(mockProvider) // tagging provider (for analyzeImage)
-        .mockReturnValueOnce(mockAiProviderForEmbedding); // embedding provider
-      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue(VEC);
       mockProvider.analyzeImage.mockResolvedValue(
         JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
       );
@@ -973,9 +1012,12 @@ describe('AutoTaggingService', () => {
       await service.processMediaItem(makeJob());
 
       expect(mockAiProviderForEmbedding.embedText).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: 'embedding-key' }),
+        expect.anything(),
         'text-embedding-3-small',
         expect.any(String),
+      );
+      expect(mockForSystem).toHaveBeenCalledWith(
+        expect.objectContaining({ feature: 'semantic_embedding' }),
       );
       expect(mockPrisma.$executeRaw).toHaveBeenCalled();
     });
@@ -985,13 +1027,7 @@ describe('AutoTaggingService', () => {
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
-        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
-      mockRegistry.get
-        .mockReturnValueOnce(mockProvider)
-        .mockReturnValueOnce(mockAiProviderForEmbedding);
-      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue(VEC);
       (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockResolvedValue({
         text: 'happy birthday to you',
       });
@@ -1019,13 +1055,7 @@ describe('AutoTaggingService', () => {
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
-        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
-      mockRegistry.get
-        .mockReturnValueOnce(mockProvider)
-        .mockReturnValueOnce(mockAiProviderForEmbedding);
-      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue(VEC);
       (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockResolvedValue(null);
       mockProvider.analyzeImage.mockResolvedValue(
         JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
@@ -1041,13 +1071,7 @@ describe('AutoTaggingService', () => {
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
-        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
-      mockRegistry.get
-        .mockReturnValueOnce(mockProvider)
-        .mockReturnValueOnce(mockAiProviderForEmbedding);
-      mockAiProviderForEmbedding.embedText.mockResolvedValue([0.1, 0.2, 0.3]);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue(VEC);
       (mockPrisma.mediaTranscript.findUnique as jest.Mock).mockRejectedValue(
         new Error('transcripts table unreachable'),
       );
@@ -1067,12 +1091,6 @@ describe('AutoTaggingService', () => {
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
-        .mockResolvedValueOnce({ apiKey: 'embedding-key' });
-      mockRegistry.get
-        .mockReturnValueOnce(mockProvider)
-        .mockReturnValueOnce(mockAiProviderForEmbedding);
       mockAiProviderForEmbedding.embedText.mockRejectedValue(new Error('Embedding API down'));
       mockProvider.analyzeImage.mockResolvedValue(
         JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
@@ -1087,22 +1105,22 @@ describe('AutoTaggingService', () => {
       expect(finalUpsert.create.status).toBe(MediaTagStatusType.processed);
     });
 
-    it('swallows resolveCredentials errors for embedding provider — tagging job still succeeds', async () => {
+    it('swallows an embedding call the platform refuses (no key) — tagging job still succeeds', async () => {
       mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      // First resolveCredentials call succeeds (tagging), second fails (embedding)
-      mockAiSettingsService.resolveCredentials
-        .mockResolvedValueOnce({ apiKey: 'tagging-key' })
-        .mockRejectedValueOnce(new Error('Embedding creds not configured'));
+      // The embedding call is refused (no key for the embedding provider)
+      mockAiProviderForEmbedding.embedText.mockRejectedValue(
+        new AiError('AI_KEY_REQUIRED', 'Embedding creds not configured'),
+      );
       mockProvider.analyzeImage.mockResolvedValue(
         JSON.stringify({ tags: ['Beach'], description: 'Sand.' }),
       );
 
       await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
 
-      // $executeRaw should NOT be called since credential resolution failed
+      // $executeRaw should NOT be called since the embedding call was refused
       expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
 
       // Tagging status still processed
@@ -1132,41 +1150,35 @@ describe('AutoTaggingService', () => {
     // embedAndStore signature: (mediaItemId, circleId, description, tagNames, peopleNames)
     // -------------------------------------------------------------------------
 
-    it('rethrows RateLimitError from embedText — embedding rate-limits must propagate', async () => {
-      // Arrange: configure embedding so embedAndStore reaches the embedText call
+    it('rethrows the platform RateLimitError from embedText — embedding rate-limits must propagate', async () => {
+      // Arrange: configure embedding so embedAndStore reaches the embed call
       mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
         provider: 'openai',
         model: 'text-embedding-3-small',
       });
-      mockAiSettingsService.resolveCredentials.mockResolvedValue({ apiKey: 'embedding-key' });
-      mockRegistry.get.mockReturnValue(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockRejectedValue(
+        new AiError('AI_RATE_LIMITED', 'Embedding rate limited', { retryAfterMs: 30_000 }),
+      );
 
-      const rl = new RateLimitError('Embedding rate limited', 30_000, 'openai');
-      mockAiProviderForEmbedding.embedText.mockRejectedValue(rl);
-
-      // Act + Assert: embedAndStore must rethrow the RateLimitError
-      await expect(
-        (service as any).embedAndStore('media-1', 'circle-1', 'Sand.', ['Beach'], []),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      // Act + Assert: embedAndStore must rethrow it as the queue's deferral signal
+      const err = await (service as any)
+        .embedAndStore('media-1', 'circle-1', 'Sand.', ['Beach'], [])
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PlatformRateLimitError);
+      expect(err.retryAfterMs).toBe(30_000);
     });
 
-    it('rethrows a classifyRateLimit-detected 429-shaped error as RateLimitError', async () => {
-      // Arrange
+    it('swallows a dimension mismatch (a model that answers vectors the storage cannot hold)', async () => {
       mockAiSettingsService.resolveEmbeddingConfig.mockResolvedValue({
         provider: 'openai',
-        model: 'text-embedding-3-small',
+        model: 'text-embedding-3-large',
       });
-      mockAiSettingsService.resolveCredentials.mockResolvedValue({ apiKey: 'embedding-key' });
-      mockRegistry.get.mockReturnValue(mockAiProviderForEmbedding);
+      mockAiProviderForEmbedding.embedText.mockResolvedValue(Array.from({ length: 3072 }, () => 0.1));
 
-      // A 429-shaped error that classifyRateLimit detects (not already a RateLimitError)
-      const http429 = Object.assign(new Error('Too Many Requests'), { status: 429 });
-      mockAiProviderForEmbedding.embedText.mockRejectedValue(http429);
-
-      // Act + Assert
       await expect(
         (service as any).embedAndStore('media-1', 'circle-1', 'Waves.', ['Ocean'], []),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).resolves.toBeUndefined();
+      expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
     });
   });
 
