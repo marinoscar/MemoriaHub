@@ -16,41 +16,29 @@
  * needed), mirroring the workflow evaluate handler spec's style.
  */
 
-import { EnrichmentJob, TrashEmptyRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { TrashEmptyEvaluateHandler } from './trash-empty-evaluate.handler';
-import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../../prisma/prisma.service';
-import { TrashEmptyRunService } from './trash-empty-run.service';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+
+import { mockMediaDb, type MockMediaDb } from '../../../test/helpers/mock-media-db.js';
+import type { MemoriahubJob } from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { TRASH_EMPTY_RUN_STATUS as TrashEmptyRunStatus } from './trash-empty.constants.js';
+import { TrashEmptyEvaluateHandler } from './trash-empty-evaluate.handler.js';
+import type { TrashEmptyRunService } from './trash-empty-run.service.js';
 
 const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 
-function makeJob(payload: Record<string, unknown>, attempts = 1): EnrichmentJob {
+function makeJob(payload: Record<string, unknown>, attempts = 1): MemoriahubJob {
   return {
     id: randomUUID(),
     type: 'trash_empty_evaluate',
-    mediaItemId: null,
-    circleId: CIRCLE_ID,
-    status: 'running',
-    reason: 'rerun',
-    priority: 20,
-    providerKey: null,
-    modelVersion: null,
+    subjectType: 'circle',
+    subjectId: CIRCLE_ID,
     payload,
     attempts,
-    lastError: null,
-    createdAt: new Date(),
-    startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: 'server',
-  } as unknown as EnrichmentJob;
+    orgId: null,
+    status: 'running',
+  };
 }
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -78,18 +66,18 @@ function rows(n: number, startIndex = 0) {
 
 describe('TrashEmptyEvaluateHandler', () => {
   let handler: TrashEmptyEvaluateHandler;
-  let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
-  let runService: jest.Mocked<Pick<TrashEmptyRunService, 'enqueueExecuteBatches'>>;
+  let prisma: MockMediaDb;
+  let jobs: { registerHandler: jest.Mock };
+  let runService: { enqueueExecuteBatches: jest.Mock };
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
-    registry = { register: jest.fn() };
+    prisma = mockMediaDb();
+    jobs = { registerHandler: jest.fn() };
     runService = { enqueueExecuteBatches: jest.fn().mockResolvedValue(undefined) };
 
     handler = new TrashEmptyEvaluateHandler(
-      registry as unknown as JobHandlerRegistry,
-      prisma as unknown as PrismaService,
+      jobs as never,
+      prisma as unknown as MediaDb,
       runService as unknown as TrashEmptyRunService,
     );
 
@@ -104,7 +92,7 @@ describe('TrashEmptyEvaluateHandler', () => {
 
   it('registers itself with the handler registry on module init', () => {
     handler.onModuleInit();
-    expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(jobs.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('is a no-op when the run is missing (idempotent — run deleted mid-flight)', async () => {

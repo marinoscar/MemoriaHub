@@ -6,3 +6,4 @@ export * from './errors/ai-errors.js';
 export * from './settings-helpers.js';
 export * from './auth/index.js';
 export * from './openapi/api-data-response.js';
+export * from './jobs/run-engine.js';

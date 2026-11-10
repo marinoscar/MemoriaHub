@@ -18,16 +18,15 @@
  * EnrichmentJobService, and MediaThumbnailService are all mocked.
  */
 
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
-import { CircleRole } from '../../../test/helpers/circle-role';
 import { randomUUID } from 'crypto';
-import { TrashEmptyRunService } from './trash-empty-run.service';
-import { PrismaService } from '../../prisma/prisma.service';
-import { OwnerAccessService } from '../../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+
+import { mockMediaDb, type MockMediaDb } from '../../../test/helpers/mock-media-db.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MediaThumbnailService } from '../thumbnails/media-thumbnail.service.js';
+import { TRASH_EMPTY_ITEM_STATUS as TrashEmptyRunItemStatus, TRASH_EMPTY_RUN_STATUS as TrashEmptyRunStatus } from './trash-empty.constants.js';
+import { TrashEmptyRunService } from './trash-empty-run.service.js';
 
 const CIRCLE_ID = randomUUID();
 const RUN_ID = randomUUID();
@@ -55,23 +54,23 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 
 describe('TrashEmptyRunService', () => {
   let service: TrashEmptyRunService;
-  let prisma: MockPrismaService;
-  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
-  let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
-  let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'attachThumbnailUrls'>>;
+  let prisma: MockMediaDb;
+  let circleMembership: { requireOwnerRole: jest.Mock };
+  let enrichmentJobs: { enqueue: jest.Mock };
+  let thumbnails: { attachThumbnailUrls: jest.Mock };
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
+    prisma = mockMediaDb();
     circleMembership = {
-      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'circle_admin', isSuperAdmin: false }),
+      requireOwnerRole: jest.fn().mockResolvedValue({ role: 'admin', isSuperAdmin: false }),
     };
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
     thumbnails = { attachThumbnailUrls: jest.fn().mockResolvedValue([]) };
 
     service = new TrashEmptyRunService(
-      prisma as unknown as PrismaService,
-      circleMembership as unknown as OwnerAccessService,
-      enrichmentJobs as unknown as EnrichmentJobService,
+      prisma as unknown as MediaDb,
+      circleMembership as never,
+      enrichmentJobs as never,
       thumbnails as unknown as MediaThumbnailService,
     );
 
@@ -162,9 +161,9 @@ describe('TrashEmptyRunService', () => {
 
       expect(enrichmentJobs.enqueue).toHaveBeenCalledWith({
         type: 'trash_empty_evaluate',
-        mediaItemId: null,
-        circleId: CIRCLE_ID,
         reason: 'rerun',
+        subjectType: 'circle',
+        subjectId: CIRCLE_ID,
         priority: 20,
         skipDedup: true,
         payload: { runId: RUN_ID },
@@ -396,7 +395,8 @@ describe('TrashEmptyRunService', () => {
 
     it('filters by status when provided', async () => {
       prisma.trashEmptyRun.findUnique.mockResolvedValue(makeRun() as any);
-      prisma.$transaction.mockResolvedValue([[], 0] as any);
+      prisma.trashEmptyRunItem.findMany.mockResolvedValue([] as any);
+      prisma.trashEmptyRunItem.count.mockResolvedValue(0);
       prisma.mediaItem.findMany.mockResolvedValue([] as any);
 
       await service.listRunItems(
@@ -420,7 +420,8 @@ describe('TrashEmptyRunService', () => {
 
     it('omits the status key from the where clause when no status filter is given', async () => {
       prisma.trashEmptyRun.findUnique.mockResolvedValue(makeRun() as any);
-      prisma.$transaction.mockResolvedValue([[], 0] as any);
+      prisma.trashEmptyRunItem.findMany.mockResolvedValue([] as any);
+      prisma.trashEmptyRunItem.count.mockResolvedValue(0);
       prisma.mediaItem.findMany.mockResolvedValue([] as any);
 
       await service.listRunItems(RUN_ID, query, USER_ID, ['media:read']);
@@ -466,9 +467,9 @@ describe('TrashEmptyRunService', () => {
       expect(enrichmentJobs.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'trash_empty_execute_batch',
-          mediaItemId: null,
-          circleId: CIRCLE_ID,
           reason: 'rerun',
+          subjectType: 'circle',
+          subjectId: CIRCLE_ID,
           priority: 100,
           skipDedup: true,
           payload: { runId: RUN_ID, itemIds: ids },

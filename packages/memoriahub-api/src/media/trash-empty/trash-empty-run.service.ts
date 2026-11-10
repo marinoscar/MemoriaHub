@@ -1,36 +1,44 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
+
 import {
-  JobReason,
-  Prisma,
-  TrashEmptyRun,
-  TrashEmptyRunItemStatus,
-  TrashEmptyRunStatus,
-} from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { OwnerAccessService } from '../../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MediaThumbnailService } from '../thumbnails/media-thumbnail.service.js';
+import {
+  TRASH_EMPTY_ITEM_STATUS,
+  TRASH_EMPTY_RUN_STATUS,
+  type TrashEmptyRunItemStatus,
+  type TrashEmptyRunRow,
+  type TrashEmptyRunStatus,
+} from './trash-empty.constants.js';
 
 /** Statuses counted against the per-circle concurrency guard (in-flight runs). */
 const ACTIVE_RUN_STATUSES: TrashEmptyRunStatus[] = [
-  TrashEmptyRunStatus.evaluating,
-  TrashEmptyRunStatus.running,
+  TRASH_EMPTY_RUN_STATUS.evaluating,
+  TRASH_EMPTY_RUN_STATUS.running,
 ];
 
 /** Terminal run statuses (no further transition). */
 const TERMINAL_RUN_STATUSES: TrashEmptyRunStatus[] = [
-  TrashEmptyRunStatus.completed,
-  TrashEmptyRunStatus.completed_with_errors,
-  TrashEmptyRunStatus.failed,
-  TrashEmptyRunStatus.cancelled,
+  TRASH_EMPTY_RUN_STATUS.completed,
+  TRASH_EMPTY_RUN_STATUS.completed_with_errors,
+  TRASH_EMPTY_RUN_STATUS.failed,
+  TRASH_EMPTY_RUN_STATUS.cancelled,
 ];
 
 /**
@@ -54,17 +62,27 @@ const BATCH_SIZE = 200;
  * and cancellation. Circle authorization is enforced here (circle_admin to
  * start/cancel, viewer to read); the queue handlers never re-authorize.
  */
+/**
+ * Starts, cancels and reads empty-trash runs, and fans a run out into execute-batch jobs.
+ *
+ * @stability experimental
+ */
 @Injectable()
+/**
+ * Trash empty run service.
+ *
+ * @stability experimental
+ */
 export class TrashEmptyRunService {
   private readonly logger = new Logger(TrashEmptyRunService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembership: OwnerAccessService,
-    private readonly enrichmentJobs: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembership: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly thumbnails: MediaThumbnailService,
     // App metrics (RETRO-T3, #628): `app.runs.finished{engine=trash_empty,outcome=cancelled}`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -94,19 +112,19 @@ export class TrashEmptyRunService {
       );
     }
 
-    const run = await this.prisma.trashEmptyRun.create({
+    const run = (await this.prisma.trashEmptyRun.create({
       data: {
         circleId,
-        status: TrashEmptyRunStatus.evaluating,
+        status: TRASH_EMPTY_RUN_STATUS.evaluating,
         startedById: userId,
       },
-    });
+    })) as TrashEmptyRunRow;
 
-    await this.enrichmentJobs.enqueue({
+    await this.jobs.enqueue({
       type: 'trash_empty_evaluate',
-      mediaItemId: null,
-      circleId,
-      reason: JobReason.rerun,
+      reason: 'rerun',
+      subjectType: 'circle',
+      subjectId: circleId,
       priority: 20,
       skipDedup: true,
       payload: { runId: run.id },
@@ -128,7 +146,7 @@ export class TrashEmptyRunService {
    * cancellation check stops further deletes; items already purged stay purged.
    */
   async cancelRun(runId: string, userId: string, perms: string[]) {
-    const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
+    const run = (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } })) as TrashEmptyRunRow | null;
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
     await this.circleMembership.requireOwnerRole(
@@ -144,7 +162,7 @@ export class TrashEmptyRunService {
 
     await this.prisma.trashEmptyRun.update({
       where: { id: run.id },
-      data: { status: TrashEmptyRunStatus.cancelled, finishedAt: new Date() },
+      data: { status: TRASH_EMPTY_RUN_STATUS.cancelled, finishedAt: new Date() },
     });
     this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'cancelled' });
 
@@ -156,7 +174,7 @@ export class TrashEmptyRunService {
     });
     await this.audit(userId, 'trash_empty_run:cancelled', run.id, {});
 
-    return { runId: run.id, status: TrashEmptyRunStatus.cancelled };
+    return { runId: run.id, status: TRASH_EMPTY_RUN_STATUS.cancelled };
   }
 
   // ---------------------------------------------------------------------------
@@ -165,7 +183,7 @@ export class TrashEmptyRunService {
 
   /** Run detail incl. counters + per-item status tally (circle viewer). */
   async getRunDetail(runId: string, userId: string, perms: string[]) {
-    const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
+    const run = (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } })) as TrashEmptyRunRow | null;
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
     await this.circleMembership.requireOwnerRole(
@@ -181,7 +199,7 @@ export class TrashEmptyRunService {
       _count: { _all: true },
     });
     const itemStatusCounts: Record<string, number> = {};
-    for (const g of statusGroups) itemStatusCounts[g.status] = g._count._all;
+    for (const g of statusGroups) itemStatusCounts[g.status as string] = g._count._all;
 
     return { ...this.serializeRun(run), itemStatusCounts };
   }
@@ -193,7 +211,7 @@ export class TrashEmptyRunService {
     userId: string,
     perms: string[],
   ) {
-    const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
+    const run = (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } })) as TrashEmptyRunRow | null;
     if (!run) throw new NotFoundException(`Trash-empty run ${runId} not found`);
 
     await this.circleMembership.requireOwnerRole(
@@ -204,13 +222,13 @@ export class TrashEmptyRunService {
     );
 
     const { page, pageSize, status } = query;
-    const where: Prisma.TrashEmptyRunItemWhereInput = {
+    const where: Record<string, unknown> = {
       runId,
       ...(status ? { status } : {}),
     };
 
-    const [items, totalItems] = await this.prisma.$transaction([
-      this.prisma.trashEmptyRunItem.findMany({
+    const [items, totalItems] = (await this.prisma.$transaction(async (tx: MediaDb) => [
+      await tx.trashEmptyRunItem.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * pageSize,
@@ -223,8 +241,8 @@ export class TrashEmptyRunService {
           updatedAt: true,
         },
       }),
-      this.prisma.trashEmptyRunItem.count({ where }),
-    ]);
+      await tx.trashEmptyRunItem.count({ where }),
+    ])) as [Array<{ id: string; mediaItemId: string; status: TrashEmptyRunItemStatus; error: string | null; updatedAt: Date }>, number];
 
     // Batched thumbnail signing for the page's media items. Items already purged
     // (their MediaItem row is gone) resolve to a null thumbnail — expected, since
@@ -288,18 +306,18 @@ export class TrashEmptyRunService {
    */
   async enqueueExecuteBatches(runId: string, circleId: string): Promise<void> {
     const items = await this.prisma.trashEmptyRunItem.findMany({
-      where: { runId, status: TrashEmptyRunItemStatus.matched },
+      where: { runId, status: TRASH_EMPTY_ITEM_STATUS.matched },
       select: { mediaItemId: true },
     });
     const ids = items.map((i) => i.mediaItemId);
 
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const chunk = ids.slice(i, i + BATCH_SIZE);
-      await this.enrichmentJobs.enqueue({
+      await this.jobs.enqueue({
         type: 'trash_empty_execute_batch',
-        mediaItemId: null,
-        circleId,
-        reason: JobReason.rerun,
+        reason: 'rerun',
+        subjectType: 'circle',
+        subjectId: circleId,
         priority: 100,
         skipDedup: true,
         payload: { runId, itemIds: chunk },
@@ -312,7 +330,7 @@ export class TrashEmptyRunService {
   // ---------------------------------------------------------------------------
 
   /** Serialize a run row for API responses (counters included). */
-  serializeRun(run: TrashEmptyRun) {
+  serializeRun(run: TrashEmptyRunRow) {
     return {
       id: run.id,
       circleId: run.circleId,
@@ -344,7 +362,7 @@ export class TrashEmptyRunService {
           action,
           targetType: 'trash_empty_run',
           targetId,
-          meta: meta as Prisma.InputJsonValue,
+          meta,
         },
       })
       .catch(() => undefined);

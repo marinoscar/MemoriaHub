@@ -23,41 +23,28 @@
  * handler spec's style.
  */
 
-import { EnrichmentJob, TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { TrashEmptyExecuteBatchHandler } from './trash-empty-execute-batch.handler';
-import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../../prisma/prisma.service';
-import { MediaService } from '../media.service';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+
+import { mockMediaDb, type MockMediaDb } from '../../../test/helpers/mock-media-db.js';
+import type { MemoriahubJob } from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { TRASH_EMPTY_ITEM_STATUS as TrashEmptyRunItemStatus, TRASH_EMPTY_RUN_STATUS as TrashEmptyRunStatus } from './trash-empty.constants.js';
+import { TrashEmptyExecuteBatchHandler } from './trash-empty-execute-batch.handler.js';
 
 const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 
-function makeJob(payload: Record<string, unknown>): EnrichmentJob {
+function makeJob(payload: Record<string, unknown>): MemoriahubJob {
   return {
     id: randomUUID(),
     type: 'trash_empty_execute_batch',
-    mediaItemId: null,
-    circleId: CIRCLE_ID,
-    status: 'running',
-    reason: 'rerun',
-    priority: 100,
-    providerKey: null,
-    modelVersion: null,
+    subjectType: 'circle',
+    subjectId: CIRCLE_ID,
     payload,
     attempts: 1,
-    lastError: null,
-    createdAt: new Date(),
-    startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: 'server',
-  } as unknown as EnrichmentJob;
+    orgId: null,
+    status: 'running',
+  };
 }
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -76,21 +63,21 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 
 describe('TrashEmptyExecuteBatchHandler', () => {
   let handler: TrashEmptyExecuteBatchHandler;
-  let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
-  let mediaService: jest.Mocked<Pick<MediaService, 'purgeMediaItemsBatched'>>;
+  let prisma: MockMediaDb;
+  let jobs: { registerHandler: jest.Mock };
+  let mediaService: { purgeMediaItemsBatched: jest.Mock };
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
-    registry = { register: jest.fn() };
+    prisma = mockMediaDb();
+    jobs = { registerHandler: jest.fn() };
     mediaService = {
       purgeMediaItemsBatched: jest.fn().mockResolvedValue({ deleted: 0, failedIds: [] }),
     };
 
     handler = new TrashEmptyExecuteBatchHandler(
-      registry as unknown as JobHandlerRegistry,
-      prisma as unknown as PrismaService,
-      mediaService as unknown as MediaService,
+      jobs as never,
+      prisma as unknown as MediaDb,
+      mediaService as never,
     );
 
     prisma.trashEmptyRun.findUnique.mockResolvedValue(makeRun() as any);
@@ -107,7 +94,7 @@ describe('TrashEmptyExecuteBatchHandler', () => {
 
   it('registers itself with the handler registry on module init', () => {
     handler.onModuleInit();
-    expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(jobs.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('is a no-op when the payload is missing runId/itemIds', async () => {

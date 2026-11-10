@@ -229,6 +229,7 @@
         "@nestjs/schedule",
         "@nestjs/swagger",
         "@marinoscar/memoriahub-contract",
+        "@opentelemetry/api",
         "nestjs-zod",
         "zod"
       ]

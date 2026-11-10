@@ -67,6 +67,7 @@
     "@nestjs/core": "^11.1.12",
     "@nestjs/schedule": "^6.1.0",
     "@nestjs/swagger": "^11.4.6",
+    "@opentelemetry/api": "^1.9.1",
     "@prisma/client-runtime-utils": "^7.8.0",
     "nestjs-zod": "^5.4.0",
     "zod": "^4.4.3"
@@ -84,6 +85,9 @@
     "@nestjs/swagger": {
       "optional": true
     },
+    "@opentelemetry/api": {
+      "optional": true
+    },
     "@prisma/client-runtime-utils": {
       "optional": true
     },
@@ -97,6 +101,7 @@
     "@nestjs/schedule": "^6.1.0",
     "@nestjs/swagger": "^11.4.6",
     "@nestjs/testing": "^11.1.12",
+    "@opentelemetry/api": "^1.9.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "jest": "^30.4.2",
