@@ -1,5 +1,6 @@
 import { api } from './api';
 import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import type { BulkResolveBurst, BurstQuery } from '@marinoscar/memoriahub-contract/burst';
 import type { SortOrder } from '../types/media';
 
 /**
@@ -13,13 +14,13 @@ export const BULK_RESOLVE_CHUNK_SIZE = 100;
 /** Max page size the list endpoint accepts; used when collecting all ids. */
 const LIST_MAX_PAGE_SIZE = 100;
 
-export type BurstGroupStatus = 'pending' | 'resolved' | 'dismissed';
+export type BurstGroupStatus = BurstQuery['status'];
 
 /** Sortable columns accepted by `GET /media/bursts` (server default: `capturedAt`). */
-export type BurstSortBy = 'capturedAt' | 'confidence' | 'mediaCount';
+export type BurstSortBy = BurstQuery['sortBy'];
 
 /** Archive-or-trash action shared by burst and duplicate group resolution. */
-export type GroupResolveAction = 'archive' | 'trash';
+export type GroupResolveAction = BulkResolveBurst['action'];
 
 export interface BurstGroupSummary {
   id: string;

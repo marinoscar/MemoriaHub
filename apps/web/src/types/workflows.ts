@@ -5,13 +5,15 @@
 // as `string` because JSON transports ISO 8601 strings.
 // ---------------------------------------------------------------------------
 
+import type { WORKFLOW_RUN_STATUSES, WORKFLOW_TRIGGERS } from '@marinoscar/memoriahub-contract/workflows';
+
 // ---------------------------------------------------------------------------
 // Workflow definition + condition/action model
 // ---------------------------------------------------------------------------
 
 export type WorkflowSubjectType = 'media_item';
 
-export type WorkflowTriggerType = 'manual' | 'on_media_enriched' | 'scheduled';
+export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGERS)[number];
 
 export type WorkflowMatch = 'all' | 'any';
 
@@ -248,15 +250,7 @@ export interface WorkflowPreviewResponse {
 // Runs
 // ---------------------------------------------------------------------------
 
-export type WorkflowRunStatus =
-  | 'evaluating'
-  | 'awaiting_approval'
-  | 'running'
-  | 'completed'
-  | 'completed_with_errors'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
 
 export type WorkflowRunItemStatus =
   | 'matched'
