@@ -619,82 +619,16 @@ export const reportCreatedViewSchema = z.object({ id: z.uuid(), createdAt: z.iso
  */
 export type ReportCreatedView = z.infer<typeof reportCreatedViewSchema>;
 
-/**
- * The parsed value of {@link folderSchema}.
- *
- * @stability experimental
- */
-export type Folder = z.infer<typeof folderSchema>;
 
-/**
- * The parsed value of {@link inventorySchema}.
- *
- * @stability experimental
- */
-export type Inventory = z.infer<typeof inventorySchema>;
 
-/**
- * The parsed value of {@link statsSchema}.
- *
- * @stability experimental
- */
-export type Stats = z.infer<typeof statsSchema>;
 
-/**
- * The parsed value of {@link registerDeviceSchema}.
- *
- * @stability experimental
- */
-export type RegisterDevice = z.infer<typeof registerDeviceSchema>;
 
-/**
- * The parsed value of {@link updateConfigSchema}.
- *
- * @stability experimental
- */
-export type UpdateConfig = z.infer<typeof updateConfigSchema>;
 
-/**
- * The parsed value of {@link commandSchema}.
- *
- * @stability experimental
- */
-export type Command = z.infer<typeof commandSchema>;
 
-/**
- * The parsed value of {@link failedSampleSchema}.
- *
- * @stability experimental
- */
-export type FailedSample = z.infer<typeof failedSampleSchema>;
 
-/**
- * The parsed value of {@link perFolderSchema}.
- *
- * @stability experimental
- */
-export type PerFolder = z.infer<typeof perFolderSchema>;
 
-/**
- * The parsed value of {@link checkinRunSchema}.
- *
- * @stability experimental
- */
-export type CheckinRun = z.infer<typeof checkinRunSchema>;
 
-/**
- * The parsed value of {@link checkinSchema}.
- *
- * @stability experimental
- */
-export type Checkin = z.infer<typeof checkinSchema>;
 
-/**
- * The parsed value of {@link uploadDiagnosticsSchema}.
- *
- * @stability experimental
- */
-export type UploadDiagnostics = z.infer<typeof uploadDiagnosticsSchema>;
 
 /**
  * The parsed value of {@link mediaSyncListRunsQuerySchema}.
@@ -709,3 +643,17 @@ export type MediaSyncListRunsQuery = z.infer<typeof mediaSyncListRunsQuerySchema
  * @stability experimental
  */
 export type ListReportsQuery = z.infer<typeof listReportsQuerySchema>;
+
+/**
+ * One failed file of a check-in's `failedSample`.
+ *
+ * @stability experimental
+ */
+export type MediaSyncFailedFile = z.infer<typeof failedSampleSchema>;
+
+/**
+ * One per-folder count of a check-in run.
+ *
+ * @stability experimental
+ */
+export type MediaSyncPerFolder = z.infer<typeof perFolderSchema>;

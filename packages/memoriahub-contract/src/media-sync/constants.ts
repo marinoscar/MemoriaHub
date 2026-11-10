@@ -203,3 +203,52 @@ export const MEDIA_SYNC_COMMANDS = ['pause', 'resume', 'retry_failed', 'sync_now
  * @stability stable
  */
 export type MediaSyncCommand = (typeof MEDIA_SYNC_COMMANDS)[number];
+
+/**
+ * One network policy of a device's desired config.
+ *
+ * @stability stable
+ */
+export type MediaSyncNetworkPolicy = (typeof MEDIA_SYNC_NETWORK_POLICIES)[number];
+
+/**
+ * Which existing files a device uploads on pairing.
+ *
+ * @stability stable
+ */
+export type MediaSyncUploadExisting = (typeof MEDIA_SYNC_UPLOAD_EXISTING)[number];
+
+/**
+ * The media permission a device reports.
+ *
+ * @stability stable
+ */
+export type MediaSyncPermission = (typeof MEDIA_SYNC_PERMISSIONS)[number];
+
+/**
+ * The network state a device reports.
+ *
+ * @stability stable
+ */
+export type MediaSyncNetworkState = (typeof MEDIA_SYNC_NETWORK_STATES)[number];
+
+/**
+ * Whether a device is paired or was unpaired.
+ *
+ * @stability stable
+ */
+export type MediaSyncDeviceStatus = (typeof MEDIA_SYNC_DEVICE_STATUSES)[number];
+
+/**
+ * The outcome of one sync pass.
+ *
+ * @stability stable
+ */
+export type MediaSyncRunStatus = (typeof MEDIA_SYNC_RUN_STATUSES)[number];
+
+/**
+ * What started one sync pass.
+ *
+ * @stability stable
+ */
+export type MediaSyncTrigger = (typeof MEDIA_SYNC_TRIGGERS)[number];
