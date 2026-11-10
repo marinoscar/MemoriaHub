@@ -112,7 +112,11 @@ const MAX_TOTAL_IMAGE_BYTES = 18_000_000;
 const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
   parseInt(process.env['VIDEO_ENRICHMENT_MAX_BYTES'] ?? '0', 10);
 
-/** Effective `autoTagging.video.*` values, after defaults. */
+/**
+ * Effective `autoTagging.video.*` values, after defaults.
+ *
+ * @stability experimental
+ */
 export interface VideoTaggingParams {
   maxFrames: number;
   sampleIntervalSeconds: number;
@@ -127,6 +131,10 @@ export interface VideoTaggingParams {
   streamInput: boolean;
 }
 
+/**
+ * Video auto-tagging: a bounded frame sample (and an optional transcript of the opening seconds) into ONE multi-image vision call, persisted by the photo path's validator.
+ * @stability experimental
+ */
 @Injectable()
 export class VideoAutoTaggingService {
   private readonly logger = new Logger(VideoAutoTaggingService.name);
@@ -146,6 +154,12 @@ export class VideoAutoTaggingService {
   // processMediaItem — in-process orchestration
   // ---------------------------------------------------------------------------
 
+  /**
+   * Tags one video: the gate ladder (nothing downstream of a closed gate makes an AI call), the video input, the compute half, the transcript, then the shared persist half.
+   *
+   * @param job - the job's media-item context.
+   * @stability experimental
+   */
   async processMediaItem(job: MediaJobContext): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_auto_tagging job missing mediaItemId');
@@ -370,6 +384,14 @@ export class VideoAutoTaggingService {
   // (issue #460). No DB access, no storage credentials.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: frames spread across the whole runtime, an optional best-effort transcription of the first seconds, and one vision call.
+   *
+   * @param videoPath - a path or URL ffmpeg can read.
+   * @param ctx - the sampling parameters, vocabulary, people and model.
+   * @returns the raw answer, the frames used and the transcript.
+   * @stability experimental
+   */
   async computeVideoAutoTagging(
     videoPath: string,
     ctx: {
@@ -496,6 +518,16 @@ export class VideoAutoTaggingService {
   // sent. Mirrors AutoTaggingService.buildPrompt's role for photos.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The system and user prompt for a video, from the vocabulary, the people, the frame timestamps and the transcript.
+   *
+   * @param labelNames - the enabled vocabulary.
+   * @param peopleNames - the assigned people's names.
+   * @param sampledTimestampsMs - when each frame was taken.
+   * @param transcript - the opening speech, or null.
+   * @returns the two prompts.
+   * @stability experimental
+   */
   buildVideoPrompt(
     labelNames: string[],
     peopleNames: string[],

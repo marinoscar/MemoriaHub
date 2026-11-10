@@ -19,6 +19,8 @@
  * parse/persist half be reused verbatim. What differs is the framing: the
  * model must understand it is looking at ordered stills from ONE video, not a
  * set of unrelated photos.
+ *
+ * @stability experimental
  */
 export const VIDEO_AUTO_TAGGING_SYSTEM_PROMPT =
   'You are a video analysis assistant. You will be shown several still frames sampled in order from a SINGLE video, ' +
@@ -45,6 +47,8 @@ function formatTimestamp(ms: number): string {
  * is the ordered-frames framing, the timestamp of each frame, and — when
  * present — a delimited transcript block. Because the OUTPUT contract is
  * unchanged, the whole parse/persist half is reused verbatim.
+ *
+ * @stability experimental
  */
 export function buildVideoTaggingPrompt(
   labelNames: string[],
@@ -80,5 +84,9 @@ Example response: {"tags": ["label1", "label2"], "description": "A child blows o
   return prompt;
 }
 
-/** Output budget for the video vision call — see VIDEO_TAGGING_MAX_TOKENS use. */
+/**
+ * Output budget for the video vision call.
+ *
+ * @stability experimental
+ */
 export const VIDEO_TAGGING_MAX_TOKENS = 2048;

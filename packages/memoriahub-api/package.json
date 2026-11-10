@@ -39,6 +39,22 @@
       "types": "./dist/media/testing/index.d.ts",
       "default": "./dist/media/testing/index.js"
     },
+    "./tagging": {
+      "types": "./dist/tagging/index.d.ts",
+      "default": "./dist/tagging/index.js"
+    },
+    "./tagging/testing": {
+      "types": "./dist/tagging/testing/index.d.ts",
+      "default": "./dist/tagging/testing/index.js"
+    },
+    "./search": {
+      "types": "./dist/search/index.d.ts",
+      "default": "./dist/search/index.js"
+    },
+    "./search/testing": {
+      "types": "./dist/search/testing/index.d.ts",
+      "default": "./dist/search/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -47,6 +63,8 @@
     "core",
     "testing",
     "media",
+    "tagging",
+    "search",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -62,6 +80,7 @@
     "test:db": "jest -c jest.config.js --selectProjects db --runInBand --passWithNoTests"
   },
   "peerDependencies": {
+    "@marinoscar/memoriahub-compute": ">=0.0.0-0 || >=0.1.0-0",
     "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
@@ -69,10 +88,15 @@
     "@nestjs/swagger": "^11.4.6",
     "@opentelemetry/api": "^1.9.1",
     "@prisma/client-runtime-utils": "^7.8.0",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.1",
     "nestjs-zod": "^5.4.0",
     "zod": "^4.4.3"
   },
   "peerDependenciesMeta": {
+    "@marinoscar/memoriahub-compute": {
+      "optional": true
+    },
     "@marinoscar/memoriahub-contract": {
       "optional": true
     },
@@ -91,6 +115,12 @@
     "@prisma/client-runtime-utils": {
       "optional": true
     },
+    "csv-parse": {
+      "optional": true
+    },
+    "csv-stringify": {
+      "optional": true
+    },
     "nestjs-zod": {
       "optional": true
     }
@@ -104,6 +134,8 @@
     "@opentelemetry/api": "^1.9.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.1",
     "jest": "^30.4.2",
     "nestjs-zod": "^5.4.0",
     "reflect-metadata": "^0.2.2",

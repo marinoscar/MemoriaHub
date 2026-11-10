@@ -17,6 +17,14 @@ import { SearchService } from './search.service.js';
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
+  /**
+   * Searches media in a scope.
+   *
+   * @param dto - the body.
+   * @param user - the caller.
+   * @returns one page of results.
+   * @stability experimental
+   */
   @Post()
   @MemoriahubAuth({ permissions: [PERMISSIONS.SEARCH_USE] })
   @ApiOperation({
@@ -37,6 +45,12 @@ export class SearchController {
     return this.searchService.search(dto, user.id, user.permissions);
   }
 
+  /**
+   * Lists the searchable fields.
+   *
+   * @returns the descriptors.
+   * @stability experimental
+   */
   @Get('fields')
   @MemoriahubAuth({ permissions: [PERMISSIONS.SEARCH_USE] })
   @ApiOperation({

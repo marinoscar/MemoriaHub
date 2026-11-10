@@ -2,6 +2,8 @@
 /**
  * The `search_media` tool as a JSON Schema document: what the model is told. The agent turns it
  * into the platform's function tool (a Zod schema) when it opens the stream.
+ *
+ * @stability experimental
  */
 export interface SearchToolDef {
   name: string;
@@ -40,6 +42,8 @@ type JsonSchemaProperty =
  * human-readable names. The agent service resolves names to IDs before executing the search.
  *
  * Adding a new SearchableField to the registry automatically extends this tool schema.
+ *
+ * @stability experimental
  */
 export function buildSearchMediaToolDef(): SearchToolDef {
   const properties: Record<string, JsonSchemaProperty> = {};

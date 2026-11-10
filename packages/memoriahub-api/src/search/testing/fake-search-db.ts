@@ -25,7 +25,13 @@ export class FakeSearchStore {
   knnQueries = 0;
 }
 
-/** The delegate-shaped object over a store. */
+/**
+ * The delegate-shaped object over a store.
+ *
+ * @param store - the store.
+ * @returns the delegates.
+ * @stability experimental
+ */
 export function createFakeSearchDb(store: FakeSearchStore): Record<string, unknown> {
   const matching = (where: Record<string, any>) =>
     store.items.filter((item) => item.circleId === where['circleId'] && !item.deletedAt && (where['id']?.in ? where['id'].in.includes(item.id) : true));

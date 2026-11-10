@@ -54,6 +54,10 @@ const TAG_MAX_DIM = parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '1568', 10);
  */
 const MAX_IMAGE_BYTES = 4_500_000;
 
+/**
+ * Photo auto-tagging: one vision call per photo (the compute half) and the vocabulary-validated persist half that video tagging shares.
+ * @stability experimental
+ */
 @Injectable()
 export class AutoTaggingService {
   private readonly logger = new Logger(AutoTaggingService.name);
@@ -69,6 +73,12 @@ export class AutoTaggingService {
     @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /**
+   * Tags one photo: gates, the saved model, the image prepared to at most `TAG_MAX_IMAGE_DIM`, one vision call, then {@link AutoTaggingService.persistAutoTagging}.
+   *
+   * @param job - the job's media-item context.
+   * @stability experimental
+   */
   async processMediaItem(job: MediaJobContext): Promise<void> {
     // Guard: auto_tagging jobs must always have a mediaItemId (global/null jobs are not valid here)
     if (!job.mediaItemId) {
@@ -267,6 +277,14 @@ export class AutoTaggingService {
   // server would have sent — no duplicated prompt-string construction.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The system and user prompt for a photo, from the enabled vocabulary and the people named on it.
+   *
+   * @param labelNames - the enabled vocabulary.
+   * @param peopleNames - the assigned people's names.
+   * @returns the two prompts.
+   * @stability experimental
+   */
   buildPrompt(labelNames: string[], peopleNames: string[]): { system: string; prompt: string } {
     return {
       system: AUTO_TAGGING_SYSTEM_PROMPT,
@@ -283,6 +301,14 @@ export class AutoTaggingService {
   // no attempt charged). Server-only since RETRO-C4 (#590): AI rule 3, the key never leaves the API.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: one vision call through `MEMORIAHUB_AI`; a provider throttle surfaces as a rate-limit error the queue defers.
+   *
+   * @param imageBuffer - the prepared image.
+   * @param ctx - the model, prompts and the job the call is made under.
+   * @returns the raw answer.
+   * @stability experimental
+   */
   async computeAutoTagging(
     imageBuffer: Buffer,
     ctx: {
@@ -333,6 +359,14 @@ export class AutoTaggingService {
   // VideoAutoTaggingService (one implementation of vocabulary validation).
   // ---------------------------------------------------------------------------
 
+  /**
+   * The persist half, shared with video tagging: parses the answer, keeps only vocabulary labels, reconciles the item's AI tags (never a manual one), writes the description and the embedding, and marks the item processed.
+   *
+   * @param job - the job's media-item context.
+   * @param result - the model's raw answer.
+   * @param used - the provider and model the answer came from.
+   * @stability experimental
+   */
   async persistAutoTagging(
     job: MediaJobContext,
     result: AutoTaggingResult,

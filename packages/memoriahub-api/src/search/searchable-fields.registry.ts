@@ -38,16 +38,36 @@ import {
   type MediaItemWhere,
 } from '../media/index.js';
 
+/**
+ * The kind of value a searchable field takes.
+ * @stability experimental
+ */
 export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set' | 'geo-radius';
 
+/**
+ * One filter dimension of search.
+ *
+ * @stability experimental
+ */
 export interface SearchableField {
+  /** The filter key a client sends. */
   key: string;
+  /** The label the UI shows. */
   label: string;
+  /** The kind of value the filter takes. */
   type: SearchFieldType;
+  /** The allowed values of an `enum` field. */
   enumValues?: string[];
   /** Optional hint for the frontend to know where to fetch option values from. */
   optionsSource?: string;
+  /** What the filter does; the agent's tool description is built from it. */
   description: string;
+  /**
+   * Builds the where fragment of this field's value.
+   *
+   * @param value - the filter value.
+   * @returns the fragment.
+   */
   buildWhere(value: unknown): MediaItemWhere;
 }
 
@@ -91,6 +111,10 @@ function asDateRange(
   return { from: parse(raw.from, 'from'), to: parse(raw.to, 'to') };
 }
 
+/**
+ * The registry of every filter dimension: the route, the field listing and the agent's tool all read it.
+ * @stability experimental
+ */
 export const SEARCHABLE_FIELDS: SearchableField[] = [
   {
     key: 'type',
@@ -308,6 +332,8 @@ const FIELD_MAP = new Map<string, SearchableField>(
  * The circleId and deletedAt:null baseline are always applied.
  *
  * @throws BadRequestException for unknown filter keys
+ *
+ * @stability experimental
  */
 export function buildWhereFromFields(
   circleId: string,

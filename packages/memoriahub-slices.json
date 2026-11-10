@@ -101,6 +101,19 @@
       "ports",
       "core",
       "testing"
+    ],
+    "tagging": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "search": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "tagging"
     ]
   },
   "memoriahub-web": {

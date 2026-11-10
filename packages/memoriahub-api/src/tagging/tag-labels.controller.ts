@@ -35,16 +35,26 @@ import {
 /**
  * The part of the Fastify reply the CSV export writes to. Structural: the package imports no
  * Fastify type, the host runs the Fastify adapter.
+ *
+ * @stability experimental
  */
-interface CsvReply {
-  raw: { writeHead(status: number, headers: Record<string, string>): unknown; end(body: string): unknown };
+export interface CsvReply {
+  raw: {
+    /** Writes the status and the headers. */
+    writeHead(status: number, headers: Record<string, string>): unknown;
+    /** Ends the response with the body. */
+    end(body: string): unknown;
+  };
 }
 
 /**
  * The part of the Fastify request the CSV import reads. `file()` is the decoration of
  * `@fastify/multipart`, which the host registers on its Fastify app (`$hostPlugins`).
+ *
+ * @stability experimental
  */
-interface MultipartRequest {
+export interface MultipartRequest {
+  /** Reads the first uploaded file, or undefined when there is none. */
   file(): Promise<{ file: AsyncIterable<Buffer | string> } | undefined>;
 }
 
@@ -65,6 +75,12 @@ export class TagLabelsController {
   // Must be declared before :id routes to prevent shadowing.
   // --------------------------------------------------------------------------
 
+  /**
+   * Exports the vocabulary as CSV.
+   *
+   * @param res - the reply.
+   * @stability experimental
+   */
   @Get('export')
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_READ] })
   @ApiOperation({ summary: 'Export all tag labels as CSV' })
@@ -85,6 +101,13 @@ export class TagLabelsController {
   // POST /api/tag-labels/import
   // --------------------------------------------------------------------------
 
+  /**
+   * Imports a CSV (`id,name,delete`) of create, update and delete rows.
+   *
+   * @param req - the multipart request.
+   * @returns the import summary.
+   * @stability experimental
+   */
   @Post('import')
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiConsumes('multipart/form-data')
@@ -163,6 +186,12 @@ export class TagLabelsController {
   // GET /api/tag-labels
   // --------------------------------------------------------------------------
 
+  /**
+   * Lists the labels.
+   *
+   * @returns the labels.
+   * @stability experimental
+   */
   @Get()
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_READ] })
   @ApiOperation({ summary: 'List all tag labels' })
@@ -176,6 +205,13 @@ export class TagLabelsController {
   // POST /api/tag-labels
   // --------------------------------------------------------------------------
 
+  /**
+   * Creates a label.
+   *
+   * @param dto - the name.
+   * @returns the label.
+   * @stability experimental
+   */
   @Post()
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiOperation({ summary: 'Create a new tag label' })
@@ -190,6 +226,14 @@ export class TagLabelsController {
   // PATCH /api/tag-labels/:id
   // --------------------------------------------------------------------------
 
+  /**
+   * Updates a label.
+   *
+   * @param id - the label.
+   * @param dto - the changes.
+   * @returns the label.
+   * @stability experimental
+   */
   @Patch(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @ApiOperation({ summary: 'Update a tag label' })
@@ -206,6 +250,12 @@ export class TagLabelsController {
   // DELETE /api/tag-labels/:id
   // --------------------------------------------------------------------------
 
+  /**
+   * Deletes a label.
+   *
+   * @param id - the label.
+   * @stability experimental
+   */
   @Delete(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.AI_CONFIG_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)

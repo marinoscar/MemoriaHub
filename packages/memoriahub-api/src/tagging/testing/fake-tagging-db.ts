@@ -8,20 +8,35 @@
 // the slice does not use is not supported.
 // =============================================================================
 
-interface Label {
+/**
+ * A vocabulary label as the fake stores it.
+ *
+ * @stability experimental
+ */
+export interface Label {
   id: string;
   name: string;
   enabled: boolean;
 }
 
-interface Tag {
+/**
+ * A tag as the fake stores it.
+ *
+ * @stability experimental
+ */
+export interface Tag {
   id: string;
   circleId: string;
   name: string;
   addedById: string | null;
 }
 
-interface MediaTagRow {
+/**
+ * A tag-to-item join as the fake stores it.
+ *
+ * @stability experimental
+ */
+export interface MediaTagRow {
   tagId: string;
   mediaItemId: string;
   source: string;
@@ -115,7 +130,13 @@ export class FakeTaggingStore {
   }
 }
 
-/** The delegate-shaped object over a store. */
+/**
+ * The delegate-shaped object over a store.
+ *
+ * @param store - the store.
+ * @returns the delegates.
+ * @stability experimental
+ */
 export function createFakeTaggingDb(store: FakeTaggingStore): Record<string, unknown> {
   const tagName = (tagId: string): string | undefined => store.tags.find((t) => t.id === tagId)?.name;
 

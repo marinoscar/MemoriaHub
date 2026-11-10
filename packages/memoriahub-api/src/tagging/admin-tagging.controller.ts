@@ -17,7 +17,12 @@ import { MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../ports/index
 import { TAGGING_PERMISSIONS as PERMISSIONS, TAGGING_ROLES as ROLES } from './constants.js';
 import { TaggingBackfillService } from './tagging-backfill.service.js';
 
-class AdminBackfillDto extends createZodDto(adminTaggingBackfillSchema) {}
+/**
+ * The body of `POST /api/admin/tagging/backfill`.
+ *
+ * @stability experimental
+ */
+export class AdminBackfillDto extends createZodDto(adminTaggingBackfillSchema) {}
 
 /**
  * `POST /api/admin/tagging/backfill`; mounted by the host in its own module.
@@ -35,6 +40,13 @@ export class AdminTaggingController {
     @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
   ) {}
 
+  /**
+   * Queues AI tagging across every library; photos by default, videos only when asked.
+   *
+   * @param dto - the range, force and media types.
+   * @returns how many jobs and libraries.
+   * @stability experimental
+   */
   @Post('backfill')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)

@@ -1,6 +1,8 @@
 /**
  * Detects the MIME type of an image from its magic bytes.
  * Returns null for unsupported or unrecognized formats (HEIC, TIFF, etc.).
+ *
+ * @stability experimental
  */
 export function detectImageMime(buffer: Buffer): string | null {
   // JPEG: FF D8 FF

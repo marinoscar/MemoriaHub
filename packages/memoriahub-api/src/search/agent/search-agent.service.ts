@@ -205,6 +205,13 @@ export class SearchAgentService {
     toolInput['people'] = { ids, mode };
   }
 
+  /**
+   * Runs one agent turn and streams its events: `token`, `tool_call`, `results`.
+   *
+   * @param params - the history, the scope and the caller.
+   * @returns the events, in order.
+   * @stability experimental
+   */
   async *streamTurn(params: AgentTurnParams): AsyncGenerator<AgentSseEvent> {
     const { circleId, messages, userId, permissions } = params;
 

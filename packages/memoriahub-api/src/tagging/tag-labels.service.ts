@@ -18,15 +18,27 @@ import type { TaggingDb, TaggingTx } from './data/tagging-db.js';
 
 export { createTagLabelSchema, updateTagLabelSchema };
 
+/**
+ * The body of `POST /api/tag-labels`.
+ * @stability experimental
+ */
 export class CreateTagLabelDto extends createZodDto(createTagLabelSchema) {}
 
+/**
+ * The body of `PATCH /api/tag-labels/:id`.
+ * @stability experimental
+ */
 export class UpdateTagLabelDto extends createZodDto(updateTagLabelSchema) {}
 
 // ---------------------------------------------------------------------------
 // CSV import types
 // ---------------------------------------------------------------------------
 
-/** A single parsed CSV row passed in from the controller. */
+/**
+ * A single parsed CSV row passed in from the controller.
+ *
+ * @stability experimental
+ */
 export interface TagLabelCsvRow {
   /** Present on UPDATE and DELETE rows; blank/missing for CREATE. */
   id?: string;
@@ -35,6 +47,10 @@ export interface TagLabelCsvRow {
   delete?: string;
 }
 
+/**
+ * What a CSV import did.
+ * @stability experimental
+ */
 export interface ImportSummary {
   created: number;
   updated: number;
@@ -46,6 +62,10 @@ export interface ImportSummary {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * The admin-managed tag vocabulary: the only labels the model may choose.
+ * @stability experimental
+ */
 @Injectable()
 export class TagLabelsService {
   constructor(
@@ -53,10 +73,23 @@ export class TagLabelsService {
     private readonly mediaTouch: MediaTouchService,
   ) {}
 
+  /**
+   * Every label, ordered by name.
+   *
+   * @returns the labels.
+   * @stability experimental
+   */
   getAll() {
     return this.prisma.tagLabel.findMany({ orderBy: { name: 'asc' } });
   }
 
+  /**
+   * Creates a label.
+   *
+   * @param dto - the name.
+   * @returns the label.
+   * @stability experimental
+   */
   async create(dto: CreateTagLabelDto) {
     try {
       return await this.prisma.tagLabel.create({
@@ -69,6 +102,14 @@ export class TagLabelsService {
     }
   }
 
+  /**
+   * Renames or enables or disables a label.
+   *
+   * @param id - the label.
+   * @param dto - the changes.
+   * @returns the label.
+   * @stability experimental
+   */
   async update(id: string, dto: UpdateTagLabelDto) {
     try {
       return await this.prisma.tagLabel.update({
@@ -87,6 +128,12 @@ export class TagLabelsService {
     }
   }
 
+  /**
+   * Deletes a label and its AI-applied tag instances across circles (manual tags stay).
+   *
+   * @param id - the label.
+   * @stability experimental
+   */
   async remove(id: string) {
     const label = await this.prisma.tagLabel.findUnique({ where: { id } });
     if (!label) {

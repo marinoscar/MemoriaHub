@@ -24,7 +24,7 @@ import { resolveMediaItemJob } from './job-context.js';
  * persist both run in `AutoTaggingService.processMediaItem`.
  *
  * Provider throttles (HTTP 429/529, `retry-after`) reach the queue as a
- * {@link MemoriahubRateLimitError}: the job is deferred and no attempt is consumed, and
+ * `MemoriahubRateLimitError`: the job is deferred and no attempt is consumed, and
  * the `tagging` gate (shared with `video_auto_tagging`, the same provider quota)
  * pauses.
  *

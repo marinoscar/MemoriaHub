@@ -19,9 +19,18 @@ import { SearchAgentService } from './search-agent.service.js';
 /**
  * The part of the Fastify reply the SSE stream writes to. Structural: the package imports no
  * Fastify type, the host runs the Fastify adapter.
+ *
+ * @stability experimental
  */
-interface SseReply {
-  raw: { writeHead(status: number, headers: Record<string, string>): unknown; write(chunk: string): unknown; end(): unknown };
+export interface SseReply {
+  raw: {
+    /** Writes the status and the headers. */
+    writeHead(status: number, headers: Record<string, string>): unknown;
+    /** Writes one chunk. */
+    write(chunk: string): unknown;
+    /** Ends the response. */
+    end(): unknown;
+  };
 }
 
 // ---------------------------------------------------------------------------

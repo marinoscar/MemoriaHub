@@ -78,6 +78,18 @@ export class SearchService {
     private readonly mediaThumbnail: MediaThumbnailService,
   ) {}
 
+  /**
+   * Searches one owner scope.
+   *
+   * @param userId - the caller.
+   * @param circleId - the owner scope.
+   * @param permissions - the caller's permissions.
+   * @param filters - registry filters.
+   * @param paging - page, size and order.
+   * @param semanticQuery - an optional natural-language query to rank by.
+   * @returns one page of results.
+   * @stability experimental
+   */
   async runSearch(
     userId: string,
     circleId: string,
@@ -195,6 +207,15 @@ export class SearchService {
     };
   }
 
+  /**
+   * Searches from the route's body.
+   *
+   * @param dto - the body.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   * @returns one page of results.
+   * @stability experimental
+   */
   async search(dto: SearchQueryDto, userId: string, userPermissions: string[]): Promise<SearchResult> {
     const { circleId, filters, page, pageSize, sortBy, sortOrder, semanticQuery } = dto;
 
@@ -208,6 +229,12 @@ export class SearchService {
     );
   }
 
+  /**
+   * Lists the searchable fields, with `semanticQuery`.
+   *
+   * @returns the descriptors.
+   * @stability experimental
+   */
   getFields(): SearchFieldDescriptor[] {
     const registryFields = SEARCHABLE_FIELDS.map(
       ({ key, label, type, enumValues, optionsSource, description }) => ({

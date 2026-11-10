@@ -59,6 +59,14 @@ export class TaggingController {
   // POST /api/media/:id/tags/rerun
   // --------------------------------------------------------------------------
 
+  /**
+   * Re-runs tagging for one media item, routed by its type.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the queued job.
+   * @stability experimental
+   */
   @Post('media/:id/tags/rerun')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run auto-tagging for a media item' })
@@ -114,6 +122,14 @@ export class TaggingController {
   // GET /api/media/:id/tags/status
   // --------------------------------------------------------------------------
 
+  /**
+   * Reads one media item's tagging status.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the status.
+   * @stability experimental
+   */
   @Get('media/:id/tags/status')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get auto-tagging status for a media item' })
