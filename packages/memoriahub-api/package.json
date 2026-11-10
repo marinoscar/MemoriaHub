@@ -35,6 +35,10 @@
       "types": "./dist/media/index.d.ts",
       "default": "./dist/media/index.js"
     },
+    "./media/testing": {
+      "types": "./dist/media/testing/index.d.ts",
+      "default": "./dist/media/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
