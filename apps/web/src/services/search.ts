@@ -1,3 +1,4 @@
+import type { NearFilterValue } from '@marinoscar/memoriahub-contract/search';
 import { api } from './api';
 import type { MediaItem, MediaListMeta } from '../types/media';
 
@@ -17,11 +18,7 @@ export interface SearchFilters {
   [key: string]: unknown;
 }
 
-export interface NearFilter {
-  lat: number;
-  lng: number;
-  radiusKm: number;
-}
+export type NearFilter = NearFilterValue;
 
 export interface SearchRequest {
   circleId: string;
