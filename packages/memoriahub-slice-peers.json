@@ -179,12 +179,15 @@
     "core": {
       "peers": [
         "@nestjs/common",
+        "@nestjs/core",
+        "@nestjs/swagger",
         "@prisma/client-runtime-utils"
       ]
     },
     "testing": {
       "peers": [
         "@nestjs/common",
+        "@nestjs/core",
         "zod"
       ]
     },
