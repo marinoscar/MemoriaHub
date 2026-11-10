@@ -321,8 +321,8 @@ Upload-time enqueue lives in `MediaEnrichmentService.enqueueUploadEnrichment` (`
 
 This is a scale-critical design decision, not an arbitrary choice. Two verified facts about the shared enrichment worker constrain backfill design for *any* feature:
 
-- The worker claims at most `ENRICHMENT_WORKER_CONCURRENCY` jobs (default `1`) per `ENRICHMENT_JOB_POLL_MS` tick (default 5 s) — a naive one-job-per-item backfill is **poll-floor-bound** at roughly 720 jobs/hour *regardless of how fast the handler itself runs*. A 10 000-photo library would take upward of 14 hours of pure poll pacing before compute time is even considered.
-- `EnrichmentStuckResetTask` resets any job stuck in `running` for longer than `ENRICHMENT_STUCK_MINUTES` (default 15 minutes) back to `pending`, so a single job may never legitimately run longer than roughly 10–12 minutes without risking a false "stuck" reset and duplicate processing.
+- The worker claims at most `JOBS_WORKER_CONCURRENCY` jobs (default `1`) per `JOBS_POLL_MS` tick (default 5 s) — a naive one-job-per-item backfill is **poll-floor-bound** at roughly 720 jobs/hour *regardless of how fast the handler itself runs*. A 10 000-photo library would take upward of 14 hours of pure poll pacing before compute time is even considered.
+- The platform lease reaper requeues any job still `running` after its lease (derived from the job profile's `maxRuntimeMs`; 30 minutes for `duplicate_detection_batch`) back to `pending`, so a job must finish inside its profile's `maxRuntimeMs` (5 minutes for `duplicate_detection`, 30 for the batch) or risk a duplicate run.
 
 Duplicate-detection backfill is **compute-bound** (CLIP embedding is ~150–400 ms/image on 2 vCPU, plus image download/decode — call it ~1–2 s/photo end-to-end), which makes it the worst case of any backfill in the app for the poll-floor problem. `DuplicateBackfillService` (`apps/api/src/dedup/duplicate-backfill.service.ts`) resolves this by chunking: eligible item IDs are paginated with a keyset (id-cursor) scan, 5 000 per page, then sliced into **100-ID chunks**, each enqueued as one `duplicate_detection_batch` job (`skipDedup: true` so the standard `(type, mediaItemId IS NULL)` global-job dedup doesn't collapse every chunk into a single job row — each chunk gets its own row keyed only by its unique payload). At a worst-case ~3 s/item, 100 items ≈ 5 minutes/job — comfortably under the 15-minute stuck-reset ceiling, and for a 10 000-photo library this reduces the job count from 10 000 rows down to 100, making poll-floor pacing negligible.
 
@@ -350,7 +350,7 @@ There is no dedicated dedup progress endpoint. Progress is read from the existin
 
 ### 6.5 Throughput Expectations
 
-Defaults assumed: `ENRICHMENT_JOB_POLL_MS=5000`, `ENRICHMENT_WORKER_CONCURRENCY=1`, 2 vCPU host.
+Defaults assumed: `JOBS_POLL_MS=5000`, `JOBS_WORKER_CONCURRENCY=1`, 2 vCPU host.
 
 | Library size | Jobs enqueued (100/chunk) | Approximate wall-clock time |
 |---|---|---|
@@ -358,7 +358,7 @@ Defaults assumed: `ENRICHMENT_JOB_POLL_MS=5000`, `ENRICHMENT_WORKER_CONCURRENCY=
 | 10 000 photos | 100 | ~4.5–9 hours |
 | 50 000 photos | 500 | ~1–2 days |
 
-This is compute-bound (CLIP inference + image download/decode), one-time per photo (subsequent backfills with `force: false` skip already-embedded items in milliseconds), fully background, and naturally pre-empted by priority-10 upload jobs and priority-0 reruns since the enrichment worker always claims the lowest `priority` value first. Setting `ENRICHMENT_WORKER_CONCURRENCY=2` roughly halves wall-clock time on a 4 vCPU host — see the "Bulk Import Tuning" guidance in CLAUDE.md for the RAM tradeoff of raising worker concurrency for AI/CLIP-bound work.
+This is compute-bound (CLIP inference + image download/decode), one-time per photo (subsequent backfills with `force: false` skip already-embedded items in milliseconds), fully background, and naturally pre-empted by priority-10 upload jobs and priority-0 reruns since the enrichment worker always claims the lowest `priority` value first. Setting `JOBS_WORKER_CONCURRENCY=2` roughly halves wall-clock time on a 4 vCPU host — see the "Bulk Import Tuning" guidance in CLAUDE.md for the RAM tradeoff of raising worker concurrency for AI/CLIP-bound work.
 
 ---
 
@@ -409,7 +409,7 @@ All three `dedup.*` values are validated by the same Zod schema used for every o
 | `DUPLICATE_DETECTION_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable upload-time `duplicate_detection` enqueue regardless of `features.duplicateDetection`. The system setting is the runtime toggle; this env var is a hard override for CI/test environments — same pattern as `BURST_DETECTION_ENABLED`, `AUTO_TAG_ENABLED`, `FACE_AUTO_DETECT`. |
 | `MODELS_DIR` | `./data/models` | Persistent-volume directory the CLIP ONNX model file is downloaded to and loaded from (§4.1). Mount as a Docker volume in production so the model survives container recreation. |
 
-The shared enrichment worker variables (`ENRICHMENT_WORKER_ENABLED`, `ENRICHMENT_JOB_POLL_MS`, `ENRICHMENT_WORKER_CONCURRENCY`) govern the queue that runs both `duplicate_detection` and `duplicate_detection_batch` jobs alongside every other enrichment type — see [enrichment-queue.md](enrichment-queue.md).
+The shared enrichment worker variables (`JOBS_WORKER_MODE`, `JOBS_POLL_MS`, `JOBS_WORKER_CONCURRENCY`) govern the queue that runs both `duplicate_detection` and `duplicate_detection_batch` jobs alongside every other enrichment type — see [enrichment-queue.md](enrichment-queue.md).
 
 ---
 

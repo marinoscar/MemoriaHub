@@ -52,7 +52,7 @@ Workflows generalizes those one-off tools into a single **query + action engine*
 - Let a circle collaborator define a rule in a form-based builder ("On Media Items, when new media is enriched, if the filename contains 'screenshot', then move it to Trash"), preview exactly what it matches before committing, and either run it once or let it run automatically.
 - Reuse every existing bulk-mutation code path rather than re-implementing archive/trash/tag/album/person/location/burst-resolve/duplicate-resolve/location-suggestion logic a second time.
 - Scale to a production library of **~30k media items today, ~150k expected** — no unbounded `COUNT(*)`, no full in-memory ID arrays, background-priority execution that never starves upload enrichment.
-- Run identically whether the deployment is a single VPS or a `ENRICHMENT_WORKER_MODE=system` fleet backed by CLI worker nodes.
+- Run identically whether the deployment is a single VPS or a `JOBS_WORKER_MODE=system` fleet backed by CLI worker nodes.
 - Ship full power — including permanent deletion — behind guardrails strict enough that an admin can leave the feature on without fear of an accidental library wipe.
 
 ### Non-Goals (v1)
@@ -302,7 +302,7 @@ Server-only job (`WorkflowEvaluateHandler`), one per run. Compiles the run's **s
 
 - **Cap** = `Math.min(workflows.maxItemsPerRun, runBody.maxItems ?? ∞, definition.options.maxItems ?? ∞)` — the request-time override wins if smaller than the per-workflow option, which in turn is bounded by the system ceiling. On hitting the cap the handler trims the final page and sets `truncated: true`; if the cap lands exactly on a page boundary it does one bounded lookahead page (`hasMoreMatching`) purely to decide the `truncated` flag correctly.
 - **0 matches** → `completed` immediately (no approval stop, nothing to run).
-- **Failure handling**: an evaluation error only marks the run `failed` once the job has exhausted `ENRICHMENT_MAX_ATTEMPTS` (checked via `job.attempts`); earlier attempts leave the run at `evaluating` and simply retry — safe because `createMany({ skipDuplicates: true })` makes re-materialization idempotent.
+- **Failure handling**: an evaluation error only marks the run `failed` once the job has exhausted `JOBS_MAX_ATTEMPTS` (checked via `job.attempts`); earlier attempts leave the run at `evaluating` and simply retry — safe because `createMany({ skipDuplicates: true })` makes re-materialization idempotent.
 
 ### 7.4 `workflow_execute_batch` — execution
 
@@ -444,7 +444,7 @@ All four are native platform `JobHandler`s since RETRO-C7 (#604), with execution
 
 ### 11.2 Why the type is *also* server-claimable in `system` mode
 
-`workflow_execute_batch` needs no models and no native dependencies — `JOB_TYPE_REQUIREMENTS['workflow_execute_batch'] = []` in `apps/cli/src/node/capabilities.ts` — so a lean CLI install (no `optionalDependencies` resolved at all) can still advertise it. But the type is **also** kept in `systemModeEligibleTypes()`'s claim set (`apps/api/src/enrichment/enrichment-job.worker.ts`), alongside the genuinely server-only types and `thumbnail_repair`. The rationale: an `ENRICHMENT_WORKER_MODE=off` fleet-only deployment must still execute workflows even with zero nodes registered, and a `system`-mode deployment (server runs sweeps, fleet runs per-item media compute) should keep working out of the box rather than silently stalling every workflow run until an operator registers a node. Both the server's in-process worker and any node can claim `workflow_execute_batch` jobs; `FOR UPDATE SKIP LOCKED` (the same atomic claim primitive `EnrichmentClaimService` and `POST /api/nodes/:id/claim` already share) makes that dual-eligibility race-safe.
+`workflow_execute_batch` needs no models and no native dependencies — the executor declares no capability requirement (`apps/cli/src/executors/workflow-execute-batch.executor.ts`) — so a lean CLI install (no `optionalDependencies` resolved at all) can still advertise it. But the type is **also** kept in the `system` worker mode's claim set (`JOBS_SYSTEM_MODE_EXTRA_TYPES`, pinned in `apps/api/src/platform/jobs/legacy-env.ts`), alongside the genuinely server-only types and `thumbnail_repair`. The rationale: an `JOBS_WORKER_MODE=off` fleet-only deployment must still execute workflows even with zero nodes registered, and a `system`-mode deployment (server runs sweeps, fleet runs per-item media compute) should keep working out of the box rather than silently stalling every workflow run until an operator registers a node. Both the server's in-process worker and any node can claim `workflow_execute_batch` jobs; `FOR UPDATE SKIP LOCKED` (the same atomic claim primitive `EnrichmentClaimService` and `POST /api/nodes/:id/claim` already share) makes that dual-eligibility race-safe.
 
 ### 11.3 CLI eligibility
 

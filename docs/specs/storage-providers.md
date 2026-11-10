@@ -227,7 +227,7 @@ For each `storage_migration` job, `StorageMigrationHandler.process()` executes:
 7. **SOURCE IS NOT DELETED.** The source file is left in place as a fallback. Cleanup is a manual operation.
 8. Mark the `storage_migration_items` row `completed`.
 
-On any error, the handler re-throws so the enrichment worker applies standard retry / backoff logic (up to `ENRICHMENT_MAX_ATTEMPTS`, default 3).
+On any error, the handler re-throws so the enrichment worker applies standard retry / backoff logic (up to `JOBS_MAX_ATTEMPTS`, default 3).
 
 ### Cancel Semantics
 
@@ -237,8 +237,8 @@ On any error, the handler re-throws so the enrichment worker applies standard re
 
 Migration jobs inherit the shared enrichment worker retry configuration:
 
-- `ENRICHMENT_MAX_ATTEMPTS` (default 3) — max attempts before permanent failure.
-- `ENRICHMENT_RETRY_BASE_MS` / `ENRICHMENT_RETRY_MAX_MS` — equal-jitter exponential backoff for transient errors.
+- `JOBS_MAX_ATTEMPTS` (default 3) — max attempts before permanent failure.
+- `JOBS_RETRY_BASE_MS` / `JOBS_RETRY_MAX_MS` — equal-jitter exponential backoff for transient errors.
 - Failed migration jobs appear in the `/admin/jobs` dashboard under `type='storage_migration'` and can be retried individually via `POST /api/admin/jobs/:id/retry`.
 
 ---

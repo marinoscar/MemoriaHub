@@ -77,11 +77,11 @@ The longest videos in a family library — a whole recital, a wedding ceremony �
 
 `video_auto_tagging` is a distinct enrichment job type, not a branch inside `auto_tagging`. This follows the `face_detection` / `video_face_detection` precedent, and it is **required rather than stylistic**:
 
-1. **Timeout bucket.** `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` (20 min) is applied via a set of job **types** (`VIDEO_JOB_TYPES`, `enrichment-job.worker.ts`). Branching inside `auto_tagging` would hand every photo-tagging job a 20-minute budget instead of the 10-minute global.
+1. **Timeout bucket.** The 20-minute video execution profile is declared per job **type** (the three video types carry `maxRuntimeMs` 1,200,000; it was `ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` applied through a `VIDEO_JOB_TYPES` set). Branching inside `auto_tagging` would hand every photo-tagging job a 20-minute budget instead of the 10-minute global.
 2. **Node requirements are per type.** `JOB_TYPE_REQUIREMENTS.auto_tagging` is `['sharp']`; the video type needs `['sharp','ffmpeg','ffprobe']`. A node without ffmpeg must not advertise the video type — and the requirements map is keyed by type.
 3. **Per-type admin surfaces.** `/admin/settings/jobs` filtering, `job-type-labels.ts`, and per-type queue insights all key on type.
 
-`ENRICHMENT_LEASE_MS` (30 min default) comfortably exceeds the 20-minute video job timeout, so a legitimate long run is never reaped mid-flight.
+The lease (derived from the job's `maxRuntimeMs`; it was `ENRICHMENT_LEASE_MS`) comfortably exceeds the 20-minute video job timeout, so a legitimate long run is never reaped mid-flight.
 
 ### What is shared
 
@@ -245,7 +245,7 @@ Three changes:
 
 ## 10. Node compute
 
-`video_auto_tagging` is node-claimable. It is per-item media compute with an established transient-credential path — precisely the profile nodes exist for — and server-only would make it unavailable entirely under `ENRICHMENT_WORKER_MODE=off`.
+`video_auto_tagging` is node-claimable. It is per-item media compute with an established transient-credential path — precisely the profile nodes exist for — and server-only would make it unavailable entirely under `JOBS_WORKER_MODE=off`.
 
 **Requirements:** `['sharp', 'ffmpeg', 'ffprobe']`. A node without ffmpeg never claims it. The worker image already carries ffmpeg/ffprobe for `video_face_detection`, so no image change was needed.
 

@@ -25,7 +25,7 @@ The platform seeds eight starter rules, disabled. On a new deployment MemoriaHub
 
 Notes:
 
-- **`nodes.offline` sees no node until RETRO-C2.** It reads the platform `worker_nodes` table; MemoriaHub's nodes are still registered in `mh_legacy_worker_nodes`. Until C2, use the Doctor's node checks and `/admin/settings/nodes` (see `docs/platform-adoption/local-exceptions.md`).
+- **`nodes.offline` sees no node until RETRO-C2.** It reads the platform `worker_nodes` table; MemoriaHub's nodes are still registered in `mh_legacy_worker_nodes`. Until C2, use the Doctor's node checks and `/admin/settings/workers` (see `docs/platform-adoption/local-exceptions.md`).
 - **The failure rules need telemetry.** `jobs.failure_spike` and the per-type rule read the platform job metric `app.jobs.settled` (label `job_type`, never an org or user id). Enable telemetry at `/admin/settings/telemetry`.
 - **These complement, not replace, the in-app inbox.** The `enrichment_failed` notification still rolls permanent failures up per job type for administrators; alerts are the operator channel with a threshold and a resolve.
 
@@ -33,7 +33,7 @@ Notes:
 
 ### Worker node offline
 1. **Doctor** (`/admin/settings/doctor`, category Worker Nodes): heartbeat freshness and expired leases.
-2. **Worker Nodes** (`/admin/settings/nodes`): the node's last heartbeat; failed jobs claimed by it at `/admin/settings/jobs?status=failed`.
+2. **Worker Nodes** (`/admin/settings/workers`): the node's last heartbeat; failed jobs claimed by it at `/admin/settings/jobs?status=failed`.
 3. **On the node**: `memoriahub node status` and `memoriahub node logs --follow` (or the container logs). An OOM kill shows in `dmesg`. A node that was deregistered on purpose alerts until the fleet retention prunes it: disable the rule or remove the node record.
 
 ### Job failure spike / Enrichment failures by job type

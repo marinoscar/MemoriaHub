@@ -68,7 +68,7 @@ flowchart TD
     C -->|Yes| E[EnrichmentJobService.enqueue type=auto_tagging priority=20 reason=upload]
     E --> F[(enrichment_jobs table)]
     E --> G[Upsert MediaTagStatus → pending]
-    F -->|poll every ENRICHMENT_JOB_POLL_MS| H[EnrichmentJobWorker]
+    F -->|poll every JOBS_POLL_MS| H[EnrichmentJobWorker]
     H -->|atomic claim| I[AutoTaggingHandler.process]
     I --> J[AutoTaggingService.processMediaItem]
     J --> K[Read system_settings ai.features.tagging]
@@ -330,9 +330,9 @@ These are also used by face detection and any future enrichment handlers:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENRICHMENT_WORKER_ENABLED` | `true` | Set to `false` to disable the `EnrichmentJobWorker` entirely (useful in CI). Also respects legacy alias `FACE_WORKER_ENABLED`. |
-| `ENRICHMENT_JOB_POLL_MS` | `5000` | Worker polling interval in milliseconds. Also respects legacy alias `FACE_JOB_POLL_MS`. |
-| `ENRICHMENT_WORKER_CONCURRENCY` | `1` | Number of jobs to claim and process per tick. Also respects legacy alias `FACE_WORKER_CONCURRENCY`. |
+| `JOBS_WORKER_MODE` | `all` | Set to `off` to disable the in-process job worker entirely (useful in CI); `auto_tagging` is server-only, so it never runs on a node. |
+| `JOBS_POLL_MS` | `5000` | Worker polling interval in milliseconds. Also respects legacy alias `FACE_JOB_POLL_MS`. |
+| `JOBS_WORKER_CONCURRENCY` | `1` | Number of jobs to claim and process per tick. Also respects legacy alias `FACE_WORKER_CONCURRENCY`. |
 
 ### Admin Configuration Steps
 
