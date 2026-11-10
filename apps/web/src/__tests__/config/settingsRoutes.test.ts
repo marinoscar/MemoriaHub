@@ -30,6 +30,9 @@ const cardPaths = new Set(
  * (RETRO-D1).
  */
 const NOT_CARDS = new Set([
+  '/admin/settings/workers/:id/backup',
+  // The old Worker Nodes addresses redirect (RETRO-C2): the page and the backup page moved to /workers.
+  '/admin/settings/nodes',
   '/admin/settings/nodes/:id/backup',
   '/admin/settings/backup',
   '/admin/settings/storage/providers',
@@ -69,7 +72,7 @@ const ENFORCED_ADMIN_PERMISSIONS: Record<string, string> = {
   '/admin/settings/storage/insights': 'system_settings:read', // insights/insights.controller
   '/admin/settings/jobs': 'jobs:read', // enrichment/enrichment-admin.controller
   '/admin/settings/jobs/insights': 'jobs:read', // enrichment/enrichment-admin.controller
-  '/admin/settings/nodes': 'jobs:read', // nodes/nodes-admin.controller
+  '/admin/settings/workers': 'nodes:read', // platform nodes slice: NodesAdminController (RETRO-C2)
   '/admin/settings/db-backup': 'db_backup:read', // platform db-backup slice: DatabaseBackupController (RETRO-D4)
   '/admin/settings/sharing': 'sharing:admin', // public-links/admin-public-links.controller (RETRO-I4)
   '/admin/settings/workflows': 'system_settings:read', // workflows/admin/workflows-admin.controller
@@ -122,6 +125,8 @@ describe('settings routes against the registries', () => {
     '/profile',
     ADMIN_HUB_PATH,
     ...Object.keys(ENFORCED_ADMIN_PERMISSIONS),
+    '/admin/settings/workers/:id/backup',
+    '/admin/settings/nodes',
     '/admin/settings/nodes/:id/backup',
     '/admin/settings/backup',
     '/admin/settings/storage/providers',

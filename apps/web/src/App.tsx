@@ -33,6 +33,7 @@ import { IdentityWebAdaptersProvider } from '@marinoscar/platform-web/identity/h
 import { appIdentityAdapters } from './platform/identityAdapters';
 import { JobsWebAdaptersProvider } from '@marinoscar/platform-web/jobs/headless';
 import { appJobsAdapters } from './platform/jobsAdapters';
+import { appWorkersPageSlots } from './platform/nodesExtensions';
 // The packaged telemetry slice (RETRO-T2, #625): the route guard, the adapters
 // provider and this app's auth-gated binding of `GET /api/telemetry/config`.
 import { RequireTelemetryEnabled, TelemetryWebAdaptersProvider } from '@marinoscar/platform-web/telemetry/headless';
@@ -114,7 +115,8 @@ const JobsPage = lazy(() => import('./pages/Admin/JobsPage'));
 const JobInsightsPage = lazy(() =>
   import('@marinoscar/platform-web/jobs/ui').then((m) => ({ default: m.JobInsightsPage })),
 );
-const WorkersPage = lazy(() => import('./pages/Admin/WorkersPage'));
+// RETRO-C2 (#581): the packaged Worker Nodes page (`nodes:read`), with the app's row action.
+const WorkersPage = lazy(() => import('@marinoscar/platform-web/nodes/ui').then((m) => ({ default: m.WorkersPage })));
 const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 // RETRO-B1 (#597): the platform host's two admin pages, packaged. Lazy like
@@ -489,13 +491,17 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/admin/settings/nodes"
+                  path="/admin/settings/workers"
                   element={
-                    <RequirePermission permission="jobs:read" fallback={<Navigate to="/" replace />}>
-                      <WorkersPage />
+                    <RequirePermission permission="nodes:read" fallback={<Navigate to="/" replace />}>
+                      <WorkersPage slots={appWorkersPageSlots} />
                     </RequirePermission>
                   }
                 />
+                {/* Local Media Backup (epic #308) stays an app page: reached from the Worker Nodes
+                    page's "Local backup" row action. `/admin/settings/nodes*` is the old address. */}
+                <Route path="/admin/settings/workers/:id/backup" element={<NodeBackupPage />} />
+                <Route path="/admin/settings/nodes" element={<Navigate to="/admin/settings/workers" replace />} />
                 <Route path="/admin/settings/nodes/:id/backup" element={<NodeBackupPage />} />
                 {/* RETRO-B1b (#602): the packaged Doctor, behind the permission
                     `GET /api/admin/doctor` enforces. */}
@@ -552,7 +558,7 @@ function AppRoutes() {
                     Local Media Backup reachable from the Worker Nodes page. */}
                 <Route
                   path="/admin/settings/backup"
-                  element={<Navigate to="/admin/settings/nodes" replace />}
+                  element={<Navigate to="/admin/settings/workers" replace />}
                 />
                 <Route
                   path="/admin/settings/db-backup"
@@ -678,7 +684,7 @@ function AppRoutes() {
                 <Route path="/admin/tags" element={<Navigate to="/admin/settings/tagging" replace />} />
                 <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
                 <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage" replace />} />
-                <Route path="/admin/backup" element={<Navigate to="/admin/settings/nodes" replace />} />
+                <Route path="/admin/backup" element={<Navigate to="/admin/settings/workers" replace />} />
                 <Route path="/search" element={<SearchPage />} />
                 {/* The Collections hub (issue #391, spec §4.6) ADDS a route; it
                     replaces none. Every browse destination below keeps its own
