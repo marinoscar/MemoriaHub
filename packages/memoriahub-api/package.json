@@ -64,7 +64,9 @@
   "peerDependencies": {
     "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@nestjs/common": "^11.1.12",
+    "@nestjs/core": "^11.1.12",
     "@nestjs/schedule": "^6.1.0",
+    "@nestjs/swagger": "^11.4.6",
     "@prisma/client-runtime-utils": "^7.8.0",
     "zod": "^4.4.3"
   },
@@ -72,10 +74,16 @@
     "@marinoscar/memoriahub-contract": {
       "optional": true
     },
-    "@prisma/client-runtime-utils": {
+    "@nestjs/core": {
       "optional": true
     },
     "@nestjs/schedule": {
+      "optional": true
+    },
+    "@nestjs/swagger": {
+      "optional": true
+    },
+    "@prisma/client-runtime-utils": {
       "optional": true
     }
   },
@@ -83,6 +91,7 @@
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
     "@nestjs/schedule": "^6.1.0",
+    "@nestjs/swagger": "^11.4.6",
     "@nestjs/testing": "^11.1.12",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
