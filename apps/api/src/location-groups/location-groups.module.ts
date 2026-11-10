@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
@@ -17,7 +18,7 @@ import { LocationGroupRebuildHandler } from './location-group-rebuild.handler';
  * GeoModule / LocationInferenceModule / WorkflowsModule — the four consumers.
  */
 @Module({
-  imports: [PrismaModule, EnrichmentModule],
+  imports: [PrismaModule, EnrichmentModule, OwnerAccessModule],
   providers: [
     LocationGroupResolverService,
     LocationGroupRebuildService,

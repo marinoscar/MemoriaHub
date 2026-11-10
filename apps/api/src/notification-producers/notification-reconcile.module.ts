@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { MediaModule } from '../media/media.module';
-import { LinkGrantDirectory } from '../public-links/link-grant-directory.service';
+import { sharingModule } from '../platform/sharing/sharing.config';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
 import { EnrichmentFailureNotificationListener } from './enrichment-failure-notification.listener';
 import { NotificationReconcileTask } from './notification-reconcile.task';
@@ -13,14 +13,12 @@ import { ShareExpiringHandler } from './share-expiring.handler';
 
 /** The self-driven producers; see `notification-producers.module.ts`. */
 @Module({
-  imports: [MediaModule],
+  imports: [MediaModule, sharingModule],
   providers: [
     ReviewQueueReconcileService,
     NotificationReconcileTask,
     ShareExpiringService,
     ShareExpiringTask,
-    // RETRO-I4: the share sweep reads link grants (stateless; PrismaService + DefaultOrgId).
-    LinkGrantDirectory,
     EnrichmentFailureNotificationListener,
     // RETRO-C9 (#612): the two crons only enqueue; these do the work.
     ReviewQueueReconcileHandler,

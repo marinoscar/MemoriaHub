@@ -9,8 +9,8 @@
 //
 // Since RETRO-I4 a public share is a platform link grant (`grants`,
 // `grantee_kind = 'link'`, resource type `media_item` or `album`), read through
-// `LinkGrantDirectory` (the one app file allowed to list link grants across
-// records). Links that never expire (`expires_at IS NULL`), revoked links and
+// `LinkGrantsService.listExpiring` (the sharing slice's expiring-link sweep
+// seam, #1136; the platform clock decides "now"). Links that never expire (`expires_at IS NULL`), revoked links and
 // links already expired are excluded by the query, never by post-filtering.
 //
 // AUDIENCE — the link's creator (`granted_by_id`). The column is SetNull on a
@@ -37,10 +37,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { LinkGrantsService } from '@marinoscar/platform-api/sharing';
 
 import { MEMORIAHUB_EVENT_KEYS } from '../notifications-registry/memoriahub.notifications';
+import { DefaultOrgId } from '../common/tenancy/default-org-id';
 import { PrismaService } from '../prisma/prisma.service';
-import { LinkGrantDirectory, type ExpiringLink } from '../public-links/link-grant-directory.service';
+
+/** One link expiring soon: what the sweep needs. */
+export interface ExpiringLink {
+  id: string;
+  resourceType: string;
+  resourceId: string;
+  grantedById: string | null;
+  expiresAt: Date;
+}
+
+/** The two resource types a MemoriaHub link can open. */
+const LINK_TYPES: readonly string[] = ['media_item', 'album'];
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -65,7 +78,8 @@ export class ShareExpiringService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
-    private readonly links: LinkGrantDirectory,
+    private readonly links: LinkGrantsService,
+    private readonly defaultOrg: DefaultOrgId,
   ) {}
 
   /**
@@ -75,7 +89,7 @@ export class ShareExpiringService {
    * is one page regardless of deployment size. A per-share failure is logged
    * and counted, never fatal to the rest of the sweep.
    */
-  async sweep(now: Date = new Date()): Promise<ShareExpiringSweepResult> {
+  async sweep(): Promise<ShareExpiringSweepResult> {
     const result: ShareExpiringSweepResult = {
       candidates: 0,
       emitted: 0,
@@ -83,14 +97,25 @@ export class ShareExpiringService {
       errors: 0,
     };
 
-    const horizon = new Date(now.getTime() + SHARE_EXPIRY_LEAD_DAYS * MS_PER_DAY);
+    // PLATFORM-ADOPTION-SHIM(RETRO-MULTI-ORG): the single (default) organization.
+    const orgId = await this.defaultOrg.get();
+    const within = SHARE_EXPIRY_LEAD_DAYS * MS_PER_DAY;
     let cursor: string | undefined;
 
     for (;;) {
-      // `gt: now` excludes links that have ALREADY expired — warning about a
-      // link that is already dark is noise, not an action item.
-      const links = await this.links.expiringPage(now, horizon, SHARE_PAGE_SIZE, cursor);
-      if (links.length === 0) break;
+      // The window is `(now, now + within]`: links that have ALREADY expired
+      // are excluded — warning about a link that is already dark is noise.
+      const page = await this.links.listExpiring({ orgId, within, cursor, limit: SHARE_PAGE_SIZE });
+      const links: ExpiringLink[] = page.items
+        .filter((g) => LINK_TYPES.includes(g.resourceType))
+        .map((g) => ({
+          id: g.grantId,
+          resourceType: g.resourceType,
+          resourceId: g.resourceId,
+          grantedById: g.grantedById,
+          expiresAt: g.expiresAt,
+        }));
+      if (page.items.length === 0) break;
 
       for (const link of links) {
         result.candidates += 1;
@@ -107,8 +132,8 @@ export class ShareExpiringService {
         }
       }
 
-      if (links.length < SHARE_PAGE_SIZE) break;
-      cursor = links[links.length - 1]!.id;
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
     }
 
     return result;

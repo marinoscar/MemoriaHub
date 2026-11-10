@@ -25,7 +25,6 @@ import { sharingModule } from '../platform/sharing/sharing.config';
 import { AdminPublicLinksController } from './admin-public-links.controller';
 import { AdminPublicLinksService } from './admin-public-links.service';
 import { LegacyPublicShareController } from './legacy-public-share.controller';
-import { LinkGrantDirectory } from './link-grant-directory.service';
 import { PublicAlbumLinkController } from './public-album-link.controller';
 import { PublicLinkViewService } from './public-link-view.service';
 import { PublicMediaLinkController } from './public-media-link.controller';
@@ -33,7 +32,6 @@ import { PublicMediaLinkController } from './public-media-link.controller';
 @Module({
   imports: [sharingModule, MediaModule, MediaProcessingModule],
   controllers: [PublicMediaLinkController, PublicAlbumLinkController, LegacyPublicShareController, AdminPublicLinksController],
-  providers: [PublicLinkViewService, LinkGrantDirectory, AdminPublicLinksService],
-  exports: [LinkGrantDirectory],
+  providers: [PublicLinkViewService, AdminPublicLinksService],
 })
 export class PublicLinksModule {}

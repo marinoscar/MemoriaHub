@@ -72,7 +72,9 @@ function makeHandler(opts: {
   const registry = { register: jest.fn() } as never;
 
   return {
-    handler: new LocationGroupRebuildHandler(registry, prisma, systemSettings),
+    handler: new LocationGroupRebuildHandler(registry, prisma, systemSettings, {
+      allScopeIds: async () => ((await (prisma as unknown as { circle: { findMany: () => Promise<{ id: string }[]> } }).circle.findMany()) ?? []).map((c) => c.id),
+    } as never),
     prisma: prisma as unknown as {
       $executeRaw: jest.Mock;
       mediaItem: { updateMany: jest.Mock; groupBy: jest.Mock; findMany: jest.Mock };

@@ -352,12 +352,6 @@ runPlatformConformance({
       groupOwnedModels: { ...MEMORIAHUB_GROUP_OWNED_MODELS },
       resourceTypeIds: ['album', 'media_item'],
       minRoutes: 100,
-      // RETRO-I4 (#578): the app file that lists link grants across records (read-only).
-      directAccessExempt: {
-        'public-links/link-grant-directory.service.ts':
-          'PLATFORM-ADOPTION-SHIM(#578): read-only, org-scoped listing of link grants ACROSS records (the share_expiring ' +
-          'sweep and the admin public-links page); the slice lists one record\'s links only. Every write goes through the slice.',
-      },
     },
 
     // Data export (RETRO-H2, #596): every source's permission is registered and every source offers a

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobReason, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { whereDateRange } from '../search/media-where.builder';
 
@@ -11,6 +13,7 @@ export class TaggingBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /**
@@ -106,9 +109,8 @@ export class TaggingBackfillService {
     force?: boolean;
     mediaTypes?: MediaType[];
   }): Promise<{ enqueued: number; circles: number }> {
-    const allCircles = await this.prisma.circle.findMany({
-      select: { id: true },
-    });
+    // Every shared library (a platform group) plus every personal library (RETRO-N29).
+    const allCircles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;
