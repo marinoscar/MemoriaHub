@@ -68,7 +68,6 @@ model Workflow {
   updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle    Circle        @relation(fields: [circleId], references: [id], onDelete: Cascade)
   createdBy User?         @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   runs      WorkflowRun[]
 
@@ -122,7 +121,6 @@ model WorkflowRun {
 
   // Relations
   workflow   Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  circle     Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
   startedBy  User?             @relation("WorkflowRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
   approvedBy User?             @relation("WorkflowRunApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   items      WorkflowRunItem[]

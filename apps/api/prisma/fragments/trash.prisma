@@ -54,7 +54,6 @@ model TrashEmptyRun {
   finishedAt     DateTime?           @map("finished_at") @db.Timestamptz
 
   // Relations
-  circle    Circle              @relation(fields: [circleId], references: [id], onDelete: Cascade)
   startedBy User?               @relation("TrashEmptyRunStartedBy", fields: [startedById], references: [id], onDelete: SetNull)
   items     TrashEmptyRunItem[]
 

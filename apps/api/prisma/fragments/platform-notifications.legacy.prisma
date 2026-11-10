@@ -83,7 +83,6 @@ model MhLegacyNotification {
 
   // Relations
   user   User    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
-  circle Circle? @relation("CircleNotifications", fields: [circleId], references: [id], onDelete: Cascade)
   // Channel delivery audit (epic #481, issue #484)
   deliveries MhLegacyNotificationDelivery[] @relation("NotificationDeliveries")
 

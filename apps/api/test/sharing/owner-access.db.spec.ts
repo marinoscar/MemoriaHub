@@ -27,6 +27,7 @@ import { PrincipalGroupsProvider, resolveSharingModuleOptions } from '@marinosca
 import { Client } from 'pg';
 
 import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
+import { createPersonalLibrary, createSharedLibrary, dropLibraries } from '../helpers/library';
 import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
@@ -78,23 +79,17 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
     for (const [key, id] of Object.entries(users)) {
       await admin.query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
     }
-    // Written the way the app writes them; the RETRO-I2 triggers mirror the shared circle.
-    await admin.query(`INSERT INTO circles (id, name, owner_id, is_personal, updated_at) VALUES ($1, 'Circle A', $2, false, now())`, [
-      shared,
-      users.owner,
-    ]);
-    await admin.query(`INSERT INTO circles (id, name, owner_id, is_personal, updated_at) VALUES ($1, 'Library A', $2, true, now())`, [
-      personal,
-      users.owner,
-    ]);
-    for (const [userId, circleRole] of [
-      [users.owner, 'circle_admin'],
-      [users.editor, 'collaborator'],
-      [users.viewer, 'viewer'],
-    ]) {
-      await admin.query(`INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, $3)`, [shared, userId, circleRole]);
-    }
-    await admin.query(`INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, 'circle_admin')`, [personal, users.owner]);
+    // A shared library is a group; a personal library is a `personal_libraries` row (RETRO-K2).
+    await createSharedLibrary(admin, {
+      id: shared,
+      createdById: users.owner,
+      members: [
+        { userId: users.owner, role: 'admin' },
+        { userId: users.editor, role: 'editor' },
+        { userId: users.viewer, role: 'viewer' },
+      ],
+    });
+    await createPersonalLibrary(admin, { id: personal, userId: users.owner });
 
     appPrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url(role), max: 2 }) });
     const options = resolveSharingModuleOptions({
@@ -108,7 +103,7 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
   afterAll(async () => {
     await appPrisma?.$disconnect();
     if (admin) {
-      await admin.query(`DELETE FROM circles WHERE id = ANY($1::uuid[])`, [[shared, personal]]).catch(() => undefined);
+      await dropLibraries(admin, [shared, personal]).catch(() => undefined);
       await admin.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
       await admin.query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
       await admin.query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
@@ -116,7 +111,7 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
     }
   });
 
-  it('the shared circle is a group with the mapped member roles (I2 mirror)', async () => {
+  it('the shared circle is a group with its member roles', async () => {
     const rows = (
       await admin.query(`SELECT user_id::text AS u, role FROM group_members WHERE group_id = $1 ORDER BY role`, [shared])
     ).rows;
@@ -152,10 +147,10 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
     await expect(service.requireOwnerRole(users.editor, personal, [], 'viewer')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('a role change and a removal through circle_members are seen on the next check', async () => {
-    await admin.query(`UPDATE circle_members SET role = 'collaborator' WHERE circle_id = $1 AND user_id = $2`, [shared, users.viewer]);
+  it('a role change and a removal in group_members are seen on the next check', async () => {
+    await admin.query(`UPDATE group_members SET role = 'editor' WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
     await expect(service.roleIn(users.viewer, shared)).resolves.toBe('editor');
-    await admin.query(`DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, [shared, users.viewer]);
+    await admin.query(`DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
     await expect(service.requireOwnerRole(users.viewer, shared, [], 'viewer')).rejects.toBeInstanceOf(NotFoundException);
   });
 

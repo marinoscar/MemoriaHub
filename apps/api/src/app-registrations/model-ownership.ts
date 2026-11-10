@@ -10,12 +10,12 @@ import type { Prisma } from '@prisma/client';
 // (NOT NULL, the default organization) under FORCE ROW LEVEL SECURITY and is
 // owned by a group (a former shared circle) or a user (a former personal
 // circle). The other MemoriaHub models are `system`: the app runs in
-// single-organization mode, and the circle models leave with RETRO-I3/I5.
+// single-organization mode, and the circle tables left with RETRO-K2 (a personal library is a system row).
 
 const SINGLE_ORG = 'MemoriaHub app table: single-organization mode, no org_id column until Epic I.';
 
 const SYSTEM_MODELS = [
-  'UserProfile', 'Circle', 'CircleMember', 'AlbumItem', 'MediaTag', 'MediaFaceStatus', 'TagLabel',
+  'UserProfile', 'PersonalLibrary', 'AlbumItem', 'MediaTag', 'MediaFaceStatus', 'TagLabel',
   'InsightsSnapshot', 'MediaSocialStatus', 'LocationGroup', 'LocationGroupAlias', 'ReviewRunItem',
   'TrashEmptyRunItem', 'WorkflowRunItem', 'MemoryItem', 'MemoryUserState', 'MediaSyncDevice', 'MediaSyncRun',
   'MediaSyncDiagnosticReport', 'NodeBackupConfig', 'NodeBackupRun', 'EnrichmentJob', 'AiProviderCredential',

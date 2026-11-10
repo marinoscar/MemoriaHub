@@ -19,6 +19,7 @@
 // Time is pinned so "the most recently completed season" and the year-in-review
 // window are deterministic.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -217,18 +218,14 @@ describeMaybeDb('Memories — theme / seasonal / year-in-review (DB_GATED: real 
     await prisma.user.create({
       data: { id: userId, email: `memories-periodic-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories Periodic Circle', ownerId: userId },
-    });
-    await prisma.circle.create({
-      data: { id: emptyCircleId, name: 'Memories Periodic Empty', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories Periodic Circle', createdById: userId });
+    await createSharedLibrary(prisma, { id: emptyCircleId, name: 'Memories Periodic Empty', createdById: userId });
   }, 30000);
 
   afterAll(async () => {
     if (!prisma) return;
     await clearAll().catch(() => undefined);
-    await prisma.circle.deleteMany({ where: { id: { in: [circleId, emptyCircleId] } } });
+    await dropLibraries(prisma, [circleId, emptyCircleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

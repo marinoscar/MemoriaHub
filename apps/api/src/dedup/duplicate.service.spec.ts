@@ -35,16 +35,8 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import {
-  CircleRole,
-  DuplicateGroupStatus,
-  JobReason,
-  MhLegacyJobStatus,
-  MediaType,
-  ReviewRunAction,
-  ReviewRunStatus,
-  ReviewRunSubject,
-} from '@prisma/client';
+import { DuplicateGroupStatus, JobReason, MhLegacyJobStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';

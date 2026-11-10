@@ -1,3 +1,4 @@
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { Module } from '@nestjs/common';
 
 import {
@@ -20,7 +21,7 @@ import { EnrichmentHandlerRegistry } from './enrichment-handler.registry';
  * converted to native `JobHandler`s, and goes with C11.
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, OwnerAccessModule],
   providers: [
     LegacyEnrichmentHandlerAdapter,
     EnrichmentHandlerRegistry,

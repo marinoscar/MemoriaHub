@@ -55,9 +55,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
   beforeEach(() => {
     mockRegistry = { register: jest.fn() };
     mockPrisma = createMockPrismaService();
-    (mockPrisma.circle.findUnique as jest.Mock).mockImplementation(async ({ where }: { where: { id: string } }) =>
-      where.id === 'circle-1' ? { id: 'circle-1' } : null,
-    );
+    const scopes = { exists: jest.fn(async (id: string) => id === 'circle-1') };
     mockMatchingService = {
       findLiveMatchesAgainstArchived: jest.fn().mockResolvedValue([]),
       archiveMaxCandidates: 5000,
@@ -69,6 +67,7 @@ describe('FaceAutoArchiveSweepHandler', () => {
     handler = new FaceAutoArchiveSweepHandler(
       mockRegistry as unknown as JobHandlerRegistry,
       mockPrisma as unknown as PrismaService,
+      scopes as never,
       mockMatchingService as unknown as FaceMatchingService,
       mockSystemSettings as unknown as AppSystemSettingsService,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,

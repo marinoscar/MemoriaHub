@@ -37,6 +37,7 @@ import { ExportsStorageAdapter } from '../../src/platform/exports/exports-storag
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { defaultOrgId } from '../helpers/default-org';
+import { newLibrary } from '../helpers/library';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -97,12 +98,9 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
   }
 
   async function circle(ownerId: string, isPersonal: boolean, members: string[] = []): Promise<string> {
-    const created = await prisma.circle.create({ data: { name: `Circle ${randomUUID().slice(0, 8)}`, ownerId, isPersonal } });
-    await prisma.circleMember.create({ data: { circleId: created.id, userId: ownerId, role: 'circle_admin' } });
-    for (const userId of members) {
-      await prisma.circleMember.create({ data: { circleId: created.id, userId, role: 'collaborator' } });
-    }
-    return created.id;
+    return (
+      await newLibrary(prisma, { ownerId, personal: isPersonal, members: members.map((userId) => ({ userId, role: 'editor' as const })) })
+    ).id;
   }
 
   async function media(circleId: string, addedById: string, filename: string, extra: Record<string, unknown> = {}) {

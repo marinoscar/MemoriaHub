@@ -117,22 +117,31 @@ export class OwnerScopeSweepService {
       return { id: personal.id, name: personalLibraryName(personal), kind: 'personal', ownerId: personal.ownerId, createdById: null };
     }
     try {
-      const group = await this.groups.get(
-        {
-          kind: 'user',
-          userId: SYSTEM_READER_ID,
-          email: '',
-          credential: 'session',
-          roles: [],
-          permissions: [SHARING_PERMISSIONS.GROUPS_ADMIN],
-          activeOrgId: await this.defaultOrgId.get(),
-        },
-        scopeId,
-      );
+      const group = await this.groups.get(await this.adminPrincipal(), scopeId);
       return { id: group.id, name: group.name, kind: 'group', ownerId: null, createdById: group.createdById };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Deletes a group (an empty one: content makes `owner_group_id` refuse) as a read-write
+   * `groups:admin` principal. For the user removal hook only: the slice has no system delete.
+   */
+  async removeGroup(groupId: string): Promise<void> {
+    await this.groups.delete(await this.adminPrincipal(), groupId);
+  }
+
+  private async adminPrincipal() {
+    return {
+      kind: 'user' as const,
+      userId: SYSTEM_READER_ID,
+      email: '',
+      credential: 'session' as const,
+      roles: [],
+      permissions: [SHARING_PERMISSIONS.GROUPS_ADMIN],
+      activeOrgId: await this.defaultOrgId.get(),
+    };
   }
 
   /** Whether a group or a personal library has this id. */

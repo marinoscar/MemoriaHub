@@ -121,8 +121,7 @@ model User {
   mediaItems                     MediaItem[]                     @relation("MediaAddedBy")
   albums                         Album[]                         @relation("AlbumAddedBy")
   tags                           Tag[]                           @relation("TagAddedBy")
-  ownedCircles                   Circle[]                        @relation("CircleOwner")
-  circleMemberships              CircleMember[]
+  personalLibrary                PersonalLibrary?
   aiCredentialsUpdated           AiProviderCredential[]          @relation("AiCredentialUpdater")
   faceCredentialsUpdated         FaceProviderCredential[]        @relation("FaceCredentialUpdater")
   storageCredentialsUpdated      StorageProviderCredential[]     @relation("StorageCredentialUpdater")

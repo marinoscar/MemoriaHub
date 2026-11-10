@@ -141,9 +141,9 @@ describe('Memories — data model schema-drift guard (issue #301)', () => {
       );
     });
 
-    it('declares circle as a required FK to Circle with onDelete: Cascade', () => {
+    it('declares circleId as the library scope id: a plain column, no relation to a circle table (RETRO-K2)', () => {
       expect(body).toMatch(/circleId\s+String\s+@map\("circle_id"\)\s+@db\.Uuid/);
-      expect(body).toMatch(/circle\s+Circle\s+@relation\(fields:\s*\[circleId\],\s*references:\s*\[id\],\s*onDelete:\s*Cascade\)/);
+      expect(body).not.toMatch(/Circle\s+@relation/);
     });
 
     it('declares titleSource (String, not an enum) and titleModel (String?)', () => {
@@ -251,11 +251,6 @@ describe('Memories — data model schema-drift guard (issue #301)', () => {
   });
 
   describe('back-reference relations on existing models', () => {
-    it('Circle declares a memories Memory[] relation', () => {
-      const body = extractBlock(schema, 'model', 'Circle');
-      expect(body).toMatch(/memories\s+Memory\[\]/);
-    });
-
     it('Person declares a memories Memory[] relation', () => {
       const body = extractBlock(schema, 'model', 'Person');
       expect(body).toMatch(/memories\s+Memory\[\]/);
@@ -289,9 +284,6 @@ describe('Memories — data model schema-drift guard (issue #301)', () => {
       expect(migrationSql).toMatch(/CREATE TABLE "memory_items"/);
       expect(migrationSql).toMatch(/CREATE TABLE "memory_user_state"/);
 
-      expect(migrationSql).toMatch(
-        /ALTER TABLE "memories" ADD CONSTRAINT "memories_circle_id_fkey" FOREIGN KEY \("circle_id"\) REFERENCES "circles"\("id"\) ON DELETE CASCADE/,
-      );
       expect(migrationSql).toMatch(
         /ALTER TABLE "memories" ADD CONSTRAINT "memories_person_id_fkey" FOREIGN KEY \("person_id"\) REFERENCES "people"\("id"\) ON DELETE CASCADE/,
       );

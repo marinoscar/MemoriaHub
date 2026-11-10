@@ -26,6 +26,7 @@ import { BurstDetectionService } from '../../src/burst/burst-detection.service';
 import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
 import { DuplicateDetectionService } from '../../src/dedup/duplicate-detection.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { mediaItemJob } from '../helpers/platform-job';
 
@@ -91,7 +92,7 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
       await prisma.mediaItem.deleteMany({ where: { circleId } });
       await prisma.burstGroup.deleteMany({ where: { circleId } });
       await prisma.duplicateGroup.deleteMany({ where: { circleId } });
-      await prisma.circle.delete({ where: { id: circleId } });
+      await dropLibraries(prisma, [circleId]);
     }
     if (objects.length > 0) await prisma.storageObject.deleteMany({ where: { id: { in: objects } } });
     if (userId) await prisma.user.delete({ where: { id: userId } });
@@ -100,7 +101,7 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
 
   /** A circle with two burst-and-duplicate photos: A at t, B at t + 2 s. */
   async function seedPair(): Promise<{ circleId: string; a: string; b: string }> {
-    const circle = await prisma.circle.create({ data: { name: `Circle ${randomUUID()}`, ownerId: userId } });
+    const circle = await newLibrary(prisma, { ownerId: userId });
     circles.push(circle.id);
     const base = new Date('2026-06-20T10:00:00Z').getTime();
     const ids: string[] = [];

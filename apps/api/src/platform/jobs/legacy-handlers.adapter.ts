@@ -10,6 +10,7 @@ import {
 
 import type { EnrichmentHandler } from '../../enrichment/enrichment-handler.interface';
 import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../../enrichment/rate-limit.error';
+import { OwnerScopeSweepService } from '../sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ENRICHMENT_MAX_ATTEMPTS } from './queue-limits';
 import { videoJobTimeoutMs } from './legacy-env';
@@ -195,6 +196,7 @@ export class LegacyEnrichmentHandlerAdapter {
     private readonly registry: JobHandlerRegistry,
     private readonly throttle: ProviderThrottleService,
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /** The subject check: a media item or a circle must still exist; anything else (global) does. */
@@ -204,7 +206,7 @@ export class LegacyEnrichmentHandlerAdapter {
       return (await this.prisma.mediaItem.findUnique({ where: { id: job.subjectId }, select: { id: true } })) !== null;
     }
     if (job.subjectType === 'circle') {
-      return (await this.prisma.circle.findUnique({ where: { id: job.subjectId }, select: { id: true } })) !== null;
+      return this.scopes.exists(job.subjectId);
     }
     return true;
   };

@@ -85,7 +85,6 @@ model MediaEnhancement {
 
   // Relations
   mediaItem       MediaItem              @relation("MediaEnhancementSource", fields: [mediaItemId], references: [id], onDelete: Cascade)
-  circle          Circle                 @relation(fields: [circleId], references: [id], onDelete: Cascade)
   resultMediaItem MediaItem?             @relation("MediaEnhancementResult", fields: [resultMediaItemId], references: [id], onDelete: SetNull)
   createdBy       User?                  @relation("MediaEnhancementCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   batch           MediaEnhancementBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
@@ -135,7 +134,6 @@ model MediaEnhancementBatch {
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle       Circle             @relation(fields: [circleId], references: [id], onDelete: Cascade)
   createdBy    User?              @relation("MediaEnhancementBatchCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   enhancements MediaEnhancement[]
 

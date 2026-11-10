@@ -6,6 +6,7 @@ import {
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
 import { resolveCircleJob } from '../platform/jobs/media-item-job';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
 import { MediaTouchService } from '../media/media-touch.service';
@@ -42,6 +43,7 @@ export class FaceAutoArchiveSweepHandler implements JobHandler, OnModuleInit {
   constructor(
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly matchingService: FaceMatchingService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaTouch: MediaTouchService,
@@ -52,7 +54,7 @@ export class FaceAutoArchiveSweepHandler implements JobHandler, OnModuleInit {
   }
 
   async process(job: Job): Promise<void> {
-    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    const circleId = await resolveCircleJob(this.scopes, job, this.logger);
     if (!circleId) return;
 
     // Defensive guard — the admin endpoint also gates on this feature, but a job

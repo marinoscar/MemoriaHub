@@ -52,6 +52,9 @@ function makeCircleRow(memberIds: string[], name = 'Family') {
   };
 }
 
+/** The `{ name, members }` lookup behind the scope directory double (RETRO-K2: no `circles` table to mock). */
+const circleLookup = jest.fn();
+
 describe('UploadNotificationService', () => {
   let service: UploadNotificationService;
   let mockPrisma: MockPrismaService;
@@ -61,6 +64,7 @@ describe('UploadNotificationService', () => {
   const recorded = () => platform.calls('notifyCounted').map((c) => [c] as const);
 
   beforeEach(async () => {
+    circleLookup.mockReset();
     mockPrisma = createMockPrismaService();
     platform = createPlatformNotificationsMock();
     mockNotifications = { upsertCountedEvent: platform.mock.notifyCounted };
@@ -69,7 +73,7 @@ describe('UploadNotificationService', () => {
       providers: [
         UploadNotificationService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerScopeSweepService, useValue: scopesOverCircleLookup(mockPrisma.circle.findUnique as jest.Mock) },
+        { provide: OwnerScopeSweepService, useValue: scopesOverCircleLookup(circleLookup) },
         { provide: NotificationsService, useValue: platform.mock },
       ],
     }).compile();
@@ -88,7 +92,7 @@ describe('UploadNotificationService', () => {
 
   describe('audience — uploader plus every other member regardless of role', () => {
     it('increments the uploader once and every other member once each, including a viewer', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID, MEMBER_VIEWER_ID, MEMBER_COLLAB_ID]),
       );
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
@@ -122,7 +126,7 @@ describe('UploadNotificationService', () => {
     });
 
     it('a solo circle (uploader is the only member) produces ONLY the uploader row', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID]),
       );
 
@@ -136,7 +140,7 @@ describe('UploadNotificationService', () => {
     });
 
     it('a deleted circle (lookup returns null) short-circuits before any notification call', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(null);
+      circleLookup.mockResolvedValue(null);
 
       await service.recordUpload({ circleId: CIRCLE_ID, uploaderId: UPLOADER_ID });
 
@@ -152,7 +156,7 @@ describe('UploadNotificationService', () => {
     it('passes windowMs = UPLOAD_WINDOW_MS (15 minutes) on both the uploader and other-member calls', async () => {
       expect(UPLOAD_WINDOW_MS).toBe(15 * 60 * 1000);
 
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID, MEMBER_VIEWER_ID]),
       );
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
@@ -175,7 +179,7 @@ describe('UploadNotificationService', () => {
 
   describe('title templates and pluralization', () => {
     it("uploader title is '{count} item(s) uploaded to {circle}' and pluralizes correctly", async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID], 'The Smiths'),
       );
 
@@ -188,7 +192,7 @@ describe('UploadNotificationService', () => {
     });
 
     it("other-member title is '{uploader} added {count} photo(s) to {circle}' and pluralizes correctly", async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID, MEMBER_VIEWER_ID], 'The Smiths'),
       );
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
@@ -210,7 +214,7 @@ describe('UploadNotificationService', () => {
     });
 
     it('the uploader row carries no uploaderId payload (it IS the uploader)', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID]),
       );
 
@@ -273,7 +277,7 @@ describe('UploadNotificationService', () => {
         // TTL, keyed by circleId / userId respectively) on the SAME service
         // instance across loop iterations, so reusing either key would let
         // an earlier case's cached value silently leak into a later case.
-        (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+        circleLookup.mockResolvedValue(
           makeCircleRow([c.uploaderId, MEMBER_VIEWER_ID]),
         );
         (mockPrisma.user.findUnique as jest.Mock).mockResolvedValueOnce(c.user);
@@ -292,7 +296,7 @@ describe('UploadNotificationService', () => {
 
   describe('circle/user-name lookup caches', () => {
     it('does not re-query the circle or the uploader name on a second upload within the TTL', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID, MEMBER_VIEWER_ID]),
       );
       (mockPrisma.user.findUnique as jest.Mock).mockResolvedValue({
@@ -304,7 +308,7 @@ describe('UploadNotificationService', () => {
       await service.recordUpload({ circleId: CIRCLE_ID, uploaderId: UPLOADER_ID });
       await service.recordUpload({ circleId: CIRCLE_ID, uploaderId: UPLOADER_ID });
 
-      expect(mockPrisma.circle.findUnique).toHaveBeenCalledTimes(1);
+      expect(circleLookup).toHaveBeenCalledTimes(1);
       expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
       // But the notification primitive was still invoked once per upload.
       expect(mockNotifications.upsertCountedEvent).toHaveBeenCalledTimes(4); // 2 recipients x 2 uploads
@@ -312,7 +316,7 @@ describe('UploadNotificationService', () => {
 
     it('re-queries after the 30s cache TTL expires', async () => {
       const nowSpy = jest.spyOn(Date, 'now');
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID]),
       );
 
@@ -322,7 +326,7 @@ describe('UploadNotificationService', () => {
       nowSpy.mockReturnValue(1_000_000 + 30_001); // just past the 30s TTL
       await service.recordUpload({ circleId: CIRCLE_ID, uploaderId: UPLOADER_ID });
 
-      expect(mockPrisma.circle.findUnique).toHaveBeenCalledTimes(2);
+      expect(circleLookup).toHaveBeenCalledTimes(2);
       nowSpy.mockRestore();
     });
   });
@@ -333,7 +337,7 @@ describe('UploadNotificationService', () => {
 
   describe('best-effort contract', () => {
     it('recordUploadAsync() never throws even when the underlying write path rejects', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockRejectedValue(new Error('db down'));
+      circleLookup.mockRejectedValue(new Error('db down'));
 
       expect(() =>
         service.recordUploadAsync({ circleId: CIRCLE_ID, uploaderId: UPLOADER_ID }),
@@ -345,7 +349,7 @@ describe('UploadNotificationService', () => {
     });
 
     it('recordUploadAsync() never throws even when notifyCounted itself rejects', async () => {
-      (mockPrisma.circle.findUnique as jest.Mock).mockResolvedValue(
+      circleLookup.mockResolvedValue(
         makeCircleRow([UPLOADER_ID]),
       );
       mockNotifications.upsertCountedEvent.mockRejectedValue(new Error('write failed'));

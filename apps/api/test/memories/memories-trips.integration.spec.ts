@@ -20,6 +20,7 @@
 // the 18-month trip lookback are deterministic and fixtures can be seeded on
 // exact dates relative to them.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -228,12 +229,8 @@ describeMaybeDb('Memories — Trips curator (DB_GATED: real PostgreSQL)', () => 
     await prisma.user.create({
       data: { id: userId, email: `memories-trips-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories Trips Circle', ownerId: userId },
-    });
-    await prisma.circle.create({
-      data: { id: otherCircleId, name: 'Memories Trips Other Circle', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories Trips Circle', createdById: userId });
+    await createSharedLibrary(prisma, { id: otherCircleId, name: 'Memories Trips Other Circle', createdById: userId });
   }, 30000);
 
   afterAll(async () => {
@@ -241,7 +238,7 @@ describeMaybeDb('Memories — Trips curator (DB_GATED: real PostgreSQL)', () => 
     await clearMemories().catch(() => undefined);
     await clearMedia().catch(() => undefined);
     await prisma.duplicateGroup.deleteMany({ where: { circleId } }).catch(() => undefined);
-    await prisma.circle.deleteMany({ where: { id: { in: [circleId, otherCircleId] } } });
+    await dropLibraries(prisma, [circleId, otherCircleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

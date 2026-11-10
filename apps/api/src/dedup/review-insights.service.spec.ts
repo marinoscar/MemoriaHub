@@ -18,7 +18,7 @@ import { ReviewInsightsService } from './review-insights.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { CircleRole } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 
 // ---------------------------------------------------------------------------
 // Helpers

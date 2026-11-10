@@ -14,7 +14,7 @@
 import type { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { LocationInferenceHandler } from './location-inference.handler';
 import { LocationInferenceService } from './location-inference.service';
-import { circleJob, mediaItemJob, subjectPrisma, systemJob } from '../../test/helpers/platform-job';
+import { circleJob, mediaItemJob, subjectPrisma, subjectScopes, systemJob } from '../../test/helpers/platform-job';
 
 describe('LocationInferenceHandler', () => {
   let handler: LocationInferenceHandler;
@@ -30,7 +30,8 @@ describe('LocationInferenceHandler', () => {
 
     handler = new LocationInferenceHandler(
       mockRegistry as unknown as JobHandlerRegistry,
-      subjectPrisma({ mediaItems: { 'media-1': 'circle-1' }, circles: ['circle-1', 'circle-xyz', 'circle-from-job'] }) as never,
+      subjectPrisma({ mediaItems: { 'media-1': 'circle-1' } }) as never,
+      subjectScopes(['circle-1', 'circle-xyz', 'circle-from-job']) as never,
       mockLocationInferenceService as unknown as LocationInferenceService,
     );
   });

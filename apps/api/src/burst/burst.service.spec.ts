@@ -26,14 +26,8 @@ import { DuplicateDetectionService } from '../dedup/duplicate-detection.service'
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import {
-  BurstGroupStatus,
-  CircleRole,
-  MediaType,
-  ReviewRunAction,
-  ReviewRunStatus,
-  ReviewRunSubject,
-} from '@prisma/client';
+import { BurstGroupStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';

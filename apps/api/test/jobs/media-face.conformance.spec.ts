@@ -112,9 +112,6 @@ function subjectLookups() {
     mediaItem: {
       findUnique: async ({ where }: { where: { id: string } }) => world.mediaItems.get(where.id) ?? null,
     },
-    circle: {
-      findUnique: async ({ where }: { where: { id: string } }) => (world.circles.has(where.id) ? { id: where.id } : null),
-    },
   };
 }
 
@@ -322,6 +319,7 @@ function buildAutoArchiveSweep(): FaceAutoArchiveSweepHandler {
   return new FaceAutoArchiveSweepHandler(
     registry,
     prisma as never,
+    { exists: async (id: string) => world.circles.has(id) } as never,
     matching as never,
     settings as never,
     { touchMediaItems: async () => undefined } as never,

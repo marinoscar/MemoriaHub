@@ -110,9 +110,6 @@ function subjectLookups() {
     mediaItem: {
       findUnique: async ({ where }: { where: { id: string } }) => world.mediaItems.get(where.id) ?? null,
     },
-    circle: {
-      findUnique: async ({ where }: { where: { id: string } }) => (world.circles.has(where.id) ? { id: where.id } : null),
-    },
   };
 }
 
@@ -201,7 +198,7 @@ describe('duplicate_detection', () => {
 // ---------------------------------------------------------------------------
 
 const buildBatch = () =>
-  new DuplicateDetectionBatchHandler(registry, subjectLookups() as never, dedupService() as never);
+  new DuplicateDetectionBatchHandler(registry, subjectLookups() as never, { exists: async (id: string) => world.circles.has(id) } as never, dedupService() as never);
 
 describe('duplicate_detection_batch', () => {
   staticContract('duplicate_detection_batch', buildBatch);

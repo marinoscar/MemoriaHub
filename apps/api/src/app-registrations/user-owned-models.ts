@@ -53,11 +53,11 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
     rationale: "The user's profile-picture state and person link; meaningless without the user.",
   },
   {
-    model: 'CircleMember',
+    model: 'PersonalLibrary',
     ownerField: 'userId',
     purge: 'delete',
-    export: 'include',
-    rationale: "The user's membership of a circle, with the per-circle role.",
+    export: 'exclude',
+    rationale: "The id of the user's personal library (the scope id its content rows carry); meaningless without the user. A data reset keeps it (the manifest's keep line).",
   },
   {
     model: 'MediaSyncDevice',
@@ -89,13 +89,6 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
   },
 
   // ---- actor-only models -------------------------------------------------------
-  {
-    model: 'Circle',
-    actorFields: ['ownerId'],
-    purge: 'retain',
-    export: 'exclude',
-    rationale: 'A circle has members besides its owner; the owner hands it over or deletes it before the user can be deleted.',
-  },
   { model: 'MediaItem', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
   { model: 'Album', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },
   { model: 'Tag', actorFields: ['addedById', 'ownerUserId'], purge: 'retain', export: 'exclude', rationale: SHARED_CONTENT },

@@ -838,9 +838,21 @@ export class ApiClient {
   // shape the controller returns underneath it.
   // -------------------------------------------------------------------------
 
-  /** Create a circle (POST /api/circles) — returns the created circle record. */
-  createCircle(body: { name: string; description?: string }): Promise<Circle> {
-    return this.post<Circle>('/api/circles', body);
+  /**
+   * Create a shared library (RETRO-K2, #588): a platform group (`POST /api/groups`; its id is the
+   * scope id every upload names). Before RETRO-K2 this posted to `/api/circles` because the group's
+   * circle row was written asynchronously and an upload straight after could race it; the circle
+   * tables are gone, so the group is enough. A server older than RETRO-I6 has no `/api/groups`
+   * (404): the legacy `POST /api/circles` is used then.
+   */
+  async createCircle(body: { name: string; description?: string }): Promise<Circle> {
+    try {
+      const group = await this.post<{ id: string; name: string }>('/api/groups', body);
+      return { id: group.id, name: group.name, isPersonal: false };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return this.post<Circle>('/api/circles', body);
+      throw err;
+    }
   }
 
   /** Fetch one media item; a 404 surfaces as ApiError(404). */

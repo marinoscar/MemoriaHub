@@ -81,9 +81,9 @@ export const MEMORIAHUB_CONTENT_STEP: FactoryResetStepDef = {
   id: 'memoriahub.content',
   phase: 'before-users',
   description:
-    'Every circle with its photos, videos, albums, tags, people, faces, memories, workflows and review history; profiles and paired devices.',
+    'The content of every library (photos, videos, albums, tags, people, faces, memories, workflows and review history); profiles and paired devices. The libraries and their members stay.',
   summary:
-    'Every circle, photo, video, album, tag, person, face and memory, with their stored files, and every paired phone',
+    'Every photo, video, album, tag, person, face and memory, with their stored files, and every paired phone (the libraries and their members stay)',
   async run(tx: any): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
     // Files without a storage-object row, before the rows that name them go.
@@ -96,7 +96,12 @@ export const MEMORIAHUB_CONTENT_STEP: FactoryResetStepDef = {
     counts.albums = await wipe(tx, 'album');
     counts.tags = await wipe(tx, 'tag');
     counts.people = await wipe(tx, 'person');
-    counts.circles = await wipe(tx, 'circle');
+    // The libraries themselves stay (RETRO-K2): a shared library is a platform group (the platform keeps
+    // groups and memberships through a reset, as it keeps accounts) and a personal library is only an id.
+    // They are emptied: every content table above is wiped.
+    for (const model of ['burstGroup', 'duplicateGroup', 'locationSuggestion', 'mediaEnhancementBatch', 'reviewRun', 'trashEmptyRun', 'workflow', 'memory']) {
+      counts[model] = await wipe(tx, model);
+    }
 
     counts.profiles = await wipe(tx, 'userProfile');
     counts.devices = await wipe(tx, 'mediaSyncDevice');
@@ -112,7 +117,7 @@ export const MEMORIAHUB_LEFTOVERS_STEP: FactoryResetStepDef = {
   id: 'memoriahub.leftovers',
   phase: 'deployment',
   description:
-    'Legacy notification tables and the frozen pre-platform job archive; a new personal circle for the administrator.',
+    'Legacy notification tables and the frozen pre-platform job archive; a personal library for the administrator if they have none.',
   async run(tx: any, ctx): Promise<Record<string, number>> {
     const counts: Record<string, number> = {
       legacyNotifications: await wipe(tx, 'mhLegacyNotification'),
@@ -122,23 +127,12 @@ export const MEMORIAHUB_LEFTOVERS_STEP: FactoryResetStepDef = {
       personalCircles: 0,
     };
 
-    // The first-run state: every user has a personal circle (`ensurePersonalCircle`
-    // in `circles/identity-listeners.ts` creates it at sign-up, which the
-    // administrator will not repeat).
-    const existing = await tx.circle.findFirst({ where: { ownerId: ctx.actorUserId, isPersonal: true }, select: { id: true } });
+    // The first-run state: every user has a personal library (`ensurePersonalCircle` in
+    // `circles/identity-listeners.ts` creates it at sign-up, which the administrator will not repeat).
+    // Personal libraries are kept by the reset; the actor gets one if they somehow have none.
+    const existing = await tx.personalLibrary.findUnique({ where: { userId: ctx.actorUserId }, select: { id: true } });
     if (!existing) {
-      const actor = await tx.user.findUnique({
-        where: { id: ctx.actorUserId },
-        select: { email: true, displayName: true, providerDisplayName: true },
-      });
-      const circle = await tx.circle.create({
-        data: {
-          name: `${actor?.displayName || actor?.providerDisplayName || actor?.email || 'My'}'s Library`,
-          ownerId: ctx.actorUserId,
-          isPersonal: true,
-        },
-      });
-      await tx.circleMember.create({ data: { circleId: circle.id, userId: ctx.actorUserId, role: 'circle_admin' } });
+      await tx.personalLibrary.create({ data: { userId: ctx.actorUserId } });
       counts.personalCircles = 1;
     }
     return counts;

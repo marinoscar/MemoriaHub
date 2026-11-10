@@ -4,7 +4,6 @@
 // relative to apps/api/src. A new file with raw SQL fails the suite until it is
 // added here with a reason; prefer the typed client.
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
-  { file: 'circles/identity-listeners.ts', why: "Per-user transaction advisory lock (pg_advisory_xact_lock) serialising the personal-circle create and the invite claim; the key is the event's user id." },
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
   { file: 'dedup/duplicate-backfill.service.ts', why: 'pgvector candidate queries scoped by circle id; not user data.' },
   { file: 'dedup/duplicate-detection.service.ts', why: 'pgvector KNN queries scoped by circle id; not user data.' },

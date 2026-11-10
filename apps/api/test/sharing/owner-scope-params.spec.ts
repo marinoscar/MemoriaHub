@@ -86,12 +86,11 @@ describe('owner-scope parameters through the app (RETRO-I3)', () => {
   async function asMemberOf(scopeId: string, personal: boolean) {
     const user = await createMockContributorUser(context);
     const m = context.prismaMock;
-    m.circle.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) =>
-      where.id === scopeId ? { id: scopeId, isPersonal: personal, ownerId: personal ? user.id : randomUUID() } : null,
-    );
-    m.circle.findFirst.mockImplementation(async ({ where }: { where: { ownerId: string; isPersonal: boolean } }) =>
-      where.ownerId === user.id && where.isPersonal ? { id: PERSONAL } : null,
-    );
+    // The PersonalLibraryStore (RETRO-K2): by scope id -> its owner, by user id -> the library id.
+    m.personalLibrary.findUnique.mockImplementation(async ({ where }: { where: { id?: string; userId?: string } }) => {
+      if (where.id !== undefined) return where.id === scopeId && personal ? { userId: user.id } : where.id === PERSONAL ? { userId: user.id } : null;
+      return where.userId === user.id ? { id: PERSONAL } : null;
+    });
     m.circleMember.findUnique.mockResolvedValue({ circleId: scopeId, userId: user.id, role: 'viewer', joinedAt: new Date() });
     m.album.findMany.mockResolvedValue([]);
     m.album.count.mockResolvedValue(0);

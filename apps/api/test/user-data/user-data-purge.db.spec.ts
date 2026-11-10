@@ -39,6 +39,7 @@ import {
 import { memoriaHubCircleContentRemovalHook } from '../../src/platform/user-data/user-removal.hook';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { newLibrary } from '../helpers/library';
 import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
@@ -76,12 +77,10 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
   }
 
   async function circle(ownerId: string, isPersonal: boolean, members: string[] = []): Promise<string> {
-    const created = await prisma.circle.create({ data: { name: `Circle ${randomUUID()}`, ownerId, isPersonal } });
-    await prisma.circleMember.create({ data: { circleId: created.id, userId: ownerId, role: 'circle_admin' } });
-    for (const userId of members) {
-      await prisma.circleMember.create({ data: { circleId: created.id, userId, role: 'collaborator' } });
-    }
-    return created.id;
+    // A shared library is a group, a personal one a personal_libraries row (RETRO-K2).
+    return (
+      await newLibrary(prisma, { ownerId, personal: isPersonal, members: members.map((userId) => ({ userId, role: 'editor' as const })) })
+    ).id;
   }
 
   async function object(uploadedById: string, storageKey: string, provider = 's3', bucket: string | null = 'bucket-a') {
@@ -240,7 +239,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     expect(await prisma.tag.count({ where: { circleId: personal } })).toBe(0);
     expect(await prisma.person.count({ where: { circleId: personal } })).toBe(0);
     expect(await prisma.face.count({ where: { circleId: personal } })).toBe(0);
-    expect(await prisma.circle.count({ where: { id: personal } })).toBe(1);
+    expect(await prisma.personalLibrary.count({ where: { id: personal } })).toBe(1);
     expect(deletedKeys.get('s3:bucket-a')).toEqual(
       expect.arrayContaining([mine.original.storageKey, mine.thumb.storageKey]),
     );
@@ -266,7 +265,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
 
     await expect(service.prepareUserRemoval(alpha)).rejects.toBeInstanceOf(SharedCircleOwnershipError);
     await expect(service.prepareUserRemoval(alpha)).rejects.toThrow(/Transfer ownership/);
-    expect(await prisma.circle.count({ where: { id: owned } })).toBe(1);
+    expect(await prisma.group.count({ where: { id: owned } })).toBe(1);
     expect(await prisma.mediaItem.count({ where: { id: kept.item.id } })).toBe(1);
   });
 
@@ -287,7 +286,8 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     expect(counts.circlesDeleted).toBe(2);
     expect(counts.mediaReassigned).toBe(1);
 
-    expect(await prisma.circle.count({ where: { id: { in: [personal, solo] } } })).toBe(0);
+    expect(await prisma.personalLibrary.count({ where: { id: personal } })).toBe(0);
+    expect(await prisma.group.count({ where: { id: solo } })).toBe(0);
     expect(allDeleted()).toContain(mine.original.storageKey);
     expect((await prisma.mediaItem.findUnique({ where: { id: contributed.item.id } }))?.addedById).toBe(beta);
     expect((await prisma.album.findUnique({ where: { id: album.id } }))?.addedById).toBe(beta);
@@ -326,9 +326,11 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     expect(await prisma.person.count()).toBe(0);
     expect(await prisma.face.count()).toBe(0);
     expect(await prisma.mediaSyncDevice.count({ where: { id: sharedDevice.id } })).toBe(0);
-    // The first-run state: exactly the actor's own personal circle.
-    const circles = await prisma.circle.findMany({ select: { ownerId: true, isPersonal: true } });
-    expect(circles).toEqual([{ ownerId: actor, isPersonal: true }]);
+    // The first-run state: exactly the actor's own personal library (the other users' left with them,
+    // and so did the group they were the last members of).
+    const libraries = await prisma.personalLibrary.findMany({ select: { userId: true } });
+    expect(libraries).toEqual([{ userId: actor }]);
+    expect(await prisma.group.count()).toBe(0);
     // Kept: configuration (the tag vocabulary) and backups (their files are never swept).
     expect(await prisma.tagLabel.count()).toBe(labelsBefore);
     expect(await prisma.storageObject.count({ where: { id: backupObject.id } })).toBe(1);
