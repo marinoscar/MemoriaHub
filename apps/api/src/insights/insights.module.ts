@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { InsightsService } from './insights.service';
-import { InsightsRefreshTask } from './insights-refresh.task';
-import { InsightsController } from './insights.controller';
-import { StorageInsightsHandler } from './storage-insights.handler';
+import { InsightsModule as InsightsSliceModule } from '@marinoscar/memoriahub-api/insights';
 
+import { InsightsController } from './insights.controller';
+
+/**
+ * The web app's binding of the insights slice (RETRO-J10, #624): the slice (service, handler,
+ * refresh task) lives in `@marinoscar/memoriahub-api/insights`; the controller stays here until the
+ * identity-backed guard lands in the package.
+ */
 @Module({
-  imports: [PrismaModule, EnrichmentModule],
+  imports: [InsightsSliceModule.forRoot()],
   controllers: [InsightsController],
-  providers: [InsightsService, InsightsRefreshTask, StorageInsightsHandler],
-  exports: [InsightsService],
+  exports: [InsightsSliceModule],
 })
 export class InsightsModule {}

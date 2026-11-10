@@ -12,31 +12,40 @@
 // throws.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { JobsService, enqueueHousekeepingJob } from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../prisma/prisma.service';
-import { InsightsService } from './insights.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubJobsPort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import { InsightsService } from './insights.service.js';
+
+/**
+ * Enqueues the storage insights refresh once the configured interval has elapsed.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class InsightsRefreshTask {
   private readonly logger = new Logger(InsightsRefreshTask.name);
 
   constructor(
     private readonly insights: InsightsService,
-    private readonly systemSettings: AppSystemSettingsService,
-    private readonly jobs: JobsService,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /** The hourly tick. */
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledRefresh(): Promise<void> {
     try {
-      const hours =
-        (await this.systemSettings.getSettingValue<number>(
-          'storage.insights.refreshIntervalHours',
-        )) ?? 4;
+      const { value: storage } = await this.settings.readSystem<
+        { insights?: { refreshIntervalHours?: number } } | undefined
+      >('storage');
+      const hours = storage?.insights?.refreshIntervalHours ?? 4;
 
       // Skip if a refresh is already queued or running — enqueue idempotency
       // also deduplicates, but checking first avoids log noise.
@@ -54,13 +63,7 @@ export class InsightsRefreshTask {
         return;
       }
 
-      await enqueueHousekeepingJob({
-        jobs: this.jobs,
-        prisma: this.prisma,
-        logger: this.logger,
-        type: 'storage_insights',
-        what: 'storage insights refresh',
-      });
+      await this.jobs.enqueueHousekeeping({ type: 'storage_insights', what: 'storage insights refresh' });
     } catch (err) {
       this.logger.error('Storage insights schedule check failed', err as Error);
     }

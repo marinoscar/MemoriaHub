@@ -17,6 +17,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/testing`: an in-memory fake of every port and `describeMemoriahubPortsConformance`, the kit a binding must pass ([slice README](src/testing/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/media`: the media slice, `MediaModule.forRoot` and `UploadEnrichmentRegistry` ([slice README](src/media/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/media/testing`: `describeMediaSliceConformance`, the kit the media slice's guarantees are checked with ([slice README](src/media/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/insights`: the storage insights slice, `InsightsModule.forRoot` and `InsightsService` ([slice README](src/insights/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
 
 ## Install and peer dependencies
 

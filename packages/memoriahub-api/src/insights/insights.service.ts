@@ -7,12 +7,16 @@
 // provide retries, restart-survival, and visibility in the jobs dashboard.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, InsightsSnapshot, JobReason } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { EnrichmentJob } from '@prisma/client';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, type MemoriahubJobsPort } from '../ports/index.js';
+import type { InsightsDb } from './data/insights-db.js';
+
+/**
+ * The storage-metrics snapshot. Byte fields are strings (a BigInt never reaches JSON).
+ *
+ * @stability experimental
+ */
 export interface InsightsMetrics {
   totalBytes: string;   // BigInt serialised as string for JSON safety
   photoBytes: string;
@@ -42,6 +46,11 @@ interface StorageBreakdownRow {
   bytes: bigint;
 }
 
+/**
+ * The in-flight or last-known state of the global `storage_insights` job.
+ *
+ * @stability experimental
+ */
 export interface RefreshState {
   state: 'idle' | 'pending' | 'running' | 'failed';
   jobId: string | null;
@@ -55,19 +64,43 @@ interface MediaTypeRow {
   bytes: bigint;
 }
 
+/**
+ * A snapshot row as the slice reads it.
+ *
+ * @stability experimental
+ */
+export interface InsightsSnapshotRow {
+  /** The row id. */
+  id: string;
+  /** `ready` once computed. */
+  status: string;
+  /** The metrics document ({@link InsightsMetrics}). */
+  metrics: unknown;
+  /** When it was computed. */
+  computedAt: Date | null;
+  /** How long the computation took. */
+  durationMs: number | null;
+}
+
+/**
+ * Computes and caches the global storage-metrics snapshot, and enqueues its refresh.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class InsightsService {
   private readonly logger = new Logger(InsightsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: InsightsDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
   // ---------------------------------------------------------------------------
   // computeMetrics
   // ---------------------------------------------------------------------------
 
+  /** Aggregates the whole library: items and bytes by type, faces, tagged items, stored bytes by provider and kind. */
   async computeMetrics(): Promise<InsightsMetrics> {
     const [rows, totalFaces, taggedItems, breakdownRows] = await Promise.all([
       this.prisma.$queryRaw<MediaTypeRow[]>`
@@ -133,7 +166,8 @@ export class InsightsService {
   // getLatest
   // ---------------------------------------------------------------------------
 
-  async getLatest(): Promise<InsightsSnapshot | null> {
+  /** The latest ready snapshot, or null when none was computed. */
+  async getLatest(): Promise<InsightsSnapshotRow | null> {
     return this.prisma.insightsSnapshot.findFirst({
       where: { status: 'ready' },
       orderBy: { createdAt: 'desc' },
@@ -152,7 +186,8 @@ export class InsightsService {
   // enqueue idempotency and atomic job claim.
   // ---------------------------------------------------------------------------
 
-  async runComputation(): Promise<InsightsSnapshot> {
+  /** Computes and stores a ready snapshot and prunes the older ones. Throws so the queue records the error and retries. */
+  async runComputation(): Promise<InsightsSnapshotRow> {
     const start = Date.now();
     const metrics = await this.computeMetrics();
     const durationMs = Date.now() - start;
@@ -160,7 +195,7 @@ export class InsightsService {
     const snapshot = await this.prisma.insightsSnapshot.create({
       data: {
         status: 'ready',
-        metrics: metrics as unknown as Prisma.JsonObject,
+        metrics: metrics as unknown as Record<string, unknown>,
         computedAt: new Date(),
         durationMs,
       },
@@ -183,14 +218,17 @@ export class InsightsService {
   // so the queue idempotency deduplicates by (type, mediaItemId IS NULL).
   // ---------------------------------------------------------------------------
 
-  async enqueueRefresh(reason: JobReason, priority: number): Promise<EnrichmentJob> {
-    return this.enrichmentJobService.enqueue({
-      type: 'storage_insights',
-      mediaItemId: null,
-      circleId: null,
-      reason,
-      priority,
-    });
+  /**
+   * Enqueues the global `storage_insights` job and answers its id and status (`pending`, or
+   * `running` when a job was already in flight).
+   *
+   * @param reason - why (`rerun` for a manual refresh).
+   * @param priority - the queue priority (0 pre-empts the scheduled 100).
+   */
+  async enqueueRefresh(reason: string, priority: number): Promise<{ id: string; status: string }> {
+    const { id } = await this.jobs.enqueue({ type: 'storage_insights', reason, payload: {}, priority });
+    const row = await this.prisma.job.findUnique({ where: { id }, select: { status: true } });
+    return { id, status: (row?.status as string | undefined) ?? 'pending' };
   }
 
   // ---------------------------------------------------------------------------
@@ -202,6 +240,7 @@ export class InsightsService {
   // a global job, so the type alone identifies it).
   // ---------------------------------------------------------------------------
 
+  /** The state of the newest `storage_insights` job row. */
   async getRefreshState(): Promise<RefreshState> {
     const job = await this.prisma.job.findFirst({
       where: { type: 'storage_insights' },
@@ -218,7 +257,7 @@ export class InsightsService {
       case 'running':
         return { state: 'running', jobId: job.id, lastError: null };
       case 'failed':
-        return { state: 'failed', jobId: job.id, lastError: job.lastError };
+        return { state: 'failed', jobId: job.id, lastError: job.lastError as string | null };
       case 'succeeded':
       default:
         return { state: 'idle', jobId: null, lastError: null };

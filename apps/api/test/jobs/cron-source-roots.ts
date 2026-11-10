@@ -30,5 +30,13 @@ export const API_SOURCE_ROOT = join(__dirname, '..', '..', 'src');
  */
 export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'media');
 
+/**
+ * The package's domain slices moved by RETRO-J10 (#624) (insights, location, dedup, burst, social,
+ * enhancement): each root is scanned like the app's own tree and its raw-SQL allowlist paths are
+ * relative to it.
+ */
+const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
+export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights'].map((slice) => join(SLICES_ROOT, slice));
+
 /** Every root the two scans read. */
-export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT];
+export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT, ...J10_SLICE_SOURCE_ROOTS];

@@ -8,17 +8,16 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { StorageInsightsHandler } from './storage-insights.handler';
-import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
-import { InsightsService } from './insights.service';
-import { systemJob } from '../../test/helpers/platform-job';
+import { MEMORIAHUB_JOBS, type MemoriahubJob } from '../../src/ports/index.js';
+import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler.js';
+import { InsightsService } from '../../src/insights/insights.service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return systemJob('storage_insights', { id: 'job-si-1', status: 'running', reason: 'backfill', priority: 100, attempts: 1, ...overrides });
+function makeJob(overrides: Partial<MemoriahubJob> = {}): MemoriahubJob {
+  return { id: 'job-si-1', type: 'storage_insights', subjectType: null, subjectId: null, payload: {}, attempts: 1, orgId: null, ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -27,12 +26,12 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 
 describe('StorageInsightsHandler', () => {
   let handler: StorageInsightsHandler;
-  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockInsightsService: jest.Mocked<Pick<InsightsService, 'runComputation'>>;
 
   beforeEach(async () => {
     mockRegistry = {
-      register: jest.fn(),
+      registerHandler: jest.fn(),
     };
 
     mockInsightsService = {
@@ -51,7 +50,7 @@ describe('StorageInsightsHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StorageInsightsHandler,
-        { provide: JobHandlerRegistry, useValue: mockRegistry },
+        { provide: MEMORIAHUB_JOBS, useValue: mockRegistry },
         { provide: InsightsService, useValue: mockInsightsService },
       ],
     }).compile();
@@ -84,19 +83,19 @@ describe('StorageInsightsHandler', () => {
   // =========================================================================
 
   describe('onModuleInit', () => {
-    it('registers itself in the platform JobHandlerRegistry on init', () => {
+    it('registers itself in the jobs port on init', () => {
       handler.onModuleInit();
 
-      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+      expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
     });
 
     it('registers exactly once per call', () => {
       // Call onModuleInit a second time (e.g., to simulate a restart scenario)
       // — the registry receives another register call; the handler does not
       // de-duplicate (that is the registry's responsibility).
-      const callsBefore = (mockRegistry.register as jest.Mock).mock.calls.length;
+      const callsBefore = mockRegistry.registerHandler.mock.calls.length;
       handler.onModuleInit();
-      expect(mockRegistry.register).toHaveBeenCalledTimes(callsBefore + 1);
+      expect(mockRegistry.registerHandler).toHaveBeenCalledTimes(callsBefore + 1);
     });
   });
 
@@ -124,7 +123,7 @@ describe('StorageInsightsHandler', () => {
 
     it('ignores the job — a global job has no subject', async () => {
       const job = makeJob({ subjectType: null, subjectId: null });
-      await (handler.process as (job: Job) => Promise<void>)(job);
+      await handler.process();
 
       // runComputation is called regardless of job fields
       expect(mockInsightsService.runComputation).toHaveBeenCalledTimes(1);

@@ -8,8 +8,7 @@
 
 import { Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { JobReason } from '@prisma/client';
-import { InsightsService, InsightsMetrics, RefreshState } from './insights.service';
+import { InsightsService, type InsightsMetrics, type RefreshState } from '@marinoscar/memoriahub-api/insights';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 
@@ -84,7 +83,7 @@ export class InsightsController {
   })
   async refresh(): Promise<InsightsRefreshDto> {
     // Priority 0 = highest priority; pre-empts scheduled (priority 100) jobs
-    const job = await this.insightsService.enqueueRefresh(JobReason.rerun, 0);
+    const job = await this.insightsService.enqueueRefresh('rerun', 0);
     return { jobId: job.id, state: job.status };
   }
 }

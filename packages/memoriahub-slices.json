@@ -101,6 +101,11 @@
       "ports",
       "core",
       "testing"
+    ],
+    "insights": [
+      "ports",
+      "core",
+      "media"
     ]
   }
 }

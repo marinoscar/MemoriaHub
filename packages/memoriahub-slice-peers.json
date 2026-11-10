@@ -195,6 +195,12 @@
         "@marinoscar/memoriahub-contract",
         "zod"
       ]
+    },
+    "insights": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/schedule"
+      ]
     }
   }
 }

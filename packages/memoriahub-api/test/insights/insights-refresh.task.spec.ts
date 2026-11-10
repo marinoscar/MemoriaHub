@@ -12,11 +12,9 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobsService } from '@marinoscar/platform-api/jobs';
-import { InsightsRefreshTask } from './insights-refresh.task';
-import { PrismaService } from '../prisma/prisma.service';
-import { InsightsService } from './insights.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_SETTINGS } from '../../src/ports/index.js';
+import { InsightsRefreshTask } from '../../src/insights/insights-refresh.task.js';
+import { InsightsService } from '../../src/insights/insights.service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,9 +44,8 @@ function makeRefreshState(state: 'idle' | 'pending' | 'running' | 'failed') {
 describe('InsightsRefreshTask', () => {
   let task: InsightsRefreshTask;
   let mockInsights: jest.Mocked<Pick<InsightsService, 'getLatest' | 'getRefreshState'>>;
-  let mockJobs: { enqueue: jest.Mock };
-  let mockPrisma: { job: { findFirst: jest.Mock } };
-  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
+  let mockJobs: { enqueueHousekeeping: jest.Mock };
+  let mockSettings: { getSettingValue: jest.Mock };
 
   beforeEach(async () => {
     mockInsights = {
@@ -56,8 +53,7 @@ describe('InsightsRefreshTask', () => {
       getRefreshState: jest.fn().mockResolvedValue(makeRefreshState('idle')),
     };
 
-    mockJobs = { enqueue: jest.fn().mockResolvedValue({ id: 'job-new', status: 'pending' }) };
-    mockPrisma = { job: { findFirst: jest.fn().mockResolvedValue(null) } };
+    mockJobs = { enqueueHousekeeping: jest.fn().mockResolvedValue({ id: 'job-new' }) };
 
     mockSettings = {
       getSettingValue: jest.fn().mockResolvedValue(4),
@@ -67,9 +63,17 @@ describe('InsightsRefreshTask', () => {
       providers: [
         InsightsRefreshTask,
         { provide: InsightsService, useValue: mockInsights },
-        { provide: AppSystemSettingsService, useValue: mockSettings },
-        { provide: JobsService, useValue: mockJobs },
-        { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: MEMORIAHUB_SETTINGS,
+          // The port answers the whole `storage` namespace; the spec keeps seeding the one value it cares about.
+          useValue: {
+            readSystem: async (name: string) => ({
+              value: { insights: { refreshIntervalHours: await mockSettings.getSettingValue(`${name}.insights.refreshIntervalHours`) } },
+              version: 1,
+            }),
+          },
+        },
+        { provide: MEMORIAHUB_JOBS, useValue: mockJobs },
       ],
     }).compile();
 
@@ -90,7 +94,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
 
     it('does NOT call the enqueue when state is running', async () => {
@@ -98,7 +102,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
   });
 
@@ -116,7 +120,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
 
     it('does NOT call the enqueue when computedAt is exactly at the threshold minus 1 ms', async () => {
@@ -128,7 +132,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
   });
 
@@ -145,21 +149,19 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
     });
 
-    it('enqueues with backfill reason and low priority (100)', async () => {
+    it('asks the jobs port for the global housekeeping job (the host applies priority 100)', async () => {
       const staleComputedAt = new Date(Date.now() - 5 * 3_600_000);
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(makeSnapshot(staleComputedAt) as any);
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledWith({
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledWith({
         type: 'storage_insights',
-        reason: 'backfill',
-        orgId: null,
-        priority: 100,
+        what: 'storage insights refresh',
       });
     });
 
@@ -171,7 +173,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
     });
 
     it('respects a custom interval: 8h interval with snapshot 5h old → skips', async () => {
@@ -182,7 +184,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
   });
 
@@ -197,7 +199,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
     });
 
     it('calls the enqueue when latest snapshot has no computedAt', async () => {
@@ -208,7 +210,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -225,7 +227,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).not.toHaveBeenCalled();
+      expect(mockJobs.enqueueHousekeeping).not.toHaveBeenCalled();
     });
 
     it('uses 4 hours when getSettingValue returns null', async () => {
@@ -236,7 +238,7 @@ describe('InsightsRefreshTask', () => {
 
       await task.handleScheduledRefresh();
 
-      expect(mockJobs.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
     });
 
     it('reads the interval from storage.insights.refreshIntervalHours', async () => {
@@ -259,7 +261,7 @@ describe('InsightsRefreshTask', () => {
     it('does not throw when the enqueue fails (errors are swallowed)', async () => {
       mockInsights.getRefreshState.mockResolvedValue(makeRefreshState('idle'));
       mockInsights.getLatest.mockResolvedValue(null);
-      mockJobs.enqueue.mockRejectedValue(new Error('enqueue error'));
+      mockJobs.enqueueHousekeeping.mockRejectedValue(new Error('enqueue error'));
 
       await expect(task.handleScheduledRefresh()).resolves.not.toThrow();
     });

@@ -1,8 +1,8 @@
 // The files allowed to issue raw SQL ($queryRaw / $executeRaw), each with the reason
 // (the `user-owned-data` conformance suite, RETRO-B2 #611). Raw SQL bypasses the
 // typed client, so every statement is listed where a reviewer sees it. Paths are
-// relative to apps/api/src (or to packages/memoriahub-api/src/media for the media slice,
-// RETRO-J5). A new file with raw SQL fails the suite until it is
+// relative to apps/api/src (or to packages/memoriahub-api/src/<slice> for a slice moved into the
+// package: media RETRO-J5, insights RETRO-J10). A new file with raw SQL fails the suite until it is
 // added here with a reason; prefer the typed client.
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
@@ -13,7 +13,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
   { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },
   { file: 'face/face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id.' },
-  { file: 'insights/insights.service.ts', why: 'Storage insight aggregates over the whole deployment.' },
+  { file: 'insights.service.ts', why: 'Storage insight aggregates over the whole deployment. In the insights slice package (packages/memoriahub-api/src/insights).' },
   { file: 'legacy/media-shares-import.ts', why: 'Data migration only (RETRO-I4): reads the dropped-from-Prisma media_shares table, finds already-imported link grants by token hash, and re-keys share_expiring stamps; no request input, run by the operator script.' },
   { file: 'location-groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },
   { file: 'media/media.service.ts', why: 'Gallery, map-cluster and aggregate queries Prisma cannot express, scoped by circle id.' },

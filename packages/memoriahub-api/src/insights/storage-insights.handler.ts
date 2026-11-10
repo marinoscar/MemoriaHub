@@ -12,29 +12,43 @@
 // library; nothing for a node without database access to compute).
 // =============================================================================
 
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { JobHandlerRegistry, type JobExecutionProfile, type JobHandler } from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { InsightsService } from './insights.service';
+import {
+  MEMORIAHUB_JOBS,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import { InsightsService } from './insights.service.js';
 
+/**
+ * Recomputes the global storage-metrics snapshot.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class StorageInsightsHandler implements JobHandler, OnModuleInit {
+export class StorageInsightsHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'storage_insights';
 
+  /** The label in the admin job list. */
   readonly label = 'Storage insights';
 
   /** A handful of aggregate scans: 15 minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly insights: InsightsService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
+  /** Runs one attempt. */
   async process(): Promise<void> {
     // The snapshot is the source of the `app.storage.bytes` / `app.storage.trash.bytes` gauges (RETRO-T3).
     await this.insights.runComputation();

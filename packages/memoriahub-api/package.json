@@ -39,6 +39,14 @@
       "types": "./dist/media/testing/index.d.ts",
       "default": "./dist/media/testing/index.js"
     },
+    "./insights": {
+      "types": "./dist/insights/index.d.ts",
+      "default": "./dist/insights/index.js"
+    },
+    "./insights/testing": {
+      "types": "./dist/insights/testing/index.d.ts",
+      "default": "./dist/insights/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -47,6 +55,7 @@
     "core",
     "testing",
     "media",
+    "insights",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

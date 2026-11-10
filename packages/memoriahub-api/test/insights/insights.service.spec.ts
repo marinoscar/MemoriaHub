@@ -9,14 +9,12 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MhLegacyJobStatus, JobReason } from '@prisma/client';
-import { InsightsService } from './insights.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { InsightsService } from '../../src/insights/insights.service.js';
+import { createMockDb, type MockDb } from '../helpers/mock-db.js';
+
+type MhLegacyJobStatus = 'pending' | 'running' | 'failed' | 'succeeded';
+const MhLegacyJobStatus = { pending: 'pending', running: 'running', failed: 'failed', succeeded: 'succeeded' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,11 +50,11 @@ function makeJob(status: MhLegacyJobStatus, lastError: string | null = null) {
 
 describe('InsightsService', () => {
   let service: InsightsService;
-  let mockPrisma: MockPrismaService;
-  let mockEnrichmentJobService: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
+  let mockPrisma: MockDb;
+  let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockEnrichmentJobService = {
       enqueue: jest.fn(),
     };
@@ -64,8 +62,8 @@ describe('InsightsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InsightsService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_JOBS, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 
@@ -326,28 +324,27 @@ describe('InsightsService', () => {
   // =========================================================================
 
   describe('enqueueRefresh', () => {
-    it('calls enrichmentJobService.enqueue with type=storage_insights and null scope', async () => {
-      const job = makeJob(MhLegacyJobStatus.pending);
-      mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
+    it('enqueues the global storage_insights job through the jobs port (no subject)', async () => {
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-uuid-1', deduplicated: false });
+      (mockPrisma.job.findUnique as jest.Mock).mockResolvedValue({ status: 'pending' });
 
-      await service.enqueueRefresh(JobReason.rerun, 0);
+      await service.enqueueRefresh('rerun', 0);
 
       expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith({
         type: 'storage_insights',
-        mediaItemId: null,
-        circleId: null,
-        reason: JobReason.rerun,
+        reason: 'rerun',
+        payload: {},
         priority: 0,
       });
     });
 
-    it('returns the job returned by enrichmentJobService.enqueue', async () => {
-      const job = makeJob(MhLegacyJobStatus.pending);
-      mockEnrichmentJobService.enqueue.mockResolvedValue(job as any);
+    it('returns the job id and its current status (running when one was already in flight)', async () => {
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-uuid-1', deduplicated: true });
+      (mockPrisma.job.findUnique as jest.Mock).mockResolvedValue({ status: 'running' });
 
-      const result = await service.enqueueRefresh(JobReason.backfill, 100);
+      const result = await service.enqueueRefresh('backfill', 100);
 
-      expect(result).toEqual(job);
+      expect(result).toEqual({ id: 'job-uuid-1', status: 'running' });
     });
   });
 

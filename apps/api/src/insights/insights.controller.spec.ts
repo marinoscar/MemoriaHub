@@ -12,7 +12,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MhLegacyJobStatus } from '@prisma/client';
 import { InsightsController } from './insights.controller';
-import { InsightsService } from './insights.service';
+import { InsightsService } from '@marinoscar/memoriahub-api/insights';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 
@@ -162,7 +162,7 @@ describe('InsightsController', () => {
       await controller.refresh();
 
       expect(mockInsightsService.enqueueRefresh).toHaveBeenCalledWith(
-        expect.anything(), // JobReason.rerun
+        'rerun',
         0,                 // highest priority
       );
     });
