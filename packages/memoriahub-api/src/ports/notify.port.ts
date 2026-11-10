@@ -53,12 +53,17 @@ export interface MemoriahubNotificationEventDef {
   label: string;
   /** What triggers it, for the preferences matrix. */
   description: string;
-  /** The channels it can use (`inbox`, `push`, `email`). */
+  /** The channels it can use (`browser`, `push`, `email`). */
   channels: readonly string[];
   /** Whether a user who has not chosen receives it. Defaults to true. */
   defaultEnabled?: boolean;
   /** True when the user cannot switch it off. */
   mandatory?: boolean;
+  /**
+   * How repeated occurrences are stored: `event` (one row each, the default), `counted` (folded into one
+   * row whose count grows) or `state` (one live row per user and scope, refreshed in place).
+   */
+  kind?: 'event' | 'state' | 'counted';
   /** The email template name, when `email` is a channel. */
   emailTemplate?: string;
   /** Renders the in-app / OS notification from the event data. */

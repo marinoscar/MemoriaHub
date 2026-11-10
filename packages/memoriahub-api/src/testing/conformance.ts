@@ -448,7 +448,7 @@ export function describeMemoriahubPortsConformance(
     // ---- ai ------------------------------------------------------------------
     h.describe('ai', () => {
       rule('ai', 'answers a text request and never returns key material', async ({ port, userId, feature }) => {
-        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', systemCalls: true });
+        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', needs: ['responses'], systemCalls: true });
         const client = port.forUser(userId ?? 'user-1', { feature: feature ?? 'conformance' });
         const response = await client.respond({ input: 'Say hello' });
         h.expect(typeof response.outputText).toBe('string');
@@ -456,13 +456,13 @@ export function describeMemoriahubPortsConformance(
       });
 
       rule('ai', 'serves a system call with no acting user', async ({ port, feature }) => {
-        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', systemCalls: true });
+        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', needs: ['responses'], systemCalls: true });
         const response = await port.forSystem({ feature: feature ?? 'conformance', orgId: null }).respond({ input: 'Say hello' });
         h.expect(typeof response.outputText).toBe('string');
       });
 
       rule('ai', 'streams text, then tool calls, then exactly one done', async ({ port, userId, feature }) => {
-        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', systemCalls: true });
+        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', needs: ['responses'], systemCalls: true });
         const client = port.forUser(userId ?? 'user-1', { feature: feature ?? 'conformance' });
         const events = [];
         for await (const event of await client.openStream({ input: 'Find beaches' })) events.push(event);
@@ -472,14 +472,14 @@ export function describeMemoriahubPortsConformance(
       });
 
       rule('ai', 'returns one vector per input, in order', async ({ port, userId, feature }) => {
-        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', systemCalls: true });
+        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', needs: ['responses'], systemCalls: true });
         const client = port.forUser(userId ?? 'user-1', { feature: feature ?? 'conformance' });
         const result = await client.embed({ model: 'text-embedding-3-small', input: ['one', 'two'] });
         h.expect(result.vectors).toHaveLength(2);
       });
 
       rule('ai', 'declares a feature idempotently', ({ port }) => {
-        const feature = { id: unique('conf_feature'), label: 'Once', systemCalls: true };
+        const feature = { id: unique('conf_feature').replace(/-/g, '_'), label: 'Once', needs: ['responses'], systemCalls: true };
         port.registerFeature(feature);
         h.expect(() => port.registerFeature(feature)).not.toThrow();
       });
@@ -487,7 +487,7 @@ export function describeMemoriahubPortsConformance(
       rule('ai', 'fails with a classified MemoriahubAiError that holds no key material', async (under) => {
         const { port, userId, feature, failNextWith } = under;
         if (!failNextWith) return;
-        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', systemCalls: true });
+        port.registerFeature({ id: feature ?? 'conformance', label: 'Conformance', needs: ['responses'], systemCalls: true });
         const client = port.forUser(userId ?? 'user-1', { feature: feature ?? 'conformance' });
         for (const errorClass of MEMORIAHUB_AI_ERROR_CLASSES) {
           if (!(await failNextWith(errorClass))) continue;
@@ -646,8 +646,8 @@ export function describeMemoriahubPortsConformance(
     // ---- notify --------------------------------------------------------------
     h.describe('notify', () => {
       rule('notify', 'never throws, for a registered event or an unregistered one', async ({ port, event }) => {
-        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['inbox'] }]);
-        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['inbox'] }]);
+        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['browser'] }]);
+        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['browser'] }]);
         h.expect(() => port.notify(event.key, event.userId, { count: 1 })).not.toThrow();
         h.expect(() => port.notify('conformance.unregistered', event.userId, {})).not.toThrow();
         h.expect(() => port.notifyCounted(event.key, event.userId, { count: 1 }, { scopeId: 'scope-1', windowMs: 1000 })).not.toThrow();
@@ -656,7 +656,7 @@ export function describeMemoriahubPortsConformance(
       });
 
       rule('notify', 'answers an awaited send with the rate-limit verdict and never rejects', async ({ port, event }) => {
-        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['inbox'] }]);
+        port.registerEvents([{ key: event.key, label: 'Conformance event', description: 'Raised by the kit', channels: ['browser'] }]);
         const result = await port.notifyNow(event.key, event.userId, {});
         h.expect(typeof result.rateLimited).toBe('boolean');
         await h.expect(port.notifyNow('conformance.unregistered', event.userId, {})).resolves.toBeDefined();

@@ -6,6 +6,7 @@ import {
   type MemoriahubAiClient,
   type MemoriahubAiEmbedResult,
   type MemoriahubAiErrorClass,
+  type MemoriahubAiFeatureDef,
   type MemoriahubAiImageEditRequest,
   type MemoriahubAiImageResult,
   type MemoriahubAiPort,
@@ -46,7 +47,7 @@ export class FakeMemoriahubAi implements MemoriahubAiPort {
   readonly calls: FakeAiCall[] = [];
 
   /** The registered features. */
-  readonly features = new Map<string, { id: string; label: string; description?: string; systemCalls?: boolean }>();
+  readonly features = new Map<string, MemoriahubAiFeatureDef>();
 
   /** The text `respond` answers with. */
   responseText = 'ok';
@@ -99,7 +100,7 @@ export class FakeMemoriahubAi implements MemoriahubAiPort {
    *
    * @param feature - the feature.
    */
-  registerFeature(feature: { id: string; label: string; description?: string; systemCalls?: boolean }): void {
+  registerFeature(feature: MemoriahubAiFeatureDef): void {
     this.features.set(feature.id, feature);
   }
 

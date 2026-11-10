@@ -244,6 +244,24 @@ export interface MemoriahubAiTranscription {
 }
 
 /**
+ * An AI feature the host meters, limits and lists. Its id is permanent once usage rows carry it (lower snake case).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAiFeatureDef {
+  /** The feature id (`semantic_embedding`). */
+  id: string;
+  /** What an administrator reads in the usage report. */
+  label: string;
+  /** The usage report's group (`Search`, `Tagging`). */
+  group?: string;
+  /** The model capabilities the feature needs (`responses`, `tools`, `streaming`, `vision_input`, `embeddings`). */
+  needs: readonly string[];
+  /** True when a background job runs the feature with no acting user (`forSystem`). */
+  systemCalls?: boolean;
+}
+
+/**
  * Options of one call.
  *
  * @stability experimental
@@ -429,7 +447,7 @@ export interface MemoriahubAiPort {
    * Declares an AI feature the host meters, limits and lists. Idempotent per id; call it at import or
    * start-up time, before the host freezes its registries.
    *
-   * @param feature - the id, a label, and whether system (job) calls are allowed.
+   * @param feature - the id, a label, the capabilities it needs, and whether system (job) calls are allowed.
    */
-  registerFeature(feature: { id: string; label: string; description?: string; systemCalls?: boolean }): void;
+  registerFeature(feature: MemoriahubAiFeatureDef): void;
 }
