@@ -9,3 +9,5 @@ export * from './dedup/index.js';
 export * from './review-runs/index.js';
 export * from './location/index.js';
 export * from './workflows/index.js';
+export * from './media/index.js';
+export * from './media-sync/index.js';

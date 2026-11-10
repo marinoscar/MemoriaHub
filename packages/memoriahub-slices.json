@@ -35,6 +35,12 @@
     "dedup": [],
     "review-runs": [],
     "location": [],
-    "workflows": []
+    "workflows": [],
+    "media": [
+      "primitives"
+    ],
+    "media-sync": [
+      "primitives"
+    ]
   }
 }

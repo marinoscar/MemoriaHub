@@ -10,7 +10,9 @@
     "./src/dedup/index.ts",
     "./src/review-runs/index.ts",
     "./src/location/index.ts",
-    "./src/workflows/index.ts"
+    "./src/workflows/index.ts",
+    "./src/media/index.ts",
+    "./src/media-sync/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-contract",

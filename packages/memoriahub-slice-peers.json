@@ -90,6 +90,16 @@
       "peers": [
         "zod"
       ]
+    },
+    "media": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "media-sync": {
+      "peers": [
+        "zod"
+      ]
     }
   }
 }

@@ -61,6 +61,16 @@
       "import": "./dist/esm/workflows/index.js",
       "require": "./dist/cjs/workflows/index.js"
     },
+    "./media": {
+      "types": "./dist/types/media/index.d.ts",
+      "import": "./dist/esm/media/index.js",
+      "require": "./dist/cjs/media/index.js"
+    },
+    "./media-sync": {
+      "types": "./dist/types/media-sync/index.d.ts",
+      "import": "./dist/esm/media-sync/index.js",
+      "require": "./dist/cjs/media-sync/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -72,6 +82,8 @@
     "review-runs",
     "location",
     "workflows",
+    "media",
+    "media-sync",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
