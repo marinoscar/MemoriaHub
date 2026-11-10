@@ -1,19 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '../search/media-where.builder';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA, type MemoriahubAccessPort } from '../ports/index.js';
+import { whereCapturedAtRange } from './host/captured-at-range.js';
+import type { FaceDb } from './host/face-db.js';
+import { JobReason, MediaFaceStatusType, MediaType } from './host/face-enums.js';
+import { FaceJobs } from './host/face-jobs.js';
 
+/**
+ * The admin backfills: detection for the photos and videos of one or every circle, and the auto-archive sweep for every circle that has archived faces.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class FaceBackfillService {
   private readonly logger = new Logger(FaceBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    private readonly enrichmentJobService: FaceJobs,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
   /**
@@ -26,7 +30,7 @@ export class FaceBackfillService {
 
     const from = opts.from ? new Date(opts.from) : undefined;
     const to = opts.to ? new Date(opts.to) : undefined;
-    const dateWhere = whereDateRange(from, to);
+    const dateWhere = whereCapturedAtRange(from, to);
 
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {
@@ -102,7 +106,7 @@ export class FaceBackfillService {
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number }> {
     // Every shared library (a platform group) plus every personal library (RETRO-N29).
-    const allCircles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
+    const allCircles = (await this.access.allScopeIds()).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;
@@ -146,20 +150,16 @@ export class FaceBackfillService {
     const eligibleCircles = groups.filter((g) => g._count > 0);
     let enqueued = 0;
 
-    for (const group of eligibleCircles) {
-      // Per-circle guard: skip if a sweep is already pending/running for this circle.
-      const existing = await this.prisma.job.findFirst({
-        where: {
-          type: 'face_auto_archive_sweep',
-          subjectType: 'circle',
-          subjectId: group.circleId,
-          status: { in: ['pending', 'running'] },
-        },
-      });
+    // Per-circle guard: skip a circle whose sweep is already pending/running.
+    const busy = await this.enrichmentJobService.circlesWithActive(
+      'face_auto_archive_sweep',
+      eligibleCircles.map((g) => g.circleId as string),
+    );
 
-      if (existing) {
+    for (const group of eligibleCircles) {
+      if (busy.has(group.circleId)) {
         this.logger.debug(
-          `Skipping face-auto-archive sweep for circle ${group.circleId}: job ${existing.id} already ${existing.status}`,
+          `Skipping face-auto-archive sweep for circle ${group.circleId}: a sweep is already pending or running`,
         );
         continue;
       }

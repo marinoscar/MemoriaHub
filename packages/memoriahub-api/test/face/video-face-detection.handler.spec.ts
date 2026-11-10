@@ -76,7 +76,8 @@ jest.mock('sharp', () => {
 
 // Mock prepareImageForProcessing — applied orientation upright, returns the
 // buffer as-is with non-zero dimensions so the handler continues normally.
-jest.mock('../media-processing/image-orientation.util', () => ({
+jest.mock('@marinoscar/memoriahub-compute/image', () => ({
+  ...jest.requireActual('@marinoscar/memoriahub-compute/image'),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('frame-prepared'),
     width: 640,
@@ -112,22 +113,20 @@ jest.mock('fs', () => {
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
 import { tmpdir } from 'os';
-import type { Job } from '@marinoscar/platform-api/jobs';
-import { mediaItemJob } from '../../test/helpers/platform-job';
-import { VideoFaceDetectionHandler } from './video-face-detection.handler';
-import { VideoFaceDetectionService } from './video-face-detection.service';
-import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
+import type { MemoriahubJob } from '../../src/ports/index.js';
+import { mediaItemJob } from './support/mock-jobs.js';
+import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler.js';
+import { VideoFaceDetectionService } from '../../src/face/video-face-detection.service.js';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 
 // ---------------------------------------------------------------------------
 // Test-scoped factory helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<Job> = {}): Job {
+function makeJob(overrides: Partial<MemoriahubJob> = {}): MemoriahubJob {
   return mediaItemJob('video_face_detection', 'media-video-1', 'circle-1', {
     id: 'job-video-1',
-    status: 'running',
     attempts: 1,
-    startedAt: new Date(),
     ...overrides,
   });
 }
@@ -185,10 +184,10 @@ describe('VideoFaceDetectionHandler', () => {
   // Shared mocks — rebuilt in beforeEach so each test starts clean
   // -------------------------------------------------------------------------
 
-  let mockRegistry: { register: jest.Mock };
+  let mockJobs: { registerHandler: jest.Mock };
+  let mockSystemSettings: { face: jest.Mock };
   let mockPrisma: {
     mediaItem: { findUnique: jest.Mock };
-    systemSettings: { findUnique: jest.Mock };
     storageObject: { upsert: jest.Mock };
     face: { deleteMany: jest.Mock; create: jest.Mock; update: jest.Mock };
     mediaFaceStatus: { upsert: jest.Mock };
@@ -204,7 +203,7 @@ describe('VideoFaceDetectionHandler', () => {
   };
   let mockFrameExtractor: { extractFrames: jest.Mock };
   let mockMatchingService: { cosineSimilarity: jest.Mock; clusterThreshold: number };
-  let mockResolver: { getActiveProvider: jest.Mock; getProviderFor: jest.Mock };
+  let mockResolver: { active: jest.Mock; forLocation: jest.Mock };
   let mockActiveStorageProvider: { upload: jest.Mock; getBucket: jest.Mock };
   let mockObjectStorageProvider: { download: jest.Mock };
   let mockEnrichmentJobService: { recordModel: jest.Mock };
@@ -237,7 +236,6 @@ describe('VideoFaceDetectionHandler', () => {
     // -----------------------------------------------------------------------
     mockPrisma = {
       mediaItem: { findUnique: jest.fn() },
-      systemSettings: { findUnique: jest.fn() },
       storageObject: { upsert: jest.fn().mockResolvedValue({ id: 'so-1' }) },
       face: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
@@ -301,10 +299,10 @@ describe('VideoFaceDetectionHandler', () => {
     };
 
     mockResolver = {
-      getProviderFor: jest.fn().mockResolvedValue(mockObjectStorageProvider),
-      getActiveProvider: jest.fn().mockResolvedValue({
+      forLocation: jest.fn().mockResolvedValue(mockObjectStorageProvider),
+      active: jest.fn().mockResolvedValue({
         id: 'active-s3',
-        provider: mockActiveStorageProvider,
+        store: mockActiveStorageProvider,
       }),
     };
 
@@ -316,23 +314,20 @@ describe('VideoFaceDetectionHandler', () => {
     // Prisma: default media item and system settings
     // -----------------------------------------------------------------------
     mockPrisma.mediaItem.findUnique.mockResolvedValue(makeMediaItem());
-    mockPrisma.systemSettings.findUnique.mockResolvedValue({
-      key: 'global',
-      value: {
-        face: {
-          video: {
-            enabled: true,
-            sampleIntervalSeconds: 5,
-            maxFramesPerVideo: 60,
-          },
+    mockSystemSettings = {
+      face: jest.fn().mockResolvedValue({
+        video: {
+          enabled: true,
+          sampleIntervalSeconds: 5,
+          maxFramesPerVideo: 60,
         },
-      },
-    });
+      }),
+    };
 
     // -----------------------------------------------------------------------
     // Registry mock
     // -----------------------------------------------------------------------
-    mockRegistry = { register: jest.fn() };
+    mockJobs = { registerHandler: jest.fn() };
 
     // -----------------------------------------------------------------------
     // Instantiate the service (holds all the pipeline logic), then the thin
@@ -351,12 +346,14 @@ describe('VideoFaceDetectionHandler', () => {
       mockEnrichmentJobService as any,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
       { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } as any,
+      mockSystemSettings as any,
     );
 
     handler = new VideoFaceDetectionHandler(
-      mockRegistry as any,
+      mockJobs as any,
       mockPrisma as any,
       videoFaceDetectionService,
+      {},
     );
   });
 
@@ -371,9 +368,9 @@ describe('VideoFaceDetectionHandler', () => {
   });
 
   describe('onModuleInit()', () => {
-    it('registers itself with the handler registry', () => {
+    it('registers itself with the queue', () => {
       handler.onModuleInit();
-      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+      expect(mockJobs.registerHandler).toHaveBeenCalledWith(handler);
     });
   });
 
@@ -547,10 +544,7 @@ describe('VideoFaceDetectionHandler', () => {
 
   describe('face.video.enabled = false', () => {
     beforeEach(() => {
-      mockPrisma.systemSettings.findUnique.mockResolvedValue({
-        key: 'global',
-        value: { face: { video: { enabled: false } } },
-      });
+      mockSystemSettings.face.mockResolvedValue({ video: { enabled: false } });
     });
 
     it('skips frame extraction and does not call storageObject.upsert', async () => {
@@ -861,7 +855,7 @@ describe('VideoFaceDetectionHandler', () => {
         expect.any(String),
       );
       // Not a single byte downloaded, no frames, no thumbnails.
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockObjectStorageProvider.download).not.toHaveBeenCalled();
       expect(mockFrameExtractor.extractFrames).not.toHaveBeenCalled();
       expect(mockPrisma.storageObject.upsert).not.toHaveBeenCalled();

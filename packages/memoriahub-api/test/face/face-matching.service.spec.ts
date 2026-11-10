@@ -5,16 +5,16 @@
  * and threshold configuration from ConfigService.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { FACE_CONFIG } from '../../src/face/host/face-config.js';
 import {
   FaceMatchingService,
   DEFAULT_FACE_MATCH_THRESHOLD,
   DEFAULT_FACE_CLUSTER_THRESHOLD,
   DEFAULT_FACE_CLUSTER_MIN_SIZE,
   DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD,
-} from './face-matching.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+} from '../../src/face/face-matching.service.js';
+import { MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -42,8 +42,8 @@ describe('FaceMatchingService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceMatchingService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: ConfigService, useValue: mockConfig },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: FACE_CONFIG, useValue: mockConfig },
       ],
     }).compile();
 
@@ -162,8 +162,8 @@ describe('FaceMatchingService', () => {
       const module = await Test.createTestingModule({
         providers: [
           FaceMatchingService,
-          { provide: PrismaService, useValue: mockPrisma },
-          { provide: ConfigService, useValue: config },
+          { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+          { provide: FACE_CONFIG, useValue: config },
         ],
       }).compile();
       return module.get<FaceMatchingService>(FaceMatchingService);
@@ -555,8 +555,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -587,8 +587,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -606,8 +606,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -630,8 +630,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -653,8 +653,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: appConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: appConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -682,8 +682,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -702,8 +702,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -723,8 +723,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -744,8 +744,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -762,8 +762,8 @@ describe('FaceMatchingService', () => {
         const module: TestingModule = await Test.createTestingModule({
           providers: [
             FaceMatchingService,
-            { provide: PrismaService, useValue: mockPrisma },
-            { provide: ConfigService, useValue: pgvectorConfig },
+            { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+            { provide: FACE_CONFIG, useValue: pgvectorConfig },
           ],
         }).compile();
         const customService = module.get<FaceMatchingService>(FaceMatchingService);
@@ -855,8 +855,8 @@ describe('FaceMatchingService', () => {
       const module = await Test.createTestingModule({
         providers: [
           FaceMatchingService,
-          { provide: PrismaService, useValue: mockPrisma },
-          { provide: ConfigService, useValue: customConfig },
+          { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+          { provide: FACE_CONFIG, useValue: customConfig },
         ],
       }).compile();
 
@@ -882,8 +882,8 @@ describe('FaceMatchingService', () => {
       const module = await Test.createTestingModule({
         providers: [
           FaceMatchingService,
-          { provide: PrismaService, useValue: mockPrisma },
-          { provide: ConfigService, useValue: customConfig },
+          { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+          { provide: FACE_CONFIG, useValue: customConfig },
         ],
       }).compile();
 
@@ -901,8 +901,8 @@ describe('FaceMatchingService', () => {
       const module = await Test.createTestingModule({
         providers: [
           FaceMatchingService,
-          { provide: PrismaService, useValue: mockPrisma },
-          { provide: ConfigService, useValue: customConfig },
+          { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+          { provide: FACE_CONFIG, useValue: customConfig },
         ],
       }).compile();
 

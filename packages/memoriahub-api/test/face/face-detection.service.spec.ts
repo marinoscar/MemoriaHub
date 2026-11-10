@@ -25,49 +25,25 @@ jest.mock('sharp', () => {
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
-import { FaceDetectionService } from './face-detection.service';
-import { FaceDetectionCore } from './face-detection-core.service';
-import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceSettingsService } from './face-settings.service';
-import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { FaceMatchingService } from './face-matching.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaFaceStatusType } from '@prisma/client';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { FaceDetectionService } from '../../src/face/face-detection.service.js';
+import { FaceDetectionCore } from '../../src/face/face-detection-core.service.js';
+import { MediaTouchService } from '../../src/media/index.js';
+import { MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { FaceSettingsService } from '../../src/face/face-settings.service.js';
+import { FaceProviderRegistry } from '../../src/face/providers/face-provider.registry.js';
+import { FaceMatchingService } from '../../src/face/face-matching.service.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
+import { MediaFaceStatusType } from '../../src/face/host/face-enums.js';
+import { FaceJobs } from '../../src/face/host/face-jobs.js';
+import { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
+import type { MediaJobContext } from '../../src/face/host/media-item-job.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'face_detection',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+function makeJob(overrides: Partial<MediaJobContext> = {}): MediaJobContext {
+  return { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1', ...overrides };
 }
 
 function makeMediaItem(overrides: Partial<{
@@ -104,12 +80,13 @@ describe('FaceDetectionService', () => {
   let mockRegistry: { get: jest.Mock };
   let mockProvider: { detect: jest.Mock; capabilities: Record<string, never> };
   let mockStorageProvider: { download: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockObjectStore: { forLocation: jest.Mock };
+  let faceSettingsValue: any;
   let mockMatchingService: {
     matchFaceToPerson: jest.Mock;
   };
   let mockEnrichmentJobService: { recordModel: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock; face: jest.Mock };
   let mockMediaTouch: { touchMediaItems: jest.Mock };
 
   beforeEach(async () => {
@@ -125,7 +102,7 @@ describe('FaceDetectionService', () => {
     mockFaceSettingsService = { resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }) };
     mockStorageProvider = { download: jest.fn().mockResolvedValue(makeReadable()) };
     // Resolver returns mockStorageProvider so download assertions are unchanged.
-    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    mockObjectStore = { forLocation: jest.fn().mockResolvedValue(mockStorageProvider) };
     mockMatchingService = {
       matchFaceToPerson: jest.fn().mockResolvedValue(null),
     };
@@ -139,19 +116,15 @@ describe('FaceDetectionService', () => {
         features: {},
         face: { autoArchive: { matchThreshold: 0.45 } },
       }),
+      face: jest.fn(async () => faceSettingsValue),
     };
 
     // Default system settings: face detection configured
-    (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
-      key: 'global',
-      value: {
-        face: {
-          features: {
-            detection: { provider: 'compreface', model: 'arcface-r100-v1' },
-          },
-        },
+    faceSettingsValue = {
+      features: {
+        detection: { provider: 'compreface', model: 'arcface-r100-v1' },
       },
-    });
+    };
 
     // Default media item
     (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
@@ -179,14 +152,13 @@ describe('FaceDetectionService', () => {
       providers: [
         FaceDetectionService,
         FaceDetectionCore, // Real instance wired to the mocked dependencies below
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         { provide: FaceSettingsService, useValue: mockFaceSettingsService },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: mockObjectStore },
         { provide: FaceMatchingService, useValue: mockMatchingService },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
+        { provide: FaceSystemSettings, useValue: mockSystemSettings },
         { provide: MediaTouchService, useValue: mockMediaTouch },
       ],
     }).compile();
@@ -522,10 +494,7 @@ describe('FaceDetectionService', () => {
   describe('no provider configured', () => {
     it('calls markFailed and throws when face detection provider is not configured', async () => {
       // Return system settings with no face provider
-      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
-        key: 'global',
-        value: { face: { features: { detection: { model: 'arcface-r100-v1' } } } },
-      });
+      faceSettingsValue = { features: { detection: { model: 'arcface-r100-v1' } } };
 
       await expect(service.processMediaItem(makeJob())).rejects.toThrow(
         'Face detection provider not configured in system settings',
@@ -540,8 +509,8 @@ describe('FaceDetectionService', () => {
       );
     });
 
-    it('throws when systemSettings row is null (not configured at all)', async () => {
-      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue(null);
+    it('throws when the face settings are absent (not configured at all)', async () => {
+      faceSettingsValue = undefined;
 
       await expect(service.processMediaItem(makeJob())).rejects.toThrow();
 
@@ -708,10 +677,7 @@ describe('FaceDetectionService', () => {
     });
 
     it('does NOT call recordModel when provider is not configured', async () => {
-      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
-        key: 'global',
-        value: { face: { features: { detection: { model: 'arcface-r100-v1' } } } },
-      });
+      faceSettingsValue = { features: { detection: { model: 'arcface-r100-v1' } } };
 
       await expect(service.processMediaItem(makeJob())).rejects.toThrow();
 
@@ -852,7 +818,7 @@ describe('FaceDetectionService', () => {
     });
 
     it('does not throw when resolving the active provider fails during the mismatch check', async () => {
-      (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValueOnce(null);
+      mockSystemSettings.face.mockResolvedValueOnce(undefined);
 
       await expect(
         service.persistFaces(makeJob(), makeCannedResult()),

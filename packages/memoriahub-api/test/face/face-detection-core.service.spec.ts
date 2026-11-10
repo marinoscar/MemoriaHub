@@ -20,7 +20,7 @@
  *  - A person match invalidates that person's cached centroid.
  *
  * FaceProviderRegistry, FaceSettingsService, FaceMatchingService, and
- * AppSystemSettingsService are all replaced with mocks — no transitive
+ * FaceSystemSettings are all replaced with mocks — no transitive
  * dependencies, no real DB.
  */
 
@@ -29,13 +29,13 @@ import {
   FaceDetectionCore,
   NormalizedFace,
   VideoFaceFields,
-} from './face-detection-core.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceSettingsService } from './face-settings.service';
-import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { FaceMatchingService } from './face-matching.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+} from '../../src/face/face-detection-core.service.js';
+import { MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { FaceSettingsService } from '../../src/face/face-settings.service.js';
+import { FaceProviderRegistry } from '../../src/face/providers/face-provider.registry.js';
+import { FaceMatchingService } from '../../src/face/face-matching.service.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
+import { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,7 +56,7 @@ function makeFace(overrides: Partial<TestFace> = {}): TestFace {
   } as TestFace;
 }
 
-/** Settings shape returned by AppSystemSettingsService.getSettings() */
+/** Settings shape returned by FaceSystemSettings.getSettings() */
 function makeSettings(
   faceAutoArchive: boolean,
   matchThreshold = 0.45,
@@ -136,11 +136,11 @@ describe('FaceDetectionCore — persistAndMatchFaces (auto-archive)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceDetectionCore,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         { provide: FaceSettingsService, useValue: mockFaceSettingsService },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
         { provide: FaceMatchingService, useValue: mockMatchingService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: FaceSystemSettings, useValue: mockSystemSettings },
       ],
     }).compile();
 

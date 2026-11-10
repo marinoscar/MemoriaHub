@@ -32,9 +32,8 @@
 //     FaceDetectionCore.persistAndMatchFaces, and upserts MediaFaceStatus.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { MediaFaceStatusType } from '@prisma/client';
-import type { MediaJobContext } from '../platform/jobs/media-item-job';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { MediaFaceStatusType } from './host/face-enums.js';
 import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -46,22 +45,24 @@ import {
   buildFaceCropThumbnail,
   type ClusterableDetection,
 } from '@marinoscar/memoriahub-compute/face-video';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { downloadToTempFile } from '../media-processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
+import { MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, type MemoriahubObjectStorePort } from '../ports/index.js';
+import { downloadToTempFile } from '../core/index.js';
+import type { FaceDb } from './host/face-db.js';
+import { FACE_STORAGE_ORG, type FaceStorageOrg } from './host/face-host-hooks.js';
+import { FaceJobs } from './host/face-jobs.js';
+import { FaceSystemSettings } from './host/face-system-settings.js';
+import type { MediaJobContext } from './host/media-item-job.js';
 import {
   FaceDetectionCore,
   NormalizedFace,
   ResolvedProvider,
   VideoFaceFields,
-} from './face-detection-core.service';
-import { VideoFrameExtractionService } from './video-frame-extraction.service';
-import { FaceMatchingService } from './face-matching.service';
-import type { DetectedFace } from './providers/face-provider.interface';
-import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import { DefaultOrgId } from '../common/tenancy/default-org-id';
+} from './face-detection-core.service.js';
+import { VideoFrameExtractionService } from './video-frame-extraction.service.js';
+import { FaceMatchingService } from './face-matching.service.js';
+import type { DetectedFace } from './providers/face-provider.interface.js';
+import { MediaTouchService } from '../media/index.js';
 
 // Max long-edge for face detection on video frames (same env var as photo path).
 const FACE_MAX_IMAGE_DIM = (): number =>
@@ -77,14 +78,23 @@ const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
 // Types
 // ---------------------------------------------------------------------------
 
-/** Minimal MediaItem shape computeVideoFaces needs. */
-interface VideoMediaItemInput {
+/**
+ * The part of a media item `computeVideoFaces` needs.
+ *
+ * @stability experimental
+ */
+export interface VideoMediaItemInput {
   durationMs: number | null;
   width: number | null;
   height: number | null;
 }
 
-interface VideoSettingsInput {
+/**
+ * The sampling settings `computeVideoFaces` takes (`face.video.*`).
+ *
+ * @stability experimental
+ */
+export interface VideoSettingsInput {
   sampleIntervalSeconds: number;
   maxFrames: number;
 }
@@ -104,7 +114,11 @@ interface DetectionPayload {
   frameBuf: Buffer;
 }
 
-/** In-memory compute result for one identity cluster — thumbnail bytes not yet uploaded. */
+/**
+ * In-memory compute result for one identity cluster — thumbnail bytes not yet uploaded.
+ *
+ * @stability experimental
+ */
 export interface ComputedVideoFaceCluster {
   boundingBox: { x: number; y: number; width: number; height: number };
   imageWidth: number;
@@ -117,25 +131,36 @@ export interface ComputedVideoFaceCluster {
   thumbnailBuffer: Buffer;
 }
 
+/**
+ * Video face detection: frame sampling, per-frame detection, cross-frame de-duplication and one representative frame per identity. The compute and persist halves are separate so a worker node runs the first.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class VideoFaceDetectionService {
   private readonly logger = new Logger(VideoFaceDetectionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
     private readonly core: FaceDetectionCore,
     private readonly frameExtractor: VideoFrameExtractionService,
     private readonly matchingService: FaceMatchingService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    private readonly enrichmentJobService: FaceJobs,
     private readonly mediaTouch: MediaTouchService,
-    private readonly defaultOrgId: DefaultOrgId,
+    @Inject(FACE_STORAGE_ORG) private readonly defaultOrgId: FaceStorageOrg,
+    private readonly systemSettings: FaceSystemSettings,
   ) {}
 
   // ---------------------------------------------------------------------------
   // processMediaItem — orchestrates the in-process path
   // ---------------------------------------------------------------------------
 
+  /**
+   * Runs the in-process path for one video: the three skips that need no download, then download, compute, upload the frames and persist.
+   *
+   * @param job - the media-item job context.
+   */
   async processMediaItem(job: MediaJobContext): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_face_detection job missing mediaItemId');
@@ -209,11 +234,8 @@ export class VideoFaceDetectionService {
       }
 
       // --- 4. Read face.video settings ---
-      const settings = await this.prisma.systemSettings.findUnique({
-        where: { key: 'global' },
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const videoSettings = (settings?.value as any)?.face?.video as
+      const faceSettings = await this.systemSettings.face();
+      const videoSettings = faceSettings?.video as
         | { enabled?: boolean; sampleIntervalSeconds?: number; maxFramesPerVideo?: number }
         | undefined;
 
@@ -262,8 +284,8 @@ export class VideoFaceDetectionService {
       // being proven on the new, off-by-default video_auto_tagging type first.
       const { path: tmpVideoPath, cleanup: cleanupVideo } = await downloadToTempFile({
         getStream: () =>
-          this.resolver
-            .getProviderFor(
+          this.objectStore
+            .forLocation(
               mediaItem.storageObject!.storageProvider,
               mediaItem.storageObject!.bucket,
             )
@@ -291,8 +313,8 @@ export class VideoFaceDetectionService {
       }
 
       // --- 10. Upload representative frame thumbnails (server holds storage creds) ---
-      const { id: activeProviderId, provider: activeStorageProvider } =
-        await this.resolver.getActiveProvider();
+      const { id: activeProviderId, store: activeStorageProvider } =
+        await this.objectStore.active();
 
       const clusters: VideoFaceDetectionResult['clusters'] = [];
 
@@ -342,7 +364,7 @@ export class VideoFaceDetectionService {
             updatedAt: new Date(),
           },
           create: {
-            orgId: await this.defaultOrgId.get(), // single-organization default (common/tenancy/default-org-id.ts)
+            orgId: await this.defaultOrgId.get(), // the default organization (single-organization mode)
             name: `video-face-${frameThumbId}.jpg`,
             size: BigInt(c.thumbnailBuffer.length),
             mimeType: 'image/jpeg',
@@ -403,6 +425,16 @@ export class VideoFaceDetectionService {
   // via a presigned URL), bypassing this method.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: extracts frames from a video on disk, detects, clusters and crops a thumbnail per identity.
+   *
+   * @param tmpVideoPath - the local video file.
+   * @param mediaItem - its stored dimensions and duration.
+   * @param videoSettings - the sampling interval and the frame cap.
+   * @param resolved - the provider and credentials.
+   * @param logJobId - for log lines.
+   * @returns the clusters with their thumbnail bytes.
+   */
   async computeVideoFaces(
     tmpVideoPath: string,
     mediaItem: VideoMediaItemInput,
@@ -532,6 +564,13 @@ export class VideoFaceDetectionService {
   // already-computed DTO.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The persist half: replaces the non-manual faces of the video from the clusters, matches people and marks the status.
+   *
+   * @param job - the media-item job context.
+   * @param result - the node or in-process result.
+   * @param executor - which side computed it.
+   */
   async persistVideoFaces(
     job: MediaJobContext,
     result: VideoFaceDetectionResult,

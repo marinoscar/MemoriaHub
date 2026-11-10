@@ -3,63 +3,80 @@
 // =============================================================================
 
 import {
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   BadRequestException,
   Optional,
 } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { JobReason } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { FaceClusteringService } from './face-clustering.service';
-import { FaceMatchingService } from './face-matching.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { FEATURE_KEYS } from '../settings/feature-gates';
+import type {
+  AssignFaces,
+  Cluster,
+  BulkPeople,
+  CreatePerson,
+  ListPeopleQuery,
+  ListUnassignedFacesQuery,
+  MergePeople,
+  UpdatePerson,
+} from '@marinoscar/memoriahub-contract/face';
 import {
-  ListPeopleQueryDto,
-  CreatePersonDto,
-  UpdatePersonDto,
-  AssignFacesDto,
-  ListUnassignedFacesQueryDto,
-  BulkPeopleDto,
-  BulkFacesDto,
-  PurgeArchivedFacesDto,
-} from './dto/people.dto';
-import { MergePeopleDto } from './dto/merge-people.dto';
-import { MediaThumbnailService, MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import { UserAvatarService } from '../profile/user-avatar.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubMetricsPort,
+} from '../ports/index.js';
+import { JobReason } from './host/face-enums.js';
+import { envSwitchOn } from './host/face-config.js';
+import type { FaceDb } from './host/face-db.js';
+import { FACE_PERSON_AVATARS, type FacePersonAvatars } from './host/face-host-hooks.js';
+import { FaceJobs } from './host/face-jobs.js';
+import { FaceSystemSettings } from './host/face-system-settings.js';
+import { FaceClusteringService } from './face-clustering.service.js';
+import { FaceMatchingService } from './face-matching.service.js';
+import { MediaThumbnailService, MediaTouchService } from '../media/index.js';
 
+/**
+ * The people API: list, get, create, update, assign, unassign, merge, delete, hide, unhide and purge people and single faces, manual association of a person to a photo, and clustering. Every method checks the caller's role in the library first: a non-member gets a 404, a member below the role a 403.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class PeopleService {
   private readonly logger = new Logger(PeopleService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
     private readonly clusteringService: FaceClusteringService,
     private readonly matchingService: FaceMatchingService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: AppSystemSettingsService,
+    private readonly enrichmentJobService: FaceJobs,
+    private readonly systemSettings: FaceSystemSettings,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly mediaTouch: MediaTouchService,
     // Profile picture management (issue #354): an account can be linked to a
     // Person and display that person's picture, so a change to the person's
     // chosen picture must propagate. FaceModule -> ProfileModule is the only edge
     // between the two; ProfileModule must never import FaceModule back.
-    private readonly userAvatarService: UserAvatarService,
+    @Inject(FACE_PERSON_AVATARS) private readonly userAvatarService: FacePersonAvatars,
     // App metrics (RETRO-T3, #628): `app.people.assignments{mode=manual}`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
   // ---------------------------------------------------------------------------
   // listPeople
   // ---------------------------------------------------------------------------
 
+  /**
+   * Lists the people of a library.
+   *
+   * @param query - the filters and paging.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async listPeople(
-    query: ListPeopleQueryDto,
+    query: ListPeopleQuery,
     userId: string,
     userPermissions: string[],
   ) {
@@ -187,10 +204,17 @@ export class PeopleService {
   // listUnassignedFaces
   // ---------------------------------------------------------------------------
 
+  /**
+   * Lists the faces that belong to no person (live, or archived).
+   *
+   * @param query - the filters and paging.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async listUnassignedFaces(
     userId: string,
     userPermissions: string[],
-    query: ListUnassignedFacesQueryDto,
+    query: ListUnassignedFacesQuery,
   ) {
     const { circleId, archived, page, pageSize } = query;
 
@@ -265,6 +289,13 @@ export class PeopleService {
   // getPerson
   // ---------------------------------------------------------------------------
 
+  /**
+   * Reads one person with their faces.
+   *
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async getPerson(
     personId: string,
     userId: string,
@@ -321,10 +352,10 @@ export class PeopleService {
         const frameKeyToUrl =
           await this.mediaThumbnailService.signThumbsBatched(
             person.faces
-              .map((f) => f.frameThumbnailKey)
-              .filter((k): k is string => !!k),
+              .map((f: { frameThumbnailKey?: string | null }) => f.frameThumbnailKey)
+              .filter((k: string | null | undefined): k is string => !!k),
           );
-        return person.faces.map((f) => ({
+        return person.faces.map((f: any) => ({
           faceId: f.id,
           mediaItemId: f.mediaItemId,
           boundingBox: f.boundingBox,
@@ -345,8 +376,15 @@ export class PeopleService {
   // createPerson
   // ---------------------------------------------------------------------------
 
+  /**
+   * Creates a person, optionally assigning faces to them.
+   *
+   * @param dto - the new person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async createPerson(
-    dto: CreatePersonDto,
+    dto: CreatePerson,
     userId: string,
     userPermissions: string[],
   ) {
@@ -401,9 +439,17 @@ export class PeopleService {
   // updatePerson
   // ---------------------------------------------------------------------------
 
+  /**
+   * Renames a person or sets their cover face or profile picture, and refreshes the avatar of any account linked to them.
+   *
+   * @param personId - the person.
+   * @param dto - the changes.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async updatePerson(
     personId: string,
-    dto: UpdatePersonDto,
+    dto: UpdatePerson,
     userId: string,
     userPermissions: string[],
   ) {
@@ -522,9 +568,17 @@ export class PeopleService {
   // assignFaces
   // ---------------------------------------------------------------------------
 
+  /**
+   * Assigns faces to a person (a manual assignment that re-clustering never undoes).
+   *
+   * @param personId - the person.
+   * @param dto - the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async assignFaces(
     personId: string,
-    dto: AssignFacesDto,
+    dto: AssignFaces,
     userId: string,
     userPermissions: string[],
   ) {
@@ -578,6 +632,14 @@ export class PeopleService {
   // unassignFace
   // ---------------------------------------------------------------------------
 
+  /**
+   * Returns a face to the unknown pool.
+   *
+   * @param personId - the person.
+   * @param faceId - the face.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async unassignFace(
     personId: string,
     faceId: string,
@@ -629,6 +691,13 @@ export class PeopleService {
   // clusterUnknowns
   // ---------------------------------------------------------------------------
 
+  /**
+   * Clusters the unknown, live faces of a library into provisional people.
+   *
+   * @param circleId - the library.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async clusterUnknowns(
     circleId: string,
     userId: string,
@@ -641,7 +710,7 @@ export class PeopleService {
       'admin',
     );
 
-    if (!(await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION))) {
+    if (!(await this.systemSettings.isFeatureEnabled('faceRecognition'))) {
       throw new BadRequestException('Face recognition is disabled globally.');
     }
 
@@ -662,8 +731,15 @@ export class PeopleService {
   // mergePeople
   // ---------------------------------------------------------------------------
 
+  /**
+   * Merges one person into another: the faces move, the source is soft-deleted and account links carry over.
+   *
+   * @param dto - the source and the survivor.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async mergePeople(
-    dto: MergePeopleDto,
+    dto: MergePeople,
     userId: string,
     userPermissions: string[],
   ) {
@@ -806,6 +882,13 @@ export class PeopleService {
   // deletePerson
   // ---------------------------------------------------------------------------
 
+  /**
+   * Soft-deletes a person; their faces return to the unknown pool and linked accounts are unlinked.
+   *
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async deletePerson(
     personId: string,
     userId: string,
@@ -903,8 +986,15 @@ export class PeopleService {
   // hidePeople
   // ---------------------------------------------------------------------------
 
+  /**
+   * Hides people from the people views (reversible; nothing is deleted).
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async hidePeople(
-    dto: BulkPeopleDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ hidden: number }> {
@@ -951,8 +1041,15 @@ export class PeopleService {
   // unhidePeople
   // ---------------------------------------------------------------------------
 
+  /**
+   * Brings hidden people back.
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async unhidePeople(
-    dto: BulkPeopleDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ unhidden: number }> {
@@ -999,8 +1096,15 @@ export class PeopleService {
   // purgePeople
   // ---------------------------------------------------------------------------
 
+  /**
+   * Permanently deletes people and their faces, reclaiming the embeddings; the photos stay.
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async purgePeople(
-    dto: BulkPeopleDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ deleted: number }> {
@@ -1075,8 +1179,15 @@ export class PeopleService {
   // hideFaces  (archive individual unassigned faces)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Archives unassigned faces, then sweeps the live unassigned faces that match them when auto-archive is on.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async hideFaces(
-    dto: BulkFacesDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ hidden: number }> {
@@ -1113,8 +1224,7 @@ export class PeopleService {
     try {
       const settings = await this.systemSettings.getSettings();
       const autoArchiveOn =
-        settings.features?.faceAutoArchive === true &&
-        (process.env.FACE_AUTO_ARCHIVE ?? 'true') !== 'false';
+        settings.features?.faceAutoArchive === true && envSwitchOn('FACE_AUTO_ARCHIVE');
 
       if (autoArchiveOn) {
         // Reference set: embeddings of the faces the user just archived.
@@ -1185,8 +1295,15 @@ export class PeopleService {
   // unhideFaces  (unarchive individual unassigned faces)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Restores archived unassigned faces.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async unhideFaces(
-    dto: BulkFacesDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ unhidden: number }> {
@@ -1233,8 +1350,15 @@ export class PeopleService {
   // purgeFaces  (permanently delete individual faces)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Permanently deletes unassigned faces, reclaiming the embeddings; the photos stay.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async purgeFaces(
-    dto: BulkFacesDto,
+    dto: BulkPeople,
     userId: string,
     userPermissions: string[],
   ): Promise<{ deleted: number }> {
@@ -1305,8 +1429,15 @@ export class PeopleService {
   // purgeArchivedFaces  (permanently delete ALL archived unassigned faces in a circle)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Permanently deletes every archived unassigned face of a library.
+   *
+   * @param dto - the library.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async purgeArchivedFaces(
-    dto: PurgeArchivedFacesDto,
+    dto: Cluster,
     userId: string,
     userPermissions: string[],
   ): Promise<{ deleted: number }> {
@@ -1378,6 +1509,14 @@ export class PeopleService {
   // addPersonToMedia
   // ---------------------------------------------------------------------------
 
+  /**
+   * Associates a person (by id, or by name, creating them) with a photo whose face detection missed them.
+   *
+   * @param mediaItemId - the photo.
+   * @param dto - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async addPersonToMedia(
     mediaItemId: string,
     userId: string,
@@ -1478,6 +1617,14 @@ export class PeopleService {
   // removePersonFromMedia
   // ---------------------------------------------------------------------------
 
+  /**
+   * Removes a manual association; detected faces are untouched.
+   *
+   * @param mediaItemId - the photo.
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
   async removePersonFromMedia(
     mediaItemId: string,
     personId: string,
@@ -1596,7 +1743,7 @@ export class PeopleService {
   private async enqueueAutoTaggingForMediaItems(
     mediaItems: Array<{ mediaItemId: string; circleId: string }>,
   ): Promise<void> {
-    if (!(await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.AUTO_TAGGING))) {
+    if (!(await this.systemSettings.isFeatureEnabled('autoTagging'))) {
       return;
     }
     for (const { mediaItemId, circleId } of mediaItems) {

@@ -6,16 +6,15 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { PeopleService } from './people.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { FaceClusteringService } from './face-clustering.service';
-import { FaceMatchingService } from './face-matching.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { MediaThumbnailService, MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import { UserAvatarService } from '../profile/user-avatar.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { PeopleService } from '../../src/face/people.service.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { FaceClusteringService } from '../../src/face/face-clustering.service.js';
+import { FaceMatchingService } from '../../src/face/face-matching.service.js';
+import { FaceJobs } from '../../src/face/host/face-jobs.js';
+import { FACE_PERSON_AVATARS } from '../../src/face/host/face-host-hooks.js';
+import { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
+import { MediaThumbnailService, MediaTouchService } from '../../src/media/index.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -141,15 +140,15 @@ describe('PeopleService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PeopleService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockOwnerAccessService },
         { provide: FaceClusteringService, useValue: mockClusteringService },
         { provide: FaceMatchingService, useValue: mockMatchingService },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
+        { provide: FaceSystemSettings, useValue: mockSystemSettings },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
         { provide: MediaTouchService, useValue: mockMediaTouch },
-        { provide: UserAvatarService, useValue: mockUserAvatarService },
+        { provide: FACE_PERSON_AVATARS, useValue: mockUserAvatarService },
       ],
     }).compile();
 

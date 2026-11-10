@@ -1,24 +1,30 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { MediaFaceStatusType } from '@prisma/client';
-import type { MediaJobContext } from '../platform/jobs/media-item-job';
-import { Readable } from 'stream';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
+import { MediaFaceStatusType } from './host/face-enums.js';
 import type { FaceDetectionResult } from '@marinoscar/memoriahub-compute/dto';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { FaceDetectionCore, ResolvedProvider } from './face-detection-core.service';
-import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import type { DetectedFace } from './providers/face-provider.interface';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
+import { MEMORIAHUB_OBJECT_STORE, type MemoriahubObjectStorePort } from '../ports/index.js';
+import { streamToBuffer } from '../core/index.js';
+import type { FaceDb } from './host/face-db.js';
+import { FaceJobs } from './host/face-jobs.js';
+import type { MediaJobContext } from './host/media-item-job.js';
+import { FaceDetectionCore, ResolvedProvider } from './face-detection-core.service.js';
+import { MediaTouchService } from '../media/index.js';
+import type { DetectedFace } from './providers/face-provider.interface.js';
 
+/**
+ * Photo face detection: downloads the image, prepares it, detects, and persists the faces. The compute half (`computeFaces`) and the persist half (`persistFaces`) are separate so a worker node runs the first and the server only the second.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class FaceDetectionService {
   private readonly logger = new Logger(FaceDetectionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    private readonly enrichmentJobService: FaceJobs,
     private readonly core: FaceDetectionCore,
     private readonly mediaTouch: MediaTouchService,
   ) {}
@@ -31,6 +37,11 @@ export class FaceDetectionService {
   // calls persistFaces directly — the same persist code path either way.
   // ---------------------------------------------------------------------------
 
+  /**
+   * Runs the in-process path for one media item: resolve the provider, download, compute, persist.
+   *
+   * @param job - the media-item job context.
+   */
   async processMediaItem(job: MediaJobContext): Promise<void> {
     // Guard: face_detection jobs must always have a mediaItemId (global/null jobs are not valid here)
     if (!job.mediaItemId) {
@@ -75,7 +86,7 @@ export class FaceDetectionService {
       }
 
       // 4. Download image → buffer (resolved via the object's own provider+bucket)
-      const objectProvider = await this.resolver.getProviderFor(
+      const objectProvider = await this.objectStore.forLocation(
         mediaItem.storageObject.storageProvider,
         mediaItem.storageObject.bucket,
       );
@@ -120,6 +131,15 @@ export class FaceDetectionService {
   // and submits the same DTO shape directly, bypassing this method.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: prepares the image (EXIF orientation, downscale) and detects. Boxes stay in pixel space; normalization is the persist half's job.
+   *
+   * @param buffer - the image bytes.
+   * @param resolved - the provider and credentials.
+   * @param fallbackDims - the stored dimensions, used when preprocessing fails.
+   * @param logContext - a prefix for log lines.
+   * @returns the detection result.
+   */
   async computeFaces(
     buffer: Buffer,
     resolved: ResolvedProvider,
@@ -179,6 +199,13 @@ export class FaceDetectionService {
   // matching, and upserts MediaFaceStatus from an already-computed DTO.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The persist half: replaces the non-manual faces of the item, matches people, and marks the status. Shared by the in-process path and the worker-node result ingestion.
+   *
+   * @param job - the media-item job context.
+   * @param result - the detection result.
+   * @param executor - which side computed it.
+   */
   async persistFaces(
     job: MediaJobContext,
     result: FaceDetectionResult,
@@ -274,17 +301,4 @@ export class FaceDetectionService {
       // Best-effort only — a provider-resolution failure here must never block persistence.
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-    stream.on('error', reject);
-  });
 }

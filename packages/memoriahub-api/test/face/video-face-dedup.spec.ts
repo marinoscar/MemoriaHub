@@ -25,7 +25,7 @@
  *   isBetterRepresentative: higher confidence wins; tie-break = larger bbox area
  */
 
-import { DEFAULT_FACE_CLUSTER_THRESHOLD } from './face-matching.service';
+import { DEFAULT_FACE_CLUSTER_THRESHOLD } from '../../src/face/face-matching.service.js';
 
 // ---------------------------------------------------------------------------
 // Minimal type aliases matching the production code

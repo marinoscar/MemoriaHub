@@ -13,24 +13,30 @@
 //   - markStatus() / markFailed() — MediaFaceStatus upsert helpers
 // =============================================================================
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { MediaFaceStatusType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceSettingsService } from './face-settings.service';
-import { FaceProviderRegistry } from './providers/face-provider.registry';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { MEMORIAHUB_METRICS, MEMORIAHUB_PRISMA, type MemoriahubMetricsPort } from '../ports/index.js';
+import { MediaFaceStatusType } from './host/face-enums.js';
+import { FaceSettingsService } from './face-settings.service.js';
+import { FaceProviderRegistry } from './providers/face-provider.registry.js';
 import {
   DetectedFace,
   FaceProvider,
   FaceProviderCredentials,
-} from './providers/face-provider.interface';
-import { FaceMatchingService } from './face-matching.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+} from './providers/face-provider.interface.js';
+import { FaceMatchingService } from './face-matching.service.js';
+import { envSwitchOn } from './host/face-config.js';
+import type { FaceDb } from './host/face-db.js';
+import { FaceSystemSettings } from './host/face-system-settings.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * The active detection provider with its resolved credentials and the model it runs.
+ *
+ * @stability experimental
+ */
 export interface ResolvedProvider {
   provider: FaceProvider;
   creds: FaceProviderCredentials;
@@ -38,6 +44,11 @@ export interface ResolvedProvider {
   modelVersion: string;
 }
 
+/**
+ * A detected face with its box in 0-1 fractions and an L2-normalized embedding.
+ *
+ * @stability experimental
+ */
 export interface NormalizedFace extends DetectedFace {
   /** Embedding is always set (possibly empty array) and L2-normalized. */
   embedding: number[];
@@ -46,6 +57,8 @@ export interface NormalizedFace extends DetectedFace {
 /**
  * Optional video-specific fields written onto the Face row.
  * For photo detections, leave all fields undefined.
+ *
+ * @stability experimental
  */
 export interface VideoFaceFields {
   /** Timestamp of the representative frame (milliseconds from start). */
@@ -56,6 +69,11 @@ export interface VideoFaceFields {
   frameThumbnailKey?: string;
 }
 
+/**
+ * What {@link FaceDetectionCore.persistAndMatchFaces} writes for one media item.
+ *
+ * @stability experimental
+ */
 export interface PersistFaceInput {
   mediaItemId: string;
   circleId: string;
@@ -72,18 +90,23 @@ export interface PersistFaceInput {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * The half of detection the photo and video paths share: provider resolution, bounding-box and embedding normalization, the face rows with person matching and auto-archive, and the status row.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class FaceDetectionCore {
   private readonly logger = new Logger(FaceDetectionCore.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
     private readonly faceSettingsService: FaceSettingsService,
     private readonly registry: FaceProviderRegistry,
     private readonly matchingService: FaceMatchingService,
-    private readonly systemSettings: AppSystemSettingsService,
+    private readonly systemSettings: FaceSystemSettings,
     // App metrics (RETRO-T3, #628): `app.media.faces.detected`, `app.people.assignments`.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -95,11 +118,8 @@ export class FaceDetectionCore {
    * Throws (with an error message) when no provider is configured.
    */
   async resolveProviderAndCreds(): Promise<ResolvedProvider> {
-    const row = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const faceConfig = (row?.value as any)?.face?.features?.detection as
+    const face = await this.systemSettings.face();
+    const faceConfig = face?.features?.detection as
       | { provider?: string; model?: string }
       | undefined;
 
@@ -209,8 +229,7 @@ export class FaceDetectionCore {
     try {
       const settings = await this.systemSettings.getSettings();
       autoArchiveOn =
-        settings.features?.faceAutoArchive === true &&
-        (process.env['FACE_AUTO_ARCHIVE'] ?? 'true') !== 'false';
+        settings.features?.faceAutoArchive === true && envSwitchOn('FACE_AUTO_ARCHIVE');
       archiveThreshold = settings.face?.autoArchive?.matchThreshold;
     } catch (settingsErr) {
       const msg =
@@ -242,7 +261,6 @@ export class FaceDetectionCore {
           circleId,
           boundingBox: face.boundingBox,
           confidence: face.confidence ?? null,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           landmarks: (face.landmarks ?? null) as any,
           embedding: face.embedding ?? [],
           providerKey,

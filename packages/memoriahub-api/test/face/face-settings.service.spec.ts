@@ -8,11 +8,11 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { CredentialsService } from '@marinoscar/platform-api/credentials';
-import { FaceSettingsService } from './face-settings.service';
-import { FaceProviderRegistry } from './providers/face-provider.registry';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { FakeCredentials } from '../../test/helpers/fake-credentials';
+import { FaceSettingsService } from '../../src/face/face-settings.service.js';
+import { FaceProviderRegistry } from '../../src/face/providers/face-provider.registry.js';
+import { MEMORIAHUB_SECRETS } from '../../src/ports/index.js';
+import { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
+import { FakeCredentials } from './support/fake-credentials.js';
 
 const PURPOSE = 'face_provider';
 const CAPS = { detect: true, embed: true };
@@ -22,7 +22,7 @@ describe('FaceSettingsService', () => {
   let creds: FakeCredentials;
   let face: Record<string, unknown> | null;
   let mockRegistry: { get: jest.Mock; keys: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock; patchFace: jest.Mock };
   const keyless = { capabilities: CAPS, requiresCredentials: false };
   const keyed = { capabilities: CAPS, requiresCredentials: true };
 
@@ -35,14 +35,14 @@ describe('FaceSettingsService', () => {
     };
     mockSystemSettings = {
       getSettings: jest.fn(async () => ({ face })),
-      patchSettings: jest.fn().mockResolvedValue(undefined),
+      patchFace: jest.fn().mockResolvedValue(undefined),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceSettingsService,
-        { provide: CredentialsService, useValue: creds },
+        { provide: MEMORIAHUB_SECRETS, useValue: creds },
         { provide: FaceProviderRegistry, useValue: mockRegistry },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: FaceSystemSettings, useValue: mockSystemSettings },
       ],
     }).compile();
     service = module.get(FaceSettingsService);
@@ -104,12 +104,12 @@ describe('FaceSettingsService', () => {
         { apiKey: 'cf-test-1234abcd', baseUrl: 'http://cf:8000', enabled: false },
         'user-1',
       );
-      expect(creds.setSecret).toHaveBeenCalledWith(PURPOSE, 'compreface', 'cf-test-1234abcd', { updatedByUserId: 'user-1' });
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { face: { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: false } } } },
+      expect(creds.set).toHaveBeenCalledWith(PURPOSE, 'compreface', 'cf-test-1234abcd', 'user-1');
+      expect(mockSystemSettings.patchFace).toHaveBeenCalledWith(
+        { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: false } } },
         'user-1',
       );
-      expect(JSON.stringify(mockSystemSettings.patchSettings.mock.calls)).not.toContain('cf-test-1234abcd');
+      expect(JSON.stringify(mockSystemSettings.patchFace.mock.calls)).not.toContain('cf-test-1234abcd');
       expect(r).toMatchObject({ provider: 'compreface', configured: true, last4: 'abcd' });
       expect(JSON.stringify(r)).not.toContain('cf-test-1234abcd');
     });
@@ -117,9 +117,9 @@ describe('FaceSettingsService', () => {
     it('works with baseUrl only (keyless): no secret is written', async () => {
       face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
       const r = await service.upsertCredential('compreface', { baseUrl: 'http://cf:8000' }, 'user-1');
-      expect(creds.setSecret).not.toHaveBeenCalled();
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { face: { providers: { compreface: { baseUrl: 'http://cf:8000' } } } },
+      expect(creds.set).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchFace).toHaveBeenCalledWith(
+        { providers: { compreface: { baseUrl: 'http://cf:8000' } } },
         'user-1',
       );
       expect(r).toEqual({ provider: 'compreface', configured: true, enabled: true, last4: null, baseUrl: 'http://cf:8000' });
@@ -133,8 +133,8 @@ describe('FaceSettingsService', () => {
 
     it('clears baseUrl when none is sent (the legacy overwrite rule)', async () => {
       await service.upsertCredential('compreface', {}, 'u');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { face: { providers: { compreface: { baseUrl: null } } } },
+      expect(mockSystemSettings.patchFace).toHaveBeenCalledWith(
+        { providers: { compreface: { baseUrl: null } } },
         'u',
       );
     });
@@ -161,9 +161,9 @@ describe('FaceSettingsService', () => {
       creds.seed(PURPOSE, 'compreface', 'cf-test-1234abcd');
       face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
       await service.deleteCredential('compreface', 'u');
-      expect(creds.deleteSecret).toHaveBeenCalledWith(PURPOSE, 'compreface');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { face: { providers: { compreface: { baseUrl: null, enabled: true } } } },
+      expect(creds.delete).toHaveBeenCalledWith(PURPOSE, 'compreface', 'u');
+      expect(mockSystemSettings.patchFace).toHaveBeenCalledWith(
+        { providers: { compreface: { baseUrl: null, enabled: true } } },
         'u',
       );
     });
@@ -171,8 +171,8 @@ describe('FaceSettingsService', () => {
     it('resets an override with no secret without touching the store', async () => {
       face = { providers: { compreface: { baseUrl: 'http://cf:8000', enabled: true } } };
       await service.deleteCredential('compreface', 'u');
-      expect(creds.deleteSecret).not.toHaveBeenCalled();
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalled();
+      expect(creds.delete).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchFace).toHaveBeenCalled();
     });
   });
 
@@ -233,8 +233,8 @@ describe('FaceSettingsService', () => {
   describe('setDetectionFeature', () => {
     it('patches the nested detection feature and returns it', async () => {
       const r = await service.setDetectionFeature({ provider: 'compreface', model: 'm1' } as never, 'u');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { face: { features: { detection: { provider: 'compreface', model: 'm1' } } } },
+      expect(mockSystemSettings.patchFace).toHaveBeenCalledWith(
+        { features: { detection: { provider: 'compreface', model: 'm1' } } },
         'u',
       );
       expect(r).toEqual({ provider: 'compreface', model: 'm1' });

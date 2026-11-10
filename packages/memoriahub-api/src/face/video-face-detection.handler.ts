@@ -16,21 +16,28 @@
 // back and is recorded as is.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import type { FaceDb } from './host/face-db.js';
+import { DEFAULT_VIDEO_JOB_TIMEOUT_MS, FACE_OPTIONS, type FaceModuleOptions } from './host/face-options.js';
+import { resolveMediaItemJob, withRateLimits } from './host/media-item-job.js';
 import { videoFaceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
-import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
-import { PrismaService } from '../prisma/prisma.service';
-import { VideoFaceDetectionService } from './video-face-detection.service';
+import { VideoFaceDetectionService } from './video-face-detection.service.js';
 
+/**
+ * The `video_face_detection` job handler: a thin queue entry point; the pipeline is `VideoFaceDetectionService`. Node-eligible: a worker node submits the clusters and the server persists them.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class VideoFaceDetectionHandler implements JobHandler, OnModuleInit {
+export class VideoFaceDetectionHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'video_face_detection';
   readonly label = 'Face detection (video)';
   /**
@@ -38,29 +45,35 @@ export class VideoFaceDetectionHandler implements JobHandler, OnModuleInit {
    * legitimately run past ten minutes on a small VPS: 20 minutes by default,
    * still overridable for one release through ENRICHMENT_VIDEO_JOB_TIMEOUT_MS.
    */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: videoJobTimeoutMs(), maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile;
   readonly nodeResultSchema = videoFaceDetectionResultSchema;
 
   private readonly logger = new Logger(VideoFaceDetectionHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
     private readonly videoFaceDetectionService: VideoFaceDetectionService,
-  ) {}
-
-  onModuleInit(): void {
-    this.registry.register(this);
+    @Optional() @Inject(FACE_OPTIONS) options?: FaceModuleOptions,
+  ) {
+    this.profile = { maxRuntimeMs: options?.videoJobTimeoutMs ?? DEFAULT_VIDEO_JOB_TIMEOUT_MS, maxAttempts: 3 };
   }
 
-  async process(job: Job): Promise<void> {
+  /**
+   * Registers the handler with the queue.
+   */
+  onModuleInit(): void {
+    this.jobs.registerHandler(this);
+  }
+
+  async process(job: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
-    await withPlatformRateLimits(() => this.videoFaceDetectionService.processMediaItem(context));
+    await withRateLimits(() => this.videoFaceDetectionService.processMediaItem(context));
   }
 
   /** Persist a node-computed result (already validated by the data plane; re-parsed to narrow). */
-  async persistNodeResult(job: Job, result: unknown): Promise<void> {
+  async persistNodeResult(job: MemoriahubJob, result: unknown): Promise<void> {
     const parsed = videoFaceDetectionResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;

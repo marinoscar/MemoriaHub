@@ -1,10 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
-import { FaceBackfillService } from './face-backfill.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { JobReason, MediaFaceStatusType, MediaType } from '../../src/face/host/face-enums.js';
+import { FaceBackfillService } from '../../src/face/face-backfill.service.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { FaceJobs } from '../../src/face/host/face-jobs.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
 
 /** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
 const scopeFindMany = jest.fn();
@@ -24,14 +23,14 @@ describe('FaceBackfillService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FaceBackfillService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         // The sweep helper (groups through the slice, personal libraries through the store) is
         // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
-          provide: OwnerScopeSweepService,
+          provide: MEMORIAHUB_ACCESS,
           useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
       ],
     }).compile();
 

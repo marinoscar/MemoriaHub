@@ -14,25 +14,20 @@
  *    id of the first page as the cursor.
  */
 
-import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
-import { circleJob } from '../../test/helpers/platform-job';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceMatchingService } from './face-matching.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import type { MemoriahubJob, MemoriahubJobsPort } from '../../src/ports/index.js';
+import type { FaceDb } from '../../src/face/host/face-db.js';
+import type { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
+import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler.js';
+import { circleJob } from './support/mock-jobs.js';
+import { FaceMatchingService } from '../../src/face/face-matching.service.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return circleJob('face_auto_archive_sweep', 'circle-1', {
-    status: 'running',
-    reason: 'backfill',
-    priority: 100,
-    ...overrides,
-  });
+function makeJob(overrides: Partial<MemoriahubJob> = {}): MemoriahubJob {
+  return circleJob('face_auto_archive_sweep', 'circle-1', overrides);
 }
 
 function makeSettings(faceAutoArchive: boolean, matchThreshold = 0.45) {
@@ -44,7 +39,7 @@ function makeSettings(faceAutoArchive: boolean, matchThreshold = 0.45) {
 
 describe('FaceAutoArchiveSweepHandler', () => {
   let handler: FaceAutoArchiveSweepHandler;
-  let mockRegistry: { register: jest.Mock };
+  let mockJobs: { registerHandler: jest.Mock };
   let mockPrisma: MockPrismaService;
   let mockMatchingService: {
     findLiveMatchesAgainstArchived: jest.Mock;
@@ -53,9 +48,9 @@ describe('FaceAutoArchiveSweepHandler', () => {
   let mockSystemSettings: { getSettings: jest.Mock };
 
   beforeEach(() => {
-    mockRegistry = { register: jest.fn() };
+    mockJobs = { registerHandler: jest.fn() };
     mockPrisma = createMockPrismaService();
-    const scopes = { exists: jest.fn(async (id: string) => id === 'circle-1') };
+    const access = { scopeExists: jest.fn(async (id: string) => id === 'circle-1') };
     mockMatchingService = {
       findLiveMatchesAgainstArchived: jest.fn().mockResolvedValue([]),
       archiveMaxCandidates: 5000,
@@ -65,19 +60,19 @@ describe('FaceAutoArchiveSweepHandler', () => {
     };
 
     handler = new FaceAutoArchiveSweepHandler(
-      mockRegistry as unknown as JobHandlerRegistry,
-      mockPrisma as unknown as PrismaService,
-      scopes as never,
+      mockJobs as unknown as MemoriahubJobsPort,
+      mockPrisma as unknown as FaceDb,
+      access as never,
       mockMatchingService as unknown as FaceMatchingService,
-      mockSystemSettings as unknown as AppSystemSettingsService,
+      mockSystemSettings as unknown as FaceSystemSettings,
       { touchMediaItems: jest.fn().mockResolvedValue(undefined) } as any,
     );
   });
 
-  it('registers itself with the platform JobHandlerRegistry on module init', () => {
+  it('registers itself with the queue on module init', () => {
     handler.onModuleInit();
 
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockJobs.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it("exposes type 'face_auto_archive_sweep'", () => {

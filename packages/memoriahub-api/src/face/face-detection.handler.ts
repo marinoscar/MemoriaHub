@@ -1,15 +1,16 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
-  JobHandlerRegistry,
-  ProviderThrottleService,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import type { FaceDb } from './host/face-db.js';
+import { FACE_THROTTLE_KEY, resolveMediaItemJob, withRateLimits } from './host/media-item-job.js';
 import { faceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceDetectionService } from './face-detection.service';
+import { FaceDetectionService } from './face-detection.service.js';
 
 /**
  * `face_detection`: a native platform `JobHandler` (RETRO-C3, #585).
@@ -23,38 +24,42 @@ import { FaceDetectionService } from './face-detection.service';
  *
  * The subject is the media item (`job.subjectType === 'media_item'`); a media
  * item that no longer exists settles the job as a no-op.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class FaceDetectionHandler implements JobHandler, OnModuleInit {
+export class FaceDetectionHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'face_detection';
   readonly label = 'Face detection (photo)';
   /** One download, one EXIF-oriented downscale, one sidecar call: minutes, never ten. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
+  /** The face provider's quota: a cooldown on one face job holds the others. */
+  readonly throttleKey = FACE_THROTTLE_KEY;
   readonly nodeResultSchema = faceDetectionResultSchema;
 
   private readonly logger = new Logger(FaceDetectionHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly throttle: ProviderThrottleService,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
     private readonly faceDetectionService: FaceDetectionService,
   ) {}
 
+  /**
+   * Registers the handler with the queue.
+   */
   onModuleInit(): void {
-    this.registry.register(this);
-    // The face provider's quota: a cooldown on one face job holds the others.
-    this.throttle.registerProviderKey(this.type, 'face');
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  async process(job: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
-    await withPlatformRateLimits(() => this.faceDetectionService.processMediaItem(context));
+    await withRateLimits(() => this.faceDetectionService.processMediaItem(context));
   }
 
   /** Persist a node-computed result (already validated by the data plane; re-parsed to narrow). */
-  async persistNodeResult(job: Job, result: unknown): Promise<void> {
+  async persistNodeResult(job: MemoriahubJob, result: unknown): Promise<void> {
     const parsed = faceDetectionResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;

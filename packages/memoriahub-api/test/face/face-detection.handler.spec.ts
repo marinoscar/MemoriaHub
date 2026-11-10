@@ -10,11 +10,10 @@
  * transitive dependencies.
  */
 
-import { RateLimitError } from '@marinoscar/platform-api/jobs';
-import { FaceDetectionHandler } from './face-detection.handler';
+import { MemoriahubRateLimitError } from '../../src/ports/index.js';
+import { FaceDetectionHandler } from '../../src/face/face-detection.handler.js';
 import { faceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
-import { mediaItemJob, subjectPrisma } from '../../test/helpers/platform-job';
+import { mediaItemJob, subjectPrisma } from './support/mock-jobs.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,22 +46,19 @@ function makeNodeResult() {
 // ---------------------------------------------------------------------------
 
 describe('FaceDetectionHandler', () => {
-  let mockRegistry: { register: jest.Mock };
-  let mockThrottle: { registerProviderKey: jest.Mock };
+  let mockJobs: { registerHandler: jest.Mock };
   let mockFaceDetectionService: { processMediaItem: jest.Mock; persistFaces: jest.Mock };
   let handler: FaceDetectionHandler;
 
   beforeEach(() => {
-    mockRegistry = { register: jest.fn() };
-    mockThrottle = { registerProviderKey: jest.fn() };
+    mockJobs = { registerHandler: jest.fn() };
     mockFaceDetectionService = {
       processMediaItem: jest.fn(),
       persistFaces: jest.fn().mockResolvedValue(undefined),
     };
     // Instantiate directly — no NestJS testing module needed for this pure unit test
     handler = new FaceDetectionHandler(
-      mockRegistry as any,
-      mockThrottle as any,
+      mockJobs as any,
       subjectPrisma() as any,
       mockFaceDetectionService as any,
     );
@@ -83,16 +79,15 @@ describe('FaceDetectionHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('onModuleInit()', () => {
-    it('calls registry.register() with itself when the module initializes', () => {
+    it('registers itself with the queue when the module initializes', () => {
       handler.onModuleInit();
 
-      expect(mockRegistry.register).toHaveBeenCalledTimes(1);
-      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+      expect(mockJobs.registerHandler).toHaveBeenCalledTimes(1);
+      expect(mockJobs.registerHandler).toHaveBeenCalledWith(handler);
     });
 
     it('maps the type onto the face provider throttle bucket', () => {
-      handler.onModuleInit();
-      expect(mockThrottle.registerProviderKey).toHaveBeenCalledWith('face_detection', 'face');
+      expect(handler.throttleKey).toBe('face');
     });
   });
 
@@ -131,11 +126,20 @@ describe('FaceDetectionHandler', () => {
       await expect(handler.process(job)).rejects.toThrow('not about a media item');
     });
 
-    it('rethrows a legacy rate limit as the platform RateLimitError', async () => {
-      mockFaceDetectionService.processMediaItem.mockRejectedValue(new LegacyRateLimitError('slow down', 5000));
+    it('rethrows a provider throttle signal as the queue rate-limit error, keeping the retry-after', async () => {
+      mockFaceDetectionService.processMediaItem.mockRejectedValue(
+        Object.assign(new Error('slow down'), { status: 429, headers: { 'retry-after': '5' } }),
+      );
       const error = await handler.process(makeJob()).catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(RateLimitError);
-      expect((error as RateLimitError).retryAfterMs).toBe(5000);
+      expect(error).toBeInstanceOf(MemoriahubRateLimitError);
+      expect((error as MemoriahubRateLimitError).retryAfterMs).toBe(5000);
+      expect((error as MemoriahubRateLimitError).throttleKey).toBe('face');
+    });
+
+    it('passes a rate-limit error through unchanged', async () => {
+      const original = new MemoriahubRateLimitError('face', 1000, 'busy');
+      mockFaceDetectionService.processMediaItem.mockRejectedValue(original);
+      await expect(handler.process(makeJob())).rejects.toBe(original);
     });
 
     it('returns undefined (void) on success', async () => {

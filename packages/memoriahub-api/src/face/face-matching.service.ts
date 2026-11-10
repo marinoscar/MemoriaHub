@@ -51,16 +51,22 @@
 //     justify creating a new Person record.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   DEFAULT_FACE_CLUSTER_THRESHOLD,
   DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD,
   bestMatchAgainstSet,
 } from '@marinoscar/memoriahub-compute/face-video';
-import { PrismaService } from '../prisma/prisma.service';
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
+import { Prisma } from '../core/index.js';
+import { FACE_CONFIG, type FaceConfigReader } from './host/face-config.js';
+import type { FaceDb } from './host/face-db.js';
 
-/** Recognition threshold (match incoming face → existing Person centroid). */
+/**
+ * Recognition threshold (match incoming face → existing Person centroid).
+ *
+ * @stability experimental
+ */
 export const DEFAULT_FACE_MATCH_THRESHOLD = 0.38;
 
 /**
@@ -91,6 +97,8 @@ export { DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD };
 /**
  * Minimum cluster size to justify creating a provisional Person.
  * Singletons remain with personId = null.
+ *
+ * @stability experimental
  */
 export const DEFAULT_FACE_CLUSTER_MIN_SIZE = 2;
 
@@ -98,6 +106,8 @@ export const DEFAULT_FACE_CLUSTER_MIN_SIZE = 2;
  * Default vector matching backend when FACE_VECTOR_BACKEND is unset.
  * 'pgvector' delegates KNN candidate selection to the `faces.embedding_vec`
  * HNSW index; 'app' loads candidates and computes cosine similarity in-process.
+ *
+ * @stability experimental
  */
 export const DEFAULT_FACE_VECTOR_BACKEND = 'pgvector';
 
@@ -106,6 +116,8 @@ export const DEFAULT_FACE_VECTOR_BACKEND = 'pgvector';
  * bounded centroid recompute (matchFaceToPerson) or nearest-archive pick
  * (matchFaceToArchived). Kept modest so the KNN LIMIT stays well under the
  * per-query hnsw.ef_search recall budget set in the same transaction.
+ *
+ * @stability experimental
  */
 export const DEFAULT_FACE_MATCH_KNN_CANDIDATES = 40;
 
@@ -131,6 +143,11 @@ const CENTROID_CACHE_TTL_MS = 60_000;
 /** Max centroid-cache entries before a wholesale clear (simple overflow guard). */
 const CENTROID_CACHE_MAX_ENTRIES = 5000;
 
+/**
+ * Matches a face embedding against the people and the archived-face pool of a circle, by the indexed pgvector search or the in-process cosine scan.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class FaceMatchingService {
   private readonly logger = new Logger(FaceMatchingService.name);
@@ -165,8 +182,8 @@ export class FaceMatchingService {
   >();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(FACE_CONFIG) private readonly config: FaceConfigReader,
   ) {
     this.matchThreshold = parseFloat(
       this.config.get<string>('FACE_MATCH_THRESHOLD') ??
@@ -465,7 +482,7 @@ export class FaceMatchingService {
     const efSearch = Math.max(HNSW_EF_SEARCH_FLOOR, k);
 
     const [, rows] = await this.prisma.$transaction([
-      this.prisma.$executeRawUnsafe(`SET LOCAL hnsw.ef_search = ${efSearch}`),
+      this.prisma.$executeRaw(Prisma.raw(`SET LOCAL hnsw.ef_search = ${efSearch}`)),
       this.prisma.$queryRaw<{ person_id: string }[]>`
         SELECT f.person_id AS person_id
         FROM faces f
@@ -618,7 +635,7 @@ export class FaceMatchingService {
     const efSearch = Math.max(HNSW_EF_SEARCH_FLOOR, k);
 
     const [, rows] = await this.prisma.$transaction([
-      this.prisma.$executeRawUnsafe(`SET LOCAL hnsw.ef_search = ${efSearch}`),
+      this.prisma.$executeRaw(Prisma.raw(`SET LOCAL hnsw.ef_search = ${efSearch}`)),
       this.prisma.$queryRaw<{ id: string; similarity: number }[]>`
         SELECT f.id AS id, 1 - (f.embedding_vec <=> ${vectorLiteral}::vector) AS similarity
         FROM faces f

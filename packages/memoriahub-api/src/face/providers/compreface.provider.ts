@@ -28,7 +28,7 @@ import type {
   FaceCapabilities,
   FaceProviderCredentials,
   DetectedFace,
-} from './face-provider.interface';
+} from './face-provider.interface.js';
 
 // ---------------------------------------------------------------------------
 // Default URL (overridden by stored credential baseUrl or FACE_COMPREFACE_URL)
@@ -36,6 +36,11 @@ import type {
 
 const DEFAULT_COMPREFACE_URL = 'http://compreface-core:3000';
 
+/**
+ * The CompreFace face provider (a keyless sidecar): detection and embeddings through the shared compute client.
+ *
+ * @stability experimental
+ */
 export class ComprefaceProvider implements FaceProvider {
   readonly key = 'compreface';
 

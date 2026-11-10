@@ -32,7 +32,7 @@
  *  8. All timestamps are strictly less than durationSec.
  */
 
-import { VideoFrameExtractionService } from './video-frame-extraction.service';
+import { VideoFrameExtractionService } from '../../src/face/video-frame-extraction.service.js';
 
 // ---------------------------------------------------------------------------
 // Mocks

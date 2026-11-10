@@ -88,6 +88,18 @@ export interface DownloadToTempFileOptions {
 }
 
 /**
+ * A downloaded temp file and its cleanup.
+ *
+ * @stability experimental
+ */
+export interface DownloadedTempFile {
+  /** The file path. */
+  path: string;
+  /** Removes the file; safe to call after a failure. */
+  cleanup: () => Promise<void>;
+}
+
+/**
  * Downloads an object to a temp file behind the disk-space pre-flight and returns
  * the path plus a cleanup function. The caller MUST call `cleanup()` in a `finally`.
  *
@@ -97,7 +109,7 @@ export interface DownloadToTempFileOptions {
  */
 export async function downloadToTempFile(
   opts: DownloadToTempFileOptions,
-): Promise<{ path: string; cleanup: () => Promise<void> }> {
+): Promise<DownloadedTempFile> {
   const dir = opts.dir ?? tmpdir();
   const filePath = join(dir, `${opts.prefix}${randomUUID()}${opts.extension ?? ''}`);
   const cleanup = async (): Promise<void> => {

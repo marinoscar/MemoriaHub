@@ -1,16 +1,20 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { resolveCircleJob } from '../platform/jobs/media-item-job';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceMatchingService } from './face-matching.service';
-import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import { envSwitchOn } from './host/face-config.js';
+import type { FaceDb } from './host/face-db.js';
+import { FaceSystemSettings } from './host/face-system-settings.js';
+import { resolveCircleJob } from './host/media-item-job.js';
+import { FaceMatchingService } from './face-matching.service.js';
+import { MediaTouchService } from '../media/index.js';
 
 /**
  * FaceAutoArchiveSweepHandler: a native platform `JobHandler` (RETRO-C3, #585).
@@ -28,41 +32,45 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * previously-archived (hidden) unassigned face is hidden too — the same
  * retroactive sweep FaceDetectionCore / PeopleService.hideFaces perform on new
  * detections and manual archives, applied here to the whole live pool at once.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class FaceAutoArchiveSweepHandler implements JobHandler, OnModuleInit {
+export class FaceAutoArchiveSweepHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'face_auto_archive_sweep';
   readonly label = 'Face auto-archive sweep';
   /** Pages the whole live unassigned pool of one circle against its archived set. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
   private readonly logger = new Logger(FaceAutoArchiveSweepHandler.name);
 
   /** Live unassigned faces scanned per DB page (bounds memory). */
   private static readonly LIVE_BATCH_SIZE = 500;
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
     private readonly matchingService: FaceMatchingService,
-    private readonly systemSettings: AppSystemSettingsService,
+    private readonly systemSettings: FaceSystemSettings,
     private readonly mediaTouch: MediaTouchService,
   ) {}
 
+  /**
+   * Registers the handler with the queue.
+   */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
-    const circleId = await resolveCircleJob(this.scopes, job, this.logger);
+  async process(job: MemoriahubJob): Promise<void> {
+    const circleId = await resolveCircleJob((id) => this.access.scopeExists(id), job, this.logger);
     if (!circleId) return;
 
     // Defensive guard — the admin endpoint also gates on this feature, but a job
     // may have been enqueued before the toggle was flipped off.
     const settings = await this.systemSettings.getSettings();
     const autoArchiveOn =
-      settings.features?.faceAutoArchive === true &&
-      (process.env.FACE_AUTO_ARCHIVE ?? 'true') !== 'false';
+      settings.features?.faceAutoArchive === true && envSwitchOn('FACE_AUTO_ARCHIVE');
     if (!autoArchiveOn) {
       this.logger.log(`face_auto_archive_sweep: feature disabled; no-op for circle ${circleId}`);
       return;

@@ -4,7 +4,8 @@ const common = {
   rootDir: '.',
   testEnvironment: 'node',
   // The sources keep the `.js` extension on relative imports (NodeNext); map it back for ts-jest.
-  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1' },
+  // `sharp` is pinned to one copy so a `jest.mock('sharp')` in a spec covers the compute package too.
+  moduleNameMapper: { '^(\\.{1,2}/.*)\\.js$': '$1', '^sharp$': require.resolve('sharp') },
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json', diagnostics: { ignoreCodes: [151002] } }],
   },

@@ -9,8 +9,8 @@
 const mockFetch = jest.fn();
 global.fetch = mockFetch as any;
 
-import { ComprefaceProvider } from './compreface.provider';
-import type { FaceProviderCredentials } from './face-provider.interface';
+import { ComprefaceProvider } from '../../src/face/providers/compreface.provider.js';
+import type { FaceProviderCredentials } from '../../src/face/providers/face-provider.interface.js';
 
 // Credentials that supply a custom baseUrl (no apiKey needed)
 const credsWithBaseUrl: FaceProviderCredentials = {

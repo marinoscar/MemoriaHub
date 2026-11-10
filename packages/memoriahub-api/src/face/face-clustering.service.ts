@@ -17,16 +17,22 @@
 // not re-cluster already-assigned faces.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { FaceMatchingService } from './face-matching.service';
+import type { FaceDb } from './host/face-db.js';
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { FaceMatchingService } from './face-matching.service.js';
 
+/**
+ * Groups the unknown, live faces of a circle into provisional people by cosine similarity.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class FaceClusteringService {
   private readonly logger = new Logger(FaceClusteringService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
     private readonly matchingService: FaceMatchingService,
   ) {}
 

@@ -1,35 +1,44 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { UploadEnrichmentRegistry } from '@marinoscar/memoriahub-api/media';
-import { JobReason, MediaFaceStatusType, MediaType } from '@prisma/client';
-
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { featureSkipReason } from '../enrichment/upload/upload-enrichment-gates';
-import { PrismaService } from '../prisma/prisma.service';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
+import { featureSkipReason } from '../core/index.js';
+import { UploadEnrichmentRegistry } from '../media/index.js';
+import type { FaceDb } from './host/face-db.js';
+import { JobReason, MediaFaceStatusType, MediaType } from './host/face-enums.js';
+import { FaceJobs } from './host/face-jobs.js';
 
 /**
  * Registers the photo face-detection fan-out with the media slice (RETRO-J5, #613):
  * `face_detection` at priority 10 and the `pending` face status, behind
  * `features.faceRecognition` and `FACE_AUTO_DETECT`. (Video face detection rides the
  * post-social-media-detection fan-out, `MediaEnrichmentService`.)
+ *
+ * @stability experimental
  */
 @Injectable()
 export class FaceUploadEnrichment implements OnModuleInit {
   constructor(
     private readonly registry: UploadEnrichmentRegistry,
-    private readonly jobs: EnrichmentJobService,
-    private readonly prisma: PrismaService,
+    private readonly jobs: FaceJobs,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
   ) {}
 
+  /**
+   * Registers the photo fan-out with the media slice.
+   */
   onModuleInit(): void {
     registerFaceUploadEnrichment(this.registry, this.jobs, this.prisma);
   }
 }
 
-/** The registration itself, callable from a unit test without a Nest module. */
+/**
+ * The registration itself, callable from a unit test without a Nest module.
+ *
+ * @stability experimental
+ */
 export function registerFaceUploadEnrichment(
   registry: UploadEnrichmentRegistry,
-  jobs: Pick<EnrichmentJobService, 'enqueue'>,
-  prisma: Pick<PrismaService, 'mediaFaceStatus'>,
+  jobs: Pick<FaceJobs, 'enqueue'>,
+  prisma: Pick<FaceDb, 'mediaFaceStatus'>,
 ): void {
   registry.register('face_detection', {
     mediaTypes: [MediaType.photo],

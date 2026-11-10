@@ -8,11 +8,11 @@
  * threshold values are exercised realistically.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
-import { FaceClusteringService } from './face-clustering.service';
-import { FaceMatchingService, DEFAULT_FACE_CLUSTER_THRESHOLD, DEFAULT_FACE_CLUSTER_MIN_SIZE } from './face-matching.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { FACE_CONFIG } from '../../src/face/host/face-config.js';
+import { FaceClusteringService } from '../../src/face/face-clustering.service.js';
+import { FaceMatchingService, DEFAULT_FACE_CLUSTER_THRESHOLD, DEFAULT_FACE_CLUSTER_MIN_SIZE } from '../../src/face/face-matching.service.js';
+import { MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,9 +49,9 @@ describe('FaceClusteringService', () => {
       providers: [
         FaceClusteringService,
         FaceMatchingService, // real, not mocked
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         {
-          provide: ConfigService,
+          provide: FACE_CONFIG,
           useValue: { get: jest.fn().mockReturnValue(null) }, // uses defaults
         },
       ],

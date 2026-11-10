@@ -2,13 +2,28 @@
 // Face Provider Interface
 // =============================================================================
 
+/**
+ * Injection token name of a face provider.
+ *
+ * @stability experimental
+ */
 export const FACE_PROVIDER = 'FACE_PROVIDER';
 
+/**
+ * What a provider needs to reach its service: an optional key and an optional base URL override.
+ *
+ * @stability experimental
+ */
 export interface FaceProviderCredentials {
   apiKey?: string;
   baseUrl?: string;
 }
 
+/**
+ * What a face provider can do.
+ *
+ * @stability experimental
+ */
 export interface FaceCapabilities {
   /** Provider can detect faces and return bounding boxes */
   detect: boolean;
@@ -16,6 +31,11 @@ export interface FaceCapabilities {
   embed: boolean;
 }
 
+/**
+ * One face a provider found in an image.
+ *
+ * @stability experimental
+ */
 export interface DetectedFace {
   /**
    * Bounding box of the face in the image, in absolute pixel coordinates
@@ -30,6 +50,11 @@ export interface DetectedFace {
   embedding?: number[];
 }
 
+/**
+ * A face detection and embedding provider. CompreFace is the only one today.
+ *
+ * @stability experimental
+ */
 export interface FaceProvider {
   /** Unique string key for this provider (e.g. 'compreface') */
   readonly key: string;

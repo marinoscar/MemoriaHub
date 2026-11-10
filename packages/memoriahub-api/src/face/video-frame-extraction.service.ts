@@ -27,6 +27,11 @@ import {
 
 export type { ExtractedFrame, FrameExtractionOpts };
 
+/**
+ * Extracts JPEG frames from a video file on disk through the shared compute package, so a worker node samples frames the same way the server does.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class VideoFrameExtractionService {
   /**
