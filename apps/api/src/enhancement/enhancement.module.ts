@@ -3,7 +3,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { LegacyAiModule } from '../ai-port/legacy-ai.module';
+import { AiPortModule } from '../ai-port/ai-port.module';
 import { MediaModule } from '../media/media.module';
 import { MediaEnhancementController } from './media-enhancement.controller';
 import { EnhancementBatchesController } from './enhancement-batches.controller';
@@ -24,7 +24,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  *     ObjectReprocessService.reprocessNow.
  *   - OwnerAccessModule: OwnerAccessService.requireOwnerRole.
  *   - SettingsModule: AppSystemSettingsService.
- *   - LegacyAiModule: AiSettingsService + AiProviderRegistry (enhanceImage provider).
+ *   - AiPortModule: AiService (the synchronous image edit, `editImageInline`).
  *   - MediaModule: MediaMetadataSyncService + MediaEnrichmentService (keep_both path).
  *
  * The purge cron @Cron works via ScheduleModule.forRoot() in AppModule.
@@ -36,7 +36,7 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     MediaProcessingModule,
     OwnerAccessModule,
     
-    LegacyAiModule,
+    AiPortModule,
     MediaModule,
   ],
   controllers: [

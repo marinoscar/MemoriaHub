@@ -46,11 +46,11 @@ import { VideoAutoTaggingService } from './video-auto-tagging.service';
 import { buildVideoTaggingPrompt } from '@memoriahub/enrichment-compute/ai';
 import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
+import { AiError, AiService } from '@marinoscar/platform-api/ai';
+import { RateLimitError } from '@marinoscar/platform-api/jobs';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { RateLimitError } from '../enrichment/rate-limit.error';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { extractFrames, extractAudioLead } from '@memoriahub/enrichment-compute/video';
 
@@ -127,6 +127,23 @@ function makeSettings(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * The platform `respond` request, read back as the multi-image vision request the old provider
+ * took (`model`, `system`, `prompt`, `images`, `maxTokens`), so the assertions below keep
+ * describing WHAT the model is asked, not how the request is shaped.
+ */
+function toVisionView(req: any) {
+  const content = req.input[0].content as Array<{ type: string; text?: string; url?: string }>;
+  const images = content
+    .filter((part) => part.type === 'image')
+    .map((part) => {
+      const m = /^data:([^;]+);base64,(.*)$/.exec(part.url!)!;
+      return { base64: m[2], mimeType: m[1] };
+    });
+  const text = content.find((part) => part.type === 'text')!;
+  return { model: req.model, system: req.instructions, prompt: text.text, images, maxTokens: req.maxOutputTokens };
+}
+
 function makeFrames(count: number) {
   return Array.from({ length: count }, (_, i) => ({
     timestampMs: (i + 1) * 2500,
@@ -140,10 +157,11 @@ describe('VideoAutoTaggingService', () => {
   let service: VideoAutoTaggingService;
   let mockPrisma: MockPrismaService;
   let mockAiSettings: {
-    resolveCredentials: jest.Mock;
+    selection: jest.Mock;
     resolveTranscriptionConfig: jest.Mock;
   };
-  let mockRegistry: { get: jest.Mock };
+  let mockForSystem: jest.Mock;
+  /** The scripted model: `analyzeImage` answers the vision text, `transcribeAudio` the transcript. */
   let mockProvider: { analyzeImage: jest.Mock; transcribeAudio?: jest.Mock };
   let mockVideoInput: { resolve: jest.Mock };
   let mockCleanup: jest.Mock;
@@ -162,11 +180,33 @@ describe('VideoAutoTaggingService', () => {
       ),
       transcribeAudio: jest.fn().mockResolvedValue({ text: 'happy birthday', language: 'en' }),
     };
-    mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
     mockAiSettings = {
-      resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }),
       resolveTranscriptionConfig: jest.fn().mockResolvedValue(null),
+      // `selection('tagging')` reads the saved row the tests stage in `systemSettings`;
+      // `selection('transcription')` answers `resolveTranscriptionConfig`.
+      selection: jest.fn(async (key: string) => {
+        if (key === 'transcription') return mockAiSettings.resolveTranscriptionConfig();
+        const row: any = await (mockPrisma.systemSettings.findUnique as jest.Mock)();
+        const chosen = row?.value?.ai?.features?.[key];
+        return chosen?.provider && chosen?.model ? chosen : null;
+      }),
     };
+    // The platform AiService, as a system call.
+    mockForSystem = jest.fn().mockReturnValue({
+      respond: jest.fn(async (req: any) => ({
+        outputText: await mockProvider.analyzeImage({}, toVisionView(req)),
+      })),
+      transcribeInline: jest.fn(async (req: any) => {
+        if (!mockProvider.transcribeAudio) {
+          throw new AiError('AI_CAPABILITY_UNSUPPORTED', 'The model cannot transcribe audio.');
+        }
+        return mockProvider.transcribeAudio({}, {
+          model: req.model,
+          audio: Buffer.from(req.audio.data),
+          mimeType: req.audio.mimeType,
+        });
+      }),
+    });
     mockCleanup = jest.fn().mockResolvedValue(undefined);
     mockVideoInput = {
       resolve: jest.fn().mockResolvedValue({
@@ -201,8 +241,8 @@ describe('VideoAutoTaggingService', () => {
       providers: [
         VideoAutoTaggingService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: AiSettingsService, useValue: mockAiSettings },
-        { provide: AiProviderRegistry, useValue: mockRegistry },
+        { provide: MemoriaHubAiSettings, useValue: mockAiSettings },
+        { provide: AiService, useValue: { forSystem: mockForSystem } },
         { provide: VideoInputResolver, useValue: mockVideoInput },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AutoTaggingService, useValue: mockAutoTaggingService },
@@ -481,18 +521,18 @@ describe('VideoAutoTaggingService', () => {
 
     it('converts a provider 429 into RateLimitError so the job is DEFERRED, not counted as a failure', async () => {
       mockProvider.analyzeImage.mockRejectedValue(
-        Object.assign(new Error('slow down'), { status: 429, headers: { 'retry-after': '30' } }),
+        new AiError('AI_RATE_LIMITED', 'slow down', { retryAfterMs: 30_000 }),
       );
 
-      await expect(service.processMediaItem(makeJob())).rejects.toBeInstanceOf(RateLimitError);
+      const err = await service.processMediaItem(makeJob()).catch((e) => e);
+      expect(err).toBeInstanceOf(RateLimitError);
+      expect((err as RateLimitError).retryAfterMs).toBe(30_000);
     });
 
-    it('converts a provider 529 (Anthropic "Overloaded") the same way', async () => {
-      mockProvider.analyzeImage.mockRejectedValue(
-        Object.assign(new Error('overloaded'), { status: 529 }),
-      );
+    it('calls the platform as a system call under the video_tagging feature, on the job', async () => {
+      await service.processMediaItem(makeJob());
 
-      await expect(service.processMediaItem(makeJob())).rejects.toBeInstanceOf(RateLimitError);
+      expect(mockForSystem).toHaveBeenCalledWith({ orgId: null, feature: 'video_tagging', jobId: 'job-1' });
     });
   });
 
@@ -571,7 +611,8 @@ describe('VideoAutoTaggingService', () => {
     });
 
     it('degrades to visual-only when the provider has no audio capability', async () => {
-      mockRegistry.get.mockReturnValue({ analyzeImage: mockProvider.analyzeImage });
+      // The platform refuses a model without `audio_transcription` (AI_CAPABILITY_UNSUPPORTED).
+      delete mockProvider.transcribeAudio;
 
       await service.processMediaItem(makeJob());
 
@@ -600,9 +641,7 @@ describe('VideoAutoTaggingService', () => {
     });
 
     it('RETHROWS a rate-limited transcription rather than silently producing a worse description', async () => {
-      mockProvider.transcribeAudio!.mockRejectedValue(
-        Object.assign(new Error('slow down'), { status: 429 }),
-      );
+      mockProvider.transcribeAudio!.mockRejectedValue(new AiError('AI_RATE_LIMITED', 'slow down'));
 
       await expect(service.processMediaItem(makeJob())).rejects.toBeInstanceOf(RateLimitError);
       // The visual call must not have happened either — the job is deferred whole.

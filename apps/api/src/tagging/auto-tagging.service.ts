@@ -4,9 +4,10 @@ import { MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
 import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiSettingsService } from '../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '../ai-port/legacy-ai-provider.registry';
-import type { AiProvider, AiProviderCredentials } from '../ai-port/legacy-ai-provider.types';
+import { AiService, type AiContentPart } from '@marinoscar/platform-api/ai';
+import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
+import { assertEmbeddingDimensions, asJobError, aiRateLimit, systemScope, visionCallOptions } from '../ai-port/ai-calls';
+import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import {
   STORAGE_PROVIDER,
   StorageProvider,
@@ -16,7 +17,6 @@ import { prepareImageForProcessing } from '../media-processing/image-orientation
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
-import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { MediaTouchService } from '../media/media-touch.service';
 
 /**
@@ -54,8 +54,8 @@ export class AutoTaggingService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiSettingsService: AiSettingsService,
-    private readonly aiProviderRegistry: AiProviderRegistry,
+    private readonly aiSettings: MemoriaHubAiSettings,
+    private readonly ai: AiService,
     @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly enrichmentJobService: EnrichmentJobService,
@@ -117,17 +117,10 @@ export class AutoTaggingService {
       },
     });
 
-    // d. Read AI tagging config from system settings
-    const row = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const taggingConfig = (row?.value as any)?.ai?.features?.tagging as
-      | { provider?: string; model?: string }
-      | undefined;
-
-    const provider = taggingConfig?.provider;
-    const model = taggingConfig?.model;
+    // d. Read the tagging selection (`ai.features.tagging`)
+    const selection = await this.aiSettings.selection('tagging');
+    const provider = selection?.provider;
+    const model = selection?.model;
 
     if (!provider || !model) {
       const errMsg = 'AI tagging provider or model not configured in system settings';
@@ -138,19 +131,9 @@ export class AutoTaggingService {
 
     await this.enrichmentJobService.recordModel(job.id, provider, model);
 
-    // e. Resolve credentials — non-throwing gate
-    let creds: { apiKey: string; baseUrl?: string };
-    try {
-      creds = await this.aiSettingsService.resolveCredentials(provider);
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`AutoTagJob ${job.id}: failed to resolve credentials for provider ${provider}: ${errMsg}`);
-      await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
-      return;
-    }
-
-    // f. Get provider instance
-    const aiProvider = this.aiProviderRegistry.get(provider);
+    // e./f. The key is the platform's to resolve per call (`AiService`, AiKeyResolver): a missing or
+    // disabled key surfaces from the call below as an `AiError`, which fails the item like any
+    // other provider error.
 
     // g. Load enabled TagLabels
     const tagLabels = await this.prisma.tagLabel.findMany({
@@ -256,9 +239,8 @@ export class AutoTaggingService {
         system: systemPrompt,
         prompt: userPrompt,
         mimeType,
-        creds,
-        aiProvider,
-        providerKey: provider,
+        provider,
+        jobId: job.id,
       });
 
       // PERSIST half — identical whether the raw text came from this
@@ -291,10 +273,10 @@ export class AutoTaggingService {
   // ---------------------------------------------------------------------------
   // computeAutoTagging — COMPUTE half of the split.
   //
-  // Thin wrapper around aiProvider.analyzeImage: base64-encodes the already-
-  // prepared image buffer and calls the vision provider, with 429/529 mapped to
-  // RateLimitError (the handler hands it to the queue as the platform one).
-  // Server-only since RETRO-C4 (#590): AI rule 3, the key never leaves the API.
+  // One vision call through the platform `AiService` (`forSystem`: a job has no acting user;
+  // feature `media_tagging`): base64-encodes the already-prepared image and asks the model.
+  // A provider 429/529 reaches the queue as the platform `RateLimitError` (the job is deferred,
+  // no attempt charged). Server-only since RETRO-C4 (#590): AI rule 3, the key never leaves the API.
   // ---------------------------------------------------------------------------
 
   async computeAutoTagging(
@@ -304,46 +286,38 @@ export class AutoTaggingService {
       system: string;
       prompt: string;
       mimeType: string;
-      creds: AiProviderCredentials;
-      aiProvider: AiProvider;
-      /** Provider key, for tagging a thrown RateLimitError. */
-      providerKey: string;
+      /** Provider id of the tagging selection. */
+      provider: string;
+      /** The queue job the call is made under (usage rows). */
+      jobId?: string;
     },
   ): Promise<AutoTaggingResult> {
-    const imageBase64 = imageBuffer.toString('base64');
+    const image: AiContentPart = {
+      type: 'image',
+      url: `data:${ctx.mimeType};base64,${imageBuffer.toString('base64')}`,
+    };
+    const text: AiContentPart = { type: 'text', text: ctx.prompt };
 
     try {
-      const rawText = await ctx.aiProvider.analyzeImage(ctx.creds, {
-        model: ctx.model,
-        system: ctx.system,
-        prompt: ctx.prompt,
-        imageBase64,
-        mimeType: ctx.mimeType,
-      });
-      return { rawText };
+      const response = await this.ai
+        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.mediaTagging, ctx.jobId))
+        .respond({
+          provider: ctx.provider,
+          model: ctx.model,
+          instructions: ctx.system,
+          // Text first, then the image (the order the OpenAI path always sent); Anthropic reads the image first.
+          input: [
+            {
+              type: 'message',
+              role: 'user',
+              content: ctx.provider === 'anthropic' ? [image, text] : [text, image],
+            },
+          ],
+          ...visionCallOptions(ctx.provider, ctx.model),
+        });
+      return { rawText: response.outputText };
     } catch (providerErr) {
-      // Surface provider-level 429 / rate-limit errors explicitly so the
-      // worker routes them through the rate-limit deferral path instead of
-      // the normal exponential-retry path.
-      const e = providerErr as Record<string, unknown> | null;
-      const httpStatus =
-        typeof e?.['status'] === 'number' ? e['status'] : undefined;
-      // 529 = Anthropic "Overloaded" — transient, treat the same as 429
-      if (httpStatus === 429 || httpStatus === 529) {
-        const retryHeader =
-          typeof (e?.['headers'] as Record<string, unknown> | undefined)?.['retry-after'] === 'string'
-            ? ((e?.['headers'] as Record<string, unknown>)['retry-after'] as string)
-            : typeof (e?.['response'] as Record<string, unknown> | undefined)?.['headers'] === 'object'
-              ? (((e?.['response'] as Record<string, unknown>)['headers'] as Record<string, unknown>)['retry-after'] as string | undefined)
-              : undefined;
-        const retryAfterMs = parseRetryAfterMs(retryHeader) ?? undefined;
-        throw new RateLimitError(
-          (typeof e?.['message'] === 'string' ? e['message'] : 'AI provider rate limit exceeded (429)'),
-          retryAfterMs,
-          ctx.providerKey,
-        );
-      }
-      throw providerErr;
+      throw asJobError(providerErr);
     }
   }
 
@@ -460,7 +434,7 @@ export class AutoTaggingService {
     const peopleNames = [
       ...new Set(faces.map((f) => f.person?.name).filter((n): n is string => !!n)),
     ];
-    await this.embedAndStore(mediaItem.id, mediaItem.circleId, description, normalizedLabels, peopleNames);
+    await this.embedAndStore(mediaItem.id, mediaItem.circleId, description, normalizedLabels, peopleNames, job.id);
 
     // Upsert mediaTagStatus → processed
     await this.prisma.mediaTagStatus.upsert({
@@ -502,6 +476,7 @@ export class AutoTaggingService {
     description: string | null,
     tagNames: string[],
     peopleNames: string[],
+    jobId?: string,
   ): Promise<void> {
     try {
       // A video's transcript (epic #452, issue #454) joins the same embedding
@@ -524,8 +499,8 @@ export class AutoTaggingService {
         return;
       }
 
-      // Resolve embedding config
-      const embeddingConfig = await this.aiSettingsService.resolveEmbeddingConfig();
+      // Resolve the embedding selection (`ai.features.embedding`)
+      const embeddingConfig = await this.aiSettings.selection('embedding');
       if (!embeddingConfig) {
         this.logger.warn(
           `AutoTagging embedAndStore: no embedding provider/model configured; skipping embedding for MediaItem ${mediaItemId}`,
@@ -535,28 +510,13 @@ export class AutoTaggingService {
 
       const { provider: embProvider, model: embModel } = embeddingConfig;
 
-      // Resolve credentials for embedding provider
-      let embCreds: { apiKey: string; baseUrl?: string };
-      try {
-        embCreds = await this.aiSettingsService.resolveCredentials(embProvider);
-      } catch (credErr) {
-        this.logger.warn(
-          `AutoTagging embedAndStore: failed to resolve credentials for embedding provider ${embProvider}: ${credErr instanceof Error ? credErr.message : String(credErr)}`,
-        );
-        return;
-      }
-
-      // Get provider instance and check embedText support
-      const embProviderInstance = this.aiProviderRegistry.get(embProvider);
-      if (typeof embProviderInstance.embedText !== 'function') {
-        this.logger.warn(
-          `AutoTagging embedAndStore: provider ${embProvider} does not support embedText; skipping embedding for MediaItem ${mediaItemId}`,
-        );
-        return;
-      }
-
-      // Generate embedding
-      const embedding = await embProviderInstance.embedText(embCreds, embModel, text);
+      // Generate the embedding through the platform `AiService` (feature `semantic_embedding`);
+      // a model that answers another size than `media_item_embedding` holds is refused.
+      const result = await this.ai
+        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.semanticEmbedding, jobId))
+        .embed({ provider: embProvider, model: embModel, input: text });
+      const embedding = result.vectors[0] ?? [];
+      assertEmbeddingDimensions(embedding, embModel);
 
       // Store via parameterized raw SQL to handle the pgvector column type
       const vectorLiteral = `[${embedding.join(',')}]`;
@@ -572,7 +532,7 @@ export class AutoTaggingService {
     } catch (err) {
       // Re-throw rate-limit errors so the worker defers the entire tagging job
       // rather than silently dropping the embedding and marking it processed.
-      const rl = err instanceof RateLimitError ? err : classifyRateLimit(err);
+      const rl = aiRateLimit(err);
       if (rl) throw rl;
 
       this.logger.warn(

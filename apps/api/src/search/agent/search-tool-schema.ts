@@ -1,4 +1,13 @@
-import { AiToolDef } from '../../ai-port/legacy-ai-provider.types';
+
+/**
+ * The `search_media` tool as a JSON Schema document: what the model is told. The agent turns it
+ * into the platform's function tool (a Zod schema) when it opens the stream.
+ */
+export interface SearchToolDef {
+  name: string;
+  description: string;
+  inputSchema: object;
+}
 import { SEARCHABLE_FIELDS } from '../searchable-fields.registry';
 
 type JsonSchemaProperty =
@@ -32,7 +41,7 @@ type JsonSchemaProperty =
  *
  * Adding a new SearchableField to the registry automatically extends this tool schema.
  */
-export function buildSearchMediaToolDef(): AiToolDef {
+export function buildSearchMediaToolDef(): SearchToolDef {
   const properties: Record<string, JsonSchemaProperty> = {};
 
   for (const field of SEARCHABLE_FIELDS) {

@@ -21,7 +21,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { LegacyAiModule } from '../ai-port/legacy-ai.module';
+import { AiPortModule } from '../ai-port/ai-port.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
 import { emailModule } from '../platform/email/email.config';
@@ -49,10 +49,9 @@ import { YearInReviewCurator } from './curators/year-in-review.curator';
 import { memoryCuratorsProvider } from './curators/memory-curators.provider';
 
 @Module({
-  // LegacyAiModule supplies AiSettingsService (ai.features.memories + the decrypted
-  // credential) and AiProviderRegistry to MemoryTitleService (#306). The edge
-  // points one way only — LegacyAiModule imports SettingsModule and nothing else —
-  // so there is no cycle to break.
+  // AiPortModule supplies the platform AiService to MemoryTitleService (#306; a system call, the
+  // `memory_titles` feature routed by `ai.features.memories`). The edge points one way only —
+  // AiPortModule imports no feature module — so there is no cycle to break.
   //
   // #307's API layer adds two edges: OwnerAccessModule (OwnerAccessService,
   // the per-circle role checks) and MediaModule (MediaThumbnailService for
@@ -72,7 +71,7 @@ import { memoryCuratorsProvider } from './curators/memory-curators.provider';
     PrismaModule,
     
     EnrichmentModule,
-    LegacyAiModule,
+    AiPortModule,
     OwnerAccessModule,
     MediaModule,
     emailModule,
