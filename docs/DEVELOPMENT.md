@@ -565,10 +565,12 @@ const response = await request(app.getHttpServer())
 1. **Update the schema fragment** (the schema is split into fragments and composed; never hand-edit `prisma/schema/`, it is GENERATED):
    ```bash
    cd apps/api
-   # Edit the owning fragment in prisma/fragments/*.prisma
-   npm run db:compose            # regenerates prisma/schema/ (CI runs db:compose:check)
+   # Edit the owning fragment: a domain model in packages/memoriahub-db/schema/memoriahub.<slice>.prisma,
+   # an app-owned model in prisma/fragments/*.prisma (never the generated prisma/fragments/memoriahub.*.prisma)
+   npm run db:compose            # memoriahub-db sync, then platform db compose; regenerates prisma/schema/ (CI runs db:compose:check)
    ```
-   Models a platform slice will replace live in `prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); everything else is grouped by domain (`media.prisma`, `face.prisma`, ...). Parentheses inside a field type such as `Unsupported("vector(128)")` are written `\u0028`/`\u0029` because the composer's field reader stops a type at the first `)`; Prisma decodes them.
+   A domain table's migration is promoted into the package (`npx memoriahub-db promote <ts>_<name> --id <name> --slice <slice>` after `prisma:migrate:dev --create-only`); see [the domain migration runbook](runbooks/memoriahub-domain-migration.md). `npm run db:check` runs `platform db check && memoriahub-db check`; `db:check:database` and `db:memoriahub:check:database` also check a live database.
+   Models a platform slice will replace live in `prisma/fragments/platform-*.legacy.prisma` (header `PLATFORM-ADOPTION-SHIM`); the domain models are the package's (`packages/memoriahub-db/schema`). Parentheses inside a field type such as `Unsupported("vector(128)")` are written `\u0028`/`\u0029` because the composer's field reader stops a type at the first `)`; Prisma decodes them.
 
 2. **Create Migration:**
    ```bash
