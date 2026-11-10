@@ -12,15 +12,17 @@ import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
 import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
 import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
-import { LocationSuggestionRunEvaluateHandler } from '../../src/location-inference/runs/location-suggestion-run-evaluate.handler';
-import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inference/runs/location-suggestion-run-execute-batch.handler';
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
 import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
 import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
 import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
 import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
-import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
-import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
+import {
+  LocationSuggestionRunEvaluateHandler,
+  LocationSuggestionRunExecuteBatchHandler,
+  ReviewRunEvaluateHandler,
+  ReviewRunExecuteBatchHandler,
+} from '@marinoscar/memoriahub-api/review-runs';
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';

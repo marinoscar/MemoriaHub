@@ -37,26 +37,24 @@
  * preserved location-suggestion-run-evaluate.handler.spec.ts.old reference.
  */
 
-import { EnrichmentJob, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
 import { randomUUID } from 'crypto';
-import { ReviewRunEvaluateHandler } from './review-run-evaluate.handler';
-import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../prisma/prisma.service';
-import { ReviewRunService } from './review-run.service';
-import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import {
-  ReviewRunCursor,
-  ReviewRunEvaluatePage,
-  ReviewRunSubjectStrategy,
-} from './review-run-subject.strategy';
-import { BurstGroupReviewStrategy } from './strategies/burst-group.strategy';
-import { DuplicateGroupReviewStrategy } from './strategies/duplicate-group.strategy';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+  REVIEW_RUN_STATUS as ReviewRunStatus,
+  ReviewRunEvaluateHandler,
+  type ReviewRunCursor,
+  type ReviewRunEvaluatePage,
+  type ReviewRunService,
+  type ReviewRunSubjectRegistry,
+  type ReviewRunSubjectStrategy,
+  type ReviewRunsDb,
+} from '../../src/review-runs/index.js';
+import { createMockDb } from '../helpers/mock-db.js';
 
 const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 
-function makeJob(payload: Record<string, unknown>, attempts = 1): EnrichmentJob {
+function makeJob(payload: Record<string, unknown>, attempts = 1) {
   return {
     id: randomUUID(),
     type: 'review_run_evaluate',
@@ -79,7 +77,7 @@ function makeJob(payload: Record<string, unknown>, attempts = 1): EnrichmentJob 
     claimedByNodeId: null,
     leaseExpiresAt: null,
     executor: 'server',
-  } as unknown as EnrichmentJob;
+  };
 }
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -113,22 +111,22 @@ function makeStubStrategy(
 
 describe('ReviewRunEvaluateHandler', () => {
   let handler: ReviewRunEvaluateHandler;
-  let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
-  let runService: jest.Mocked<Pick<ReviewRunService, 'enqueueExecuteBatches'>>;
+  let prisma: any;
+  let jobs: { registerHandler: jest.Mock };
+  let runService: { enqueueExecuteBatches: jest.Mock };
   let subjects: { get: jest.Mock };
   let stubStrategy: ReturnType<typeof makeStubStrategy>;
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
-    registry = { register: jest.fn() };
+    prisma = createMockDb();
+    jobs = { registerHandler: jest.fn() };
     runService = { enqueueExecuteBatches: jest.fn().mockResolvedValue(undefined) };
     stubStrategy = makeStubStrategy();
     subjects = { get: jest.fn().mockReturnValue(stubStrategy) };
 
     handler = new ReviewRunEvaluateHandler(
-      registry as unknown as JobHandlerRegistry,
-      prisma as unknown as PrismaService,
+      jobs as never,
+      prisma as unknown as ReviewRunsDb,
       runService as unknown as ReviewRunService,
       subjects as unknown as ReviewRunSubjectRegistry,
     );
@@ -144,7 +142,7 @@ describe('ReviewRunEvaluateHandler', () => {
 
   it('registers itself with the handler registry on module init', () => {
     handler.onModuleInit();
-    expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(jobs.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('has type === "review_run_evaluate"', () => {
@@ -355,80 +353,6 @@ describe('ReviewRunEvaluateHandler', () => {
       await expect(handler.process(makeJob({ runId: RUN_ID }, 1))).rejects.toThrow(
         'primary failure',
       );
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // Null-confidence exclusion in BOTH directions (real strategy, not a stub)
-  // ---------------------------------------------------------------------------
-
-  describe('null-confidence exclusion (real BurstGroupReviewStrategy / DuplicateGroupReviewStrategy)', () => {
-    let strategyPrisma: MockPrismaService;
-
-    beforeEach(() => {
-      strategyPrisma = createMockPrismaService();
-      (strategyPrisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
-      (strategyPrisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([]);
-    });
-
-    it('BurstGroupReviewStrategy: a resolve run filters confidence { not: null, gte: floor }', async () => {
-      const strategy = new BurstGroupReviewStrategy(
-        strategyPrisma as unknown as PrismaService,
-        {} as any,
-      );
-      const run = makeRun({ action: ReviewRunAction.resolve_archive, threshold: 60 });
-
-      await strategy.evaluatePage(run as any, null, 1000);
-
-      const where = (strategyPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0].where;
-      expect(where.confidence).toEqual({ not: null, gte: 0.6 });
-    });
-
-    it('BurstGroupReviewStrategy: a dismiss run filters confidence { not: null, lt: floor }', async () => {
-      const strategy = new BurstGroupReviewStrategy(
-        strategyPrisma as unknown as PrismaService,
-        {} as any,
-      );
-      const run = makeRun({ action: ReviewRunAction.dismiss, threshold: 60 });
-
-      await strategy.evaluatePage(run as any, null, 1000);
-
-      const where = (strategyPrisma.burstGroup.findMany as jest.Mock).mock.calls[0][0].where;
-      expect(where.confidence).toEqual({ not: null, lt: 0.6 });
-    });
-
-    it('DuplicateGroupReviewStrategy: a resolve run filters confidence { not: null, gte: floor }', async () => {
-      const strategy = new DuplicateGroupReviewStrategy(
-        strategyPrisma as unknown as PrismaService,
-        {} as any,
-      );
-      const run = makeRun({
-        subjectType: ReviewRunSubject.duplicate_group,
-        action: ReviewRunAction.resolve_trash,
-        threshold: 75,
-      });
-
-      await strategy.evaluatePage(run as any, null, 1000);
-
-      const where = (strategyPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0].where;
-      expect(where.confidence).toEqual({ not: null, gte: 0.75 });
-    });
-
-    it('DuplicateGroupReviewStrategy: a dismiss run filters confidence { not: null, lt: floor }', async () => {
-      const strategy = new DuplicateGroupReviewStrategy(
-        strategyPrisma as unknown as PrismaService,
-        {} as any,
-      );
-      const run = makeRun({
-        subjectType: ReviewRunSubject.duplicate_group,
-        action: ReviewRunAction.dismiss,
-        threshold: 75,
-      });
-
-      await strategy.evaluatePage(run as any, null, 1000);
-
-      const where = (strategyPrisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0].where;
-      expect(where.confidence).toEqual({ not: null, lt: 0.75 });
     });
   });
 });

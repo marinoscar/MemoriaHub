@@ -1,21 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, type MemoriahubJobsPort } from '../../ports/index.js';
 import {
-  JobReason,
-  LocationSuggestionStatus,
-  Prisma,
-  ReviewRun,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import {
-  ReviewRunCursor,
-  ReviewRunEvaluatePage,
-  ReviewRunExecutionContext,
-  ReviewRunSubjectPreview,
-  ReviewRunSubjectStrategy,
-} from '../review-run-subject.strategy';
+  ReviewRunSubjectRegistry,
+  type ReviewRunCursor,
+  type ReviewRunEvaluatePage,
+  type ReviewRunExecutionContext,
+  type ReviewRunRow,
+  type ReviewRunSubjectPreview,
+  type ReviewRunSubjectStrategy,
+} from '../../review-runs/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { enqueueGeocodeJob } from '../geo/enqueue-geocode.js';
+
+/** The `LocationSuggestionStatus` values the strategy reads and writes. */
+const SUGGESTION_STATUS = { pending: 'pending', accepted: 'accepted', rejected: 'rejected' } as const;
 
 /** Keyset cursor for the (createdAt DESC, id DESC) scan. */
 interface LocationCursor extends ReviewRunCursor {
@@ -38,25 +37,48 @@ interface LocationCursor extends ReviewRunCursor {
  * NON-nullable Float, so there are no NULL rows to exclude from the threshold
  * filter in either direction.
  */
+/**
+ * The location-suggestion review strategy.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrategy {
-  readonly subject = ReviewRunSubject.location_suggestion;
+export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrategy, OnModuleInit {
+  /** The review queue this strategy serves. */
+  readonly subject = 'location_suggestion' as const;
+
+  /** The `review_run_items` column the subject ids live in. */
   readonly subjectColumn = 'locationSuggestionId' as const;
-  readonly supportedActions = [ReviewRunAction.accept, ReviewRunAction.reject] as const;
+
+  /** Bulk accept and reject. */
+  readonly supportedActions = ['accept', 'reject'] as const;
 
   private readonly logger = new Logger(LocationSuggestionReviewStrategy.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobs: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    private readonly registry: ReviewRunSubjectRegistry,
   ) {}
+
+  /** Registers the strategy with the review-run engine. */
+  onModuleInit(): void {
+    this.registry.register(this);
+  }
 
   // ---------------------------------------------------------------------------
   // Evaluate
   // ---------------------------------------------------------------------------
 
+  /**
+   * One keyset page of pending suggestions on the side of the threshold the run's action names.
+   *
+   * @param run - the run.
+   * @param cursor - the previous page's cursor.
+   * @param pageSize - the page size.
+   */
   async evaluatePage(
-    run: ReviewRun,
+    run: ReviewRunRow,
     cursor: ReviewRunCursor | null,
     pageSize: number,
   ): Promise<ReviewRunEvaluatePage> {
@@ -65,25 +87,24 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
     // high-confidence ones), a REJECT run matches those BELOW it (reject the
     // low-confidence noise).
     const floor = run.threshold / 100;
-    const confidence: Prisma.FloatFilter =
-      run.action === ReviewRunAction.accept ? { gte: floor } : { lt: floor };
+    const confidence: Record<string, number> = run.action === 'accept' ? { gte: floor } : { lt: floor };
 
-    const baseWhere: Prisma.LocationSuggestionWhereInput = {
+    const baseWhere: Record<string, unknown> = {
       circleId: run.circleId,
-      status: LocationSuggestionStatus.pending,
+      status: SUGGESTION_STATUS.pending,
       confidence,
     };
     const c = cursor as LocationCursor | null;
-    const where: Prisma.LocationSuggestionWhereInput = c
+    const where: Record<string, unknown> = c
       ? { AND: [baseWhere, buildAfterCursor(c)] }
       : baseWhere;
 
-    const rows = await this.prisma.locationSuggestion.findMany({
+    const rows = (await this.prisma.locationSuggestion.findMany({
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: pageSize,
       select: { id: true, createdAt: true },
-    });
+    })) as Array<{ id: string; createdAt: Date }>;
 
     if (rows.length === 0) return { subjectIds: [], nextCursor: null };
 
@@ -98,8 +119,15 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
   // Execute
   // ---------------------------------------------------------------------------
 
+  /**
+   * Accepts or rejects one suggestion; skips one resolved by hand since evaluation.
+   *
+   * @param run - the run.
+   * @param suggestionId - the suggestion.
+   * @param ctx - the batch accumulator (accepted items queue a geocode).
+   */
   async executeItem(
-    run: ReviewRun,
+    run: ReviewRunRow,
     suggestionId: string,
     ctx: ReviewRunExecutionContext,
   ): Promise<'applied' | 'skipped'> {
@@ -110,9 +138,9 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
 
     // Someone resolved this suggestion individually since evaluation, or it
     // vanished → skip (don't clobber a manual decision).
-    if (!suggestion || suggestion.status !== LocationSuggestionStatus.pending) return 'skipped';
+    if (!suggestion || suggestion.status !== SUGGESTION_STATUS.pending) return 'skipped';
 
-    if (run.action === ReviewRunAction.accept) {
+    if (run.action === 'accept') {
       await this.prisma.$transaction([
         this.prisma.mediaItem.update({
           where: { id: suggestion.mediaItemId },
@@ -125,7 +153,7 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
         this.prisma.locationSuggestion.update({
           where: { id: suggestion.id },
           data: {
-            status: LocationSuggestionStatus.accepted,
+            status: SUGGESTION_STATUS.accepted,
             resolvedById: run.startedById,
             resolvedAt: new Date(),
           },
@@ -142,7 +170,7 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
     await this.prisma.locationSuggestion.update({
       where: { id: suggestion.id },
       data: {
-        status: LocationSuggestionStatus.rejected,
+        status: SUGGESTION_STATUS.rejected,
         resolvedById: run.startedById,
         resolvedAt: new Date(),
       },
@@ -155,16 +183,14 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
    * Dedup-safe default (no skipDedup) — collapses with any pending geocode for
    * the same item.
    */
-  async deferredEffects(_run: ReviewRun, ctx: ReviewRunExecutionContext): Promise<void> {
+  async deferredEffects(_run: ReviewRunRow, ctx: ReviewRunExecutionContext): Promise<void> {
     for (const g of ctx.geocode) {
-      await this.enrichmentJobs
-        .enqueue({
-          type: 'geocode',
-          mediaItemId: g.mediaItemId,
-          circleId: g.circleId,
-          reason: JobReason.backfill,
-          priority: 100,
-        })
+      await enqueueGeocodeJob(
+        this.jobs,
+        this.prisma,
+        { mediaItemId: g.mediaItemId, circleId: g.circleId, reason: 'backfill', priority: 100 },
+        this.logger,
+      )
         .catch((err) =>
           this.logger.warn(
             `geocode enqueue failed for media item ${g.mediaItemId}: ${
@@ -179,8 +205,13 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
   // Hydrate
   // ---------------------------------------------------------------------------
 
+  /**
+   * Resolves suggestion ids to the media items they are about, for run-item listings.
+   *
+   * @param suggestionIds - the suggestions of one page.
+   */
   async hydrateItems(suggestionIds: string[]): Promise<Map<string, ReviewRunSubjectPreview>> {
-    const suggestions = await this.prisma.locationSuggestion.findMany({
+    const suggestions = (await this.prisma.locationSuggestion.findMany({
       where: { id: { in: suggestionIds } },
       select: {
         id: true,
@@ -197,7 +228,7 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
           },
         },
       },
-    });
+    })) as Array<{ id: string; mediaItemId: string; mediaItem: any }>;
 
     const out = new Map<string, ReviewRunSubjectPreview>();
     for (const s of suggestions) {
@@ -221,7 +252,7 @@ export class LocationSuggestionReviewStrategy implements ReviewRunSubjectStrateg
  * ordering. createdAt is non-null (@default(now)), so this is a plain
  * lexicographic descent with no NULLS-LAST branch.
  */
-function buildAfterCursor(cursor: LocationCursor): Prisma.LocationSuggestionWhereInput {
+function buildAfterCursor(cursor: LocationCursor): Record<string, unknown> {
   return {
     OR: [
       { createdAt: { lt: cursor.createdAt } },

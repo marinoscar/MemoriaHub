@@ -1,28 +1,28 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
-import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import {
-  Prisma,
-  ReviewRunItemStatus,
-  ReviewRunStatus,
-} from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
-import { createExecutionContext } from './review-run-subject.strategy';
-import { subjectIdOf } from './review-run.service';
-import {
-  runJobPayload,
-  vetoDeleteWhileRunActive,
-  type RunJobInput,
-} from '../platform/jobs/run-engine-jobs';
 
-/** Payload shape for a `review_run_execute_batch` job. */
+import { runJobPayload, vetoDeleteWhileRunActive, type MemoriahubRunJobInput } from '../core/index.js';
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../ports/index.js';
+import type { ReviewRunsDb } from './data/review-runs-db.js';
+import { ReviewRunSubjectRegistry } from './review-run-subject.registry.js';
+import { createExecutionContext } from './review-run-subject.strategy.js';
+import { subjectIdOf } from './review-run.service.js';
+import { REVIEW_RUN_ITEM_STATUS, REVIEW_RUN_STATUS, type ReviewRunRow } from './review-runs.constants.js';
+
+/**
+ * Payload shape for a `review_run_execute_batch` job.
+ *
+ * @stability experimental
+ */
 export interface ReviewRunExecuteBatchPayload {
   runId: string;
   subjectIds: string[];
@@ -52,35 +52,38 @@ const tracer = trace.getTracer('review-run');
  * it simply drops out of the work set — finalize keys off "no rows remain in
  * matched/processing", never on processedCount === matchedCount.
  *
- * A native platform `JobHandler` (RETRO-C7, #604). SERVER-ONLY by omission: no
+ * SERVER-ONLY by omission: no
  * `nodeResultSchema` / `persistNodeResult` node pair (resolving a group calls
  * the archive/trash services, which need the database). `canDelete` refuses to
  * delete a pending batch of a run that is still `running`.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
+export class ReviewRunExecuteBatchHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'review_run_execute_batch';
 
   readonly label = 'Review run execute batch';
 
   /** 200 subjects, each one short transaction: 10 minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(ReviewRunExecuteBatchHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: ReviewRunsDb,
     private readonly subjects: ReviewRunSubjectRegistry,
     // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `review`). Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: RunJobInput): Promise<void> {
+  async process(job: MemoriahubRunJobInput): Promise<void> {
     const raw = runJobPayload<ReviewRunExecuteBatchPayload>(job);
     if (typeof raw?.runId !== 'string' || raw.runId === '' || !Array.isArray(raw.subjectIds)) {
       this.logger.warn(`review_run_execute_batch job ${job.id} missing payload; skipping`);
@@ -115,13 +118,13 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
   }
 
   /** Refuses to delete a pending batch of a run that is still running. */
-  canDelete(job: Job): Promise<string | null> {
+  canDelete(job: MemoriahubJob): Promise<string | null> {
     return vetoDeleteWhileRunActive(job, {
       engine: 'review run',
-      activeStatuses: [ReviewRunStatus.running],
+      activeStatuses: [REVIEW_RUN_STATUS.running],
       readRunStatus: async (runId) =>
-        (await this.prisma.reviewRun.findUnique({ where: { id: runId }, select: { status: true } }))?.status ??
-        null,
+        ((await this.prisma.reviewRun.findUnique({ where: { id: runId }, select: { status: true } })) as { status: string } | null)
+          ?.status ?? null,
     });
   }
 
@@ -132,33 +135,33 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
   async executeBatch(payload: ReviewRunExecuteBatchPayload): Promise<void> {
     const { runId, subjectIds } = payload;
 
-    const run = await this.prisma.reviewRun.findUnique({ where: { id: runId } });
+    const run = (await this.prisma.reviewRun.findUnique({ where: { id: runId } })) as ReviewRunRow | null;
     if (!run) return; // run gone → nothing to do
     // Cooperative cancellation: a cancelled run stops all not-yet-started batches.
-    if (run.status === ReviewRunStatus.cancelled) return;
+    if (run.status === REVIEW_RUN_STATUS.cancelled) return;
 
     const strategy = this.subjects.get(run.subjectType);
     const column = strategy.subjectColumn;
-    const batchWhere = { runId, [column]: { in: subjectIds } } as Prisma.ReviewRunItemWhereInput;
+    const batchWhere: Record<string, unknown> = { runId, [column]: { in: subjectIds } };
 
     // Claim: flip still-'matched' items to 'processing' in one atomic updateMany.
     await this.prisma.reviewRunItem.updateMany({
-      where: { ...batchWhere, status: ReviewRunItemStatus.matched },
-      data: { status: ReviewRunItemStatus.processing },
+      where: { ...batchWhere, status: REVIEW_RUN_ITEM_STATUS.matched },
+      data: { status: REVIEW_RUN_ITEM_STATUS.processing },
     });
 
     // Read back every row now 'processing' for this batch — includes rows claimed
     // by a PRIOR attempt that crashed before finishing, so a retry re-processes
     // them. Do NOT rely on the claim count for tallying; use this work set.
-    const workRows = await this.prisma.reviewRunItem.findMany({
-      where: { ...batchWhere, status: ReviewRunItemStatus.processing },
+    const workRows = (await this.prisma.reviewRunItem.findMany({
+      where: { ...batchWhere, status: REVIEW_RUN_ITEM_STATUS.processing },
       select: {
         id: true,
         burstGroupId: true,
         duplicateGroupId: true,
         locationSuggestionId: true,
       },
-    });
+    })) as Array<{ id: string; burstGroupId: string | null; duplicateGroupId: string | null; locationSuggestionId: string | null }>;
 
     if (workRows.length === 0) {
       await this.maybeFinalizeRun(runId);
@@ -182,8 +185,8 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
           data: {
             status:
               outcome === 'applied'
-                ? ReviewRunItemStatus.applied
-                : ReviewRunItemStatus.skipped,
+                ? REVIEW_RUN_ITEM_STATUS.applied
+                : REVIEW_RUN_ITEM_STATUS.skipped,
           },
         });
         if (outcome === 'applied') appliedTally++;
@@ -193,7 +196,7 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
         await this.prisma.reviewRunItem
           .update({
             where: { id: row.id },
-            data: { status: ReviewRunItemStatus.failed, error: message },
+            data: { status: REVIEW_RUN_ITEM_STATUS.failed, error: message },
           })
           .catch(() => undefined);
         failedTally++;
@@ -243,22 +246,22 @@ export class ReviewRunExecuteBatchHandler implements JobHandler, OnModuleInit {
     const remaining = await this.prisma.reviewRunItem.count({
       where: {
         runId,
-        status: { in: [ReviewRunItemStatus.matched, ReviewRunItemStatus.processing] },
+        status: { in: [REVIEW_RUN_ITEM_STATUS.matched, REVIEW_RUN_ITEM_STATUS.processing] },
       },
     });
     if (remaining > 0) return;
 
-    const run = await this.prisma.reviewRun.findUnique({
+    const run = (await this.prisma.reviewRun.findUnique({
       where: { id: runId },
       select: { failedCount: true },
-    });
+    })) as { failedCount: number } | null;
     const finalStatus =
       (run?.failedCount ?? 0) > 0
-        ? ReviewRunStatus.completed_with_errors
-        : ReviewRunStatus.completed;
+        ? REVIEW_RUN_STATUS.completed_with_errors
+        : REVIEW_RUN_STATUS.completed;
 
     const fin = await this.prisma.reviewRun.updateMany({
-      where: { id: runId, status: ReviewRunStatus.running },
+      where: { id: runId, status: REVIEW_RUN_STATUS.running },
       data: { status: finalStatus, finishedAt: new Date() },
     });
 

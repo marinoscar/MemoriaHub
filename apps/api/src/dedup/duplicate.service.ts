@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  forwardRef,
   Optional,
 } from '@nestjs/common';
 import {
@@ -32,7 +31,7 @@ import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
 import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
-import { ReviewRunService } from '../review-runs/review-run.service';
+import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
 
 type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
@@ -76,9 +75,8 @@ export class DuplicateService {
     private readonly storageProvider: StorageProvider,
     private readonly resolver: StorageProviderResolver,
     private readonly mediaThumbnailService: MediaThumbnailService,
-    // Circular by nature: the review-run strategies wrap this service's
-    // resolve/dismiss primitives, while these threshold endpoints start runs.
-    @Inject(forwardRef(() => ReviewRunService))
+    // The review-run engine (RETRO-J9): these threshold endpoints start runs, the registered strategy wraps
+    // this service's resolve/dismiss primitives.
     private readonly reviewRuns: ReviewRunService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,

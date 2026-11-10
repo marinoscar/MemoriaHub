@@ -71,6 +71,14 @@
       "types": "./dist/dedup/testing/index.d.ts",
       "default": "./dist/dedup/testing/index.js"
     },
+    "./review-runs": {
+      "types": "./dist/review-runs/index.d.ts",
+      "default": "./dist/review-runs/index.js"
+    },
+    "./review-runs/testing": {
+      "types": "./dist/review-runs/testing/index.d.ts",
+      "default": "./dist/review-runs/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -83,6 +91,7 @@
     "insights",
     "location",
     "dedup",
+    "review-runs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

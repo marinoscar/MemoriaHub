@@ -37,22 +37,14 @@
  */
 
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { ReviewRunAction, ReviewRunItemStatus, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
-import { CircleRole } from '../../test/helpers/circle-role';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
+import { REVIEW_RUN_ITEM_STATUS as ReviewRunItemStatus, REVIEW_RUN_STATUS as ReviewRunStatus } from '../../src/review-runs/index.js';
 import { randomUUID } from 'crypto';
-import {
-  ACTIVE_RUN_STATUSES,
-  BATCH_SIZE,
-  ReviewRunService,
-  subjectIdOf,
-} from './review-run.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { ACTIVE_RUN_STATUSES, BATCH_SIZE, ReviewRunService, subjectIdOf } from '../../src/review-runs/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS, MediaThumbnailService } from '../../src/media/index.js';
+import type { ReviewRunsDb } from '../../src/review-runs/index.js';
+import { createMockDb } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
 
 const CIRCLE_ID = randomUUID();
 const RUN_ID = randomUUID();
@@ -102,17 +94,17 @@ function makeStrategy(
 
 describe('ReviewRunService', () => {
   let service: ReviewRunService;
-  let prisma: MockPrismaService;
-  let circleMembership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
-  let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
+  let prisma: any;
+  let circleMembership: { requireOwnerRole: jest.Mock };
+  let enrichmentJobs: { enqueue: jest.Mock };
   let thumbnails: jest.Mocked<Pick<MediaThumbnailService, 'signThumbsBatched' | 'extractThumbKey'>>;
   let burstStrategy: ReturnType<typeof makeStrategy>;
   let duplicateStrategy: ReturnType<typeof makeStrategy>;
   let locationStrategy: ReturnType<typeof makeStrategy>;
-  let registry: { get: jest.Mock };
+  let registry: { get: jest.Mock; find: jest.Mock };
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
+    prisma = createMockDb();
     circleMembership = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
@@ -144,14 +136,16 @@ describe('ReviewRunService', () => {
         if (subject === ReviewRunSubject.location_suggestion) return locationStrategy;
         return undefined;
       }),
+      find: undefined as unknown as jest.Mock,
     };
+    registry.find = registry.get;
 
     service = new ReviewRunService(
-      prisma as unknown as PrismaService,
-      circleMembership as unknown as OwnerAccessService,
-      enrichmentJobs as unknown as EnrichmentJobService,
+      prisma as unknown as ReviewRunsDb,
+      circleMembership as never,
+      jobsPortOverFacade(enrichmentJobs) as never,
       thumbnails as unknown as MediaThumbnailService,
-      registry as unknown as ReviewRunSubjectRegistry,
+      registry as never,
     );
 
     prisma.auditEvent.create.mockResolvedValue({} as any);

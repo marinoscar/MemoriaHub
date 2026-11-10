@@ -48,18 +48,20 @@
  * location-suggestion-run-execute-batch.handler.spec.ts.old reference.
  */
 
-import { EnrichmentJob, ReviewRunItemStatus, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { ReviewRunExecuteBatchHandler } from './review-run-execute-batch.handler';
-import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../prisma/prisma.service';
-import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { ReviewRunSubject } from '../helpers/review-run-enums.js';
+import {
+  REVIEW_RUN_ITEM_STATUS as ReviewRunItemStatus,
+  REVIEW_RUN_STATUS as ReviewRunStatus,
+  ReviewRunExecuteBatchHandler,
+  type ReviewRunsDb,
+} from '../../src/review-runs/index.js';
+import { createMockDb } from '../helpers/mock-db.js';
 
 const RUN_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 
-function makeJob(payload: Record<string, unknown>): EnrichmentJob {
+function makeJob(payload: Record<string, unknown>) {
   return {
     id: randomUUID(),
     type: 'review_run_execute_batch',
@@ -82,7 +84,7 @@ function makeJob(payload: Record<string, unknown>): EnrichmentJob {
     claimedByNodeId: null,
     leaseExpiresAt: null,
     executor: 'server',
-  } as unknown as EnrichmentJob;
+  };
 }
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -117,21 +119,21 @@ function makeStubStrategy(overrides: Record<string, unknown> = {}): {
 
 describe('ReviewRunExecuteBatchHandler', () => {
   let handler: ReviewRunExecuteBatchHandler;
-  let prisma: MockPrismaService;
-  let registry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
+  let prisma: any;
+  let jobs: { registerHandler: jest.Mock };
   let subjects: { get: jest.Mock };
   let stubStrategy: ReturnType<typeof makeStubStrategy>;
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
-    registry = { register: jest.fn() };
+    prisma = createMockDb();
+    jobs = { registerHandler: jest.fn() };
     stubStrategy = makeStubStrategy();
     subjects = { get: jest.fn().mockReturnValue(stubStrategy) };
 
     handler = new ReviewRunExecuteBatchHandler(
-      registry as unknown as JobHandlerRegistry,
-      prisma as unknown as PrismaService,
-      subjects as unknown as ReviewRunSubjectRegistry,
+      jobs as never,
+      prisma as unknown as ReviewRunsDb,
+      subjects as never,
     );
 
     prisma.reviewRun.findUnique.mockResolvedValue(makeRun() as any);
@@ -149,7 +151,7 @@ describe('ReviewRunExecuteBatchHandler', () => {
 
   it('registers itself with the handler registry on module init', () => {
     handler.onModuleInit();
-    expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(jobs.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('has type === "review_run_execute_batch"', () => {

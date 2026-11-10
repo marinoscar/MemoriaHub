@@ -117,9 +117,16 @@
       "ports",
       "core",
       "testing",
-      "media"
+      "media",
+      "review-runs"
     ],
     "dedup": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "review-runs": [
       "ports",
       "core",
       "testing",

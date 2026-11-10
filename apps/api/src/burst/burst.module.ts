@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -12,6 +12,7 @@ import { BurstDetectionService } from './burst-detection.service';
 import { AdminBurstController } from './admin-burst.controller';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { BurstUploadEnrichment } from './burst-upload-enrichment';
+import { BurstGroupReviewStrategy } from '../review-runs/strategies/burst-group.strategy';
 
 @Module({
   imports: [
@@ -22,9 +23,9 @@ import { BurstUploadEnrichment } from './burst-upload-enrichment';
     
     DedupModule,
     MediaModule,
-    // Mutual: the burst review-run strategy wraps BurstService's primitives
-    // while BurstService's threshold endpoints start review runs (issue #190).
-    forwardRef(() => ReviewRunsModule),
+    // The review-run engine lives in the review-runs slice (RETRO-J9); this module registers the burst
+    // strategy with it (BurstService's threshold endpoints start runs, the strategy wraps its primitives).
+    ReviewRunsModule,
   ],
   controllers: [BurstController, AdminBurstController],
   providers: [
@@ -33,6 +34,7 @@ import { BurstUploadEnrichment } from './burst-upload-enrichment';
     BurstService,
     BurstDetectionHandler,
     BurstDetectionService,
+    BurstGroupReviewStrategy,
   ],
   exports: [BurstService],
 })

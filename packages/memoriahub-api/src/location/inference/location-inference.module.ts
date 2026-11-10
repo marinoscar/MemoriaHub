@@ -1,7 +1,9 @@
 import { Module, type DynamicModule, type Type } from '@nestjs/common';
 
 import { MediaModule } from '../../media/index.js';
+import { ReviewRunsModule } from '../../review-runs/index.js';
 import { LocationModule } from '../location.module.js';
+import { LocationSuggestionReviewStrategy } from '../review/location-suggestion.strategy.js';
 import { LocationInferenceBackfillService } from './location-inference-backfill.service.js';
 import { LocationInferenceUploadEnrichment } from './location-inference-upload-enrichment.js';
 import { LocationInferenceHandler } from './location-inference.handler.js';
@@ -45,13 +47,14 @@ export class LocationInferenceModule {
   static forRoot(options: LocationInferenceModuleOptions = {}): DynamicModule {
     LocationInferenceModule.root ??= {
       module: LocationInferenceModule,
-      imports: [LocationModule.forRoot(), MediaModule.forRoot(), ...(options.geoProviderImports ?? [])],
+      imports: [LocationModule.forRoot(), MediaModule.forRoot(), ReviewRunsModule.forRoot(), ...(options.geoProviderImports ?? [])],
       providers: [
         LocationInferenceService,
         LocationInferenceHandler,
         LocationInferenceBackfillService,
         LocationSuggestionService,
         LocationInferenceUploadEnrichment,
+        LocationSuggestionReviewStrategy,
       ],
       exports: [LocationInferenceService, LocationInferenceBackfillService, LocationSuggestionService],
     };

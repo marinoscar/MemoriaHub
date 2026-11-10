@@ -32,7 +32,7 @@ import { randomUUID } from 'crypto';
 import { DuplicateGroupReviewStrategy } from './duplicate-group.strategy';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DuplicateService } from '../../dedup/duplicate.service';
-import { createExecutionContext } from '../review-run-subject.strategy';
+import { createExecutionContext } from '@marinoscar/memoriahub-api/review-runs';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = randomUUID();
@@ -68,6 +68,7 @@ describe('DuplicateGroupReviewStrategy', () => {
     strategy = new DuplicateGroupReviewStrategy(
       prisma as unknown as PrismaService,
       duplicateService as unknown as DuplicateService,
+      { register: jest.fn() } as never,
     );
   });
 

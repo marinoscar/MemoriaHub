@@ -23,18 +23,19 @@
  *     not abort the remaining entries.
  *   - hydrateItems: resolves the media item THROUGH the suggestion.
  *
- * No database required — PrismaService and EnrichmentJobService are mocked;
+ * No database required — the database client and the jobs port are mocked;
  * the strategy is constructed directly (plain class, no Nest wiring
  * needed).
  */
 
-import { LocationSuggestionStatus, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { LocationSuggestionReviewStrategy } from './location-suggestion.strategy';
-import { PrismaService } from '../../prisma/prisma.service';
-import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { createExecutionContext } from '../review-run-subject.strategy';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
+import { LocationSuggestionReviewStrategy } from '../../src/location/index.js';
+import { createExecutionContext } from '../../src/review-runs/index.js';
+import { createMockDb } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+
+const LocationSuggestionStatus = { pending: 'pending', accepted: 'accepted', rejected: 'rejected' } as const;
 
 const CIRCLE_ID = randomUUID();
 const ACTOR_ID = randomUUID();
@@ -66,16 +67,17 @@ function makeSuggestion(overrides: Record<string, unknown> = {}) {
 
 describe('LocationSuggestionReviewStrategy', () => {
   let strategy: LocationSuggestionReviewStrategy;
-  let prisma: MockPrismaService;
-  let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
+  let prisma: any;
+  let enrichmentJobs: { enqueue: jest.Mock };
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
+    prisma = createMockDb();
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
 
     strategy = new LocationSuggestionReviewStrategy(
-      prisma as unknown as PrismaService,
-      enrichmentJobs as unknown as EnrichmentJobService,
+      prisma as never,
+      jobsPortOverFacade(enrichmentJobs) as never,
+      { register: jest.fn() } as never,
     );
 
     prisma.$transaction.mockImplementation(async (arg: any) => {

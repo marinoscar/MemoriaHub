@@ -38,8 +38,7 @@ import {
 import { TrashEmptyEvaluateHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
-import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
-import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
+import { ReviewRunEvaluateHandler, ReviewRunExecuteBatchHandler } from '@marinoscar/memoriahub-api/review-runs';
 import { ReviewRunsRetentionHandler, STALE_RUN_ERROR } from '../../src/review-runs/review-runs-retention.handler';
 import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
@@ -506,7 +505,7 @@ const subjects = { get: () => strategy };
 function buildReviewEvaluate(): ReviewRunEvaluateHandler {
   const runService = { enqueueExecuteBatches: async () => void (rv.enqueued += 1) };
   return new ReviewRunEvaluateHandler(
-    registry,
+    { registerHandler: (handler: unknown) => registry.register(handler as never) } as never,
     { reviewRun: rv.runs, reviewRunItem: rv.items } as never,
     runService as never,
     subjects as never,
@@ -536,7 +535,7 @@ describeJobHandlerConformance('review_run_evaluate', () => alias(buildReviewEval
 });
 
 function buildReviewExecute(): ReviewRunExecuteBatchHandler {
-  return new ReviewRunExecuteBatchHandler(registry, { reviewRun: rv.runs, reviewRunItem: rv.items } as never, subjects as never);
+  return new ReviewRunExecuteBatchHandler({ registerHandler: (handler: unknown) => registry.register(handler as never) } as never, { reviewRun: rv.runs, reviewRunItem: rv.items } as never, subjects as never);
 }
 
 const rvItem = (id: string, group: string, status = 'matched'): Row => ({ id, runId: RUN, burstGroupId: group, status });

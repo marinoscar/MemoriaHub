@@ -12,7 +12,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
-import { ReviewRunService } from '../review-runs/review-run.service';
+import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
