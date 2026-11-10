@@ -43,6 +43,7 @@ import {
   daemonBackupControl,
   embeddedBackupControl,
   embeddedBackupFeed,
+  hydrateFromBackupSnapshot,
   initialBackupDashboardState,
   makeBackupLogEntry,
   probeBackupDaemon,
@@ -230,7 +231,14 @@ export function BackupDashboard({
 
     if (choice.mode === 'attached') {
       controlRef.current = daemonBackupControl();
-      setSource(createBackupSource(backupDaemonFeed()));
+      // Seeded from the probe's snapshot, so the first frame shows the catalog and any run in flight
+      // while the channel feed connects (it then re-hydrates from the channel's own snapshot).
+      setSource(
+        createBackupSource(
+          backupDaemonFeed(),
+          hydrateFromBackupSnapshot(initialBackupDashboardState(), choice.snapshot, Date.now()),
+        ),
+      );
     } else {
       controlRef.current = embeddedBackupControl({
         start: (kind) => void startEmbeddedRun(kind),

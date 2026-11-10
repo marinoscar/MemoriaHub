@@ -1,24 +1,11 @@
-[screen crashed: Could not locate the bindings file. Tried:
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/build/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/build/Debug/better_sqlite3.
-node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/build/Release/better_sqlite
-3.node
- →
-/home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/out/Debug/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/Debug/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/out/Release/better_sqlite3.
-node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/Release/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/build/default/better_sqlite
-3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/compiled/22.23.4/linux/x64/
-better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/addon-build/release/install
--root/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/addon-build/debug/install-r
-oot/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/addon-build/default/install
--root/better_sqlite3.node
- → /home/user/MemoriaHub/worktrees/retro-c10/node_modules/better-sqlite3/lib/binding/node-v127-linux
--x64/better_sqlite3.node]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│  MemoriaHub — Settings                                                                           │
+│  Select a setting to edit its value.                                                             │
+│                                                                                                  │
+│  > concurrency      = 3     (default: 3)  Max concurrent upload workers                          │
+│    attempts_cap     = 5     (default: 5)  Max upload attempts before a file is blocked           │
+│                                                                                                  │
+│  [up/down] navigate  [Enter] edit  [Esc/q] back                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
