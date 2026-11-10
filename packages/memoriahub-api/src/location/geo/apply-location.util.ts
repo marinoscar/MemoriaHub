@@ -1,10 +1,12 @@
-import type { GeoLocationProvider } from './geo-location-provider.interface';
-import { geoResultToMediaColumns } from './geo-result.mapper';
-import type { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
+import type { GeoLocationProvider } from './geo-location-provider.interface.js';
+import { geoResultToMediaColumns } from './geo-result.mapper.js';
+import type { LocationGroupResolverService } from '../groups/location-group-resolver.service.js';
 
 /**
  * Data patch produced by applyLocation — write coords + coordSource
  * provenance + freshly reverse-geocoded geo columns onto a MediaItem.
+ *
+ * @stability experimental
  */
 export interface ApplyLocationPatch {
   takenLat: number;
@@ -53,6 +55,8 @@ export interface ApplyLocationPatch {
  * patch, so a manual location set, a bulk location update and a
  * location-suggestion accept all land canonical columns consistent with their
  * raw ones — this one helper covers all three call sites.
+ *
+ * @stability experimental
  */
 export async function applyLocation(
   geoProvider: GeoLocationProvider,

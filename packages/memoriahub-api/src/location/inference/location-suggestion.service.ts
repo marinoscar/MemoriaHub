@@ -1,28 +1,49 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '../media/geo/geo-location-provider.interface';
-import { applyLocation } from '../media/geo/apply-location.util';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
-import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
-import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
+import type {
+  AcceptLocationSuggestion as AcceptLocationSuggestionDto,
+  LocationSuggestionQuery as LocationSuggestionQueryDto,
+} from '@marinoscar/memoriahub-contract/location';
 
+import { MediaThumbnailService, enqueueEnrichmentJob } from '../../media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { enqueueGeocodeJob } from '../geo/enqueue-geocode.js';
+import { applyLocation } from '../geo/apply-location.util.js';
+import { GEO_LOCATION_PROVIDER, type GeoLocationProvider } from '../geo/geo-location-provider.interface.js';
+import { GEO_CLEAR_COLUMNS } from '../geo/geo-result.mapper.js';
+import { LocationGroupResolverService } from '../groups/location-group-resolver.service.js';
+
+const LocationSuggestionStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  rejected: 'rejected',
+  auto_applied: 'auto_applied',
+  reverted: 'reverted',
+} as const;
+type LocationSuggestionStatus = (typeof LocationSuggestionStatus)[keyof typeof LocationSuggestionStatus];
+const MediaType = { photo: 'photo', video: 'video' } as const;
+
+/**
+ * The review queue behind `/api/media/location-suggestions`: list, accept (unmodified or adjusted), reject,
+ * revert an auto-applied guess, and force a per-item rerun. Every method checks the caller's role in the
+ * owner scope first.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class LocationSuggestionService {
   private readonly logger = new Logger(LocationSuggestionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly membership: OwnerAccessService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly membership: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly locationGroupResolver: LocationGroupResolverService,
@@ -40,7 +61,7 @@ export class LocationSuggestionService {
         action,
         targetType: 'location_suggestion',
         targetId,
-        meta: meta as Prisma.InputJsonValue,
+        meta: meta,
       },
     });
   }
@@ -49,6 +70,13 @@ export class LocationSuggestionService {
   // List
   // ---------------------------------------------------------------------------
 
+  /**
+   * Lists a circle's suggestions (viewer), newest or most confident first, with signed thumbnails.
+   *
+   * @param query - the circle, status, paging and sort.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async listSuggestions(query: LocationSuggestionQueryDto, userId: string, perms: string[]) {
     const { circleId, status, page, pageSize, mediaItemId } = query;
     // Service specs construct this DTO from a bare object literal (bypassing the
@@ -58,14 +86,14 @@ export class LocationSuggestionService {
 
     await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 
-    const where: Prisma.LocationSuggestionWhereInput = { circleId, status: status as LocationSuggestionStatus };
+    const where: Record<string, any> = { circleId, status: status as LocationSuggestionStatus };
     if (mediaItemId) {
       where.mediaItemId = mediaItemId;
     }
 
     // Both `confidence` and `createdAt` are non-null columns, so the
     // `{ sort, nulls }` object form is not applicable here.
-    const orderBy: Prisma.LocationSuggestionOrderByWithRelationInput[] =
+    const orderBy: Array<Record<string, any>> =
       by === 'confidence'
         ? [{ confidence: dir }, { createdAt: 'desc' }, { id: 'desc' }]
         : [{ createdAt: dir }, { id: dir }];
@@ -129,6 +157,14 @@ export class LocationSuggestionService {
   // Accept
   // ---------------------------------------------------------------------------
 
+  /**
+   * Accepts a pending suggestion (editor): unmodified keeps `coordSource` `inferred`, adjusted becomes `manual`.
+   *
+   * @param id - the suggestion.
+   * @param dto - optional adjusted coordinates.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async acceptSuggestion(id: string, dto: AcceptLocationSuggestionDto, userId: string, perms: string[]) {
     const suggestion = await this.prisma.locationSuggestion.findUnique({ where: { id } });
     if (!suggestion) {
@@ -183,6 +219,13 @@ export class LocationSuggestionService {
   // Reject
   // ---------------------------------------------------------------------------
 
+  /**
+   * Rejects a pending suggestion (editor); a rejection is sticky against non-forced recomputes.
+   *
+   * @param id - the suggestion.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async rejectSuggestion(id: string, userId: string, perms: string[]) {
     const suggestion = await this.prisma.locationSuggestion.findUnique({ where: { id } });
     if (!suggestion) {
@@ -213,6 +256,13 @@ export class LocationSuggestionService {
   // Revert
   // ---------------------------------------------------------------------------
 
+  /**
+   * Reverts an auto-applied suggestion (editor): clears the coordinates and every derived geo column.
+   *
+   * @param id - the suggestion.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async revertSuggestion(id: string, userId: string, perms: string[]) {
     const suggestion = await this.prisma.locationSuggestion.findUnique({ where: { id } });
     if (!suggestion) {
@@ -249,6 +299,13 @@ export class LocationSuggestionService {
   // Per-item rerun (forced — bypasses the rejected-skip rule)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Queues a forced inference rerun for one photo (editor) that bypasses the rejected-suggestion skip.
+   *
+   * @param mediaItemId - the photo.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async inferLocation(mediaItemId: string, userId: string, perms: string[]) {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -269,13 +326,15 @@ export class LocationSuggestionService {
       throw new BadRequestException('Location inference only applies to photos');
     }
 
-    const job = await this.enrichmentJobService.enqueue({
+    const { id: jobId } = await enqueueEnrichmentJob(this.jobs, {
       type: 'location_inference',
       mediaItemId,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
+      reason: 'rerun',
       priority: 0,
     });
+    const jobRow = await this.prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+    const job = { id: jobId, status: (jobRow?.status as string | undefined) ?? 'pending' };
 
     this.logger.log(
       `Location-inference rerun job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${userId}`,

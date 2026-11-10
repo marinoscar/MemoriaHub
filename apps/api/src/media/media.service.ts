@@ -46,7 +46,7 @@ import {
   type RecordType,
 } from '../platform/sharing/record-access';
 import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
-import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
+import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '@marinoscar/memoriahub-api/location';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { fold } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
@@ -59,8 +59,8 @@ import { ListTrashQueryDto } from './dto/list-trash-query.dto';
 import { RestoreFromTrashDto } from './dto/restore-from-trash.dto';
 import { DeleteForeverDto } from './dto/delete-forever.dto';
 import { EmptyTrashDto } from './dto/empty-trash.dto';
-import { GEO_CLEAR_COLUMNS } from './geo/geo-result.mapper';
-import { applyLocation } from './geo/apply-location.util';
+import { GEO_CLEAR_COLUMNS } from '@marinoscar/memoriahub-api/location';
+import { applyLocation } from '@marinoscar/memoriahub-api/location';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';

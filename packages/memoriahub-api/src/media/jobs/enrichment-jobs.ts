@@ -123,3 +123,27 @@ export async function resolveMediaItemJob(
   }
   return { id: job.id, mediaItemId: row.id, circleId: payloadCircleId(job) ?? row.circleId };
 }
+
+/**
+ * The circle a `circle` job is about, or null when it no longer exists (the job settles as a no-op).
+ *
+ * @param scopes - answers whether an owner scope still exists.
+ * @param job - the job.
+ * @param logger - receives the no-op note.
+ * @throws Error when the job is not a circle job (a malformed row).
+ * @stability experimental
+ */
+export async function resolveCircleJob(
+  scopes: { scopeExists(scopeId: string): Promise<boolean> },
+  job: MemoriahubJob,
+  logger: Pick<Logger, 'debug'>,
+): Promise<string | null> {
+  if (job.subjectType !== 'circle' || !job.subjectId) {
+    throw new Error(`${job.type} job ${job.id} is not about a circle (subjectType=${String(job.subjectType)})`);
+  }
+  if (!(await scopes.scopeExists(job.subjectId))) {
+    logger.debug(`${job.type} job ${job.id}: circle ${job.subjectId} no longer exists; settling as a no-op`);
+    return null;
+  }
+  return job.subjectId;
+}

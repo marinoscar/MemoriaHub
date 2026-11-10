@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { mapNominatimResponse } from '@marinoscar/memoriahub-compute/geo';
-import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
+import type { GeoLocationProvider, GeoLocationResult } from '@marinoscar/memoriahub-api/location';
 import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
 /**

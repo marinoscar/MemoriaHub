@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
+import type { GeoLocationProvider, GeoLocationResult } from '@marinoscar/memoriahub-api/location';
 import { resolveUsState } from './us-state-codes';
 
 // local-reverse-geocoder has no official @types package; use require to avoid

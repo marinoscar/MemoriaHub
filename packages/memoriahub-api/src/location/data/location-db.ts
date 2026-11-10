@@ -32,6 +32,10 @@ export interface LocationModels {
   locationGroupAlias: LocationDelegate;
   /** The media items (raw and canonical geo columns, coordinates). */
   mediaItem: LocationDelegate;
+  /** The location suggestions of the review queue. */
+  locationSuggestion: LocationDelegate;
+  /** The audit log. */
+  auditEvent: LocationDelegate;
   /** The platform job rows (the state of a queued job). */
   job: MediaDelegate;
 }

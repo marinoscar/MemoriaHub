@@ -1,4 +1,4 @@
-import type { GeoLocationResult } from './geo-location-provider.interface';
+import type { GeoLocationResult } from './geo-location-provider.interface.js';
 
 /**
  * Maps a GeoLocationResult to the typed geo columns used in MediaItem.
@@ -7,6 +7,8 @@ import type { GeoLocationResult } from './geo-location-provider.interface';
  * This is intentional for manual bulk re-tagging (geoSource='manual').
  * Contrast with MediaMetadataSyncService, which uses present-only semantics
  * (never nulls out existing geo data from automatic geocoding).
+ *
+ * @stability experimental
  */
 export function geoResultToMediaColumns(result: GeoLocationResult, source: string) {
   return {
@@ -24,6 +26,8 @@ export function geoResultToMediaColumns(result: GeoLocationResult, source: strin
 /**
  * Columns to set when clearing location (location: null in bulk update).
  * Nulls coordinates AND all derived geo fields, forcing a full reset.
+ *
+ * @stability experimental
  */
 export const GEO_CLEAR_COLUMNS = {
   takenLat: null,

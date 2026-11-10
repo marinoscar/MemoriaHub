@@ -283,6 +283,7 @@ function toDomainJob(job: Job): MemoriahubJob {
     subjectType: job.subjectType,
     subjectId: job.subjectId,
     payload: job.payload,
+    reason: job.reason ?? null,
     attempts: job.attempts,
     orgId: job.orgId,
   };

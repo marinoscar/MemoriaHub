@@ -17,23 +17,24 @@
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, LocationSuggestionStatus, MediaType } from '@prisma/client';
-import { CircleRole } from '../../test/helpers/circle-role';
-import { LocationSuggestionService } from './location-suggestion.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { GEO_LOCATION_PROVIDER } from '../media/geo/geo-location-provider.interface';
-import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
-import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
-import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
+import type {
+  AcceptLocationSuggestion as AcceptLocationSuggestionDto,
+  LocationSuggestionQuery as LocationSuggestionQueryDto,
+} from '@marinoscar/memoriahub-contract/location';
+import { LocationSuggestionService } from '../../src/location/inference/location-suggestion.service.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { GEO_LOCATION_PROVIDER } from '../../src/location/geo/geo-location-provider.interface.js';
+import { GEO_CLEAR_COLUMNS } from '../../src/location/geo/geo-result.mapper.js';
+import { MediaThumbnailService } from '../../src/media/index.js';
+import { LocationGroupResolverService } from '../../src/location/groups/location-group-resolver.service.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { createMockLocationGroupResolver } from '../helpers/location-group-resolver.mock.js';
+
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+const LocationSuggestionStatus = { pending: 'pending', accepted: 'accepted', rejected: 'rejected', auto_applied: 'auto_applied', reverted: 'reverted' } as const;
+const CircleRole = { circle_admin: 'circle_admin', collaborator: 'collaborator', viewer: 'viewer' } as const;
 // NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO
 // were removed in favour of the async run-based engine
 // (LocationSuggestionRunService). The former `describe('bulkAcceptSuggestions')`
@@ -80,7 +81,7 @@ describe('LocationSuggestionService', () => {
   let mockGeoProvider: { reverseGeocode: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockMembership = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
     };
@@ -105,12 +106,17 @@ describe('LocationSuggestionService', () => {
         LocationSuggestionService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockMembership },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        {
+          provide: MediaThumbnailService,
+          useFactory: () =>
+            new MediaThumbnailService(mockPrisma as never, {
+              active: async () => ({ id: 's3', store: mockStorageProvider }),
+              forLocation: async (provider: string | null, bucket: string | null) => mockResolver.getProviderFor(provider, bucket),
+            } as never),
+        },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockMembership },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
         { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
       ],
     }).compile();

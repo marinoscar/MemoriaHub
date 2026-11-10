@@ -1,14 +1,18 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
+import { resolveCircleJob, resolveMediaItemJob } from '../../media/index.js';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { resolveCircleJob, resolveMediaItemJob } from '../platform/jobs/media-item-job';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { LocationInferenceService } from './location-inference.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { LocationInferenceService } from './location-inference.service.js';
 
 interface LocationInferenceSweepPayload {
   mode?: 'sweep';
@@ -29,27 +33,36 @@ interface LocationInferenceSweepPayload {
  * in 500-item chunks (15 minutes); per-item is far cheaper but shares the type. No node pair: pure DB read
  * plus in-memory compute, nothing a node could do. It writes no organization (row-level-security) table,
  * so it needs no `JobScope`. A subject that no longer exists settles the job as a no-op.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class LocationInferenceHandler implements JobHandler, OnModuleInit {
+export class LocationInferenceHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'location_inference';
+
+  /** The label in the admin job list. */
   readonly label = 'Location inference';
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
+
+  /** The dearer shape (a circle sweep): 15 minutes, three attempts. */
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(LocationInferenceHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly scopes: MemoriahubAccessPort,
     private readonly locationInferenceService: LocationInferenceService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one attempt: a per-item inference or a circle sweep, by the job's subject. */
+  async process(job: MemoriahubJob): Promise<void> {
     if (job.subjectType === 'media_item') {
       const context = await resolveMediaItemJob(this.prisma, job, this.logger);
       if (!context) return;

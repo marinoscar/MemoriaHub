@@ -1,4 +1,4 @@
-import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from './geo-result.mapper';
+import { geoResultToMediaColumns, GEO_CLEAR_COLUMNS } from '@marinoscar/memoriahub-api/location';
 
 describe('geoResultToMediaColumns', () => {
   it('maps all tiers and sets geoSource and geocodedAt', () => {

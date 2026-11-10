@@ -9,7 +9,7 @@
 
 import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { LocationSuggestionController } from './location-suggestion.controller';
-import { LocationSuggestionService } from './location-suggestion.service';
+import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';

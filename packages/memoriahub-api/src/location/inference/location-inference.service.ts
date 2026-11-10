@@ -1,13 +1,52 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, LocationSuggestionStatus, MediaType, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';
-import type { AppSystemSettingsDocument as SystemSettingsValue } from '../settings/app-settings.types';
-import { haversineKm } from '@marinoscar/memoriahub-api/location';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
-export type LocationInferenceConfig = NonNullable<SystemSettingsValue['locationInference']>;
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS, type MemoriahubJobsPort, type MemoriahubSettingsPort } from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { enqueueGeocodeJob } from '../geo/enqueue-geocode.js';
+import { haversineKm } from '../geometry/haversine.js';
+
+const LocationSuggestionStatus = {
+  pending: 'pending',
+  accepted: 'accepted',
+  rejected: 'rejected',
+  auto_applied: 'auto_applied',
+  reverted: 'reverted',
+} as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+type Prisma = never;
+
+/**
+ * The `locationInference` system settings namespace.
+ *
+ * @stability experimental
+ */
+export interface LocationInferenceConfig {
+  /** Maximum time gap (either side) of a two-anchor interpolation, in minutes. */
+  maxGapMinutes: number;
+  /** Maximum time gap of the single-anchor extrapolation, in minutes. */
+  maxExtrapolationGapMinutes: number;
+  /** Maximum gap (both sides) for auto-apply eligibility, in minutes; 0 disables auto-apply. */
+  autoApplyMaxGapMinutes: number;
+  /** Whether anchors must share the target's camera make and model. */
+  requireSameDevice: boolean;
+  /** Maximum distance between two anchors for them to agree, in kilometres. */
+  maxAnchorDistanceKm: number;
+  /** Ceiling on the implied travel speed between anchors, in km/h. */
+  maxImpliedSpeedKmh: number;
+  /** The confidence floor, in percent, of the review page's bulk actions. */
+  bulkAcceptThreshold: number;
+}
+
+/** The namespace defaults, used when the host's settings carry none. */
+const DEFAULT_LOCATION_INFERENCE: LocationInferenceConfig = {
+  maxGapMinutes: 30,
+  maxExtrapolationGapMinutes: 10,
+  autoApplyMaxGapMinutes: 5,
+  requireSameDevice: true,
+  maxAnchorDistanceKm: 2,
+  maxImpliedSpeedKmh: 150,
+  bulkAcceptThreshold: 80,
+};
 
 const CHUNK_SIZE = 500;
 
@@ -15,6 +54,11 @@ const CHUNK_SIZE = 500;
 // Pure computation helpers (exported for reuse/testability)
 // ---------------------------------------------------------------------------
 
+/**
+ * A photo with known coordinates that a guess is anchored on.
+ *
+ * @stability experimental
+ */
 export interface AnchorPoint {
   id: string;
   capturedAt: Date;
@@ -22,6 +66,11 @@ export interface AnchorPoint {
   lng: number;
 }
 
+/**
+ * The result of the inference algorithm for one photo.
+ *
+ * @stability experimental
+ */
 export interface ComputedLocationSuggestion {
   lat: number;
   lng: number;
@@ -44,7 +93,7 @@ export interface ComputedLocationSuggestion {
  * this module's existing importers and its golden-value spec keep working, and
  * so there is exactly one earth-radius constant in the codebase.
  */
-export { haversineKm } from '@marinoscar/memoriahub-api/location';
+export { haversineKm } from '../geometry/haversine.js';
 
 /**
  * Antimeridian-safe time-weighted longitude interpolation.
@@ -81,6 +130,8 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
  * `deviceMatchGuaranteed` must be true only when the caller filtered anchors to the
  * SAME cameraMake/cameraModel as the target — auto-apply is never eligible otherwise,
  * per the "never auto-apply a cross-device inference" rule.
+ *
+ * @stability experimental
  */
 export function computeLocationSuggestion(
   targetCapturedAt: Date,
@@ -208,6 +259,11 @@ interface SweepTarget {
   computed: ComputedLocationSuggestion;
 }
 
+/**
+ * What a circle sweep did.
+ *
+ * @stability experimental
+ */
 export interface SweepSummary {
   targets: number;
   autoApplied: number;
@@ -216,19 +272,25 @@ export interface SweepSummary {
   elapsedMs: number;
 }
 
+/**
+ * Infers coordinates for photos without GPS from same-device photos that have them: per item, or as one
+ * in-memory sweep of a circle's timeline written in 500-item chunks.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class LocationInferenceService {
   private readonly logger = new Logger(LocationInferenceService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
   ) {}
 
   private async getConfig(): Promise<LocationInferenceConfig> {
-    const settings = await this.systemSettings.getSettings();
-    return settings.locationInference ?? (DEFAULT_SYSTEM_SETTINGS.locationInference as LocationInferenceConfig);
+    const { value } = await this.settings.readSystem<LocationInferenceConfig | undefined>('locationInference');
+    return value ?? DEFAULT_LOCATION_INFERENCE;
   }
 
   // ---------------------------------------------------------------------------
@@ -278,13 +340,13 @@ export class LocationInferenceService {
       return; // Not inferable without a device to match anchors against.
     }
 
-    const deviceFilter: Prisma.MediaItemWhereInput = cfg.requireSameDevice
+    const deviceFilter: Record<string, unknown> = cfg.requireSameDevice
       ? { cameraMake: item.cameraMake, cameraModel: item.cameraModel }
       : {};
 
     const maxGapMs = cfg.maxGapMinutes * 60_000;
     const anchorSelect = { id: true, capturedAt: true, takenLat: true, takenLng: true } as const;
-    const anchorWhereBase: Prisma.MediaItemWhereInput = {
+    const anchorWhereBase: Record<string, unknown> = {
       circleId: item.circleId,
       type: MediaType.photo,
       deletedAt: null,
@@ -383,18 +445,12 @@ export class LocationInferenceService {
             action: 'media:location_inferred',
             targetType: 'media_item',
             targetId: mediaItemId,
-            meta: { ...suggestionFields } as Prisma.InputJsonValue,
+            meta: { ...suggestionFields },
           },
         }),
       ]);
 
-      await this.enrichmentJobService.enqueue({
-        type: 'geocode',
-        mediaItemId,
-        circleId,
-        reason: JobReason.rerun,
-        priority: 0,
-      });
+      await enqueueGeocodeJob(this.jobs, this.prisma, { mediaItemId, circleId, reason: 'rerun', priority: 0 }, this.logger);
 
       this.logger.log(
         `Auto-applied location inference for MediaItem ${mediaItemId} (confidence=${computed.confidence.toFixed(2)})`,
@@ -535,7 +591,7 @@ export class LocationInferenceService {
       const chunkIds = chunk.map((r) => r.mediaItemId);
       const autoApplyChunk = chunk.filter((r) => r.computed.autoApplyEligible);
 
-      await this.prisma.$transaction(async (tx) => {
+      await this.prisma.$transaction(async (tx: any) => {
         // Clear stale suggestions being replaced. `force=false` results never
         // include a target that already has ANY row (see isTargetBase), so this
         // only ever fires meaningfully when force=true — which also needs to
@@ -594,7 +650,7 @@ export class LocationInferenceService {
                 anchorDistanceKm: r.computed.anchorDistanceKm,
                 impliedSpeedKmh: r.computed.impliedSpeedKmh,
                 sweep: true,
-              } as Prisma.InputJsonValue,
+              },
             })),
           });
         }
@@ -604,13 +660,12 @@ export class LocationInferenceService {
       // since job enqueue is a separate table and a rolled-back coord write
       // must not leave an orphaned geocode job behind.
       for (const r of autoApplyChunk) {
-        await this.enrichmentJobService.enqueue({
-          type: 'geocode',
-          mediaItemId: r.mediaItemId,
-          circleId,
-          reason: JobReason.backfill,
-          priority: 100,
-        });
+        await enqueueGeocodeJob(
+          this.jobs,
+          this.prisma,
+          { mediaItemId: r.mediaItemId, circleId, reason: 'backfill', priority: 100 },
+          this.logger,
+        );
       }
 
       autoApplied += autoApplyChunk.length;

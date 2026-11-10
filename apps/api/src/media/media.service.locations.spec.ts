@@ -16,7 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
+import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';

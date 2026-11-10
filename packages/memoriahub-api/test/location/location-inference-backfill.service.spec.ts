@@ -15,11 +15,13 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, MhLegacyJobStatus } from '@prisma/client';
-import { LocationInferenceBackfillService } from './location-inference-backfill.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { LocationInferenceBackfillService } from '../../src/location/inference/location-inference-backfill.service.js';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MhLegacyJobStatus = { pending: 'pending', running: 'running', failed: 'failed', succeeded: 'succeeded' } as const;
 
 describe('LocationInferenceBackfillService', () => {
   let service: LocationInferenceBackfillService;
@@ -27,14 +29,14 @@ describe('LocationInferenceBackfillService', () => {
   let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LocationInferenceBackfillService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
       ],
     }).compile();
 

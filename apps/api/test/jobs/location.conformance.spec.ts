@@ -30,7 +30,7 @@ import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { LocationGroupRebuildHandler, LOCATION_GROUP_REBUILD_TYPE } from '@marinoscar/memoriahub-api/location';
-import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
+import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { circleJob, mediaItemJob } from '../helpers/platform-job';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c601';
@@ -94,7 +94,7 @@ const snapshot = () => ({ writes: [...world.writes.entries()].sort() });
 
 /** The scope directory double (`OwnerScopeSweepService.exists`) over the world's circles. */
 function fakeScopes() {
-  return { exists: async (id: string) => world.circles.has(id) };
+  return { scopeExists: async (id: string) => world.circles.has(id) };
 }
 
 function fakePrisma() {
@@ -234,7 +234,7 @@ function buildInference(): LocationInferenceHandler {
       world.writes.set(`sweep:${circleId}`, { force: opts.force ?? false });
     },
   };
-  return new LocationInferenceHandler(registry, fakePrisma() as never, fakeScopes() as never, service as never);
+  return new LocationInferenceHandler(registry as never, fakePrisma() as never, fakeScopes() as never, service as never);
 }
 
 describe('location_inference', () => {

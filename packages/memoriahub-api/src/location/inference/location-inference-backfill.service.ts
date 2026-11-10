@@ -1,8 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, MediaType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { enqueueEnrichmentJob } from '../../media/index.js';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, type MemoriahubJobsPort } from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+
+/**
+ * Options of {@link LocationInferenceBackfillService.backfillAllCircles}.
+ *
+ * @stability experimental
+ */
 export interface LocationInferenceBackfillOptions {
   from?: string;
   to?: string;
@@ -20,16 +26,23 @@ export interface LocationInferenceBackfillOptions {
  * check only filters by (type, mediaItemId IS NULL), not by circleId, so
  * without this manual per-circle guard, sweep jobs for DIFFERENT circles
  * could incorrectly dedup against each other.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class LocationInferenceBackfillService {
   private readonly logger = new Logger(LocationInferenceBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /**
+   * Queues one sweep job per circle that has photos without coordinates and a capture date.
+   *
+   * @param opts - an optional capture-date range and a force flag.
+   */
   async backfillAllCircles(
     opts: LocationInferenceBackfillOptions,
   ): Promise<{ enqueued: number; circles: number; estimatedItems: number }> {
@@ -40,7 +53,7 @@ export class LocationInferenceBackfillService {
       by: ['circleId'],
       where: {
         deletedAt: null,
-        type: MediaType.photo,
+        type: 'photo',
         takenLat: null,
         capturedAt: {
           not: null,
@@ -51,7 +64,7 @@ export class LocationInferenceBackfillService {
       _count: true,
     });
 
-    const eligibleCircles = groups.filter((g) => g._count > 0);
+    const eligibleCircles = groups.filter((g: { _count: number }) => g._count > 0);
     let enqueued = 0;
     let estimatedItems = 0;
 
@@ -75,11 +88,10 @@ export class LocationInferenceBackfillService {
         continue;
       }
 
-      await this.enrichmentJobService.enqueue({
+      await enqueueEnrichmentJob(this.jobs, {
         type: 'location_inference',
-        mediaItemId: null,
         circleId: group.circleId,
-        reason: JobReason.backfill,
+        reason: 'backfill',
         priority: 100,
         payload: { mode: 'sweep', from: opts.from, to: opts.to, force: opts.force ?? false },
         skipDedup: true,

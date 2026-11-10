@@ -16,3 +16,4 @@ export * from './archive-trash/media-item-purger.js';
 export * from './archive-trash/trash-purge.handler.js';
 export * from './archive-trash/trash-purge.task.js';
 export * from './jobs/enrichment-jobs.js';
+export * from './enrichment-fanout/feature-skip-reason.js';

@@ -44,6 +44,8 @@ export interface MemoriahubJob<P = unknown> {
   subjectId: string | null;
   /** The input the enqueuer gave. */
   payload: P;
+  /** Why the job was queued (`upload`, `rerun`, `backfill`); absent when the host does not record it. */
+  reason?: string | null;
   /** Attempts so far, this one included. */
   attempts: number;
   /** The organization the job belongs to, or `null` for a system job. */

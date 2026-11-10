@@ -16,7 +16,8 @@ import { registerBurstUploadEnrichment } from '../../src/burst/burst-upload-enri
 import { registerDedupUploadEnrichment } from '../../src/dedup/dedup-upload-enrichment';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 import { registerFaceUploadEnrichment } from '../../src/face/face-upload-enrichment';
-import { registerLocationInferenceUploadEnrichment } from '../../src/location-inference/location-inference-upload-enrichment';
+import { registerLocationInferenceUploadEnrichment } from '@marinoscar/memoriahub-api/location';
+import type { MemoriahubEnqueueInput, MemoriahubJobsPort } from '@marinoscar/memoriahub-api/ports';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -52,8 +53,30 @@ export function buildMediaEnrichment(
   );
   registerBurstUploadEnrichment(registry, jobs);
   registerDedupUploadEnrichment(registry, jobs);
-  registerLocationInferenceUploadEnrichment(registry, jobs);
+  registerLocationInferenceUploadEnrichment(registry, facadeAsJobsPort(jobs));
   return service;
+}
+
+/**
+ * The jobs port over the (mocked) enrichment facade, for the registrations that moved into the
+ * location slice (RETRO-J10): they enqueue through `MEMORIAHUB_JOBS`, the specs assert on the facade call.
+ */
+function facadeAsJobsPort(jobs: EnrichmentJobService): MemoriahubJobsPort {
+  return {
+    enqueue: async (input: MemoriahubEnqueueInput) => {
+      const { circleId: payloadCircle, ...rest } = (input.payload ?? {}) as Record<string, unknown>;
+      const row = await jobs.enqueue({
+        type: input.type,
+        mediaItemId: input.subjectType === 'media_item' ? (input.subjectId ?? null) : null,
+        circleId: input.subjectType === 'circle' ? (input.subjectId ?? null) : ((payloadCircle as string | undefined) ?? null),
+        reason: input.reason as never,
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(Object.keys(rest).length > 0 ? { payload: rest } : {}),
+        ...(input.skipDedup ? { skipDedup: true } : {}),
+      });
+      return { id: (row as { id?: string } | undefined)?.id ?? 'job', deduplicated: false };
+    },
+  } as unknown as MemoriahubJobsPort;
 }
 
 /** The Nest provider of {@link buildMediaEnrichment}, for `Test.createTestingModule({ providers: [...] })`. */

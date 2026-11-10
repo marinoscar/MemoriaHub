@@ -1,11 +1,15 @@
 /**
  * Dependency injection token for the geo location provider.
+ *
+ * @stability experimental
  */
 export const GEO_LOCATION_PROVIDER = Symbol('GEO_LOCATION_PROVIDER');
 
 /**
  * Result of a reverse geocoding lookup.
  * All fields are optional — providers may not resolve every tier.
+ *
+ * @stability experimental
  */
 export interface GeoLocationResult {
   /** Human-readable country name, e.g. "Costa Rica" */
@@ -26,6 +30,8 @@ export interface GeoLocationResult {
  * Pluggable interface for reverse-geocoding GPS coordinates.
  * Mirrors the StorageProvider pattern; implementation is selected at runtime
  * via the GEO_LOCATION_PROVIDER injection token.
+ *
+ * @stability experimental
  */
 export interface GeoLocationProvider {
   /**

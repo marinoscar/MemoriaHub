@@ -1,47 +1,27 @@
 import { Module } from '@nestjs/common';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { PrismaModule } from '../prisma/prisma.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
+import { LocationInferenceModule as LocationInferenceSliceModule } from '@marinoscar/memoriahub-api/location';
+
 import { GeoLocationModule } from '../media/geo/geo-location.module';
-import { MediaModule } from '../media/media.module';
-import { LocationSuggestionController } from './location-suggestion.controller';
-import { LocationSuggestionService } from './location-suggestion.service';
-import { AdminLocationInferenceController } from './admin-location-inference.controller';
-import { LocationInferenceService } from './location-inference.service';
-import { LocationInferenceHandler } from './location-inference.handler';
-import { LocationInferenceBackfillService } from './location-inference-backfill.service';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
+import { LocationSuggestionController } from './location-suggestion.controller';
+import { AdminLocationInferenceController } from './admin-location-inference.controller';
 import { LocationSuggestionRunsController } from './runs/location-suggestion-runs.controller';
 import { LocationSuggestionRunEvaluateHandler } from './runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-suggestion-run-execute-batch.handler';
-import { LocationInferenceUploadEnrichment } from './location-inference-upload-enrichment';
 
 /**
  * LocationInferenceModule
  *
- * Imports GeoLocationModule so LocationSuggestionService can call the shared
- * applyLocation() helper via the GEO_LOCATION_PROVIDER token directly.
- *
- * Also imports MediaModule for MediaThumbnailService (batched thumbnail
- * signing). This introduces no cycle: MediaModule never imports this module.
- *
- * Since issue #190 the bulk accept/reject run lifecycle lives in
- * ReviewRunsModule (shared with the burst and duplicate review queues); the two
- * handler classes kept here are deprecated shims that drain jobs queued under
- * the old `location_suggestion_run_*` types. ReviewRunsModule does not import
- * this module, so the plain import below is cycle-free.
+ * The inference, the review-queue service, the sweep backfill, the `location_inference` handler and the
+ * upload fan-out registration live in the location slice (`@marinoscar/memoriahub-api/location`,
+ * RETRO-J10 #624); this module supplies the geo provider the suggestion service calls on accept
+ * (GeoLocationModule) and keeps the controllers and the deprecated `location_suggestion_run_*` shim
+ * handlers (they delegate into the review-runs engine, which has not moved yet).
  */
 @Module({
   imports: [
-    EnrichmentModule,
-    MediaProcessingModule,
-    PrismaModule,
-    OwnerAccessModule,
-    
-    GeoLocationModule,
-    MediaModule,
+    LocationInferenceSliceModule.forRoot({ geoProviderImports: [GeoLocationModule] }),
     ReviewRunsModule,
     LocationGroupsModule,
   ],
@@ -50,16 +30,7 @@ import { LocationInferenceUploadEnrichment } from './location-inference-upload-e
     AdminLocationInferenceController,
     LocationSuggestionRunsController,
   ],
-  providers: [
-    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
-    LocationInferenceUploadEnrichment,
-    LocationInferenceService,
-    LocationInferenceHandler,
-    LocationInferenceBackfillService,
-    LocationSuggestionService,
-    LocationSuggestionRunEvaluateHandler,
-    LocationSuggestionRunExecuteBatchHandler,
-  ],
-  exports: [LocationSuggestionService],
+  providers: [LocationSuggestionRunEvaluateHandler, LocationSuggestionRunExecuteBatchHandler],
+  exports: [LocationInferenceSliceModule],
 })
 export class LocationInferenceModule {}

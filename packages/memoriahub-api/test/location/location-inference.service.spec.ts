@@ -15,7 +15,6 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, LocationSuggestionStatus, MediaType } from '@prisma/client';
 import {
   AnchorPoint,
   ComputedLocationSuggestion,
@@ -23,11 +22,15 @@ import {
   haversineKm,
   LocationInferenceConfig,
   LocationInferenceService,
-} from './location-inference.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+} from '../../src/location/inference/location-inference.service.js';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '../../src/ports/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+const LocationSuggestionStatus = { pending: 'pending', accepted: 'accepted', rejected: 'rejected', auto_applied: 'auto_applied', reverted: 'reverted' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -439,7 +442,7 @@ describe('LocationInferenceService', () => {
   }
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }) };
     mockSystemSettings = { getSettings: jest.fn() };
     setCfg();
@@ -451,9 +454,9 @@ describe('LocationInferenceService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LocationInferenceService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
+        { provide: MEMORIAHUB_SETTINGS, useValue: settingsPortFrom(async () => (await mockSystemSettings.getSettings()) as Record<string, unknown>) },
       ],
     }).compile();
 

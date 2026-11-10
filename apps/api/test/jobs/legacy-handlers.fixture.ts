@@ -14,7 +14,7 @@ import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
 import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
-import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
+import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { LocationSuggestionRunEvaluateHandler } from '../../src/location-inference/runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inference/runs/location-suggestion-run-execute-batch.handler';
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';

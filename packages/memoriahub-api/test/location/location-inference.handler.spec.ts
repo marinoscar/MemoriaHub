@@ -11,35 +11,34 @@
  *  - job.mediaItemId null + circleId null -> warns and does NOT call sweepCircle
  */
 
-import type { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { LocationInferenceHandler } from './location-inference.handler';
-import { LocationInferenceService } from './location-inference.service';
-import { circleJob, mediaItemJob, subjectPrisma, subjectScopes, systemJob } from '../../test/helpers/platform-job';
+import { LocationInferenceHandler } from '../../src/location/inference/location-inference.handler.js';
+import type { LocationInferenceService } from '../../src/location/inference/location-inference.service.js';
+import { circleJob, mediaItemJob, subjectPrisma, subjectScopes, systemJob } from '../helpers/job-fixtures.js';
 
 describe('LocationInferenceHandler', () => {
   let handler: LocationInferenceHandler;
-  let mockRegistry: { register: jest.Mock };
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockLocationInferenceService: { inferForItem: jest.Mock; sweepCircle: jest.Mock };
 
   beforeEach(() => {
-    mockRegistry = { register: jest.fn() };
+    mockRegistry = { registerHandler: jest.fn() };
     mockLocationInferenceService = {
       inferForItem: jest.fn().mockResolvedValue(undefined),
       sweepCircle: jest.fn().mockResolvedValue({ targets: 0, autoApplied: 0, pending: 0, skipped: 0, elapsedMs: 0 }),
     };
 
     handler = new LocationInferenceHandler(
-      mockRegistry as unknown as JobHandlerRegistry,
+      mockRegistry as never,
       subjectPrisma({ mediaItems: { 'media-1': 'circle-1' } }) as never,
       subjectScopes(['circle-1', 'circle-xyz', 'circle-from-job']) as never,
       mockLocationInferenceService as unknown as LocationInferenceService,
     );
   });
 
-  it('registers itself with the platform registry on module init', () => {
+  it('registers itself with the jobs port on module init', () => {
     handler.onModuleInit();
 
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('exposes type "location_inference", a label and the 15-minute profile; it is server-only (no node pair)', () => {
