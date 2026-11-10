@@ -1,9 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { deleteForeverSchema } from '@marinoscar/memoriahub-contract/media';
 
-export const deleteForeverSchema = z.object({
-  circleId: z.string().uuid(),
-  ids: z.array(z.string().uuid()).min(1).max(500),
-});
+export { deleteForeverSchema };
 
 export class DeleteForeverDto extends createZodDto(deleteForeverSchema) {}
