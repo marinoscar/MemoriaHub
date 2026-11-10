@@ -18,6 +18,15 @@
 // the grant id, so an expiry warned about before the cutover is not warned about
 // again (re-runnable as well).
 //
+// SCHEMA-STATE INDEPENDENT: the import runs on a production database BEFORE the combined
+// `prisma:migrate` (RETRO-I2 adds `media_items.org_id` / `albums.org_id`; RETRO-I4 refuses to
+// drop `media_shares` while a share is not imported), and again, harmlessly, after it. The
+// organization of a share is therefore `media_items.org_id` / `albums.org_id` when those columns
+// exist, else the default organization (single-organization mode: exactly the value the I2
+// migration backfills, `mh_default_org_id()`), so the grants are identical either way. Everything
+// else it reads (`media_shares`, `media_items.id`, `albums.id`, `grants`, `notifications`) exists
+// from the platform baseline onward.
+//
 // `media_shares` is read with raw SQL: the Prisma model is gone, and the table
 // itself is dropped by migration 20261109100000_i4_media_shares_to_link_grants
 // AFTER this import (the migration refuses to run while a row is not imported).
@@ -94,16 +103,32 @@ export async function mediaSharesTableExists(tx: Prisma.TransactionClient): Prom
   return rows[0]?.exists === true;
 }
 
+/** Whether `table.column` exists (the I2 migration adds `org_id` to the content tables). */
+async function columnExists(tx: Prisma.TransactionClient, table: string, column: string): Promise<boolean> {
+  const rows = await tx.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}
+    ) AS exists`;
+  return rows[0]?.exists === true;
+}
+
 /** Reads every share and decides what the import would do. Writes nothing. */
 export async function planMediaSharesImport(tx: Prisma.TransactionClient, now: Date = new Date()): Promise<MediaSharesPlan | null> {
   if (!(await mediaSharesTableExists(tx))) return null;
+
+  // Before RETRO-I2 the content tables carry no org_id: the organization is the default one.
+  const hasOrgColumns = (await columnExists(tx, 'media_items', 'org_id')) && (await columnExists(tx, 'albums', 'org_id'));
+  const orgExpr = hasOrgColumns
+    ? Prisma.sql`COALESCE(mi.org_id, al.org_id)::text`
+    : Prisma.sql`CASE WHEN COALESCE(mi.id, al.id) IS NULL THEN NULL ELSE (SELECT id::text FROM organizations WHERE is_default LIMIT 1) END`;
 
   const rows = await tx.$queryRaw<LegacyShareRow[]>`
     SELECT s.id::text                                       AS "id",
            s.token                                          AS "token",
            s.target_type::text                              AS "targetType",
            COALESCE(s.media_item_id, s.album_id)::text      AS "resourceId",
-           COALESCE(mi.org_id, al.org_id)::text             AS "orgId",
+           ${orgExpr}                                       AS "orgId",
            s.created_by_id::text                            AS "createdById",
            s.expires_at                                     AS "expiresAt",
            s.revoked_at                                     AS "revokedAt",
@@ -143,7 +168,7 @@ export async function planMediaSharesImport(tx: Prisma.TransactionClient, now: D
       continue;
     }
     if (!row.resourceId || !row.orgId) {
-      plan.invalid.push({ id: row.id, reason: 'the shared item or album no longer exists' });
+      plan.invalid.push({ id: row.id, reason: 'the shared item or album no longer exists, or there is no default organization' });
       continue;
     }
     plan.toImport.push(row);
