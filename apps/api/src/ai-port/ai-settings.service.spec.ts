@@ -8,7 +8,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { AiSettingsService } from './ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { AiProviderRegistry } from './legacy-ai-provider.registry';
+import { AiService } from '@marinoscar/platform-api/ai';
+import { MemoriaHubAiSettings } from './memoriahub-ai-settings';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { encryptSecret } from '../legacy/legacy-secret-cipher';
 import { composePatchSystemSettingsSchema } from '@marinoscar/platform-api/settings';
@@ -22,7 +23,10 @@ const VALID_KEY = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=';
 describe('AiSettingsService', () => {
   let service: AiSettingsService;
   let mockPrisma: MockPrismaService;
-  let mockRegistry: { get: jest.Mock; keys: jest.Mock };
+  /** The platform AiService as a system call: `respond` (the probe) and `embed`. */
+  let mockRespond: jest.Mock;
+  let mockEmbed: jest.Mock;
+  let mockSelection: jest.Mock;
   let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
   let originalKey: string | undefined;
 
@@ -41,10 +45,9 @@ describe('AiSettingsService', () => {
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockRegistry = {
-      get: jest.fn(),
-      keys: jest.fn().mockReturnValue(['openai', 'anthropic']),
-    };
+    mockRespond = jest.fn();
+    mockEmbed = jest.fn();
+    mockSelection = jest.fn().mockResolvedValue(null);
     mockSystemSettings = {
       getSettings: jest.fn(),
       patchSettings: jest.fn(),
@@ -60,7 +63,8 @@ describe('AiSettingsService', () => {
       providers: [
         AiSettingsService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: AiProviderRegistry, useValue: mockRegistry },
+        { provide: MemoriaHubAiSettings, useValue: { selection: mockSelection } },
+        { provide: AiService, useValue: { forSystem: jest.fn(() => ({ respond: mockRespond, embed: mockEmbed })) } },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         // The real key source over an EMPTY platform store, so every test here exercises the
         // legacy-row fallback (the platform-first order: ai-deployment-key-source.spec.ts).
@@ -124,7 +128,6 @@ describe('AiSettingsService', () => {
     it('returns knownProviders listing unconfigured providers', async () => {
       mockPrisma.aiProviderCredential.findMany.mockResolvedValue([]);
       mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
-      mockRegistry.keys.mockReturnValue(['openai', 'anthropic']);
 
       const result = await service.getSettings();
 
@@ -147,6 +150,7 @@ describe('AiSettingsService', () => {
         embedding: { provider: null, model: null },
         enhance: null,
         memories: null,
+        transcription: null,
       });
     });
 
@@ -430,38 +434,6 @@ describe('AiSettingsService', () => {
     });
   });
 
-  describe('resolveTranscriptionConfig', () => {
-    it('returns {provider, model} when configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: {
-          features: {
-            transcription: { provider: 'openai', model: 'gpt-4o-mini-transcribe' },
-          },
-        },
-      });
-
-      await expect(service.resolveTranscriptionConfig()).resolves.toEqual({
-        provider: 'openai',
-        model: 'gpt-4o-mini-transcribe',
-      });
-    });
-
-    it('returns null when unset, so video tagging runs visual-only rather than failing', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: { features: { transcription: null } },
-      });
-
-      await expect(service.resolveTranscriptionConfig()).resolves.toBeNull();
-    });
-
-    it('returns null for a half-filled pair — not a usable selection', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: { features: { transcription: { provider: 'openai', model: null } } },
-      });
-
-      await expect(service.resolveTranscriptionConfig()).resolves.toBeNull();
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // The wire DTO is a hand-maintained THIRD copy of every settings namespace
@@ -494,105 +466,10 @@ describe('AiSettingsService', () => {
     });
   });
 
-  describe('resolveMemoriesConfig', () => {
-    it('returns {provider, model} when configured', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: { features: { memories: { provider: 'openai', model: 'gpt-4o-mini' } } },
-      });
-
-      await expect(service.resolveMemoriesConfig()).resolves.toEqual({
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-      });
-    });
-
-    it('returns null when unset, so callers fall back to template titles', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: { features: { memories: null } },
-      });
-
-      await expect(service.resolveMemoriesConfig()).resolves.toBeNull();
-    });
-
-    it('returns null on a pre-#302 settings document with no memories key', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ ai: { features: {} } });
-
-      await expect(service.resolveMemoriesConfig()).resolves.toBeNull();
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // resolveEmbeddingConfig
   // ---------------------------------------------------------------------------
-  describe('resolveEmbeddingConfig', () => {
-    it('returns {provider, model} when both are set in system settings', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: {
-          features: {
-            embedding: { provider: 'openai', model: 'text-embedding-3-large' },
-          },
-        },
-      });
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toEqual({ provider: 'openai', model: 'text-embedding-3-large' });
-    });
-
-    it('returns null when provider is null', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: {
-          features: {
-            embedding: { provider: null, model: 'text-embedding-3-small' },
-          },
-        },
-      });
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when model is null', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: {
-          features: {
-            embedding: { provider: 'openai', model: null },
-          },
-        },
-      });
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when embedding feature is absent from system settings', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when ai block is entirely absent', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({});
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when features.embedding exists but both fields are undefined', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: { features: { embedding: {} } },
-      });
-
-      const result = await service.resolveEmbeddingConfig();
-
-      expect(result).toBeNull();
-    });
-  });
 
   // ---------------------------------------------------------------------------
   // getSettings — embedding feature in response
@@ -630,226 +507,148 @@ describe('AiSettingsService', () => {
   // ---------------------------------------------------------------------------
   // testEmbedding
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // listEmbeddingModels
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // testProvider
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // testEmbedding: through the platform AiService (feature semantic_embedding)
+  // ---------------------------------------------------------------------------
   describe('testEmbedding', () => {
-    const encryptAndSetup = (apiKey = 'sk-embed-key-1234') => {
-      const { encryptSecret: enc } = jest.requireActual<typeof import('../legacy/legacy-secret-cipher')>(
-        '../legacy/legacy-secret-cipher',
-      );
-      const encryptedValue = enc(apiKey);
-      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'openai',
-        encryptedKey: encryptedValue,
-        last4: '1234',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-    };
+    it('(a) returns ok:true with dimensions:1536 when the model answers a 1536-length vector', async () => {
+      mockEmbed.mockResolvedValue({ vectors: [new Array(1536).fill(0.1)] });
 
-    it('(a) returns ok:true with dimensions:1536 when embedText returns a 1536-length array', async () => {
-      encryptAndSetup();
-      const mockEmbedText = jest.fn().mockResolvedValue(new Array(1536).fill(0.1));
-      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+      const result = await service.testEmbedding({ provider: 'openai', model: 'text-embedding-3-small' });
 
-      const result = await service.testEmbedding({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.dimensions).toBe(1536);
-      expect(result.provider).toBe('openai');
-      expect(result.model).toBe('text-embedding-3-small');
-      expect(result.warning).toBeUndefined();
-      expect(result.error).toBeUndefined();
+      expect(result).toEqual({ ok: true, provider: 'openai', model: 'text-embedding-3-small', dimensions: 1536 });
     });
 
-    it('(b) returns ok:true WITH a warning when embedText returns a mismatched-dimension array (3072-d)', async () => {
-      encryptAndSetup();
-      const mockEmbedText = jest.fn().mockResolvedValue(new Array(3072).fill(0.1));
-      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+    it('(b) returns ok:true WITH a warning for a mismatched-dimension model (3072-d)', async () => {
+      mockEmbed.mockResolvedValue({ vectors: [new Array(3072).fill(0.1)] });
 
-      const result = await service.testEmbedding({
-        provider: 'openai',
-        model: 'text-embedding-3-large',
-      });
+      const result = await service.testEmbedding({ provider: 'openai', model: 'text-embedding-3-large' });
 
       expect(result.ok).toBe(true);
       expect(result.dimensions).toBe(3072);
-      expect(result.warning).toBeDefined();
       expect(result.warning).toMatch(/3072/);
       expect(result.warning).toMatch(/1536/);
     });
 
     it('(c) returns ok:false when no provider/model configured and none passed', async () => {
-      // resolveEmbeddingConfig returns null when ai settings are absent
-      mockSystemSettings.getSettings.mockResolvedValue({ ai: null });
+      mockSelection.mockResolvedValue(null);
 
       const result = await service.testEmbedding({});
 
       expect(result.ok).toBe(false);
       expect(result.error).toMatch(/no embedding provider/i);
+      expect(mockEmbed).not.toHaveBeenCalled();
     });
 
-    it('(d) returns ok:false when the provider has no embedText method (e.g. anthropic)', async () => {
-      encryptAndSetup('sk-ant-key-abcd');
-      // Simulate a provider object with no embedText property (like AnthropicProvider)
-      mockRegistry.get.mockReturnValue({
-        testModel: jest.fn(),
-        listModels: jest.fn(),
-        chat: jest.fn(),
-        analyzeImage: jest.fn(),
-        // no embedText
-      });
+    it('(d) returns ok:false with the platform message when the call is refused', async () => {
+      mockEmbed.mockRejectedValue(new Error('The model does not support embeddings.'));
 
-      const result = await service.testEmbedding({
-        provider: 'openai', // key used just to look up creds; mock controls the returned provider object
-        model: 'text-embedding-3-small',
-      });
+      const result = await service.testEmbedding({ provider: 'anthropic', model: 'embed-v1' });
 
-      expect(result.ok).toBe(false);
-      expect(result.error).toMatch(/does not support text embeddings/i);
+      expect(result).toEqual({
+        ok: false,
+        provider: 'anthropic',
+        model: 'embed-v1',
+        error: 'The model does not support embeddings.',
+      });
     });
 
-    it('(e) returns ok:false with the error message when embedText throws', async () => {
-      encryptAndSetup();
-      const mockEmbedText = jest.fn().mockRejectedValue(new Error('Network timeout'));
-      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
+    it('(e) falls back to the saved embedding selection when none is passed', async () => {
+      mockSelection.mockResolvedValue({ provider: 'openai', model: 'text-embedding-3-small' });
+      mockEmbed.mockResolvedValue({ vectors: [new Array(1536).fill(0.1)] });
 
-      const result = await service.testEmbedding({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
+      await service.testEmbedding({});
 
-      expect(result.ok).toBe(false);
-      expect(result.error).toBe('Network timeout');
-      expect(result.provider).toBe('openai');
-      expect(result.model).toBe('text-embedding-3-small');
-    });
-
-    it('(f) provider/model args override the configured feature when both are supplied', async () => {
-      // System settings have a different provider/model configured
-      mockSystemSettings.getSettings.mockResolvedValue({
-        ai: {
-          features: {
-            embedding: { provider: 'anthropic', model: 'some-other-model' },
-          },
-        },
-      });
-      encryptAndSetup('sk-openai-override-1234');
-      const mockEmbedText = jest.fn().mockResolvedValue(new Array(1536).fill(0.5));
-      mockRegistry.get.mockReturnValue({ embedText: mockEmbedText });
-
-      const result = await service.testEmbedding({
-        provider: 'openai',
-        model: 'text-embedding-3-small',
-      });
-
-      // Should use the explicitly passed provider+model, not the configured ones
-      expect(result.ok).toBe(true);
-      expect(result.provider).toBe('openai');
-      expect(result.model).toBe('text-embedding-3-small');
-      // resolveEmbeddingConfig should NOT have been called since both were supplied
-      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+      expect(mockSelection).toHaveBeenCalledWith('embedding');
+      expect(mockEmbed).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'text-embedding-3-small' }),
+      );
     });
   });
 
   // ---------------------------------------------------------------------------
-  // listEmbeddingModels
-  // ---------------------------------------------------------------------------
-  describe('listEmbeddingModels', () => {
-    it('returns the OpenAI embedding model list when the provider supports listEmbeddingModels', async () => {
-      const openAiModels = ['text-embedding-3-large', 'text-embedding-3-small'];
-      mockRegistry.get.mockReturnValue({
-        listEmbeddingModels: jest.fn().mockReturnValue(openAiModels),
-      });
-
-      const result = await service.listEmbeddingModels('openai');
-
-      expect(result).toEqual(openAiModels);
-    });
-
-    it('returns an empty array for a provider that has no listEmbeddingModels method (e.g. anthropic)', async () => {
-      mockRegistry.get.mockReturnValue({
-        testModel: jest.fn(),
-        listModels: jest.fn(),
-        // no listEmbeddingModels
-      });
-
-      const result = await service.listEmbeddingModels('anthropic');
-
-      expect(result).toEqual([]);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // testProvider
+  // testProvider: one small call through the platform AiService
   // ---------------------------------------------------------------------------
   describe('testProvider', () => {
-    it('delegates to the registry provider.testModel with decrypted credentials', async () => {
-      const realKey = 'sk-real-key-0000';
-      const encryptedValue = encryptSecret(realKey);
+    it('answers ok when the platform call succeeds', async () => {
+      mockRespond.mockResolvedValue({ outputText: 'hi' });
 
-      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'openai',
-        encryptedKey: encryptedValue,
-        last4: '0000',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
+      const result = await service.testProvider({ provider: 'openai', model: 'gpt-5.4' });
 
-      const mockTestModel = jest.fn().mockResolvedValue({ ok: true });
-      mockRegistry.get.mockReturnValue({ testModel: mockTestModel });
-
-      const result = await service.testProvider({ provider: 'openai', model: 'gpt-4o' });
-
-      expect(mockRegistry.get).toHaveBeenCalledWith('openai');
-      expect(mockTestModel).toHaveBeenCalledWith(
-        expect.objectContaining({ apiKey: realKey }),
-        'gpt-4o',
-      );
       expect(result).toEqual({ ok: true });
+      expect(mockRespond).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: 'openai', model: 'gpt-5.4', input: 'hi' }),
+      );
     });
 
-    it('propagates failure result from testModel', async () => {
-      const encryptedValue = encryptSecret('some-key');
+    it('propagates the failure message (no key, model not enabled, provider error)', async () => {
+      mockRespond.mockRejectedValue(new Error('Unauthorized'));
 
-      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue({
-        id: 'cred-1',
-        provider: 'anthropic',
-        encryptedKey: encryptedValue,
-        last4: 'aaaa',
-        baseUrl: null,
-        enabled: true,
-        updatedByUserId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as any);
-
-      const mockTestModel = jest.fn().mockResolvedValue({ ok: false, error: 'Unauthorized' });
-      mockRegistry.get.mockReturnValue({ testModel: mockTestModel });
-
-      const result = await service.testProvider({ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' });
+      const result = await service.testProvider({ provider: 'anthropic', model: 'claude-haiku-4-5' });
 
       expect(result).toEqual({ ok: false, error: 'Unauthorized' });
     });
 
-    it('throws when resolveCredentials throws (unconfigured provider)', async () => {
-      mockPrisma.aiProviderCredential.findUnique.mockResolvedValue(null);
+    it('refuses an unknown provider before any call', async () => {
+      await expect(service.testProvider({ provider: 'nope', model: 'x' })).rejects.toThrow(BadRequestException);
+      expect(mockRespond).not.toHaveBeenCalled();
+    });
+  });
 
-      await expect(
-        service.testProvider({ provider: 'openai', model: 'gpt-4o' }),
-      ).rejects.toThrow(BadRequestException);
+  // ---------------------------------------------------------------------------
+  // Model lists: the platform catalogue first, the curated starter list before it has rows
+  // ---------------------------------------------------------------------------
+  describe('model lists', () => {
+    const row = (modelId: string, capabilities: string[]) => ({ modelId, capabilities: { capabilities } });
 
-      // testModel should never be called
-      expect(mockRegistry.get).not.toHaveBeenCalled();
+    it('lists the enabled catalogue models that declare the capability', async () => {
+      (mockPrisma.aiModel.findMany as jest.Mock).mockResolvedValue([
+        row('text-embedding-3-large', ['embeddings']),
+        row('text-embedding-3-small', ['embeddings']),
+        row('gpt-5.5', ['responses']),
+      ]);
+
+      await expect(service.listEmbeddingModels('openai')).resolves.toEqual([
+        'text-embedding-3-large',
+        'text-embedding-3-small',
+      ]);
+    });
+
+    it('keeps the GPT >= 5.4 chat filter for OpenAI', async () => {
+      (mockPrisma.aiModel.findMany as jest.Mock).mockResolvedValue([
+        row('gpt-4o', ['responses']),
+        row('gpt-5.4', ['responses']),
+        row('gpt-5.5-mini', ['responses']),
+        row('gpt-image-1', ['responses']),
+      ]);
+
+      await expect(service.listModels('openai')).resolves.toEqual(['gpt-5.4', 'gpt-5.5-mini']);
+    });
+
+    it('falls back to the curated starter list before the catalogue has been refreshed', async () => {
+      (mockPrisma.aiModel.findMany as jest.Mock).mockResolvedValue([]);
+
+      await expect(service.listEmbeddingModels('openai')).resolves.toEqual([
+        'text-embedding-3-small',
+        'text-embedding-3-large',
+      ]);
+      await expect(service.listImageModels('openai')).resolves.toEqual(['gpt-image-1']);
+    });
+
+    it('answers an empty list for a provider without the capability (e.g. anthropic embeddings)', async () => {
+      (mockPrisma.aiModel.findMany as jest.Mock).mockResolvedValue([]);
+
+      await expect(service.listEmbeddingModels('anthropic')).resolves.toEqual([]);
+      await expect(service.listTranscriptionModels('anthropic')).resolves.toEqual([]);
     });
   });
 });

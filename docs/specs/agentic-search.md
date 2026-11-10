@@ -576,3 +576,7 @@ Stores one row per provider (unique by `provider` key). This is the only table o
 | `updated_by_user_id` | UUID FK → users | Admin who last updated the credential |
 | `created_at` | timestamptz | |
 | `updated_at` | timestamptz | |
+
+## Platform AI runtime (RETRO-E2, #601)
+
+Feature `search_agent`. `SearchAgentService.streamTurn` opens the stream with `AiService.forUser(userId, { feature: 'search_agent' }).openStream(...)` (gates and the provider connection settle before the first SSE frame, so a refusal is a plain error response) and keeps its own tool loop: `output_text.delta` becomes `token`, a completed `search_media` function call becomes `tool_call` then `results`, one tool call per turn (`parallel_tool_calls: false` for OpenAI). The tool is still the JSON Schema built from the searchable-field registry, converted to the platform function tool with `strict: false`. See [CLAUDE.md](../../CLAUDE.md) ("Every MemoriaHub model call is a registered AI feature") for the seven features and the operator prerequisites (kill switch, imported key, enabled catalogue model).

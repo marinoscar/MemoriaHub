@@ -32,8 +32,10 @@
 // keeps every selection an administrator saved. The patch and PUT schemas have
 // no `.catch`: an invalid write is a 400, never silently a default.
 //
-// RETRO-E2 moves feature routing onto registered AI features
-// (`registerAiFeature`, `AI_TARGET_RESOLVER`) and retires this extension.
+// RETRO-E2 (#601) routes each registered AI feature (`registerAiFeature`, `app-registrations/ai.ts`)
+// to its selection through `AI_TARGET_RESOLVER` (`MemoriaHubAiTargetResolver`, which reads these
+// fields through `MemoriaHubAiSettings`). This extension STAYS: it is where the platform finds the
+// feature -> model choice, and the platform admin pages and the MemoriaHub section edit it.
 // ⚠ NO FIELD HERE CAN HOLD A KEY, and none may ever be added (the `settings`
 // conformance suite walks every namespace for a secret-named field).
 // =============================================================================

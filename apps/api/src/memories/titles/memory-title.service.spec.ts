@@ -17,13 +17,8 @@
 
 import { Logger } from '@nestjs/common';
 import { MemoryType } from '@prisma/client';
-import type {
-  AiProvider,
-  ChatRequest,
-  ChatStreamEvent,
-} from '../../ai-port/legacy-ai-provider.types';
-import { AiProviderRegistry } from '../../ai-port/legacy-ai-provider.registry';
-import { AiSettingsService } from '../../ai-port/ai-settings.service';
+import { AiError, type AiService, type AiStreamEvent } from '@marinoscar/platform-api/ai';
+import { MemoriaHubAiSettings } from '../../ai-port/memoriahub-ai-settings';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   BACKFILL_AI_TITLE_CAP,
@@ -59,7 +54,21 @@ function fakePrisma(over: Record<string, unknown> = {}): PrismaService {
   } as unknown as PrismaService;
 }
 
-/** An AiProvider whose `chat` is driven by the supplied async generator body. */
+// The scripted fakes below speak the old provider's chat vocabulary (`text`, `done`); the service
+// now reads the platform's stream, so `build` maps one onto the other.
+interface ChatRequest {
+  model: string;
+  system?: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature?: number;
+}
+type ChatStreamEvent = { type: 'text'; text: string } | { type: 'done' };
+interface AiProvider {
+  key: string;
+  chat(creds: unknown, req: ChatRequest): AsyncIterable<ChatStreamEvent>;
+}
+
+/** A scripted chat source whose `chat` is driven by the supplied async generator body. */
 function fakeProvider(
   chat: (req: ChatRequest) => AsyncIterable<ChatStreamEvent>,
 ): { provider: AiProvider; requests: ChatRequest[] } {
@@ -85,27 +94,57 @@ function textProvider(text: string) {
 
 describe('MemoryTitleService', () => {
   let service: MemoryTitleService;
-  let aiSettings: { resolveMemoriesConfig: jest.Mock; resolveCredentials: jest.Mock };
-  let registry: { get: jest.Mock };
+  let aiSettings: { selection: jest.Mock };
+  let forSystem: jest.Mock;
   let prisma: PrismaService;
   let debug: jest.SpyInstance;
   let error: jest.SpyInstance;
   let warn: jest.SpyInstance;
 
   function build(provider?: AiProvider): void {
-    registry = { get: jest.fn().mockReturnValue(provider) };
+    // The platform AiService as a system call: `stream` reads the scripted chat source.
+    forSystem = jest.fn().mockReturnValue({
+      stream: (req: any): AsyncIterable<AiStreamEvent> => ({
+        // Delegates `next` and `return` to the scripted source, so closing the stream reaches it.
+        [Symbol.asyncIterator]: () => {
+          const inner = provider!
+            .chat({}, {
+              model: req.model,
+              system: req.instructions,
+              messages: [{ role: 'user', content: req.input }],
+              temperature: req.temperature,
+            })[Symbol.asyncIterator]();
+          return {
+            next: async () => {
+              const step = await inner.next();
+              if (step.done) return { done: true as const, value: undefined };
+              const e = step.value;
+              return {
+                done: false as const,
+                value: (e.type === 'text'
+                  ? { type: 'output_text.delta', delta: e.text }
+                  : { type: 'response.completed', response: { output: [] } }) as unknown as AiStreamEvent,
+              };
+            },
+            return: async () => {
+              await inner.return?.(undefined);
+              return { done: true as const, value: undefined };
+            },
+          };
+        },
+      }),
+    });
     service = new MemoryTitleService(
       prisma,
-      aiSettings as unknown as AiSettingsService,
-      registry as unknown as AiProviderRegistry,
+      aiSettings as unknown as MemoriaHubAiSettings,
+      { forSystem } as unknown as AiService,
     );
   }
 
   beforeEach(() => {
     prisma = fakePrisma();
     aiSettings = {
-      resolveMemoriesConfig: jest.fn().mockResolvedValue({ provider: 'openai', model: 'gpt-x' }),
-      resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'sk-test' }),
+      selection: jest.fn().mockResolvedValue({ provider: 'openai', model: 'gpt-x' }),
     };
     // Degradation is the NORMAL path (#306) — it must never surface as an
     // error- or warn-level log, which is asserted in every fallback test below.
@@ -248,46 +287,49 @@ describe('MemoryTitleService', () => {
 
       await expect(service.generate(request(), run)).resolves.toBeNull();
       // The epic requires "off ⇒ templates only, and no provider call at all".
-      expect(aiSettings.resolveMemoriesConfig).not.toHaveBeenCalled();
-      expect(registry.get).not.toHaveBeenCalled();
+      expect(aiSettings.selection).not.toHaveBeenCalled();
+      expect(forSystem).not.toHaveBeenCalled();
       expect(run.aiCalls).toBe(0);
     });
 
-    it('ai.features.memories unset → template, and no provider is resolved', async () => {
-      aiSettings.resolveMemoriesConfig.mockResolvedValue(null);
+    it('ai.features.memories unset → template, and no platform call is made', async () => {
+      aiSettings.selection.mockResolvedValue(null);
       const run = service.beginRun({ backfill: false, aiTitlesEnabled: true });
 
       await expect(service.generate(request(), run)).resolves.toBeNull();
-      expect(registry.get).not.toHaveBeenCalled();
+      expect(aiSettings.selection).toHaveBeenCalledWith('memories');
+      expect(forSystem).not.toHaveBeenCalled();
       expect(run.aiCalls).toBe(0);
       expectQuietDegradation();
     });
 
-    it('credential missing or disabled → template', async () => {
-      // resolveCredentials throws a 400 for both cases; the service must not.
-      aiSettings.resolveCredentials.mockRejectedValue(new Error('Provider "openai" is disabled'));
+    it('names the memory_titles feature and no acting user on the platform call', async () => {
       const run = service.beginRun({ backfill: false, aiTitlesEnabled: true });
 
-      await expect(service.generate(request(), run)).resolves.toBeNull();
-      expect(run.aiCalls).toBe(0);
-      expectQuietDegradation();
-    });
+      await service.generate(request(), run);
 
-    it('an unknown provider key → template', async () => {
-      registry.get.mockImplementation(() => {
-        throw new Error('Unknown AI provider: nope');
-      });
-      const run = service.beginRun({ backfill: false, aiTitlesEnabled: true });
-
-      await expect(service.generate(request(), run)).resolves.toBeNull();
-      expect(run.aiCalls).toBe(0);
-      expectQuietDegradation();
+      expect(forSystem).toHaveBeenCalledWith({ orgId: null, feature: 'memory_titles' });
     });
   });
 
   // --- call-time failures ---------------------------------------------------
 
   describe('call-time failures', () => {
+    it('a refused call (no key, model not enabled, kill switch) → template, quietly', async () => {
+      build(
+        fakeProvider(async function* () {
+          throw new AiError('AI_KEY_REQUIRED', 'No API key is available for provider "openai".');
+          // eslint-disable-next-line no-unreachable
+          yield { type: 'done' } as ChatStreamEvent;
+        }).provider,
+      );
+      const run = service.beginRun({ backfill: false, aiTitlesEnabled: true });
+
+      await expect(service.generate(request(), run)).resolves.toBeNull();
+      expect(run.stopped).toBe(false);
+      expectQuietDegradation();
+    });
+
     it('an HTTP/network error → template, and the run keeps going', async () => {
       // eslint-disable-next-line @typescript-eslint/require-await
       build(
@@ -384,16 +426,17 @@ describe('MemoryTitleService', () => {
   // --- rate limiting --------------------------------------------------------
 
   describe('rate limiting stops the run without failing the job', () => {
+    // The platform maps a provider 429 and Anthropic's 529 alike to AI_RATE_LIMITED.
     it.each([
-      ['429', 429],
-      ['529 (Anthropic overloaded)', 529],
-    ])('a %s stops AI titling for the remainder of the run', async (_label, status) => {
+      ['429', 30_000],
+      ['529 (Anthropic overloaded)', undefined],
+    ])('a %s stops AI titling for the remainder of the run', async (_label, retryAfterMs) => {
       let calls = 0;
       // eslint-disable-next-line @typescript-eslint/require-await
       build(
         fakeProvider(async function* () {
           calls += 1;
-          throw Object.assign(new Error('Too Many Requests'), { status });
+          throw new AiError('AI_RATE_LIMITED', 'Too Many Requests', { retryAfterMs });
           // eslint-disable-next-line no-unreachable
           yield { type: 'done' } as ChatStreamEvent;
         }).provider,

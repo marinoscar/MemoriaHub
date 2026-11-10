@@ -59,6 +59,26 @@ table), the platform kill switch `ai.enabled` (off by default; see
 provider (the platform's admin `setKey` would, and a carry-over must not depend on the provider
 answering). Verify afterwards (section 5).
 
+## 2a. Since RETRO-E2 (#601): the import is a prerequisite, not an option
+
+RETRO-E2 moved every MemoriaHub model call (tagging, video tagging, transcription, search, embeddings,
+the enhancer, memory titles) onto the platform `AiService`, which resolves keys from the **platform
+store only**. The legacy-row fallback below now serves only the provider status the admin page shows and
+the worker-node credential broker; **a deployment that has not run `ai:migrate-keys --apply` loses every
+AI feature when it upgrades to this release.** Three things must be true for a feature to run:
+
+1. the deployment key is in the platform store (this runbook's import, or `PUT /api/admin/ai/providers/:provider/key`);
+2. the platform switch is on (`ai.enabled`, **off by default**: `/admin/settings/ai`, "AI enabled"), and the key
+   policy is the one the import sets (`byok_with_org_fallback`, `deploymentKeyServesOrgs: true`);
+3. the model each feature uses (`/admin/settings/ai`, "MemoriaHub AI features") is **enabled in the catalogue**
+   (`/admin/settings/ai/models`: refresh the catalogue, then enable the models; a freshly discovered model is off).
+
+A feature that cannot run answers with the platform's own refusal (`AI_DISABLED`, `AI_KEY_REQUIRED`,
+`AI_MODEL_NOT_ENABLED`): a job fails its item with that message (visible in `/admin/settings/jobs`), search
+degrades to filter-only, memory titles fall back to templates. Every call is now recorded on
+`/admin/settings/ai/usage`, grouped by feature id (`search_agent`, `media_tagging`, `video_tagging`,
+`semantic_embedding`, `picture_enhance`, `video_transcription`, `memory_titles`).
+
 ## 2. What keeps working, before and after
 
 The app reads keys through `AiDeploymentKeySource` (PLATFORM-ADOPTION-SHIM(#605)): **the platform key
