@@ -6,6 +6,8 @@ import { GroupInvitesService } from '@marinoscar/platform-api/sharing';
 
 import { DefaultOrgId } from '../../common/tenancy/default-org-id';
 
+import { OwnerAccessService } from '../sharing/owner-scope';
+import { OwnerScopeSweepService } from '../sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiDeploymentKeySource } from '../../ai-port/ai-deployment-key-source';
 import { AppSystemSettingsService } from '../settings/app-system-settings.service';
@@ -130,26 +132,32 @@ export const CIRCLE_MEMBERSHIP_FACT: OnboardingFactDef<CircleMembershipFact> = {
   id: MEMORIAHUB_ONBOARDING_FACTS.CIRCLE_MEMBERSHIP,
   resolve: async (ctx) => {
     const prisma = ctx.get(PrismaService);
-    const memberships = await prisma.circleMember.findMany({
-      where: { userId: ctx.caller.id, role: { in: ['collaborator', 'circle_admin'] } },
-      select: { circleId: true, role: true, circle: { select: { isPersonal: true } } },
-      take: MEMBERSHIP_READ_CAP,
-    });
-    const circleIds = memberships.map((m) => m.circleId);
+    // Memberships come from the platform's group membership (and the personal library), RETRO-K1.
+    const memberships = (await ctx.get(OwnerAccessService).rolesOf(ctx.caller.id))
+      .filter((m) => m.role === 'editor' || m.role === 'admin')
+      .slice(0, MEMBERSHIP_READ_CAP);
+    const circleIds = memberships.map((m) => m.scopeId);
     if (circleIds.length === 0) return { collaboratorCircles: 0, otherMembers: 0, pendingInvites: 0 };
-    const otherMembers = await prisma.circleMember.count({
-      where: { circleId: { in: circleIds }, userId: { not: ctx.caller.id } },
-      take: 1,
-    });
+    // Another member in any of the groups (a personal library has none), one bounded lookup per group.
+    let otherMembers = 0;
+    const scopes = ctx.get(OwnerScopeSweepService);
+    for (const m of memberships) {
+      if (m.personal) continue;
+      const members = await scopes.membersOf(m.scopeId);
+      if (members.some((member) => member.userId !== ctx.caller.id)) {
+        otherMembers = 1;
+        break;
+      }
+    }
     // Pending invites are platform group invites (RETRO-I5, #583), listed through the slice,
     // which lists a group's invites to its admins only. Read only when nobody else is in yet
     // (the step is done either way), for at most INVITE_PROBE_CAP administered shared circles.
     let pendingInvites = 0;
     if (otherMembers === 0) {
       const administered = memberships
-        .filter((m) => m.role === 'circle_admin' && !m.circle.isPersonal)
+        .filter((m) => m.role === 'admin' && !m.personal)
         .slice(0, INVITE_PROBE_CAP)
-        .map((m) => m.circleId);
+        .map((m) => m.scopeId);
       if (administered.length > 0) {
         const invites = ctx.get(GroupInvitesService);
         const principal: UserPrincipal = {
@@ -184,7 +192,7 @@ export const PEOPLE_NAMED_FACT: OnboardingFactDef<PeopleNamedFact> = {
         name: { not: null },
         deletedAt: null,
         mergedIntoId: null,
-        circle: { members: { some: { userId: ctx.caller.id } } },
+        circleId: { in: await ctx.get(OwnerAccessService).scopesOf(ctx.caller.id) },
       },
       take: 1,
     }),

@@ -29,6 +29,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isMemoriesEnabled } from '../settings/feature-gates';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -68,6 +69,7 @@ export class MemoriesGenerationTask {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: AppSystemSettingsService,
   ) {}
@@ -112,17 +114,12 @@ export class MemoriesGenerationTask {
         settings.memories?.generation?.intervalHours ?? DEFAULT_INTERVAL_HOURS;
       const cutoff = new Date(Date.now() - intervalHours * 3_600_000);
 
-      let cursor: string | undefined;
-      for (;;) {
-        const circles = await this.prisma.circle.findMany({
-          select: { id: true },
-          orderBy: { id: 'asc' },
-          take: CIRCLE_PAGE_SIZE,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        });
-        if (circles.length === 0) break;
+      // Every library (groups through the platform, personal libraries from the store),
+      // walked in pages of CIRCLE_PAGE_SIZE ids (RETRO-K1).
+      const allScopeIds = await this.scopes.allScopeIds();
+      for (let offset = 0; offset < allScopeIds.length; offset += CIRCLE_PAGE_SIZE) {
+        const circleIds = allScopeIds.slice(offset, offset + CIRCLE_PAGE_SIZE);
 
-        const circleIds = circles.map((c) => c.id);
 
         // Two batched reads per page instead of two per circle.
         const [inFlight, lastSucceeded] = await Promise.all([
@@ -194,8 +191,6 @@ export class MemoriesGenerationTask {
           }
         }
 
-        if (circles.length < CIRCLE_PAGE_SIZE) break;
-        cursor = circleIds[circleIds.length - 1]!;
       }
 
       if (result.enqueued > 0 || result.errors > 0) {

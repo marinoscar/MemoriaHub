@@ -7,6 +7,7 @@ import { PrincipalGroupsProvider, resolveSharingModuleOptions } from '@marinosca
 
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
+import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
 import type { PrismaService } from '../../src/prisma/prisma.service';
@@ -20,5 +21,5 @@ export function buildOwnerAccessService(prisma: PrismaService): OwnerAccessServi
   // Only runInOrg is used by the membership lookup; the system client is never touched.
   const data = new SharingDataAdapter(prisma, {} as PrismaSystemService);
   const groups = new PrincipalGroupsProvider(data, options);
-  return new OwnerAccessService(prisma, groups, new DefaultOrgId(prisma));
+  return new OwnerAccessService(new PersonalLibraryStore(prisma), groups, new DefaultOrgId(prisma));
 }

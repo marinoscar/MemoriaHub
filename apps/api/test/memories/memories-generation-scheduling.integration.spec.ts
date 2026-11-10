@@ -35,6 +35,7 @@ import {
   MemoriesGenerationTask,
 } from '../../src/memories/memories-generation.task';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
+import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
@@ -116,6 +117,7 @@ describeMaybeDb(
       };
       task = new MemoriesGenerationTask(
         prisma as unknown as PrismaService,
+        sqlScopeDirectory(prisma as never) as never,
         new EnrichmentJobService(
           new JobsService(prisma as never),
           new DefaultOrgId(prisma as unknown as PrismaService),

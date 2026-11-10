@@ -1,16 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
-  ConflictException,
 } from '@nestjs/common';
-import { CircleRole } from '@prisma/client';
 import { CirclesService } from './circles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { PersonalLibraryStore } from '../platform/sharing/personal-library.store';
+import { GroupMemberMirrorListener } from './group-member-mirror.listener';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
-import { GroupInvitesService, SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
+import {
+  GroupInvitesService,
+  GroupMembershipService,
+  GroupsService,
+  SHARING_PERMISSIONS,
+} from '@marinoscar/platform-api/sharing';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 import { notificationsForwardingTo } from '../../test/mocks/email-notifications.adapter';
@@ -34,22 +41,42 @@ const groupInvite = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe('CirclesService', () => {
+const group = (overrides: Record<string, unknown> = {}) => ({
+  id: 'c1',
+  orgId: ORG_ID,
+  name: 'Group A',
+  description: null,
+  metadata: null,
+  createdById: 'user-1',
+  version: 1,
+  myRole: 'admin',
+  memberCount: 2,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-02T00:00:00.000Z',
+  ...overrides,
+});
+
+describe('CirclesService (served from platform groups, RETRO-K1)', () => {
   let service: CirclesService;
   let mockPrisma: MockPrismaService;
   let mockMembership: jest.Mocked<OwnerAccessService>;
   let mockEmail: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
   let mockInvites: { list: jest.Mock; create: jest.Mock; revoke: jest.Mock };
+  let groups: { create: jest.Mock; get: jest.Mock; list: jest.Mock; update: jest.Mock };
+  let members: { list: jest.Mock; add: jest.Mock; changeRole: jest.Mock; remove: jest.Mock };
+  let personal: { ownerOf: jest.Mock; idOf: jest.Mock; get: jest.Mock; page: jest.Mock };
+  let scopes: { summary: jest.Mock; membersOf: jest.Mock };
+  let mirror: { ensureCircleFor: jest.Mock };
 
   const mockUser = {
     id: 'user-1',
     email: 'user@example.com',
+    roles: [],
     permissions: [],
   } as any;
 
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
-    mockPrisma.circleMember.findMany.mockResolvedValue([]);
 
     mockMembership = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'admin' as const, isSuperAdmin: false }),
@@ -58,6 +85,26 @@ describe('CirclesService', () => {
     } as any;
 
     mockInvites = { list: jest.fn(), create: jest.fn(), revoke: jest.fn().mockResolvedValue(undefined) };
+    groups = {
+      create: jest.fn().mockResolvedValue(group()),
+      get: jest.fn().mockResolvedValue(group()),
+      list: jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100, totalPages: 1 }),
+      update: jest.fn().mockResolvedValue(group({ name: 'Renamed' })),
+    };
+    members = {
+      list: jest.fn(),
+      add: jest.fn(),
+      changeRole: jest.fn(),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    personal = {
+      ownerOf: jest.fn().mockResolvedValue(null),
+      idOf: jest.fn().mockResolvedValue(null),
+      get: jest.fn().mockResolvedValue(null),
+      page: jest.fn().mockResolvedValue([]),
+    };
+    scopes = { summary: jest.fn().mockResolvedValue({ id: 'c1', name: 'Group A', kind: 'group' }), membersOf: jest.fn().mockResolvedValue([]) };
+    mirror = { ensureCircleFor: jest.fn().mockResolvedValue(undefined) };
 
     mockEmail = {
       sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
@@ -71,6 +118,11 @@ describe('CirclesService', () => {
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: NotificationsService, useValue: notificationsForwardingTo(mockEmail) },
         { provide: GroupInvitesService, useValue: mockInvites },
+        { provide: GroupsService, useValue: groups },
+        { provide: GroupMembershipService, useValue: members },
+        { provide: PersonalLibraryStore, useValue: personal },
+        { provide: OwnerScopeSweepService, useValue: scopes },
+        { provide: GroupMemberMirrorListener, useValue: mirror },
         { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue(ORG_ID) } },
       ],
     }).compile();
@@ -82,493 +134,182 @@ describe('CirclesService', () => {
     jest.clearAllMocks();
   });
 
-  // ---- create() ----
-
   describe('create()', () => {
-    it('should create circle and add creator as circle_admin in a transaction', async () => {
-      const mockCircle = {
-        id: 'circle-1',
-        name: 'Test Circle',
-        isPersonal: false,
-        ownerId: 'user-1',
-      };
-      const mockMember = {
-        id: 'member-1',
-        circleId: 'circle-1',
-        userId: 'user-1',
-        role: CircleRole.circle_admin,
-      };
+    it('creates a platform group, writes its circle row synchronously and answers the circle shape', async () => {
+      const result = await service.create('user-1', { name: 'Group A' } as any);
 
-      // $transaction passes mockPrisma as tx to the callback
-      mockPrisma.$transaction.mockImplementation(async (callback: any) => callback(mockPrisma));
-      mockPrisma.circle.create.mockResolvedValue(mockCircle as any);
-      mockPrisma.circleMember.create.mockResolvedValue(mockMember as any);
-
-      const result = await service.create('user-1', { name: 'Test Circle' });
-
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
-      expect(mockPrisma.circle.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          name: 'Test Circle',
-          ownerId: 'user-1',
-          isPersonal: false,
-        }),
-      });
-      expect(mockPrisma.circleMember.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          circleId: 'circle-1',
-          userId: 'user-1',
-          role: CircleRole.circle_admin,
-        }),
-      });
-      expect(result).toHaveProperty('id', 'circle-1');
+      expect(groups.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1', activeOrgId: ORG_ID }),
+        { name: 'Group A', description: undefined },
+      );
+      expect(mirror.ensureCircleFor).toHaveBeenCalledWith('c1', 'Group A', null, 'user-1');
+      expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-1']);
+      expect(result).toMatchObject({ id: 'c1', name: 'Group A', isPersonal: false, ownerId: 'user-1', memberRole: 'circle_admin', _count: { members: 2 } });
     });
   });
 
-  // ---- getById() ----
+  describe('list()', () => {
+    it('lists the caller\'s groups and personal library with circle roles, by name', async () => {
+      groups.list.mockResolvedValue({ items: [group({ myRole: 'editor' })], total: 1, page: 1, pageSize: 100, totalPages: 1 });
+      personal.idOf.mockResolvedValue('p1');
+      personal.get.mockResolvedValue({ id: 'p1', ownerId: 'user-1', ownerName: 'Person A', ownerEmail: 'a@example.test', createdAt: new Date('2026-01-01T00:00:00Z') });
+
+      const result = await service.list(mockUser, false);
+
+      expect(groups.list).toHaveBeenCalledWith(expect.anything(), { scope: 'mine', page: 1, pageSize: 100 });
+      expect(result.items.map((i) => [i.id, i.isPersonal, i.memberRole])).toEqual([
+        ['c1', false, 'collaborator'],
+        ['p1', true, 'circle_admin'],
+      ]);
+      expect(result.items[1]).toMatchObject({ name: "Person A's Library", _count: { members: 1 } });
+    });
+
+    it('requires groups:admin (or circles:manage_any) for all=true', async () => {
+      await expect(service.list(mockUser, true)).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.list({ ...mockUser, permissions: [SHARING_PERMISSIONS.GROUPS_ADMIN] }, true)).resolves.toBeDefined();
+      expect(groups.list).toHaveBeenCalledWith(expect.anything(), { scope: 'all', page: 1, pageSize: 100 });
+    });
+  });
 
   describe('getById()', () => {
-    it('should throw ForbiddenException when user is not a member', async () => {
-      mockMembership.requireOwnerRole.mockRejectedValue(
-        new ForbiddenException('not a member'),
-      );
+    it('answers a group with the member and media counts', async () => {
+      mockPrisma.mediaItem.count.mockResolvedValue(7 as any);
 
-      await expect(service.getById(mockUser, 'circle-1')).rejects.toThrow(ForbiddenException);
-      await expect(service.getById(mockUser, 'circle-1')).rejects.toThrow('not a member');
+      const result = await service.getById(mockUser, 'c1');
+
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith('user-1', 'c1', [], 'viewer');
+      expect(result).toMatchObject({ id: 'c1', _count: { members: 2, mediaItems: 7 } });
     });
 
-    it('should return circle with counts when user is a member', async () => {
-      const mockCircle = {
-        id: 'circle-1',
-        name: 'Test Circle',
-        _count: { members: 3, mediaItems: 10 },
-      };
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'viewer' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circle.findUnique.mockResolvedValue(mockCircle as any);
+    it('answers a personal library for its owner', async () => {
+      personal.get.mockResolvedValue({ id: 'p1', ownerId: 'user-1', ownerName: null, ownerEmail: 'a@example.test', createdAt: new Date('2026-01-01T00:00:00Z') });
+      mockPrisma.mediaItem.count.mockResolvedValue(3 as any);
 
-      const result = await service.getById(mockUser, 'circle-1');
+      const result = await service.getById(mockUser, 'p1');
 
-      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
-        'user-1',
-        'circle-1',
-        [],
-        'viewer',
-      );
-      expect(result).toEqual(mockCircle);
+      expect(groups.get).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: 'p1', isPersonal: true, _count: { members: 1, mediaItems: 3 } });
+    });
+
+    it('is a 404 when the slice does not know the group', async () => {
+      groups.get.mockRejectedValue(new NotFoundException('Group not found'));
+      await expect(service.getById(mockUser, 'c1')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
-  // ---- update() ----
+  describe('update() and remove()', () => {
+    it('renames through the slice and refuses a personal library', async () => {
+      const updated = await service.update(mockUser, 'c1', { name: 'Renamed' } as any);
+      expect(groups.update).toHaveBeenCalledWith(expect.anything(), 'c1', { name: 'Renamed' });
+      expect(updated.name).toBe('Renamed');
 
-  describe('update()', () => {
-    it('should throw ForbiddenException when viewer tries to update (not circle_admin)', async () => {
-      mockMembership.requireOwnerRole.mockRejectedValue(
-        new ForbiddenException('This action requires circle_admin role or higher'),
-      );
-
-      await expect(
-        service.update(mockUser, 'circle-1', { name: 'New Name' }),
-      ).rejects.toThrow(ForbiddenException);
+      personal.ownerOf.mockResolvedValue('user-1');
+      await expect(service.update(mockUser, 'p1', { name: 'X' } as any)).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('should update circle when caller is circle_admin', async () => {
-      const updatedCircle = {
-        id: 'circle-1',
-        name: 'New Name',
-        description: null,
-        isPersonal: false,
-        ownerId: 'user-1',
-      };
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circle.update.mockResolvedValue(updatedCircle as any);
-
-      const result = await service.update(mockUser, 'circle-1', { name: 'New Name' });
-
-      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
-        'user-1',
-        'circle-1',
-        [],
-        'admin',
-      );
-      expect(mockPrisma.circle.update).toHaveBeenCalledWith({
-        where: { id: 'circle-1' },
-        data: { name: 'New Name' },
-      });
-      expect(result).toEqual(updatedCircle);
-    });
-  });
-
-  // ---- remove() ----
-
-  describe('remove()', () => {
-    it('should throw BadRequestException when trying to delete a personal circle', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circle.findUnique.mockResolvedValue({
-        isPersonal: true,
-        ownerId: 'user-1',
-      } as any);
-
-      await expect(service.remove(mockUser, 'circle-1')).rejects.toThrow(BadRequestException);
-      await expect(service.remove(mockUser, 'circle-1')).rejects.toThrow(
-        'Cannot delete a personal circle',
-      );
+    it('refuses to delete a personal library', async () => {
+      personal.ownerOf.mockResolvedValue('user-1');
+      await expect(service.remove(mockUser, 'p1')).rejects.toBeInstanceOf(BadRequestException);
       expect(mockPrisma.circle.delete).not.toHaveBeenCalled();
     });
 
-    it('should delete non-personal circle when caller is circle_admin', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circle.findUnique.mockResolvedValue({
-        isPersonal: false,
-        ownerId: 'user-1',
-      } as any);
+    it('deletes a shared circle (the content cascades) and drops the members\' cached groups', async () => {
+      scopes.membersOf.mockResolvedValue([{ userId: 'user-1', role: 'admin' }, { userId: 'user-2', role: 'viewer' }]);
       mockPrisma.circle.delete.mockResolvedValue({} as any);
 
-      await service.remove(mockUser, 'circle-1');
+      await service.remove(mockUser, 'c1');
 
-      expect(mockPrisma.circle.delete).toHaveBeenCalledWith({
-        where: { id: 'circle-1' },
-      });
+      expect(mockPrisma.circle.delete).toHaveBeenCalledWith({ where: { id: 'c1' } });
+      expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-1', 'user-2']);
     });
 
-    it('should throw NotFoundException when circle does not exist', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circle.findUnique.mockResolvedValue(null);
-
-      await expect(service.remove(mockUser, 'circle-nonexistent')).rejects.toThrow(NotFoundException);
+    it('is a 404 for an unknown circle', async () => {
+      scopes.summary.mockResolvedValue(null);
+      await expect(service.remove(mockUser, 'c1')).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
-  // ---- updateMemberRole() ----
+  describe('members', () => {
+    const member = (userId: string, role: string) => ({ groupId: 'c1', userId, role, email: `${userId}@example.test`, displayName: null, addedById: null, createdAt: '2026-01-01T00:00:00.000Z' });
 
-  describe('updateMemberRole()', () => {
-    it('should throw BadRequestException when demoting the last circle_admin', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findUnique.mockResolvedValue({
-        id: 'member-1',
-        circleId: 'c1',
-        userId: 'u1',
-        role: CircleRole.circle_admin,
-      } as any);
-      mockPrisma.circleMember.count.mockResolvedValue(1);
-
-      await expect(
-        service.updateMemberRole(mockUser, 'c1', 'u1', { role: CircleRole.viewer }),
-      ).rejects.toThrow(BadRequestException);
-      await expect(
-        service.updateMemberRole(mockUser, 'c1', 'u1', { role: CircleRole.viewer }),
-      ).rejects.toThrow('Cannot demote the last circle admin');
-    });
-
-    it('should allow demoting a circle_admin when there are multiple admins', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findUnique.mockResolvedValue({
-        id: 'member-1',
-        circleId: 'c1',
-        userId: 'u1',
-        role: CircleRole.circle_admin,
-      } as any);
-      mockPrisma.circleMember.count.mockResolvedValue(2);
-      mockPrisma.circleMember.update.mockResolvedValue({
-        id: 'member-1',
-        circleId: 'c1',
-        userId: 'u1',
-        role: CircleRole.viewer,
-      } as any);
-
-      const result = await service.updateMemberRole(mockUser, 'c1', 'u1', {
-        role: CircleRole.viewer,
-      });
-
-      expect(mockPrisma.circleMember.update).toHaveBeenCalledWith({
-        where: { circleId_userId: { circleId: 'c1', userId: 'u1' } },
-        data: { role: CircleRole.viewer },
-      });
-      expect(result).toHaveProperty('role', CircleRole.viewer);
-    });
-
-    it('should throw NotFoundException when target user is not a member', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.updateMemberRole(mockUser, 'c1', 'non-member', { role: CircleRole.viewer }),
-      ).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  // ---- removeMember() ----
-
-  describe('removeMember()', () => {
-    it('should throw BadRequestException when removing the last circle_admin', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findUnique.mockResolvedValue({
-        id: 'member-1',
-        circleId: 'c1',
-        userId: 'u2',
-        role: CircleRole.circle_admin,
-      } as any);
-      mockPrisma.circleMember.count.mockResolvedValue(1);
-
-      await expect(service.removeMember(mockUser, 'c1', 'u2')).rejects.toThrow(
-        BadRequestException,
-      );
-      await expect(service.removeMember(mockUser, 'c1', 'u2')).rejects.toThrow(
-        'Cannot remove the last circle admin',
-      );
-      expect(mockPrisma.circleMember.delete).not.toHaveBeenCalled();
-    });
-
-    it('should remove a viewer member successfully', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findUnique.mockResolvedValue({
-        id: 'member-2',
-        circleId: 'c1',
-        userId: 'u2',
-        role: CircleRole.viewer,
-      } as any);
-      mockPrisma.circleMember.delete.mockResolvedValue({} as any);
-
-      await service.removeMember(mockUser, 'c1', 'u2');
-
-      expect(mockPrisma.circleMember.delete).toHaveBeenCalledWith({
-        where: { circleId_userId: { circleId: 'c1', userId: 'u2' } },
-      });
-    });
-  });
-
-  // ---- addMember() ----
-
-  describe('addMember()', () => {
-    it('should upsert the circle member and trigger a membership-confirmation email', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
-      mockPrisma.circleMember.upsert.mockResolvedValue({
-        circleId: 'c1',
-        userId: 'target-user',
-        role: CircleRole.viewer,
-        user: {
-          id: 'target-user',
-          email: 'target@example.com',
-          displayName: null,
-          providerDisplayName: 'Target',
-        },
-      } as any);
-      mockPrisma.circle.findUnique.mockResolvedValue({
-        name: 'Test Circle',
-        description: 'A circle',
-      } as any);
-
-      const result = await service.addMember(mockUser, 'c1', {
-        userId: 'target-user',
-        role: CircleRole.viewer,
-      });
-
-      expect(mockPrisma.circleMember.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { circleId_userId: { circleId: 'c1', userId: 'target-user' } },
-        }),
-      );
-      expect(mockEmail.sendEmailAsync).toHaveBeenCalledWith(
-        'target@example.com',
-        'membership-confirmation',
-        expect.objectContaining({ role: CircleRole.viewer }),
-      );
-      expect(result).toEqual(
-        expect.objectContaining({ userId: 'target-user', role: CircleRole.viewer }),
-      );
-    });
-
-    it('should throw NotFoundException when the target user does not exist', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.addMember(mockUser, 'c1', { userId: 'missing-user', role: CircleRole.viewer }),
-      ).rejects.toThrow(NotFoundException);
-      expect(mockPrisma.circleMember.upsert).not.toHaveBeenCalled();
-    });
-
-    it('should still add the member even if the notification dispatch throws', async () => {
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'admin' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'target-user' } as any);
-      mockPrisma.circleMember.upsert.mockResolvedValue({
-        circleId: 'c1',
-        userId: 'target-user',
-        role: CircleRole.collaborator,
-        user: {
-          id: 'target-user',
-          email: 'target@example.com',
-          displayName: null,
-          providerDisplayName: 'Target',
-        },
-      } as any);
-      mockPrisma.circle.findUnique.mockResolvedValue({
-        name: 'Test Circle',
-        description: 'A circle',
-      } as any);
-      mockEmail.sendEmailAsync.mockImplementation(() => {
-        throw new Error('email provider exploded');
-      });
-
-      const result = await service.addMember(mockUser, 'c1', {
-        userId: 'target-user',
-        role: CircleRole.collaborator,
-      });
-
-      expect(result).toEqual(
-        expect.objectContaining({ userId: 'target-user', role: CircleRole.collaborator }),
-      );
-    });
-  });
-
-  // ---- list() ----
-
-  describe('list()', () => {
-    it('should return paginated envelope with member circles for regular user', async () => {
-      const mockMemberships = [
-        {
-          role: CircleRole.circle_admin,
-          circle: {
-            id: 'c1',
-            name: 'Alpha Circle',
-            _count: { members: 3 },
-          },
-        },
-        {
-          role: CircleRole.viewer,
-          circle: {
-            id: 'c2',
-            name: 'Beta Circle',
-            _count: { members: 1 },
-          },
-        },
-      ];
-
-      mockPrisma.circleMember.findMany.mockResolvedValue(mockMemberships as any);
-
-      const result = await service.list(mockUser, false);
-
-      expect(result.items).toHaveLength(2);
-      expect(result.items[0]).toMatchObject({ id: 'c1', memberRole: CircleRole.circle_admin });
-      expect(result.items[1]).toMatchObject({ id: 'c2', memberRole: CircleRole.viewer });
-      expect(result.total).toBe(2);
-      expect(result.page).toBe(1);
-      expect(result.totalPages).toBe(1);
-      expect(result.pageSize).toBe(2);
-    });
-
-    it('should return empty envelope when user has no memberships', async () => {
-      mockPrisma.circleMember.findMany.mockResolvedValue([]);
-
-      const result = await service.list(mockUser, false);
-
-      expect(result.items).toHaveLength(0);
-      expect(result.total).toBe(0);
-      expect(result.page).toBe(1);
-      expect(result.totalPages).toBe(1);
-    });
-
-    it('should throw ForbiddenException when non-super-admin requests all=true', async () => {
-      const regularUser = { ...mockUser, permissions: [] };
-
-      await expect(service.list(regularUser, true)).rejects.toThrow(ForbiddenException);
-    });
-
-    it('should return all circles in envelope for super-admin with all=true', async () => {
-      const superAdminUser = {
-        ...mockUser,
-        permissions: ['circles:manage_any'],
-      };
-      const mockCircles = [
-        { id: 'c1', name: 'Circle 1', _count: { members: 2 } },
-        { id: 'c2', name: 'Circle 2', _count: { members: 5 } },
-      ];
-
-      mockPrisma.circle.findMany.mockResolvedValue(mockCircles as any);
-
-      const result = await service.list(superAdminUser as any, true);
-
-      expect(result.items).toEqual(mockCircles);
-      expect(result.total).toBe(2);
-      expect(result.page).toBe(1);
-      expect(result.totalPages).toBe(1);
-    });
-  });
-
-  // ---- listMembers() ----
-
-  describe('listMembers()', () => {
-    it('should return member envelope for a circle viewer', async () => {
-      const mockMembers = [
-        { id: 'm1', userId: 'u1', role: CircleRole.circle_admin, user: { id: 'u1', email: 'u1@test.com' } },
-        { id: 'm2', userId: 'u2', role: CircleRole.viewer, user: { id: 'u2', email: 'u2@test.com' } },
-      ];
-
-      mockMembership.requireOwnerRole.mockResolvedValue({
-        role: 'viewer' as const,
-        isSuperAdmin: false,
-      });
-      mockPrisma.circleMember.findMany.mockResolvedValue(mockMembers as any);
+    it('lists the members with circle roles and the user fields the clients read', async () => {
+      members.list.mockResolvedValue({ items: [member('user-1', 'admin'), member('user-2', 'editor')], total: 2, page: 1, pageSize: 100, totalPages: 1 });
+      mockPrisma.user.findMany.mockResolvedValue([{ id: 'user-1', email: 'u1@example.test', displayName: 'U1', providerDisplayName: null, profileImageUrl: null, providerProfileImageUrl: null }] as any);
 
       const result = await service.listMembers(mockUser, 'c1');
 
-      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith(
-        'user-1',
-        'c1',
-        [],
-        'viewer',
-      );
-      expect(result.items).toEqual(mockMembers);
       expect(result.total).toBe(2);
+      expect(result.items.map((i) => [i.userId, i.role])).toEqual([['user-1', 'circle_admin'], ['user-2', 'collaborator']]);
+      expect(result.items[0]).toMatchObject({ circleId: 'c1', user: { email: 'u1@example.test' } });
+    });
+
+    it('lists a personal library as its owner only', async () => {
+      personal.ownerOf.mockResolvedValue('user-1');
+      personal.get.mockResolvedValue({ id: 'p1', ownerId: 'user-1', ownerName: null, ownerEmail: 'a@example.test', createdAt: new Date('2026-01-01T00:00:00Z') });
+      mockPrisma.user.findMany.mockResolvedValue([] as any);
+
+      const result = await service.listMembers(mockUser, 'p1');
+
+      expect(members.list).not.toHaveBeenCalled();
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({ userId: 'user-1', role: 'circle_admin' });
+    });
+
+    it('adds a member with the mapped group role and sends the confirmation e-mail', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2' } as any);
+      mockPrisma.user.findMany.mockResolvedValue([{ id: 'user-2', email: 'u2@example.test', displayName: null, providerDisplayName: null, profileImageUrl: null, providerProfileImageUrl: null }] as any);
+      members.add.mockResolvedValue(member('user-2', 'editor'));
+
+      const result = await service.addMember(mockUser, 'c1', { userId: 'user-2', role: 'collaborator' } as any);
+
+      expect(members.add).toHaveBeenCalledWith(expect.anything(), 'c1', { userId: 'user-2', role: 'editor' });
+      expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-2']);
+      expect(result).toMatchObject({ userId: 'user-2', role: 'collaborator' });
+    });
+
+    it('is a 404 for an unknown user and a 400 for a personal library', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(service.addMember(mockUser, 'c1', { userId: 'x', role: 'viewer' } as any)).rejects.toBeInstanceOf(NotFoundException);
+
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'x' } as any);
+      personal.ownerOf.mockResolvedValue('user-1');
+      await expect(service.addMember(mockUser, 'p1', { userId: 'x', role: 'viewer' } as any)).rejects.toBeInstanceOf(BadRequestException);
+      expect(members.add).not.toHaveBeenCalled();
+    });
+
+    it('maps the slice\'s LAST_GROUP_ADMIN 409 to the former 400 on demote and remove', async () => {
+      const lastAdmin = () => new ConflictException({ message: 'last', code: 'LAST_GROUP_ADMIN' });
+      members.changeRole.mockRejectedValue(lastAdmin());
+      members.remove.mockRejectedValue(lastAdmin());
+
+      await expect(service.updateMemberRole(mockUser, 'c1', 'user-1', { role: 'viewer' } as any)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.removeMember(mockUser, 'c1', 'user-1')).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('changes a role and removes a member through the slice, dropping the cached groups', async () => {
+      members.changeRole.mockResolvedValue(member('user-2', 'viewer'));
+      mockPrisma.user.findMany.mockResolvedValue([] as any);
+
+      const updated = await service.updateMemberRole(mockUser, 'c1', 'user-2', { role: 'viewer' } as any);
+      expect(members.changeRole).toHaveBeenCalledWith(expect.anything(), 'c1', 'user-2', 'viewer');
+      expect(updated.role).toBe('viewer');
+
+      await service.removeMember(mockUser, 'c1', 'user-2');
+      expect(members.remove).toHaveBeenCalledWith(expect.anything(), 'c1', 'user-2');
+      expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-2']);
+    });
+
+    it('lets a member leave with viewer-level access only', async () => {
+      await service.removeMember(mockUser, 'c1', 'user-1');
+      expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith('user-1', 'c1', [], 'viewer');
     });
   });
-
 
   // ---- invites (RETRO-I5: group invites through the sharing slice) ----
 
   describe('invites', () => {
     beforeEach(() => {
-      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: false } as any);
+      personal.ownerOf.mockResolvedValue(null);
     });
 
     it('createInvite creates a group invite with the mapped role and answers the legacy shape', async () => {
@@ -576,7 +317,7 @@ describe('CirclesService', () => {
 
       const result = await service.createInvite(mockUser, 'c1', {
         email: 'person-b@example.test',
-        role: CircleRole.collaborator,
+        role: 'collaborator',
       } as any);
 
       expect(mockMembership.requireOwnerRole).toHaveBeenCalledWith('user-1', 'c1', [], 'admin');
@@ -589,7 +330,7 @@ describe('CirclesService', () => {
         id: 'inv-1',
         circleId: 'c1',
         email: 'person-b@example.test',
-        role: CircleRole.collaborator,
+        role: 'collaborator',
         notes: null,
         addedById: 'user-1',
         addedAt: '2026-01-01T00:00:00.000Z',
@@ -602,8 +343,8 @@ describe('CirclesService', () => {
     });
 
     it.each([
-      [CircleRole.circle_admin, 'admin'],
-      [CircleRole.viewer, 'viewer'],
+      ['circle_admin', 'admin'],
+      ['viewer', 'viewer'],
     ])('maps %s to the group role %s', async (circleRole, groupRole) => {
       mockInvites.create.mockResolvedValue(groupInvite({ role: groupRole }));
 
@@ -614,10 +355,10 @@ describe('CirclesService', () => {
     });
 
     it('createInvite refuses a personal circle before reaching the slice', async () => {
-      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+      personal.ownerOf.mockResolvedValue('user-1');
 
       await expect(
-        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any),
+        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: 'viewer' } as any),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(mockInvites.create).not.toHaveBeenCalled();
     });
@@ -626,7 +367,7 @@ describe('CirclesService', () => {
       mockInvites.create.mockRejectedValue(new ConflictException({ message: 'pending', details: { reason: 'INVITE_PENDING' } }));
 
       await expect(
-        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any),
+        service.createInvite(mockUser, 'c1', { email: 'x@example.test', role: 'viewer' } as any),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -634,7 +375,7 @@ describe('CirclesService', () => {
       mockInvites.create.mockResolvedValue(groupInvite());
       const superAdmin = { ...mockUser, permissions: ['circles:manage_any'] };
 
-      await service.createInvite(superAdmin, 'c1', { email: 'x@example.test', role: CircleRole.viewer } as any);
+      await service.createInvite(superAdmin, 'c1', { email: 'x@example.test', role: 'viewer' } as any);
 
       expect(mockInvites.create.mock.calls[0][0].permissions).toContain(SHARING_PERMISSIONS.GROUPS_ADMIN);
     });
@@ -665,7 +406,7 @@ describe('CirclesService', () => {
     });
 
     it('listInvites answers an empty list for a personal circle (it has no group)', async () => {
-      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+      personal.ownerOf.mockResolvedValue('user-1');
 
       expect(await service.listInvites(mockUser, 'c1')).toEqual({ items: [], total: 0 });
       expect(mockInvites.list).not.toHaveBeenCalled();
@@ -678,7 +419,7 @@ describe('CirclesService', () => {
     });
 
     it('revokeInvite is a 404 for a personal circle', async () => {
-      mockPrisma.circle.findUnique.mockResolvedValue({ isPersonal: true } as any);
+      personal.ownerOf.mockResolvedValue('user-1');
 
       await expect(service.revokeInvite(mockUser, 'c1', 'inv-1')).rejects.toBeInstanceOf(NotFoundException);
       expect(mockInvites.revoke).not.toHaveBeenCalled();

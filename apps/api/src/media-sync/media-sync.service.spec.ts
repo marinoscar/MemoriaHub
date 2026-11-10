@@ -108,7 +108,8 @@ function refusalOf(error: unknown): { status: number; reason?: string; details?:
 
 describe('MediaSyncService', () => {
   let prisma: DeepMockProxy<PrismaClient>;
-  let circles: { requireOwnerRole: jest.Mock; personalLibraryOf: jest.Mock };
+  let circles: { requireOwnerRole: jest.Mock; personalLibraryOf: jest.Mock; writableGroupsOf: jest.Mock };
+  let scopes: { exists: jest.Mock };
   let service: MediaSyncService;
   let devices: DeviceRow[];
 
@@ -117,8 +118,14 @@ describe('MediaSyncService', () => {
     circles = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
       personalLibraryOf: jest.fn().mockResolvedValue(PERSONAL_CIRCLE),
+      writableGroupsOf: jest.fn().mockResolvedValue([]),
     };
-    service = new MediaSyncService(prisma as unknown as PrismaService, circles as unknown as OwnerAccessService);
+    scopes = { exists: jest.fn().mockResolvedValue(true) };
+    service = new MediaSyncService(
+      prisma as unknown as PrismaService,
+      circles as unknown as OwnerAccessService,
+      scopes as never,
+    );
     devices = [deviceRow(), deviceRow({ id: DEVICE_B, installationId: 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1', patId: PAT_B })];
 
     (prisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
@@ -158,7 +165,6 @@ describe('MediaSyncService', () => {
     const input = { installationId: INSTALL_A, name: 'Pixel 9', appVersionCode: 3 };
 
     beforeEach(() => {
-      (prisma.circle.findFirst as jest.Mock).mockResolvedValue({ id: PERSONAL_CIRCLE });
       (prisma.mediaSyncDevice.upsert as jest.Mock).mockImplementation(async ({ create }) =>
         deviceRow({ patId: create.patId }),
       );
@@ -236,8 +242,8 @@ describe('MediaSyncService', () => {
     });
 
     it('falls back to a collaborator circle, and refuses when the user has none', async () => {
-      (prisma.circle.findFirst as jest.Mock).mockResolvedValue(null);
-      (prisma.circleMember.findFirst as jest.Mock).mockResolvedValue(null);
+      circles.personalLibraryOf.mockResolvedValue(null);
+      circles.writableGroupsOf.mockResolvedValue([]);
 
       const error = await service.register(USER, input, pat(PAT_A)).catch((e) => e);
       expect(refusalOf(error)).toMatchObject({ status: 409, reason: 'NO_TARGET_CIRCLE' });

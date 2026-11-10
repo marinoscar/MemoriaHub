@@ -18,6 +18,7 @@ import {
   MemoriesGenerationTask,
 } from './memories-generation.task';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -46,9 +47,9 @@ function hoursAgo(h: number): Date {
 describe('MemoriesGenerationTask', () => {
   let task: MemoriesGenerationTask;
   let prisma: {
-    circle: { findMany: jest.Mock };
     job: { findMany: jest.Mock; groupBy: jest.Mock };
   };
+  let scopes: { allScopeIds: jest.Mock };
   let enrichment: { enqueue: jest.Mock };
   let settings: { getSettings: jest.Mock };
 
@@ -56,12 +57,12 @@ describe('MemoriesGenerationTask', () => {
 
   beforeEach(async () => {
     prisma = {
-      circle: { findMany: jest.fn().mockResolvedValue([]) },
       job: {
         findMany: jest.fn().mockResolvedValue([]),
         groupBy: jest.fn().mockResolvedValue([]),
       },
     };
+    scopes = { allScopeIds: jest.fn().mockResolvedValue([]) };
     enrichment = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
     settings = {
       getSettings: jest.fn().mockResolvedValue(settingsWith({ enabled: true })),
@@ -73,6 +74,7 @@ describe('MemoriesGenerationTask', () => {
       providers: [
         MemoriesGenerationTask,
         { provide: PrismaService, useValue: prisma },
+        { provide: OwnerScopeSweepService, useValue: scopes },
         { provide: EnrichmentJobService, useValue: enrichment },
         { provide: AppSystemSettingsService, useValue: settings },
       ],
@@ -93,26 +95,26 @@ describe('MemoriesGenerationTask', () => {
   describe('gating', () => {
     it('enqueues nothing and reads NOTHING when MEMORIES_ENABLED=false', async () => {
       process.env['MEMORIES_ENABLED'] = 'false';
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
 
       await task.handleScheduledGeneration();
 
       expect(enrichment.enqueue).not.toHaveBeenCalled();
       // The env kill-switch short-circuits before even the cached settings read.
       expect(settings.getSettings).not.toHaveBeenCalled();
-      expect(prisma.circle.findMany).not.toHaveBeenCalled();
+      expect(scopes.allScopeIds).not.toHaveBeenCalled();
     });
 
     it('enqueues nothing and never pages circles when features.memories is off (the default)', async () => {
       settings.getSettings.mockResolvedValue(settingsWith({ enabled: false }));
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
 
       await task.handleScheduledGeneration();
 
       expect(enrichment.enqueue).not.toHaveBeenCalled();
       // One cached settings read is the entire cost of a disabled tick.
       expect(settings.getSettings).toHaveBeenCalledTimes(1);
-      expect(prisma.circle.findMany).not.toHaveBeenCalled();
+      expect(scopes.allScopeIds).not.toHaveBeenCalled();
     });
 
     it('treats an absent features.memories key as off', async () => {
@@ -121,7 +123,7 @@ describe('MemoriesGenerationTask', () => {
       const result = await task.handleScheduledGeneration();
 
       expect(result.enqueued).toBe(0);
-      expect(prisma.circle.findMany).not.toHaveBeenCalled();
+      expect(scopes.allScopeIds).not.toHaveBeenCalled();
     });
 
     it('MEMORIES_ENABLED=false overrides features.memories=true', async () => {
@@ -142,10 +144,7 @@ describe('MemoriesGenerationTask', () => {
 
   describe('per-circle enqueue', () => {
     it('enqueues ONE job per circle, each with skipDedup: true', async () => {
-      prisma.circle.findMany.mockResolvedValue([
-        { id: 'circle-a' },
-        { id: 'circle-b' },
-      ]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a', 'circle-b']);
 
       const result = await task.handleScheduledGeneration();
 
@@ -166,7 +165,7 @@ describe('MemoriesGenerationTask', () => {
     });
 
     it('enqueues for a circle that has never generated (no succeeded job)', async () => {
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
       prisma.job.groupBy.mockResolvedValue([]);
 
       const result = await task.handleScheduledGeneration();
@@ -175,10 +174,7 @@ describe('MemoriesGenerationTask', () => {
     });
 
     it('skips a circle whose job is already pending or running', async () => {
-      prisma.circle.findMany.mockResolvedValue([
-        { id: 'circle-a' },
-        { id: 'circle-b' },
-      ]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a', 'circle-b']);
       prisma.job.findMany.mockResolvedValue([{ subjectId: 'circle-a' }]);
 
       const result = await task.handleScheduledGeneration();
@@ -198,10 +194,7 @@ describe('MemoriesGenerationTask', () => {
     });
 
     it('isolates a per-circle enqueue failure without aborting the sweep', async () => {
-      prisma.circle.findMany.mockResolvedValue([
-        { id: 'circle-a' },
-        { id: 'circle-b' },
-      ]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a', 'circle-b']);
       enrichment.enqueue
         .mockRejectedValueOnce(new Error('db down'))
         .mockResolvedValueOnce({ id: 'job-2' });
@@ -212,7 +205,7 @@ describe('MemoriesGenerationTask', () => {
     });
 
     it('never throws out of the cron even when the sweep blows up', async () => {
-      prisma.circle.findMany.mockRejectedValue(new Error('connection reset'));
+      scopes.allScopeIds.mockRejectedValue(new Error('connection reset'));
 
       await expect(task.handleScheduledGeneration()).resolves.toMatchObject({ enqueued: 0 });
     });
@@ -227,7 +220,7 @@ describe('MemoriesGenerationTask', () => {
       settings.getSettings.mockResolvedValue(
         settingsWith({ enabled: true, intervalHours: 24 }),
       );
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
       prisma.job.groupBy.mockResolvedValue([
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(1) } },
       ]);
@@ -242,7 +235,7 @@ describe('MemoriesGenerationTask', () => {
       settings.getSettings.mockResolvedValue(
         settingsWith({ enabled: true, intervalHours: 24 }),
       );
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
       prisma.job.groupBy.mockResolvedValue([
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(25) } },
       ]);
@@ -256,7 +249,7 @@ describe('MemoriesGenerationTask', () => {
       settings.getSettings.mockResolvedValue(
         settingsWith({ enabled: true, intervalHours: 1 }),
       );
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
       prisma.job.groupBy.mockResolvedValue([
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(2) } },
       ]);
@@ -267,7 +260,7 @@ describe('MemoriesGenerationTask', () => {
 
     it('falls back to a 24h interval when the setting is absent', async () => {
       settings.getSettings.mockResolvedValue(settingsWith({ enabled: true }));
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
       prisma.job.groupBy.mockResolvedValue([
         { subjectId: 'circle-a', _max: { finishedAt: hoursAgo(12) } },
       ]);
@@ -276,7 +269,7 @@ describe('MemoriesGenerationTask', () => {
     });
 
     it('only counts SUCCEEDED jobs toward the interval gate', async () => {
-      prisma.circle.findMany.mockResolvedValue([{ id: 'circle-a' }]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a']);
 
       await task.handleScheduledGeneration();
 
@@ -293,46 +286,31 @@ describe('MemoriesGenerationTask', () => {
   // -------------------------------------------------------------------------
 
   describe('circle paging', () => {
-    it('keyset-pages circles 100 at a time until a short page', async () => {
-      const page1 = Array.from({ length: 100 }, (_, i) => ({
-        id: `circle-${String(i).padStart(3, '0')}`,
-      }));
-      const page2 = [{ id: 'circle-100' }];
-      prisma.circle.findMany
-        .mockResolvedValueOnce(page1)
-        .mockResolvedValueOnce(page2);
+    it('walks every library in chunks of 100 ids, one pair of job lookups per chunk', async () => {
+      const ids = Array.from({ length: 101 }, (_, i) => `circle-${String(i).padStart(3, '0')}`);
+      scopes.allScopeIds.mockResolvedValueOnce(ids);
 
       const result = await task.handleScheduledGeneration();
 
       expect(result.circles).toBe(101);
       expect(result.enqueued).toBe(101);
-      expect(prisma.circle.findMany).toHaveBeenCalledTimes(2);
-      // Second page continues after the last id of the first, skipping it.
-      expect(prisma.circle.findMany).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          take: 100,
-          cursor: { id: 'circle-099' },
-          skip: 1,
-        }),
-      );
+      expect(scopes.allScopeIds).toHaveBeenCalledTimes(1);
+      expect(prisma.job.findMany).toHaveBeenCalledTimes(2);
+      expect(prisma.job.findMany.mock.calls[0]![0].where.subjectId.in).toHaveLength(100);
     });
 
     it('stops immediately when there are no circles at all (fresh install)', async () => {
-      prisma.circle.findMany.mockResolvedValue([]);
+      scopes.allScopeIds.mockResolvedValue([]);
 
       const result = await task.handleScheduledGeneration();
 
       expect(result).toMatchObject({ circles: 0, enqueued: 0 });
-      expect(prisma.circle.findMany).toHaveBeenCalledTimes(1);
+      expect(scopes.allScopeIds).toHaveBeenCalledTimes(1);
       expect(enrichment.enqueue).not.toHaveBeenCalled();
     });
 
     it('batches the two job lookups per page, not per circle', async () => {
-      prisma.circle.findMany.mockResolvedValue([
-        { id: 'circle-a' },
-        { id: 'circle-b' },
-        { id: 'circle-c' },
-      ]);
+      scopes.allScopeIds.mockResolvedValue(['circle-a', 'circle-b', 'circle-c']);
 
       await task.handleScheduledGeneration();
 

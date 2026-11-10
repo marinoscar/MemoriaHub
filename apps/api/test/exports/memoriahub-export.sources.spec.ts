@@ -63,7 +63,7 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
     {
       id: '10000000-0000-4000-8000-000000000001',
       circleId: 'c1',
-      circle: { name: 'Circle Alpha', ownerId: USER },
+      ownerGroup: { name: 'Circle Alpha' },
       type: 'photo',
       originalFilename: 'IMG_0001.HEIC',
       contentHash: secret('contentHash'),
@@ -106,7 +106,7 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
     {
       id: '20000000-0000-4000-8000-000000000001',
       circleId: 'c1',
-      circle: { name: 'Circle Alpha' },
+      ownerGroup: { name: 'Circle Alpha' },
       name: 'Album X',
       description: null,
       coverMediaItemId: '10000000-0000-4000-8000-000000000001',
@@ -127,7 +127,7 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
     {
       id: '40000000-0000-4000-8000-000000000001',
       circleId: 'c1',
-      circle: { name: 'Circle Alpha' },
+      ownerGroup: { name: 'Circle Alpha' },
       type: 'trip',
       periodKey: '2026-06-20',
       title: 'A trip',
@@ -157,7 +157,7 @@ const ROWS: Record<string, Record<string, unknown>[]> = {
     {
       id: '60000000-0000-4000-8000-000000000001',
       circleId: 'c1',
-      circle: { name: 'Circle Alpha' },
+      ownerGroup: { name: 'Circle Alpha' },
       name: 'Person A',
       coverFaceId: '70000000-0000-4000-8000-000000000001',
       favorite: false,
@@ -278,8 +278,8 @@ describe('MemoriaHub export sources', () => {
     expect(queries[0]!.args.where).toEqual(ownedCircleContentWhere(USER));
     expect(ownedCircleContentWhere(USER)).toEqual({
       OR: [
-        { circle: { isPersonal: true, ownerId: USER } },
-        { addedById: USER, circle: { OR: [{ isPersonal: false }, { ownerId: USER }] } },
+        { ownerUserId: USER },
+        { addedById: USER, ownerGroupId: { not: null } },
       ],
     });
     // The storage object is read for its size and type only.
@@ -294,7 +294,7 @@ describe('MemoriaHub export sources', () => {
     }
     const memory = queries.find((q) => q.delegate === 'memory')!;
     expect(memory.args.where).toEqual(memoryWhere(USER));
-    expect(memoryWhere(USER)).toEqual({ deletedAt: null, circle: { members: { some: { userId: USER } } } });
+    expect(memoryWhere(USER)).toEqual({ deletedAt: null, OR: [{ ownerUserId: USER }, { ownerGroup: { members: { some: { userId: USER } } } }] });
     const select = memory.args.select as { userStates: { where: unknown } };
     expect(select.userStates.where).toEqual({ userId: USER });
     expect(queries.find((q) => q.delegate === 'memoryItem')!.args.where).toEqual({ memory: memoryWhere(USER) });

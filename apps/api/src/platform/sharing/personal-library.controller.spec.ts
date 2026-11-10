@@ -3,14 +3,14 @@ import { ACTIVE_OWNER_SCOPE_USER_SETTINGS, activeOwnerScopeSchema } from '../../
 
 describe('PersonalLibraryService (RETRO-I6, #588)', () => {
   it("returns the caller's personal library id", async () => {
-    const findFirst = jest.fn().mockResolvedValue({ id: 'lib-1' });
-    const service = new PersonalLibraryService({ circle: { findFirst } } as never);
+    const idOf = jest.fn().mockResolvedValue('lib-1');
+    const service = new PersonalLibraryService({ idOf } as never);
     await expect(service.forUser('user-1')).resolves.toEqual({ id: 'lib-1', name: PERSONAL_LIBRARY_NAME });
-    expect(findFirst).toHaveBeenCalledWith({ where: { ownerId: 'user-1', isPersonal: true }, select: { id: true } });
+    expect(idOf).toHaveBeenCalledWith('user-1');
   });
 
   it('returns a null id when the account has no personal library', async () => {
-    const service = new PersonalLibraryService({ circle: { findFirst: jest.fn().mockResolvedValue(null) } } as never);
+    const service = new PersonalLibraryService({ idOf: jest.fn().mockResolvedValue(null) } as never);
     await expect(service.forUser('user-1')).resolves.toEqual({ id: null, name: PERSONAL_LIBRARY_NAME });
   });
 });

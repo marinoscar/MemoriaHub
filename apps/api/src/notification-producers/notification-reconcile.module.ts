@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { MediaModule } from '../media/media.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { sharingModule } from '../platform/sharing/sharing.config';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
 import { EnrichmentFailureNotificationListener } from './enrichment-failure-notification.listener';
@@ -13,7 +14,7 @@ import { ShareExpiringHandler } from './share-expiring.handler';
 
 /** The self-driven producers; see `notification-producers.module.ts`. */
 @Module({
-  imports: [MediaModule, sharingModule],
+  imports: [MediaModule, sharingModule, OwnerAccessModule],
   providers: [
     ReviewQueueReconcileService,
     NotificationReconcileTask,

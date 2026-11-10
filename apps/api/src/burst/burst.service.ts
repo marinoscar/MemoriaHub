@@ -10,6 +10,7 @@ import {
 import { BurstGroupStatus, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import {
@@ -47,6 +48,8 @@ export class BurstService {
     // resolve/dismiss primitives, while these threshold endpoints start runs.
     @Inject(forwardRef(() => ReviewRunService))
     private readonly reviewRuns: ReviewRunService,
+    // Every library for the admin backfill (RETRO-K1): groups through the platform, personal libraries from the store.
+    private readonly scopes: OwnerScopeSweepService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
     @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
   ) {}
@@ -753,9 +756,7 @@ export class BurstService {
     to?: string;
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number; evictedDuplicateOverlaps: number }> {
-    const allCircles = await this.prisma.circle.findMany({
-      select: { id: true },
-    });
+    const allCircles = (await this.scopes.allScopeIds()).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;

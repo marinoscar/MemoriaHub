@@ -49,7 +49,9 @@ import {
   column,
   instant,
   joinNames,
+  libraryName,
   num,
+  OWNER_NAME_SELECT,
   ownedCircleContentWhere,
   pageById,
   text,
@@ -95,8 +97,7 @@ function projectedTable(
 }
 
 function circleName(row: Record<string, unknown>): ExportRow[string] {
-  const circle = row.circle as { name?: unknown } | null | undefined;
-  return text(circle?.name);
+  return text(libraryName(row));
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,7 @@ export function mediaItemTable(ctx: ExportContext): ExportTable {
     where: ownedCircleContentWhere(ctx.subjectId),
     select: {
       circleId: true,
-      circle: { select: { name: true } },
+      ...OWNER_NAME_SELECT,
       type: true,
       originalFilename: true,
       // Size and type only: never the key, the bucket or the provider.
@@ -280,7 +281,7 @@ export function albumTable(ctx: ExportContext): ExportTable {
     where: albumWhere(ctx.subjectId),
     select: {
       circleId: true,
-      circle: { select: { name: true } },
+      ...OWNER_NAME_SELECT,
       name: true,
       description: true,
       coverMediaItemId: true,
@@ -387,7 +388,7 @@ export const MEMORY_ITEM_COLUMNS: readonly ExportColumn[] = [
 
 /** Live (not tombstoned) memories of the circles the user is a member of. */
 export function memoryWhere(userId: string): Record<string, unknown> {
-  return { deletedAt: null, circle: { members: { some: { userId } } } };
+  return { deletedAt: null, OR: [{ ownerUserId: userId }, { ownerGroup: { members: { some: { userId } } } }] };
 }
 
 export function memoryTable(ctx: ExportContext): ExportTable {
@@ -399,7 +400,7 @@ export function memoryTable(ctx: ExportContext): ExportTable {
     where: memoryWhere(ctx.subjectId),
     select: {
       circleId: true,
-      circle: { select: { name: true } },
+      ...OWNER_NAME_SELECT,
       type: true,
       title: true,
       subtitle: true,
@@ -503,7 +504,7 @@ export function personTable(ctx: ExportContext): ExportTable {
     where: ownedCircleContentWhere(ctx.subjectId),
     select: {
       circleId: true,
-      circle: { select: { name: true } },
+      ...OWNER_NAME_SELECT,
       name: true,
       coverFaceId: true,
       favorite: true,

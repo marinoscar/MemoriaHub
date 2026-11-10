@@ -38,6 +38,7 @@ import { NodeBackupService } from './node-backup.service';
 import { NodeBackupOwnershipService } from './node-backup-ownership.service';
 import { NodeBackupQueryService } from './node-backup-query.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -174,6 +175,7 @@ const defaultStats = {
 
 describe('NodeBackupService', () => {
   let service: NodeBackupService;
+  const access = { scopesOf: jest.fn() };
   let mockPrisma: MockPrismaService & any;
   let nodesService: { assertOwnership: jest.Mock };
   let queryService: {
@@ -213,6 +215,7 @@ describe('NodeBackupService', () => {
         { provide: NodeBackupQueryService, useValue: queryService },
         { provide: StorageProviderResolver, useValue: objectsService },
         { provide: AppSystemSettingsService, useValue: systemSettings },
+        { provide: OwnerAccessService, useValue: access },
         {
           provide: ConfigService,
           useValue: { get: jest.fn((_key: string, def?: unknown) => def) },
@@ -324,24 +327,17 @@ describe('NodeBackupService', () => {
     });
 
     it('rejects circleIds the node owner is not a member of with 400', async () => {
-      mockPrisma.circleMember.findMany.mockResolvedValue([{ circleId: CIRCLE_A }]);
+      access.scopesOf.mockResolvedValue([CIRCLE_A]);
 
       await expect(
         service.updateConfig(USER_ID, NODE_ID, { circleIds: [CIRCLE_A, CIRCLE_B] }),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(mockPrisma.circleMember.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ userId: OWNER_ID }),
-        }),
-      );
+      expect(access.scopesOf).toHaveBeenCalledWith(OWNER_ID);
       expect(mockPrisma.nodeBackupConfig.upsert).not.toHaveBeenCalled();
     });
 
     it('accepts member circleIds and persists them', async () => {
-      mockPrisma.circleMember.findMany.mockResolvedValue([
-        { circleId: CIRCLE_A },
-        { circleId: CIRCLE_B },
-      ]);
+      access.scopesOf.mockResolvedValue([CIRCLE_A, CIRCLE_B]);
 
       await service.updateConfig(USER_ID, NODE_ID, {
         circleIds: [CIRCLE_A, CIRCLE_B],

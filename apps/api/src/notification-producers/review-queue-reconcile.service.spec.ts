@@ -19,7 +19,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole } from '@prisma/client';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { createPlatformNotificationsMock } from '../../test/mocks/platform-notifications.mock';
@@ -31,6 +31,7 @@ import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
 
 const CIRCLE_A = { id: 'circle-a', name: 'Family' };
 const CIRCLE_B = { id: 'circle-b', name: 'Work' };
+const asScope = (c: { id: string; name: string }) => ({ ...c, kind: 'group' as const, ownerId: null, createdById: null });
 const USER_A = 'user-a';
 const USER_B = 'user-b';
 const USER_DEMOTED = 'user-demoted';
@@ -62,6 +63,7 @@ describe('ReviewQueueReconcileService', () => {
   let mockPrisma: MockPrismaService;
   let platform: ReturnType<typeof createPlatformNotificationsMock>;
   let mockSystemSettings: { getSettings: jest.Mock };
+  let scopes: { allScopes: jest.Mock; membersOf: jest.Mock };
   let mockMediaService: { computeReviewCounts: jest.Mock };
 
   const stateCalls = () => platform.calls('notifyState');
@@ -73,12 +75,13 @@ describe('ReviewQueueReconcileService', () => {
       delete process.env[key];
     }
     mockPrisma = createMockPrismaService();
+    scopes = { allScopes: jest.fn(), membersOf: jest.fn() };
     platform = createPlatformNotificationsMock();
     mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(features()) };
     mockMediaService = { computeReviewCounts: jest.fn().mockResolvedValue(counts()) };
 
-    (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([CIRCLE_A]);
-    (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([{ userId: USER_A }]);
+    scopes.allScopes.mockResolvedValue([asScope(CIRCLE_A)]);
+    scopes.membersOf.mockResolvedValue([{ userId: USER_A, role: 'editor' }]);
     (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -88,6 +91,7 @@ describe('ReviewQueueReconcileService', () => {
         { provide: NotificationsService, useValue: platform.mock },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: MediaService, useValue: mockMediaService },
+        { provide: OwnerScopeSweepService, useValue: scopes },
       ],
     }).compile();
 
@@ -98,7 +102,7 @@ describe('ReviewQueueReconcileService', () => {
 
   describe('fan-out is per member, never per group', () => {
     it('929 pending duplicate groups produce ONE notifyState per eligible member, scoped to the circle', async () => {
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([{ userId: USER_A }, { userId: USER_B }]);
+      scopes.membersOf.mockResolvedValue([{ userId: USER_A, role: 'editor' }, { userId: USER_B, role: 'admin' }]);
       mockMediaService.computeReviewCounts.mockResolvedValue(counts({ pendingDuplicateGroups: 929 }));
 
       const result = await service.reconcileAll();
@@ -115,16 +119,12 @@ describe('ReviewQueueReconcileService', () => {
 
     it('queries only collaborators and circle admins (viewers cannot act on a review queue)', async () => {
       await service.reconcileAll();
-      expect(mockPrisma.circleMember.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { circleId: CIRCLE_A.id, role: { in: [CircleRole.circle_admin, CircleRole.collaborator] } },
-        }),
-      );
+      expect(scopes.membersOf).toHaveBeenCalledWith(CIRCLE_A.id, ['admin', 'editor']);
     });
 
     it('calls computeReviewCounts ONCE per circle, and scopes each circle separately', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([CIRCLE_A, CIRCLE_B]);
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([{ userId: USER_A }, { userId: USER_B }]);
+      scopes.allScopes.mockResolvedValue([asScope(CIRCLE_A), asScope(CIRCLE_B)]);
+      scopes.membersOf.mockResolvedValue([{ userId: USER_A, role: 'editor' }, { userId: USER_B, role: 'admin' }]);
       mockMediaService.computeReviewCounts.mockResolvedValue(counts({ pendingBurstGroups: 3 }));
 
       await service.reconcileAll();
@@ -192,7 +192,7 @@ describe('ReviewQueueReconcileService', () => {
       mockSystemSettings.getSettings.mockResolvedValue({ features: {} });
       process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
       await service.reconcileAll();
-      expect(mockPrisma.circle.findMany).not.toHaveBeenCalled();
+      expect(scopes.allScopes).not.toHaveBeenCalled();
       expect(mockMediaService.computeReviewCounts).not.toHaveBeenCalled();
     });
   });
@@ -215,7 +215,7 @@ describe('ReviewQueueReconcileService', () => {
   });
 
   it('a per-circle failure is counted and the sweep moves on', async () => {
-    (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([CIRCLE_A, CIRCLE_B]);
+    scopes.allScopes.mockResolvedValue([asScope(CIRCLE_A), asScope(CIRCLE_B)]);
     mockMediaService.computeReviewCounts
       .mockRejectedValueOnce(new Error('db down'))
       .mockResolvedValueOnce(counts({ pendingBurstGroups: 1 }));

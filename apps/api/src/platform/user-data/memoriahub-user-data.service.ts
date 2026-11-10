@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { MediaService } from '../../media/media.service';
+import { OwnerScopeSweepService } from '../sharing/owner-scope-sweep.service';
+import { PersonalLibraryStore } from '../sharing/personal-library.store';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
@@ -93,6 +95,8 @@ export class MemoriaHubUserDataService {
     private readonly media: MediaService,
     private readonly resolver: StorageProviderResolver,
     private readonly system: PrismaSystemService,
+    private readonly scopes: OwnerScopeSweepService,
+    private readonly personalLibraries: PersonalLibraryStore,
   ) {}
 
   /** `storage_objects` is an organization table with row-level security; a purge must see every row. */
@@ -106,11 +110,8 @@ export class MemoriaHubUserDataService {
 
   /** The user's personal circle(s): normally exactly one. */
   async personalCircleIds(userId: string): Promise<string[]> {
-    const rows = await this.prisma.circle.findMany({
-      where: { ownerId: userId, isPersonal: true },
-      select: { id: true },
-    });
-    return rows.map((row) => row.id);
+    const id = await this.personalLibraries.idOf(userId);
+    return id ? [id] : [];
   }
 
   // ---------------------------------------------------------------------------
@@ -378,12 +379,16 @@ export class MemoriaHubUserDataService {
    * Afterwards no `Restrict` key (`circles.owner_id`, `*.added_by_id`) names the user.
    */
   async prepareUserRemoval(userId: string): Promise<Counts> {
-    const owned = await this.prisma.circle.findMany({
-      where: { ownerId: userId },
-      select: { id: true, isPersonal: true, _count: { select: { members: { where: { userId: { not: userId } } } } } },
-    });
-    const blocking = owned.filter((circle) => !circle.isPersonal && circle._count.members > 0).map((circle) => circle.id);
+    // The scopes the user owns (RETRO-K1): their personal library, and every group they created.
+    const personalId = await this.personalLibraries.idOf(userId);
+    const createdGroups = (await this.scopes.allScopes()).filter((scope) => scope.kind === 'group' && scope.createdById === userId);
+    const blocking: string[] = [];
+    for (const group of createdGroups) {
+      const members = await this.scopes.membersOf(group.id);
+      if (members.some((member) => member.userId !== userId)) blocking.push(group.id);
+    }
     if (blocking.length > 0) throw new SharedCircleOwnershipError(userId, blocking);
+    const owned = [...(personalId ? [{ id: personalId }] : []), ...createdGroups.map((group) => ({ id: group.id }))];
 
     const ownedIds = owned.map((circle) => circle.id);
     const counts: Counts = { circlesDeleted: 0 };
@@ -394,11 +399,23 @@ export class MemoriaHubUserDataService {
           `user ${userId}: ${counts.mediaItemsFailed} media item(s) of their own circles could not be deleted; retry`,
         );
       }
+      // PLATFORM-ADOPTION-SHIM(RETRO-K1): until RETRO-K2 drops `circles`, a scope still has a circle row
+      // (the mirror triggers delete the group with it); K2 deletes the group / personal library here instead.
       counts.circlesDeleted = (await this.prisma.circle.deleteMany({ where: { id: { in: ownedIds } } })).count;
     }
 
     const reassigned = await this.reassignSharedContent(userId);
     return { ...counts, ...reassigned };
+  }
+
+  /** The user a scope's content is reassigned to: the personal library's owner, else the group's creator, else an admin member. */
+  private async contentOwnerOf(scopeId: string, leaving: string): Promise<string | null> {
+    const summary = await this.scopes.summary(scopeId);
+    if (!summary) return null;
+    if (summary.kind === 'personal') return summary.ownerId;
+    if (summary.createdById && summary.createdById !== leaving) return summary.createdById;
+    const admins = await this.scopes.membersOf(scopeId, ['admin']);
+    return admins.find((member) => member.userId !== leaving)?.userId ?? null;
   }
 
   /** Every row the user added to a circle they do not own now names that circle's owner. */
@@ -415,13 +432,11 @@ export class MemoriaHubUserDataService {
     }
     if (circleIds.size === 0) return counts;
 
-    const circles = await this.prisma.circle.findMany({
-      where: { id: { in: [...circleIds] } },
-      select: { id: true, ownerId: true },
-    });
-    for (const circle of circles) {
-      const where = { addedById: userId, circleId: circle.id };
-      const data = { addedById: circle.ownerId };
+    for (const circleId of circleIds) {
+      const ownerId = await this.contentOwnerOf(circleId, userId);
+      if (!ownerId) continue;
+      const where = { addedById: userId, circleId };
+      const data = { addedById: ownerId };
       counts.mediaReassigned += (await this.prisma.mediaItem.updateMany({ where, data })).count;
       counts.albumsReassigned += (await this.prisma.album.updateMany({ where, data })).count;
       counts.tagsReassigned += (await this.prisma.tag.updateMany({ where, data })).count;

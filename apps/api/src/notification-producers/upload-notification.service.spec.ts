@@ -31,6 +31,8 @@ import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { createPlatformNotificationsMock } from '../../test/mocks/platform-notifications.mock';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { scopesOverCircleLookup } from '../../test/mocks/scopes.mock';
 import { PrismaService } from '../prisma/prisma.service';
 import { UPLOAD_WINDOW_MS, UploadNotificationService } from './upload-notification.service';
 
@@ -67,6 +69,7 @@ describe('UploadNotificationService', () => {
       providers: [
         UploadNotificationService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OwnerScopeSweepService, useValue: scopesOverCircleLookup(mockPrisma.circle.findUnique as jest.Mock) },
         { provide: NotificationsService, useValue: platform.mock },
       ],
     }).compile();

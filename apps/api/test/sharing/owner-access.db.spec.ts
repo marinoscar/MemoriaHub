@@ -26,6 +26,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrincipalGroupsProvider, resolveSharingModuleOptions } from '@marinoscar/platform-api/sharing';
 import { Client } from 'pg';
 
+import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
@@ -101,7 +102,7 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
       groups: { ...SHARING_MODULE_OPTIONS.groups, membershipCacheTtlSeconds: 0 },
     });
     groups = new PrincipalGroupsProvider(new SharingDataAdapter(appPrisma as never, {} as never), options);
-    service = new OwnerAccessService(appPrisma as never, groups, { get: async () => orgId } as never);
+    service = new OwnerAccessService(new PersonalLibraryStore(appPrisma as never), groups, { get: async () => orgId } as never);
   }, 120_000);
 
   afterAll(async () => {

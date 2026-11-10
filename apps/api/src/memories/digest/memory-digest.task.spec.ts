@@ -23,6 +23,7 @@ import {
   MemoryDigestService,
 } from './memory-digest.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailSettingsService } from '@marinoscar/platform-api/email';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
@@ -71,9 +72,9 @@ describe('MemoryDigestTask', () => {
   let task: MemoryDigestTask;
   let digest: MemoryDigestService;
   let prisma: {
-    circle: { findMany: jest.Mock };
     job: { findMany: jest.Mock; groupBy: jest.Mock };
   };
+  let scopes: { allScopeIds: jest.Mock };
   let enrichment: { enqueue: jest.Mock };
   let settings: { getSettings: jest.Mock };
   let loadCandidates: jest.SpyInstance;
@@ -82,12 +83,12 @@ describe('MemoryDigestTask', () => {
     delete process.env.MEMORIES_ENABLED;
 
     prisma = {
-      circle: { findMany: jest.fn().mockResolvedValue([{ id: 'circle-1' }]) },
       job: {
         findMany: jest.fn().mockResolvedValue([]),
         groupBy: jest.fn().mockResolvedValue([]),
       },
     };
+    scopes = { allScopeIds: jest.fn().mockResolvedValue(['circle-1']) };
     enrichment = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
     settings = { getSettings: jest.fn().mockResolvedValue(settingsWith()) };
 
@@ -96,6 +97,7 @@ describe('MemoryDigestTask', () => {
         MemoryDigestTask,
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
+        { provide: OwnerScopeSweepService, useValue: scopes },
         { provide: EnrichmentJobService, useValue: enrichment },
         { provide: AppSystemSettingsService, useValue: settings },
         // The dispatcher is never reached by these tests. Readiness is derived from the
@@ -155,7 +157,7 @@ describe('MemoryDigestTask', () => {
     await task.handleScheduledDigest();
 
     expect(settings.getSettings).not.toHaveBeenCalled();
-    expect(prisma.circle.findMany).not.toHaveBeenCalled();
+    expect(scopes.allScopeIds).not.toHaveBeenCalled();
     expect(enrichment.enqueue).not.toHaveBeenCalled();
   });
 
@@ -166,7 +168,7 @@ describe('MemoryDigestTask', () => {
 
     expect(result.gate).toBe('feature_disabled');
     expect(result.enqueued).toBe(0);
-    expect(prisma.circle.findMany).not.toHaveBeenCalled();
+    expect(scopes.allScopeIds).not.toHaveBeenCalled();
   });
 
   it('memories.digest.enabled=false is the admin global kill', async () => {
@@ -175,7 +177,7 @@ describe('MemoryDigestTask', () => {
     const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('digest_disabled');
-    expect(prisma.circle.findMany).not.toHaveBeenCalled();
+    expect(scopes.allScopeIds).not.toHaveBeenCalled();
   });
 
   it("frequency 'off' produces nothing", async () => {
@@ -193,7 +195,7 @@ describe('MemoryDigestTask', () => {
     const result = await task.handleScheduledDigest(AFTER_SEND_HOUR);
 
     expect(result.gate).toBe('email_unconfigured');
-    expect(prisma.circle.findMany).not.toHaveBeenCalled();
+    expect(scopes.allScopeIds).not.toHaveBeenCalled();
     expect(enrichment.enqueue).not.toHaveBeenCalled();
   });
 
@@ -313,7 +315,7 @@ describe('MemoryDigestTask', () => {
   // -------------------------------------------------------------------------
 
   it('a per-circle failure is counted, never fatal to the rest of the sweep', async () => {
-    prisma.circle.findMany.mockResolvedValue([{ id: 'circle-1' }, { id: 'circle-2' }]);
+    scopes.allScopeIds.mockResolvedValue(['circle-1', 'circle-2']);
     enrichment.enqueue
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ id: 'job-2' });

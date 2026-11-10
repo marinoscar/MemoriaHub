@@ -10,6 +10,7 @@
 // for another user's node; the platform's `@NodeRoute()` guard answers 403 for a foreign node).
 // =============================================================================
 
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { Module } from '@nestjs/common';
 
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
@@ -26,7 +27,7 @@ import { NodeBackupStaleTask } from './node-backup-stale.task';
  * presign downloads from the provider each object lives on.
  */
 @Module({
-  imports: [PrismaModule, MediaProcessingModule],
+  imports: [PrismaModule, MediaProcessingModule, OwnerAccessModule],
   controllers: [NodeBackupController],
   providers: [
     NodeBackupOwnershipService,

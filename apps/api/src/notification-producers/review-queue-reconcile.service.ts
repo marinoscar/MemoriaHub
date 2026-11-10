@@ -39,14 +39,14 @@ import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import { FEATURE_KEYS, isPictureEnhancementEnabled } from '../settings/feature-gates';
 import { MediaService } from '../media/media.service';
 import { MEMORIAHUB_EVENT_KEYS } from '../notifications-registry/memoriahub.notifications';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /** Circles fetched per keyset page — the sweep never loads them all at once. */
-const CIRCLE_PAGE_SIZE = 100;
 
 /** Per-circle roles that can actually act on a review queue. See header. */
-const ELIGIBLE_ROLES: Array<'collaborator' | 'circle_admin'> = ['circle_admin', 'collaborator'];
+const ELIGIBLE_ROLES: Array<'editor' | 'admin'> = ['admin', 'editor'];
 
 /** The four integers computeReviewCounts() returns. */
 type ReviewCounts = Awaited<ReturnType<MediaService['computeReviewCounts']>>;
@@ -117,6 +117,7 @@ export class ReviewQueueReconcileService {
     private readonly notifications: NotificationsService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly mediaService: MediaService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /**
@@ -147,33 +148,21 @@ export class ReviewQueueReconcileService {
     // Every queue off: nothing to count, so skip circle paging entirely.
     if (enabled.length === 0) return result;
 
-    let cursor: string | undefined;
-    for (;;) {
-      const circles = await this.prisma.circle.findMany({
-        select: { id: true, name: true },
-        orderBy: { id: 'asc' },
-        take: CIRCLE_PAGE_SIZE,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      });
-      if (circles.length === 0) break;
-
-      for (const circle of circles) {
-        result.circles += 1;
-        try {
-          const circleResult = await this.reconcileCircle(circle, enabled);
-          result.upserted += circleResult.upserted;
-          result.resolved += circleResult.resolved;
-        } catch (err) {
-          result.errors += 1;
-          this.logger.warn(
-            `Review-queue reconcile failed for circle ${circle.id}: ` +
-              (err instanceof Error ? err.message : String(err)),
-          );
-        }
+    // Every library: groups (platform listing) and personal libraries (RETRO-K1).
+    const allScopes = await this.scopes.allScopes();
+    for (const circle of allScopes) {
+      result.circles += 1;
+      try {
+        const circleResult = await this.reconcileCircle(circle, enabled);
+        result.upserted += circleResult.upserted;
+        result.resolved += circleResult.resolved;
+      } catch (err) {
+        result.errors += 1;
+        this.logger.warn(
+          `Review-queue reconcile failed for circle ${circle.id}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
       }
-
-      if (circles.length < CIRCLE_PAGE_SIZE) break;
-      cursor = circles[circles.length - 1]!.id;
     }
 
     return result;
@@ -195,10 +184,7 @@ export class ReviewQueueReconcileService {
   ): Promise<{ upserted: number; resolved: number }> {
     // Only ids are loaded, so a circle's whole eligible membership is a few KB
     // even in the pathological case — no paging needed at this level.
-    const members = await this.prisma.circleMember.findMany({
-      where: { circleId: circle.id, role: { in: ELIGIBLE_ROLES } },
-      select: { userId: true },
-    });
+    const members = await this.scopes.membersOf(circle.id, ELIGIBLE_ROLES);
     const eligible = new Set(members.map((m) => m.userId));
     const live = await this.liveRows({ eventKeys: queues.map((q) => q.eventKey), scopeId: circle.id });
     if (eligible.size === 0 && live.length === 0) return { upserted: 0, resolved: 0 };

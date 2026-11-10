@@ -84,19 +84,27 @@ export class GroupMemberMirrorListener {
       if (!group) return;
       const ownerId = group.createdById ?? event.actorUserId;
       if (!ownerId) return;
-      await this.prisma.circle.upsert({
-        where: { id: event.groupId },
-        update: {},
-        create: { id: event.groupId, name: group.name, description: group.description, ownerId, isPersonal: false },
-      });
-      await this.prisma.circleMember.upsert({
-        where: { circleId_userId: { circleId: event.groupId, userId: ownerId } },
-        update: { role: CircleRole.circle_admin },
-        create: { circleId: event.groupId, userId: ownerId, role: CircleRole.circle_admin },
-      });
+      await this.ensureCircleFor(event.groupId, group.name, group.description, ownerId);
     } catch (err) {
       this.logger.warn(`Mirroring the creation of group ${event.groupId} into a circle failed: ${describe(err)}`);
     }
+  }
+
+  /**
+   * The circle row (and the creator's `circle_admin` membership) of a group; idempotent. Called by
+   * the group-created listener and, synchronously, by `POST /api/circles`.
+   */
+  async ensureCircleFor(groupId: string, name: string, description: string | null, ownerId: string): Promise<void> {
+    await this.prisma.circle.upsert({
+      where: { id: groupId },
+      update: {},
+      create: { id: groupId, name, description, ownerId, isPersonal: false },
+    });
+    await this.prisma.circleMember.upsert({
+      where: { circleId_userId: { circleId: groupId, userId: ownerId } },
+      update: { role: CircleRole.circle_admin },
+      create: { circleId: groupId, userId: ownerId, role: CircleRole.circle_admin },
+    });
   }
 
   @OnEvent(SHARING_EVENTS.MEMBER_ADDED)

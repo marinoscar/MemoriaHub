@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, WorkflowRun, WorkflowRunStatus } from '@prisma/client';
+import { OWNER_NAME_SELECT, libraryName } from '../../platform/sharing/owner-name';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isWorkflowsEnabled } from '../../settings/feature-gates';
 import { RequestUser } from '@marinoscar/platform-api/identity';
@@ -87,7 +88,7 @@ export class WorkflowsAdminService {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          circle: { select: { id: true, name: true } },
+          ...OWNER_NAME_SELECT,
           createdBy: { select: { id: true, email: true, displayName: true } },
         },
       }),
@@ -135,7 +136,7 @@ export class WorkflowsAdminService {
       const tot = totalsByWorkflow.get(w.id);
       return {
         id: w.id,
-        circle: w.circle ? { id: w.circle.id, name: w.circle.name } : null,
+        circle: libraryName(w) === null ? null : { id: w.circleId, name: libraryName(w) as string },
         name: w.name,
         subjectType: w.subjectType,
         trigger: w.trigger,
@@ -238,7 +239,7 @@ export class WorkflowsAdminService {
         take: pageSize,
         include: {
           workflow: { select: { id: true, name: true } },
-          circle: { select: { id: true, name: true } },
+          ...OWNER_NAME_SELECT,
         },
       }),
       this.prisma.workflowRun.count({ where }),
@@ -306,7 +307,8 @@ export class WorkflowsAdminService {
   private serializeRun(
     run: WorkflowRun & {
       workflow?: { id: string; name: string } | null;
-      circle?: { id: string; name: string } | null;
+      ownerGroup?: { name: string } | null;
+      ownerUser?: { displayName: string | null; providerDisplayName: string | null; email: string } | null;
     },
   ) {
     return {
@@ -314,7 +316,7 @@ export class WorkflowsAdminService {
       workflowId: run.workflowId,
       workflow: run.workflow ? { id: run.workflow.id, name: run.workflow.name } : null,
       circleId: run.circleId,
-      circle: run.circle ? { id: run.circle.id, name: run.circle.name } : null,
+      circle: libraryName(run) === null ? null : { id: run.circleId, name: libraryName(run) as string },
       status: run.status,
       triggerType: run.triggerType,
       matchedCount: run.matchedCount,

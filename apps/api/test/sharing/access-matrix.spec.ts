@@ -31,6 +31,7 @@ import { OwnerAccessService, type OwnerRole } from '../../src/platform/sharing/o
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { createTestApp, closeTestApp, TestContext } from '../helpers/test-app.helper';
 import { createMockAdminUser, createMockContributorUser, authHeader } from '../helpers/auth-mock.helper';
+import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { resetPrismaMock, prismaMock } from '../mocks/prisma.mock';
 import { setupBaseMocks } from '../fixtures/mock-setup.helper';
 
@@ -95,10 +96,16 @@ describe('OwnerAccessService decision matrix (RETRO-I3)', () => {
       groups: { ...SHARING_MODULE_OPTIONS.groups, membershipCacheTtlSeconds: 0 },
     });
     const prisma = {
-      circle: { findUnique: async ({ where }: { where: { id: string } }) => circles[where.id] ?? null },
+      circle: {
+        // The PersonalLibraryStore (RETRO-K1): only a personal circle is a personal library.
+        findFirst: async ({ where }: { where: { id: string } }) => {
+          const row = circles[where.id];
+          return row && row.isPersonal ? row : null;
+        },
+      },
     };
     service = new OwnerAccessService(
-      prisma as never,
+      new PersonalLibraryStore(prisma as never),
       new PrincipalGroupsProvider(data, options),
       { get: async () => ORG } as never,
     );
@@ -277,6 +284,9 @@ describe('Owner-scope access matrix over representative routes (RETRO-I3)', () =
         await grantPermissions(user.id, ['circles:read', 'circles:write', 'search:use']);
         const m = context.prismaMock;
         m.circle.findUnique.mockResolvedValue({ id: CIRCLE_ID, isPersonal: false, ownerId: randomUUID(), name: 'Circle A' });
+        // The circle routes read the group through the sharing slice (RETRO-K1): the group exists, so a
+        // passed gate never ends in the slice's own 404.
+        m.group.findFirst.mockResolvedValue({ id: CIRCLE_ID, orgId: '00000000-0000-4000-8000-0000000000d0', name: 'Circle A', description: null, metadata: null, createdById: null, version: 1, createdAt: new Date(), updatedAt: new Date() });
         m.circleMember.findUnique.mockResolvedValue(
           caller.held ? { circleId: CIRCLE_ID, userId: user.id, role: caller.held, joinedAt: new Date() } : null,
         );

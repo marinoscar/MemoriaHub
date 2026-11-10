@@ -24,6 +24,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
@@ -81,7 +83,6 @@ const changeFeedSelect = {
   sourceDeviceId: true,
   sourceDeviceName: true,
   metadata: true,
-  circle: { select: { name: true } },
   storageObject: {
     select: {
       id: true,
@@ -118,7 +119,10 @@ const changeFeedSelect = {
 /** A fully-loaded change-feed row, as returned by getChanges. */
 export type BackupFeedItem = Prisma.MediaItemGetPayload<{
   select: typeof changeFeedSelect;
-}>;
+}> & {
+  /** The owner scope's display name (a group's name, or the personal library's), resolved through the scope directory. */
+  circleName: string;
+};
 
 /** The schemaVersion-1 sidecar document. */
 export interface BackupSidecar {
@@ -192,6 +196,8 @@ export class NodeBackupQueryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
+    private readonly access: OwnerAccessService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -203,11 +209,7 @@ export class NodeBackupQueryService {
    * when that array is non-empty (empty = ALL circles the owner belongs to).
    */
   async resolveScope(ownerId: string, circleIds: string[]): Promise<string[]> {
-    const memberships = await this.prisma.circleMember.findMany({
-      where: { userId: ownerId },
-      select: { circleId: true },
-    });
-    const memberCircleIds = memberships.map((m) => m.circleId);
+    const memberCircleIds = await this.access.scopesOf(ownerId);
 
     if (circleIds.length === 0) return memberCircleIds;
 
@@ -239,7 +241,7 @@ export class NodeBackupQueryService {
 
     const horizon = new Date(Date.now() - horizonSeconds * 1000);
 
-    return this.prisma.mediaItem.findMany({
+    const rows = await this.prisma.mediaItem.findMany({
       where: {
         circleId: { in: scope },
         updatedAt: { lte: horizon },
@@ -256,6 +258,16 @@ export class NodeBackupQueryService {
       take,
       select: changeFeedSelect,
     });
+    return this.withCircleNames(rows);
+  }
+
+  /** Adds `circleName` (one lookup per distinct scope on the page). */
+  async withCircleNames<T extends { circleId: string }>(rows: T[]): Promise<Array<T & { circleName: string }>> {
+    const names = new Map<string, string>();
+    for (const id of new Set(rows.map((row) => row.circleId))) {
+      names.set(id, (await this.scopes.summary(id))?.name ?? '');
+    }
+    return rows.map((row) => ({ ...row, circleName: names.get(row.circleId) ?? '' }));
   }
 
   // ---------------------------------------------------------------------------
@@ -283,7 +295,7 @@ export class NodeBackupQueryService {
       schemaVersion: 1,
       mediaItemId: item.id,
       circleId: item.circleId,
-      circleName: item.circle.name,
+      circleName: item.circleName,
       type: item.type,
       originalFilename: item.originalFilename,
       capturedAt: iso(item.capturedAt),
