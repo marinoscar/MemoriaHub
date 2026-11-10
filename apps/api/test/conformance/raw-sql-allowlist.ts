@@ -1,7 +1,8 @@
 // The files allowed to issue raw SQL ($queryRaw / $executeRaw), each with the reason
 // (the `user-owned-data` conformance suite, RETRO-B2 #611). Raw SQL bypasses the
 // typed client, so every statement is listed where a reviewer sees it. Paths are
-// relative to apps/api/src. A new file with raw SQL fails the suite until it is
+// relative to apps/api/src (or to packages/memoriahub-api/src/media for the media slice,
+// RETRO-J5). A new file with raw SQL fails the suite until it is
 // added here with a reason; prefer the typed client.
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
@@ -17,7 +18,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'location-groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },
   { file: 'media/media.service.ts', why: 'Gallery, map-cluster and aggregate queries Prisma cannot express, scoped by circle id.' },
   { file: 'media/thumbnail-repair.handler.ts', why: 'Candidate scan for missing thumbnails.' },
-  { file: 'media-sync/media-sync.service.ts', why: 'Run-retention trim keyed by device id (owner-checked first).' },
+  { file: 'media-sync/media-sync.service.ts', why: 'Run-retention trim keyed by device id (owner-checked first). In the media slice package (packages/memoriahub-api/src/media).' },
   { file: 'memories/curators/circle-month-counts.ts', why: 'Date-bucket aggregates scoped by circle id.' },
   { file: 'memories/curators/on-this-day.curator.ts', why: 'Date-part queries scoped by circle id.' },
   { file: 'memories/curators/person-candidates.ts', why: 'Face aggregates scoped by circle id.' },
