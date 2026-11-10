@@ -109,6 +109,8 @@ COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma/
 COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/memoriahub-compute ./packages/memoriahub-compute/
+# The wire-schema package (zod only) both the API and the CLI import by subpath.
+COPY packages/memoriahub-contract ./packages/memoriahub-contract/
 # The compute package's build ends with write-dist-stubs.mjs, which lives in the
 # shared package tooling folder (../../scripts/memoriahub-packages).
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
@@ -129,7 +131,7 @@ RUN SHARP_FORCE_GLOBAL_LIBVIPS=1 npm rebuild sharp --build-from-source
 
 # Build the shared memoriahub-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
-RUN npm run build -w @marinoscar/memoriahub-compute
+RUN npm run build -w @marinoscar/memoriahub-compute && npm run build -w @marinoscar/memoriahub-contract
 
 # Set dummy DATABASE_URL for Prisma generate (actual connection not needed at build time)
 RUN cd apps/api && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate

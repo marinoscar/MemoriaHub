@@ -1,7 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { setGeoReverseProviderSchema } from '@marinoscar/memoriahub-contract/location';
 
-export const setGeoReverseProviderSchema = z.object({
-  provider: z.enum(['offline', 'nominatim', 'google']),
-});
+export { setGeoReverseProviderSchema };
+
 export class SetGeoReverseProviderDto extends createZodDto(setGeoReverseProviderSchema) {}

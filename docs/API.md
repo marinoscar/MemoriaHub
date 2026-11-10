@@ -1,5 +1,7 @@
 # API Reference
 
+Per-endpoint reference is the generated OpenAPI document at `/api/docs`. Wire schemas (request and response shapes and `details.reason` codes of the domain routes): `@marinoscar/memoriahub-contract` (`packages/memoriahub-contract`); the API's DTO classes are built on those schemas, so a change to a request or response shape starts there.
+
 ## Base URL
 
 - **Development**: http://localhost:3535/api

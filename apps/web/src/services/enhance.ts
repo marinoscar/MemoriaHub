@@ -1,3 +1,4 @@
+import type { ApplyEnhancement, EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
 import { api, ApiError } from './api';
 import type { BaseRun } from '../types/runs';
 import type { BulkEnhanceSkipped } from './media';
@@ -6,23 +7,23 @@ import type { BulkEnhanceSkipped } from './media';
 // Types — AI Picture Enhancer (see docs/specs/picture-enhancer.md §4.1, §8)
 // ---------------------------------------------------------------------------
 
-export type EnhanceIntent = 'auto' | 'custom';
-export type EnhanceStrength = 'subtle' | 'balanced' | 'strong';
-export type ApplyDecision = 'keep_both' | 'replace';
+// The enhance request shape is `enhanceParamsSchema` of
+// `@marinoscar/memoriahub-contract/enhancement`, shared with the API.
+export type { EnhanceParams };
+
+export type EnhanceIntent = NonNullable<EnhanceParams['intent']>;
+export type EnhanceStrength = NonNullable<EnhanceParams['strength']>;
+export type ApplyDecision = ApplyEnhancement['decision'];
 
 /**
  * Task-specific preset. ORTHOGONAL to `intent` — a preset steers WHAT kind of
  * photo problem is being solved, while `intent`/`adjustments`/`instructions`
  * still steer the individual corrections. See the API's `enhance-prompt.builder`.
  */
-export type EnhancePreset =
-  | 'restore_old_photo'
-  | 'low_light'
-  | 'colorize_bw'
-  | 'portrait_polish';
+export type EnhancePreset = NonNullable<EnhanceParams['preset']>;
 
 /** Per-run override of the `pictureEnhancement.defaultQuality` system setting. */
-export type EnhanceQuality = 'low' | 'medium' | 'high';
+export type EnhanceQuality = NonNullable<EnhanceParams['quality']>;
 
 export type EnhancementStatus =
   | 'pending'
@@ -33,28 +34,7 @@ export type EnhancementStatus =
   | 'discarded'
   | 'expired';
 
-export interface EnhanceAdjustments {
-  color?: boolean;
-  tone?: boolean;
-  sharpness?: boolean;
-  denoise?: boolean;
-  dehaze?: boolean;
-  straighten?: boolean;
-}
-
-export interface EnhanceParams {
-  intent?: EnhanceIntent;
-  /** Task-specific preset; independent of `intent`. Omit for the generic template. */
-  preset?: EnhancePreset;
-  adjustments?: EnhanceAdjustments;
-  strength?: EnhanceStrength;
-  /** Omit to let the server's `pictureEnhancement.defaultQuality` apply. */
-  quality?: EnhanceQuality;
-  preserveFaces?: boolean;
-  /** Only honored by the server when `intent === 'custom'`. */
-  instructions?: string;
-  model?: string;
-}
+export type EnhanceAdjustments = NonNullable<EnhanceParams['adjustments']>;
 
 /**
  * Image descriptor in the compare payload. Note: `size` is a STRING (bytes)

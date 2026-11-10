@@ -1,8 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { dashboardQuerySchema } from '@marinoscar/memoriahub-contract/media';
 
-export const dashboardQuerySchema = z.object({
-  circleId: z.string().uuid(),
-});
+export { dashboardQuerySchema };
 
 export class DashboardQueryDto extends createZodDto(dashboardQuerySchema) {}

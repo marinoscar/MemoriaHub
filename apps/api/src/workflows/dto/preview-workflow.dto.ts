@@ -1,11 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
-import { workflowDefinitionSchema } from '../definition/workflow-definition.schema';
+import { previewWorkflowSchema } from '@marinoscar/memoriahub-contract/workflows';
 
-/** POST /api/workflows/preview body — stateless builder feedback. */
-export const previewWorkflowSchema = z.object({
-  circleId: z.string().uuid(),
-  definition: workflowDefinitionSchema,
-});
+export { previewWorkflowSchema };
 
 export class PreviewWorkflowDto extends createZodDto(previewWorkflowSchema) {}

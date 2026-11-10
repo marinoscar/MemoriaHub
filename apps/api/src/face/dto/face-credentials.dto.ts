@@ -1,25 +1,10 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { upsertFaceCredentialsSchema, testFaceProviderSchema, setDetectionFeatureSchema } from '@marinoscar/memoriahub-contract/face';
 
-// apiKey is optional because CompreFace (the only face provider) is keyless —
-// a credential row for it, if present at all, stores only an optional
-// baseUrl override.
-export const upsertFaceCredentialsSchema = z.object({
-  apiKey: z.string().optional(),
-  baseUrl: z.string().url().optional(),
-  enabled: z.boolean().optional(),
-  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
-}).default({});
+export { upsertFaceCredentialsSchema, testFaceProviderSchema, setDetectionFeatureSchema };
+
 export class UpsertFaceCredentialsDto extends createZodDto(upsertFaceCredentialsSchema) {}
 
-// No model field — face providers have a fixed modelVersion per deployment
-export const testFaceProviderSchema = z.object({
-  provider: z.string().min(1),
-});
 export class TestFaceProviderDto extends createZodDto(testFaceProviderSchema) {}
 
-export const setDetectionFeatureSchema = z.object({
-  provider: z.string().min(1).nullable(),
-  model: z.string().min(1).nullable(),
-});
 export class SetDetectionFeatureDto extends createZodDto(setDetectionFeatureSchema) {}

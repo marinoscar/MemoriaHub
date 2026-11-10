@@ -84,6 +84,8 @@ COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/cli/package.json ./apps/cli/package.json
 COPY packages/memoriahub-compute ./packages/memoriahub-compute/
+# The wire-schema package (zod only) both the API and the CLI import by subpath.
+COPY packages/memoriahub-contract ./packages/memoriahub-contract/
 # The compute package's build ends with write-dist-stubs.mjs, which lives in the
 # shared package tooling folder (../../scripts/memoriahub-packages).
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
@@ -96,7 +98,7 @@ RUN npm install
 
 # Build the shared memoriahub-compute workspace package so its dist/ exists
 # before apps/cli (which imports it) is compiled.
-RUN npm run build -w @marinoscar/memoriahub-compute
+RUN npm run build -w @marinoscar/memoriahub-compute && npm run build -w @marinoscar/memoriahub-contract
 
 # -----------------------------------------------------------------------------
 # Models stage — bake parity models into the image (reproducible / air-gap)

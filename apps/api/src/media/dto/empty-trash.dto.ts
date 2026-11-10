@@ -1,8 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { emptyTrashSchema } from '@marinoscar/memoriahub-contract/media';
 
-export const emptyTrashSchema = z.object({
-  circleId: z.string().uuid(),
-});
+export { emptyTrashSchema };
 
 export class EmptyTrashDto extends createZodDto(emptyTrashSchema) {}

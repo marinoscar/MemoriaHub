@@ -1,3 +1,4 @@
+import type { BulkResolveDuplicate, DuplicateQuery } from '@marinoscar/memoriahub-contract/dedup';
 import { api } from './api';
 import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
 import type { GroupBulkResolveResult } from './bursts';
@@ -7,12 +8,12 @@ import type { SortOrder } from '../types/media';
 /** Max page size the list endpoint accepts; used when collecting all ids. */
 const LIST_MAX_PAGE_SIZE = 100;
 
-export type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
-export type DuplicateGroupKind = 'exact_variant' | 'edited' | 'similar';
-export type DuplicateResolveAction = 'archive' | 'trash';
+export type DuplicateGroupStatus = DuplicateQuery['status'];
+export type DuplicateGroupKind = NonNullable<DuplicateQuery['kind']>;
+export type DuplicateResolveAction = BulkResolveDuplicate['action'];
 
 /** Sortable columns accepted by `GET /media/duplicates` (server default: `capturedAt`). */
-export type DuplicateSortBy = 'capturedAt' | 'confidence' | 'mediaCount';
+export type DuplicateSortBy = DuplicateQuery['sortBy'];
 
 export interface DuplicateGroupSummary {
   id: string;

@@ -1,14 +1,15 @@
+import type { LocationSuggestionQuery } from '@marinoscar/memoriahub-contract/location';
 import { api } from './api';
 import type { SortOrder } from '../types/media';
 
-export type LocationSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'auto_applied' | 'reverted';
+export type LocationSuggestionStatus = LocationSuggestionQuery['status'];
 export type LocationSuggestionMethod = 'interpolated' | 'nearest';
 
 /**
  * Sortable columns accepted by `GET /media/location-suggestions`
  * (server default: `createdAt`).
  */
-export type LocationSuggestionSortBy = 'createdAt' | 'confidence';
+export type LocationSuggestionSortBy = LocationSuggestionQuery['sortBy'];
 
 export interface LocationSuggestionSummary {
   id: string;

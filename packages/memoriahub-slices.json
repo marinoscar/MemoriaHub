@@ -27,5 +27,36 @@
     "geo": [
       "rate-limit"
     ]
+  },
+  "memoriahub-contract": {
+    "primitives": [],
+    "errors": [],
+    "burst": [],
+    "dedup": [],
+    "review-runs": [],
+    "location": [
+      "primitives"
+    ],
+    "workflows": [],
+    "media": [
+      "primitives"
+    ],
+    "media-sync": [
+      "primitives"
+    ],
+    "search": [],
+    "enhancement": [
+      "media"
+    ],
+    "face": [
+      "primitives"
+    ],
+    "memories": [],
+    "tagging": [
+      "primitives"
+    ],
+    "social": [
+      "primitives"
+    ]
   }
 }

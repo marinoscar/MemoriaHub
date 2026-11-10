@@ -1,22 +1,12 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { GeocodeBackfillService } from './geocode-backfill.service';
+import { backfillGeoSchema } from '@marinoscar/memoriahub-contract/location';
 
-const flexibleDate = z
-  .string()
-  .refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });
 
-const backfillGeoSchema = z.object({
-  from: flexibleDate.optional(),
-  to: flexibleDate.optional(),
-  force: z.boolean().optional().default(false),
-  // .prefault({}) so a bodyless POST parses exactly like {} (force: false) —
-  // see issue #289 (app.module.ts) and admin-metadata.controller.ts.
-}).prefault({});
 class BackfillGeoDto extends createZodDto(backfillGeoSchema) {}
 
 @ApiTags('Admin: Geocode')

@@ -9,31 +9,18 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { FastifyReply } from 'fastify';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { SearchAgentService } from './search-agent.service';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
+import { agentMessageSchema, agentTurnSchema } from '@marinoscar/memoriahub-contract/search';
 
 // ---------------------------------------------------------------------------
 // DTOs
 // ---------------------------------------------------------------------------
 
-const agentMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
-  content: z.string().min(1).max(10000),
-});
 
-const agentTurnSchema = z.object({
-  circleId: z.string().uuid(),
-  messages: z
-    .array(agentMessageSchema)
-    .min(1)
-    .refine((msgs) => msgs[msgs.length - 1].role === 'user', {
-      message: 'Last message must have role "user"',
-    }),
-});
 
 export class AgentTurnDto extends createZodDto(agentTurnSchema) {}
 

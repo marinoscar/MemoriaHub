@@ -1,140 +1,22 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { listPeopleQuerySchema, createPersonSchema, updatePersonSchema, assignFacesSchema, clusterSchema, listUnassignedFacesQuerySchema, bulkPeopleSchema } from '@marinoscar/memoriahub-contract/face';
 
-// ---------------------------------------------------------------------------
-// ListPeopleQuery
-// ---------------------------------------------------------------------------
-
-export const listPeopleQuerySchema = z.object({
-  circleId: z.string().uuid(),
-  includeUnlabeled: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true'),
-  hidden: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true'),
-  // Scope to people appearing in a single album's media
-  albumId: z.string().uuid().optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-});
+export { listPeopleQuerySchema, createPersonSchema, updatePersonSchema, assignFacesSchema, clusterSchema, listUnassignedFacesQuerySchema, bulkPeopleSchema };
 
 export class ListPeopleQueryDto extends createZodDto(listPeopleQuerySchema) {}
 
-// ---------------------------------------------------------------------------
-// CreatePersonDto
-// ---------------------------------------------------------------------------
-
-export const createPersonSchema = z.object({
-  circleId: z.string().uuid(),
-  name: z.string().min(1).max(100).optional(),
-  faceIds: z.array(z.string().uuid()).max(500).optional(),
-});
-
 export class CreatePersonDto extends createZodDto(createPersonSchema) {}
-
-// ---------------------------------------------------------------------------
-// UpdatePersonDto
-// ---------------------------------------------------------------------------
-
-const profileCropSchema = z
-  .object({
-    x: z.number().min(0).max(1),
-    y: z.number().min(0).max(1),
-    w: z.number().min(0).max(1),
-    h: z.number().min(0).max(1),
-  })
-  .nullable()
-  .optional();
-
-export const updatePersonSchema = z
-  .object({
-    name: z.string().min(1).max(100).optional(),
-    coverFaceId: z.string().uuid().optional().nullable(),
-    profileMediaItemId: z.string().uuid().optional().nullable(),
-    profileCrop: profileCropSchema,
-    favorite: z.boolean().optional(),
-  })
-  .refine(
-    (v) => {
-      // Both must be present (non-null) together, or both must be null/absent.
-      const hasId = v.profileMediaItemId != null;
-      const hasCrop = v.profileCrop != null;
-      return hasId === hasCrop;
-    },
-    {
-      message:
-        'profileMediaItemId and profileCrop must both be provided or both be null',
-      path: ['profileMediaItemId'],
-    },
-  )
-  // .default({}) LAST, after .refine(), so a bodyless request parses as {} —
-  // see issue #289 (app.module.ts). Note the refine is SKIPPED for that default
-  // value; harmless here because {} would satisfy it anyway (both absent, so
-  // hasId === hasCrop === false).
-  .default({});
 
 export class UpdatePersonDto extends createZodDto(updatePersonSchema) {}
 
-// ---------------------------------------------------------------------------
-// AssignFacesDto
-// ---------------------------------------------------------------------------
-
-export const assignFacesSchema = z.object({
-  faceIds: z.array(z.string().uuid()).min(1).max(500),
-});
-
 export class AssignFacesDto extends createZodDto(assignFacesSchema) {}
-
-// ---------------------------------------------------------------------------
-// ClusterDto
-// ---------------------------------------------------------------------------
-
-export const clusterSchema = z.object({
-  circleId: z.string().uuid(),
-});
 
 export class ClusterDto extends createZodDto(clusterSchema) {}
 
-// ---------------------------------------------------------------------------
-// ListUnassignedFacesQueryDto
-// ---------------------------------------------------------------------------
-
-export const listUnassignedFacesQuerySchema = z.object({
-  circleId: z.string().uuid(),
-  archived: z
-    .string()
-    .optional()
-    .transform((v) => v === 'true'),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(50),
-});
-
 export class ListUnassignedFacesQueryDto extends createZodDto(listUnassignedFacesQuerySchema) {}
-
-// ---------------------------------------------------------------------------
-// BulkPeopleDto  (shared shape: circleId + ids[])
-// ---------------------------------------------------------------------------
-
-export const bulkPeopleSchema = z.object({
-  circleId: z.string().uuid(),
-  ids: z.array(z.string().uuid()).min(1).max(500),
-});
 
 export class BulkPeopleDto extends createZodDto(bulkPeopleSchema) {}
 
-// ---------------------------------------------------------------------------
-// BulkFacesDto  (identical { circleId, ids[] } shape; alias for face bulk ops
-// so controller/service signatures read as face-scoped rather than people-scoped)
-// ---------------------------------------------------------------------------
-
 export class BulkFacesDto extends createZodDto(bulkPeopleSchema) {}
-
-// ---------------------------------------------------------------------------
-// PurgeArchivedFacesDto  (circle-wide purge of archived unassigned faces;
-// same { circleId } shape as ClusterDto, aliased for a face-scoped signature)
-// ---------------------------------------------------------------------------
 
 export class PurgeArchivedFacesDto extends createZodDto(clusterSchema) {}
