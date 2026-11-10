@@ -313,6 +313,7 @@
         "@nestjs/schedule",
         "@nestjs/swagger",
         "@opentelemetry/api",
+        "cron",
         "nestjs-zod",
         "zod"
       ]

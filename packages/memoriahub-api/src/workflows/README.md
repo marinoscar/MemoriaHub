@@ -26,7 +26,7 @@ Five job handlers register through the jobs port. Type strings and profiles are 
 
 ## Peer dependencies
 
-`@nestjs/common`, `@nestjs/schedule` (the crons), `@nestjs/swagger`, `@marinoscar/memoriahub-contract` (`workflows`), `@marinoscar/memoriahub-compute` (the node result schema), `@opentelemetry/api`, `nestjs-zod` and `zod`.
+`@nestjs/common`, `@nestjs/schedule` (the crons), `@nestjs/swagger`, `@marinoscar/memoriahub-contract` (`workflows`), `@marinoscar/memoriahub-compute` (the node result schema), `@opentelemetry/api`, `cron` (the schedule math), `nestjs-zod` and `zod`.
 
 ## Configuration
 
