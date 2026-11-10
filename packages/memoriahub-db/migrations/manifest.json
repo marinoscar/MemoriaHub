@@ -1,0 +1,21 @@
+{
+  "manifestVersion": 1,
+  "migrations": [
+    {
+      "baseline": {
+        "adoptedWhenHostHas": "20260610000000_add_media_domain"
+      },
+      "id": "20261110200000_domain_baseline",
+      "requiresHostTables": [
+        "users",
+        "organizations",
+        "groups",
+        "storage_objects",
+        "worker_nodes",
+        "personal_access_tokens"
+      ],
+      "sha256": "8e8d6a8801f3fc1ce66dc9771c7a824b0ce27b5b951d7ccdc503bd10f789f41f",
+      "slice": "media"
+    }
+  ]
+}

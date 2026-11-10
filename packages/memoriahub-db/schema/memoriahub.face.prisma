@@ -7,6 +7,8 @@ enum MediaFaceStatusType {
   no_faces
 }
 
+// @extensible — back-relations only: the app side table user_profiles (an app-owned model) points at Person with
+// "extend model Person { ... }" in an app fragment, so the domain package never names an app model.
 model Person {
   id                 String    @id @default(uuid()) @db.Uuid
   circleId           String    @map("circle_id") @db.Uuid
@@ -37,8 +39,6 @@ model Person {
   faces            Face[]     @relation("PersonFaces")
   // Memories relations (epic #300, issue #301)
   memories         Memory[]
-  // Profile picture management relations (issue #354)
-  linkedProfiles   UserProfile[] @relation("UserLinkedPerson")
 
   // RETRO-I2 (#569): the owning organization and group (composite key, a foreign-key check bypasses RLS).
   org        Organization @relation("PersonOrg", fields: [orgId], references: [id], onDelete: Restrict)

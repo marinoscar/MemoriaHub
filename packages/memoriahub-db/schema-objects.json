@@ -1,0 +1,248 @@
+{
+  "checkConstraints": [
+    {
+      "name": "albums_one_owner_check",
+      "table": "albums"
+    },
+    {
+      "name": "burst_groups_one_owner_check",
+      "table": "burst_groups"
+    },
+    {
+      "name": "duplicate_groups_one_owner_check",
+      "table": "duplicate_groups"
+    },
+    {
+      "name": "faces_one_owner_check",
+      "table": "faces"
+    },
+    {
+      "name": "location_suggestions_one_owner_check",
+      "table": "location_suggestions"
+    },
+    {
+      "name": "media_enhancement_batches_one_owner_check",
+      "table": "media_enhancement_batches"
+    },
+    {
+      "name": "media_enhancements_one_owner_check",
+      "table": "media_enhancements"
+    },
+    {
+      "name": "media_geocode_status_one_owner_check",
+      "table": "media_geocode_status"
+    },
+    {
+      "name": "media_item_embedding_one_owner_check",
+      "table": "media_item_embedding"
+    },
+    {
+      "name": "media_items_one_owner_check",
+      "table": "media_items"
+    },
+    {
+      "name": "media_metadata_status_one_owner_check",
+      "table": "media_metadata_status"
+    },
+    {
+      "name": "media_sync_devices_name_length_chk",
+      "table": "media_sync_devices"
+    },
+    {
+      "name": "media_sync_runs_counts_chk",
+      "table": "media_sync_runs"
+    },
+    {
+      "name": "media_tag_status_one_owner_check",
+      "table": "media_tag_status"
+    },
+    {
+      "name": "media_transcripts_one_owner_check",
+      "table": "media_transcripts"
+    },
+    {
+      "name": "media_visual_embedding_one_owner_check",
+      "table": "media_visual_embedding"
+    },
+    {
+      "name": "memories_one_owner_check",
+      "table": "memories"
+    },
+    {
+      "name": "people_one_owner_check",
+      "table": "people"
+    },
+    {
+      "name": "review_run_items_exactly_one_subject_check",
+      "table": "review_run_items"
+    },
+    {
+      "name": "review_run_items_subject_type_burst_group_check",
+      "table": "review_run_items"
+    },
+    {
+      "name": "review_run_items_subject_type_duplicate_group_check",
+      "table": "review_run_items"
+    },
+    {
+      "name": "review_run_items_subject_type_location_suggestion_check",
+      "table": "review_run_items"
+    },
+    {
+      "name": "review_runs_one_owner_check",
+      "table": "review_runs"
+    },
+    {
+      "name": "tags_one_owner_check",
+      "table": "tags"
+    },
+    {
+      "name": "trash_empty_runs_one_owner_check",
+      "table": "trash_empty_runs"
+    },
+    {
+      "name": "workflow_runs_one_owner_check",
+      "table": "workflow_runs"
+    },
+    {
+      "name": "workflows_one_owner_check",
+      "table": "workflows"
+    }
+  ],
+  "functions": [
+    {
+      "definedIn": "20261110200000_domain_baseline",
+      "name": "face_embedding_to_vector"
+    },
+    {
+      "definedIn": "20261110200000_domain_baseline",
+      "name": "faces_sync_embedding_vec"
+    },
+    {
+      "definedIn": "20261110200000_domain_baseline",
+      "name": "mh_content_owner_from_scope"
+    },
+    {
+      "definedIn": "20261110200000_domain_baseline",
+      "name": "mh_default_org_id"
+    }
+  ],
+  "generatedColumns": [],
+  "triggers": [
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "albums"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "burst_groups"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "duplicate_groups"
+    },
+    {
+      "function": "faces_sync_embedding_vec",
+      "name": "faces_sync_embedding_vec_insert_trigger",
+      "table": "faces"
+    },
+    {
+      "function": "faces_sync_embedding_vec",
+      "name": "faces_sync_embedding_vec_update_trigger",
+      "table": "faces"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "faces"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "location_suggestions"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_enhancement_batches"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_enhancements"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_geocode_status"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_item_embedding"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_items"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_metadata_status"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_tag_status"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_transcripts"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "media_visual_embedding"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "memories"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "people"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "review_runs"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "tags"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "trash_empty_runs"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "workflow_runs"
+    },
+    {
+      "function": "mh_content_owner_from_scope",
+      "name": "mh_owner_from_scope",
+      "table": "workflows"
+    }
+  ]
+}
