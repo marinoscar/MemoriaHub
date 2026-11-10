@@ -33,6 +33,7 @@ import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto'
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 // NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO
 // were removed in favour of the async run-based engine
 // (LocationSuggestionRunService). The former `describe('bulkAcceptSuggestions')`
@@ -104,7 +105,7 @@ describe('LocationSuggestionService', () => {
         LocationSuggestionService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

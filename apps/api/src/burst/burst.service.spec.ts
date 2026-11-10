@@ -34,6 +34,7 @@ import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,7 +250,7 @@ describe('BurstService', () => {
         BurstService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

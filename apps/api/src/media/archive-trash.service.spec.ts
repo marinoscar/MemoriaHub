@@ -39,6 +39,7 @@ import { MediaThumbnailService, MediaTouchService, UploadNotificationService } f
 import { randomUUID } from 'crypto';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -179,7 +180,7 @@ describe('MediaService — archive & trash methods', () => {
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

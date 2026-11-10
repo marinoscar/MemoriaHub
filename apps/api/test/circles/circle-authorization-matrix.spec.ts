@@ -16,6 +16,7 @@ import { MediaThumbnailService, MediaTouchService, UploadNotificationService } f
 import { randomUUID } from 'crypto';
 import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -160,7 +161,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

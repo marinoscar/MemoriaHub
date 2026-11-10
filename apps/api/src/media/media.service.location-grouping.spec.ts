@@ -26,11 +26,12 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
+import { MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 import { buildMediaWhere } from '../search/media-where.builder';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 const CIRCLE_ID = 'circle-lg';
 const USER_ID = 'user-lg';
@@ -89,7 +90,7 @@ describe('MediaService — Location Grouping read paths (issue #374)', () => {
       providers: [
         { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
         MediaService,
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: prisma },
         {
           provide: STORAGE_PROVIDER,

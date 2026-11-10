@@ -38,6 +38,7 @@ import { MediaThumbnailService, MediaTouchService, UploadNotificationService } f
 import { randomUUID } from 'crypto';
 import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -187,7 +188,7 @@ describe('MediaService.streamExport', () => {
         // Real MediaThumbnailService to satisfy the constructor dependency;
         // streamExport does not sign thumbnails so its incomplete storage
         // provider stub above is never exercised through this service.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         // MediaService constructor index [2]: syncFromStorageObject is not

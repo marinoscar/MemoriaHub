@@ -32,6 +32,7 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
 
@@ -170,7 +171,7 @@ describe('MediaService.createMedia — fallback location', () => {
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

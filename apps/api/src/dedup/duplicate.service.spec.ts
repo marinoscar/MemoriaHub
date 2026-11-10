@@ -42,6 +42,7 @@ import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
 import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
 import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
 import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -205,7 +206,7 @@ describe('DuplicateService', () => {
         DuplicateService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

@@ -24,6 +24,7 @@ import { MediaThumbnailService, MediaTouchService, UploadNotificationService } f
 import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -290,7 +291,7 @@ describe('MediaService', () => {
         // stays faithful to production; its own dependencies (PrismaService,
         // STORAGE_PROVIDER, StorageProviderResolver) reuse the same mocks
         // registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
