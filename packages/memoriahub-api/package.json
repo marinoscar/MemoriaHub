@@ -31,6 +31,10 @@
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     },
+    "./media": {
+      "types": "./dist/media/index.d.ts",
+      "default": "./dist/media/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -38,6 +42,7 @@
     "ports",
     "core",
     "testing",
+    "media",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

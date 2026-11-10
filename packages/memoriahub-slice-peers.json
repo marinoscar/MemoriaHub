@@ -187,6 +187,13 @@
         "@nestjs/common",
         "zod"
       ]
+    },
+    "media": {
+      "peers": [
+        "@nestjs/common",
+        "@marinoscar/memoriahub-contract",
+        "zod"
+      ]
     }
   }
 }
