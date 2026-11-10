@@ -93,3 +93,41 @@ Thresholds live in `MEMORIAHUB_VERDICT_RULES` so the alert rules (RETRO-H5) can 
 ## 6. Security and cost
 
 Metrics carry no personal data and no tenant id (`org.id` stays a span attribute). The groups, the card and the verdict are behind `telemetry:read`; the card reads only through the guarded facade. Worst case per metric stays under 7 x 5 x 4 series and the whole catalog under 2 000 (asserted by `memoriahub-metrics.spec.ts`). Rollback: revert the change; the names stay reserved and the tables age out with retention.
+
+## 7. Worker-node spans and vitals (RETRO-T4, #629)
+
+A node never talks to a collector. The platform engine records the five built-in phases of each job (`job.download`, `job.execute`, `job.upload`, `job.submit`, `job.secret`) and relays them best-effort to `POST /api/nodes/:id/telemetry`; the API re-emits them as spans parented on the job's stored trace context (the server's `job.process` span), tagged `job.executor: node` and `telemetry.relay: node`. A relay outage never fails or delays a job. The one switch is `relaySpans` on the engine (programmatic, no environment variable). The node holds no collector address or exporter credential.
+
+MemoriaHub's executors add their own phases under `job.app.<name>` (`apps/cli/src/executors/compute/`, through `runPhase`, which just runs the work on a context with no `phase`). Behaviour and results are unchanged.
+
+| Job type | Phases (`job.app.`) |
+|---|---|
+| `face_detection` | `decode` (`width`, `height`), `compreface_detect` (`faces`) |
+| `video_face_detection` | `probe` (`codec`), `frames_extract` (`frames`), `compreface_detect` (`frames`, `faces`; one span for the whole per-frame loop, so a 60-frame video is one span), `dedup` (`faces` = clusters) |
+| `duplicate_detection` | `dhash`, `clip_embed` (`embeddingDims`) |
+| `social_media_detection` | `probe` (`codec`), `frames_extract` (`frames`), `ocr` (`ocrFrames`) |
+| `metadata_extraction` | image: `exif`, `decode` (`width`, `height`); video: `probe` (`codec`) |
+| `thumbnail_regen` | `render` (`width`, `height`), `thumbnail_put` (`bytes`) |
+| `geocode` | `geocode` (`geoProvider`: `nominatim` or `google`) |
+| `workflow_execute_batch` | `workflow_intent` (`actions`) |
+
+**Attributes** are registered on the API in `APP_NODE_SPAN_ATTRIBUTES` (`apps/api/src/app-registrations/jobs.ts`): integers `frames`, `faces`, `width`, `height`, `ocrFrames`, `embeddingDims`, `actions`; tokens `codec`, `geoProvider`. The platform's key pattern is `^[a-z][A-Za-z0-9]{1,31}$` (camelCase, no underscore). Values are non-negative integers or token-shaped strings (letters, digits, `_ . + -`); a file name, URL, place name, coordinate, id or provider text can never ride along, and the platform drops an unregistered key or a wrong-typed value without an error. `test/nodes/node-telemetry.spec.ts` (API) and `test/executors/phases.spec.ts` (CLI) pin this.
+
+**Vitals** (heartbeat `vitals.extra`, at most 16 keys, finite numbers), worded on the Worker Nodes page by `apps/web/src/platform-extensions/nodes/memoriahubNodeVitals.ts`:
+
+| Key | Reported by | Meaning |
+|---|---|---|
+| `clip.embeds`, `clip.session.embeds`, `clip.session.recycles` | `duplicate_detection` | CLIP embeddings (lifetime, current session) and session recycles |
+| `compreface.latency_ms` | `face_detection`, `video_face_detection` | average (EWMA, weight 0.2) of CompreFace call time; absent until a call ran |
+| `ocr.frames_total` | `social_media_detection` | frames OCR'd since the node started |
+| `sharp.concurrency` | image-decoding types | libvips thread cap the node applied |
+
+Host vitals (CPU, memory, load, power) are built into the platform engine; they replace the local watchdog log lines.
+
+**Explorer queries for node work** (Explorer, GreptimeDB traces; the span tables carry the attributes above as `job.app.<key>`):
+
+- node job latency by type and phase (p50 / p95): group spans with `job.executor = node` by `job.type` and span name, over the last 24 h;
+- slowest node phases, last 24 h: the same spans ordered by duration, top 50;
+- CompreFace latency by node: `job.app.compreface_detect` spans grouped by node, or the `compreface.latency_ms` vital on the Worker Nodes page.
+
+These are documented here and not pre-saved: saving them and checking them against 200 mixed jobs on two nodes is a staging step that needs a telemetry-enabled deployment.
