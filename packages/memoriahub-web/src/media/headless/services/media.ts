@@ -1,0 +1,1139 @@
+import { api } from '../../../core/headless/index.js';
+import { createTrashEmptyRun } from './trashEmptyRuns.js';
+import type { CreateTrashEmptyRunResponse } from '../trash-empty-run-types.js';
+import type { EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
+import type {
+  MediaItem,
+  MediaListResponse,
+  MediaKeysetResponse,
+  MediaQueryParams,
+  MediaLocation,
+  MapCluster,
+  LocationExtent,
+  PatchMediaDto,
+  RegisterMediaDto,
+  RegisterMediaResponse,
+  TagItem,
+  InitUploadDto,
+  InitUploadResponse,
+  PartUploadAuth,
+  UploadPart,
+  Album,
+  AlbumListResponse,
+  AlbumDetail,
+  CreateAlbumDto,
+  AlbumQueryParams,
+  UpdateAlbumDto,
+  AddAlbumItemsByFilterDto,
+  BulkUpdateDto,
+  BulkTagsDto,
+  BulkDeleteDto,
+  BulkArchiveDto,
+  ListArchivedParams,
+  ListTrashParams,
+  RestoreFromTrashDto,
+  RestoreFromTrashResponse,
+  DeleteForeverDto,
+  EmptyTrashDto,
+  GeoSearchResult,
+  GeoReverseResult,
+  DashboardResponse,
+  ReviewCountsResponse,
+} from '../types.js';
+
+// ---------------------------------------------------------------------------
+// MediaItem CRUD
+// ---------------------------------------------------------------------------
+
+/**
+ * List media via `GET /api/media` in KEYSET (cursor) mode.
+ *
+ * `page` is deliberately never sent so the backend uses keyset pagination and
+ * responds with `{ items, meta: { pageSize, nextCursor, hasMore } }`. Pass
+ * `cursor` (from a prior response's `nextCursor`) to fetch the next page;
+ * omit it (or pass `null`) for the first page.
+ *
+ * @stability experimental
+ */
+export async function listMedia(params?: MediaQueryParams): Promise<MediaKeysetResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (params?.cursor) searchParams.set('cursor', params.cursor);
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  if (params?.type) searchParams.set('type', params.type);
+  if (params?.capturedAtFrom) searchParams.set('capturedAtFrom', params.capturedAtFrom);
+  if (params?.capturedAtTo) searchParams.set('capturedAtTo', params.capturedAtTo);
+  if (params?.albumId) searchParams.set('albumId', params.albumId);
+  if (params?.favorite !== undefined) searchParams.set('favorite', String(params.favorite));
+  if (params?.tag) searchParams.set('tag', params.tag);
+  if (params?.country) searchParams.set('country', params.country);
+  if (params?.region) searchParams.set('region', params.region);
+  if (params?.locality) searchParams.set('locality', params.locality);
+  if (params?.place) searchParams.set('place', params.place);
+  if (params?.location) searchParams.set('location', params.location);
+  if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
+  if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+  if (params?.contentHash) searchParams.set('contentHash', params.contentHash);
+  if (params?.circleId) searchParams.set('circleId', params.circleId);
+  if (params?.cameraMake) searchParams.set('cameraMake', params.cameraMake);
+  if (params?.cameraModel) searchParams.set('cameraModel', params.cameraModel);
+  if (params?.sourceDeviceId) searchParams.set('sourceDeviceId', params.sourceDeviceId);
+  if (params?.sourceDeviceName) searchParams.set('sourceDeviceName', params.sourceDeviceName);
+  if (params?.missingGeo !== undefined) searchParams.set('missingGeo', params.missingGeo ? '1' : '0');
+  if (params?.personId) searchParams.set('personId', params.personId);
+  if (params?.personIds && params.personIds.length > 0) {
+    searchParams.set('personIds', params.personIds.join(','));
+  }
+  if (params?.peopleMatch) searchParams.set('peopleMatch', params.peopleMatch);
+  if (params?.noFaces !== undefined) searchParams.set('noFaces', params.noFaces ? '1' : '0');
+
+  const qs = searchParams.toString();
+  return api.get<MediaKeysetResponse>(`/media${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * get Media.
+ *
+ * @stability experimental
+ */
+export async function getMedia(id: string): Promise<MediaItem> {
+  return api.get<MediaItem>(`/media/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Geo locations index (for map view)
+// ---------------------------------------------------------------------------
+
+/**
+ * Media Location Filters.
+ *
+ * @stability experimental
+ */
+export interface MediaLocationFilters {
+  type?: 'photo' | 'video';
+  country?: string;
+  region?: string;
+  locality?: string;
+  place?: string;
+  location?: string;
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+  circleId?: string;
+  /** Scope the location index to a single album. */
+  albumId?: string;
+  /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
+  bbox?: string;
+  /**
+   * Cap the number of points returned. Optional — callers that need every point
+   * (the album map, which plots the full set) must omit it. Used by the map's
+   * "Photos here" drawer, which only ever renders a fixed-size preview grid and
+   * would otherwise pull thousands of rows for a large cell.
+   */
+  limit?: number;
+}
+
+/**
+ * list Media Locations.
+ *
+ * @stability experimental
+ */
+export async function listMediaLocations(
+  filters?: MediaLocationFilters,
+): Promise<MediaLocation[]> {
+  const searchParams = new URLSearchParams();
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.country) searchParams.set('country', filters.country);
+  if (filters?.region) searchParams.set('region', filters.region);
+  if (filters?.locality) searchParams.set('locality', filters.locality);
+  if (filters?.place) searchParams.set('place', filters.place);
+  if (filters?.location) searchParams.set('location', filters.location);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.albumId) searchParams.set('albumId', filters.albumId);
+  if (filters?.bbox) searchParams.set('bbox', filters.bbox);
+  if (filters?.limit !== undefined) searchParams.set('limit', String(filters.limit));
+  const qs = searchParams.toString();
+  return api.get<MediaLocation[]>(`/media/locations${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Viewport-driven server-side grid clustering (map hot path — no thumbnails)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map Aggregate Filters.
+ *
+ * @stability experimental
+ */
+export interface MapAggregateFilters {
+  circleId?: string;
+  /**
+   * Grid precision (0–5); coarser at low zoom, finer at high zoom. Kept for
+   * back-compat; the backend derives precision from `zoom` when it is supplied
+   * and falls back to `precision` otherwise.
+   */
+  precision?: number;
+  /** Raw map zoom (int 0–22); the backend derives grid precision from it. */
+  zoom?: number;
+  /** Viewport bounding box: `minLng,minLat,maxLng,maxLat`. */
+  bbox?: string;
+  type?: 'photo' | 'video';
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+}
+
+/**
+ * aggregate Locations.
+ *
+ * @stability experimental
+ */
+export async function aggregateLocations(
+  filters?: MapAggregateFilters,
+): Promise<MapCluster[]> {
+  const searchParams = new URLSearchParams();
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.precision !== undefined) searchParams.set('precision', String(filters.precision));
+  if (filters?.zoom !== undefined) searchParams.set('zoom', String(filters.zoom));
+  if (filters?.bbox) searchParams.set('bbox', filters.bbox);
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  const qs = searchParams.toString();
+  return api.get<MapCluster[]>(`/media/locations/aggregate${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// True bounding-box extent across all a circle's geotagged items (initial
+// map framing — decoupled from the viewport-driven aggregate fetch above)
+// ---------------------------------------------------------------------------
+
+/**
+ * Location Extent Filters.
+ *
+ * @stability experimental
+ */
+export interface LocationExtentFilters {
+  circleId?: string;
+  type?: 'photo' | 'video';
+  capturedAtFrom?: string;
+  capturedAtTo?: string;
+}
+
+/**
+ * get Location Extent.
+ *
+ * @stability experimental
+ */
+export async function getLocationExtent(
+  filters?: LocationExtentFilters,
+): Promise<LocationExtent | null> {
+  const searchParams = new URLSearchParams();
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.capturedAtFrom) searchParams.set('capturedAtFrom', filters.capturedAtFrom);
+  if (filters?.capturedAtTo) searchParams.set('capturedAtTo', filters.capturedAtTo);
+  const qs = searchParams.toString();
+  return api.get<LocationExtent | null>(`/media/locations/extent${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Batched lazy thumbnail signing (for cluster drawers)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thumbnail Ref.
+ *
+ * @stability experimental
+ */
+export interface ThumbnailRef {
+  id: string;
+  thumbnailUrl: string | null;
+}
+
+/**
+ * get Thumbnails.
+ *
+ * @stability experimental
+ */
+export async function getThumbnails(
+  circleId: string,
+  ids: string[],
+): Promise<ThumbnailRef[]> {
+  if (ids.length === 0) return [];
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', circleId);
+  searchParams.set('ids', ids.join(','));
+  return api.get<ThumbnailRef[]>(`/media/thumbnails?${searchParams.toString()}`);
+}
+
+/**
+ * List geotagged media locations scoped to a single album.
+ * Thin wrapper over listMediaLocations that mirrors the MediaMapPage flow.
+ *
+ * @stability experimental
+ */
+export async function listAlbumLocations(
+  albumId: string,
+  circleId: string,
+): Promise<MediaLocation[]> {
+  return listMediaLocations({ albumId, circleId });
+}
+
+/**
+ * patch Media.
+ *
+ * @stability experimental
+ */
+export async function patchMedia(id: string, dto: PatchMediaDto): Promise<MediaItem> {
+  return api.patch<MediaItem>(`/media/${id}`, dto);
+}
+
+/**
+ * delete Media.
+ *
+ * @stability experimental
+ */
+export async function deleteMedia(id: string): Promise<void> {
+  await api.delete<void>(`/media/${id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Orientation editing (destructive rotate / flip of a photo's original bytes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Orientation Op.
+ *
+ * @stability experimental
+ */
+export type OrientationOp =
+  | 'rotate_left'
+  | 'rotate_right'
+  | 'flip_horizontal'
+  | 'flip_vertical';
+
+/**
+ * edit Orientation.
+ *
+ * @stability experimental
+ */
+export async function editOrientation(
+  id: string,
+  op: OrientationOp,
+): Promise<{ status: string; width: number; height: number }> {
+  return api.post<{ status: string; width: number; height: number }>(
+    `/media/${id}/edit/orientation`,
+    { op },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+/**
+ * list Tags.
+ *
+ * @stability experimental
+ */
+export async function listTags(circleId?: string): Promise<TagItem[]> {
+  // GET /api/media/tags returns an array of { id, name, count, createdAt }
+  const qs = circleId ? `?circleId=${encodeURIComponent(circleId)}` : '';
+  return api.get<TagItem[]>(`/media/tags${qs}`);
+}
+
+// ---------------------------------------------------------------------------
+// Resumable upload — init / upload part / complete
+// ---------------------------------------------------------------------------
+
+/**
+ * init Upload.
+ *
+ * @stability experimental
+ */
+export async function initUpload(dto: InitUploadDto): Promise<InitUploadResponse> {
+  return api.post<InitUploadResponse>('/storage/objects/upload/init', {
+    name: dto.name,
+    size: dto.size,
+    mimeType: dto.mimeType,
+  });
+}
+
+/**
+ * True when `url` points at this page's own origin. A bearer token is only
+ * ever attached to such a URL: `partUploadAuth: 'bearer'` comes from the
+ * server, but the token must never leave for a third-party host even if a
+ * misconfigured server hands one out.
+ *
+ * @stability experimental
+ */
+export function isSameOriginUrl(url: string): boolean {
+  try {
+    return new URL(url, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upload a single part of a multipart upload.
+ *
+ * - `auth: 'none'` (default): `url` is a presigned S3/R2 URL. It is
+ *   self-authorizing, so the request carries NO Authorization header and no
+ *   cookies — S3 rejects a request with both a signature and a bearer token.
+ * - `auth: 'bearer'` (issue #506): `url` is the API's own
+ *   `PUT /api/storage/objects/:id/upload/parts/:n` route, used by the local
+ *   storage provider. It needs the caller's bearer token, sent only to a
+ *   same-origin URL, and the raw bytes as `application/octet-stream`. A 401
+ *   refreshes the access token once and retries.
+ *
+ * Returns the ETag header — required for CompleteMultipartUpload.
+ * Throws on HTTP error so callers can implement retry logic.
+ *
+ * @stability experimental
+ */
+export async function uploadPart(
+  url: string,
+  chunk: Blob,
+  auth: PartUploadAuth = 'none',
+): Promise<string> {
+  let response: Response;
+  if (auth === 'bearer') {
+    if (!isSameOriginUrl(url)) {
+      throw new Error('Refusing to send credentials to a part URL on another origin');
+    }
+    const send = () =>
+      fetch(url, {
+        method: 'PUT',
+        body: chunk,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          ...(api.getAccessToken() ? { Authorization: `Bearer ${api.getAccessToken()}` } : {}),
+        },
+      });
+    response = await send();
+    if (response.status === 401 && (await api.refreshToken())) {
+      response = await send();
+    }
+  } else {
+    response = await fetch(url, {
+      method: 'PUT',
+      body: chunk,
+      // No Authorization header, no credentials — presigned URL is self-authorizing
+    });
+  }
+
+  if (!response.ok) {
+    throw new Error(`Part upload failed: ${response.status} ${response.statusText}`);
+  }
+
+  // S3 (and the API's part route) return the ETag in a response header
+  const etag = response.headers.get('ETag') ?? response.headers.get('etag');
+  if (!etag) {
+    throw new Error('The storage server did not return an ETag for the uploaded part');
+  }
+
+  return etag;
+}
+
+/**
+ * complete Upload.
+ *
+ * @stability experimental
+ */
+export async function completeUpload(
+  objectId: string,
+  parts: UploadPart[],
+): Promise<void> {
+  await api.post<void>(`/storage/objects/${objectId}/upload/complete`, { parts });
+}
+
+// ---------------------------------------------------------------------------
+// Register media after upload
+// ---------------------------------------------------------------------------
+
+/**
+ * register Media.
+ *
+ * @stability experimental
+ */
+export async function registerMedia(dto: RegisterMediaDto): Promise<RegisterMediaResponse> {
+  return api.post<RegisterMediaResponse>('/media', dto);
+}
+
+// ---------------------------------------------------------------------------
+// Albums
+// ---------------------------------------------------------------------------
+
+/**
+ * list Albums.
+ *
+ * @stability experimental
+ */
+export async function listAlbums(params?: AlbumQueryParams): Promise<AlbumListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  if (params?.sortBy) searchParams.set('sortBy', params.sortBy);
+  if (params?.sortOrder) searchParams.set('sortOrder', params.sortOrder);
+  if (params?.circleId) searchParams.set('circleId', params.circleId);
+
+  const qs = searchParams.toString();
+  return api.get<AlbumListResponse>(`/media/albums${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Shared with me (RETRO-I6, #588): records granted to the caller, across libraries
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared With Me Params.
+ *
+ * @stability experimental
+ */
+export interface SharedWithMeParams {
+  page?: number;
+  pageSize?: number;
+}
+
+function sharedQuery(params?: SharedWithMeParams): string {
+  const sp = new URLSearchParams();
+  if (params?.page) sp.set('page', String(params.page));
+  if (params?.pageSize) sp.set('pageSize', String(params.pageSize));
+  const qs = sp.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/**
+ * The media items shared with the caller through grants (`GET /api/media/shared-with-me`).
+ *
+ * @stability experimental
+ */
+export async function listSharedMedia(params?: SharedWithMeParams): Promise<MediaListResponse> {
+  return api.get<MediaListResponse>(`/media/shared-with-me${sharedQuery(params)}`);
+}
+
+/**
+ * The albums shared with the caller through grants (`GET /api/media/albums/shared-with-me`).
+ *
+ * @stability experimental
+ */
+export async function listSharedAlbums(params?: SharedWithMeParams): Promise<AlbumListResponse> {
+  return api.get<AlbumListResponse>(`/media/albums/shared-with-me${sharedQuery(params)}`);
+}
+
+/**
+ * create Album.
+ *
+ * @stability experimental
+ */
+export async function createAlbum(dto: CreateAlbumDto): Promise<Album> {
+  return api.post<Album>('/media/albums', dto);
+}
+
+/**
+ * get Album.
+ *
+ * @stability experimental
+ */
+export async function getAlbum(id: string): Promise<AlbumDetail> {
+  return api.get<AlbumDetail>(`/media/albums/${id}`);
+}
+
+/**
+ * update Album.
+ *
+ * @stability experimental
+ */
+export async function updateAlbum(id: string, dto: UpdateAlbumDto): Promise<Album> {
+  return api.patch<Album>('/media/albums/' + id, dto);
+}
+
+/**
+ * delete Album.
+ *
+ * @stability experimental
+ */
+export async function deleteAlbum(id: string): Promise<void> {
+  await api.delete<void>('/media/albums/' + id);
+}
+
+/**
+ * add Album Items.
+ *
+ * @stability experimental
+ */
+export async function addAlbumItems(id: string, mediaItemIds: string[]): Promise<unknown> {
+  return api.post<unknown>('/media/albums/' + id + '/items', { mediaItemIds });
+}
+
+/**
+ * remove Album Item.
+ *
+ * @stability experimental
+ */
+export async function removeAlbumItem(id: string, itemId: string): Promise<void> {
+  await api.delete<void>('/media/albums/' + id + '/items/' + itemId);
+}
+
+/**
+ * add Album Items By Filter.
+ *
+ * @stability experimental
+ */
+export async function addAlbumItemsByFilter(
+  id: string,
+  filters: AddAlbumItemsByFilterDto,
+): Promise<{ added: number }> {
+  return api.post<{ added: number }>('/media/albums/' + id + '/items/by-filter', filters);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+/**
+ * bulk Update Media.
+ *
+ * @stability experimental
+ */
+export async function bulkUpdateMedia(dto: BulkUpdateDto): Promise<{ updated: number }> {
+  return api.patch<{ updated: number }>('/media/bulk', dto);
+}
+
+/**
+ * bulk Tags.
+ *
+ * @stability experimental
+ */
+export async function bulkTags(dto: BulkTagsDto): Promise<{ added: number; removed: number }> {
+  return api.post<{ added: number; removed: number }>('/media/bulk/tags', dto);
+}
+
+/**
+ * bulk Delete.
+ *
+ * @stability experimental
+ */
+export async function bulkDelete(dto: BulkDeleteDto): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/media/bulk/delete', dto);
+}
+
+/**
+ * bulk Archive.
+ *
+ * @stability experimental
+ */
+export async function bulkArchive(dto: BulkArchiveDto): Promise<{ archived: number }> {
+  return api.patch<{ archived: number }>('/media/bulk/archive', dto);
+}
+
+// ---------------------------------------------------------------------------
+// Bulk enrichment reruns (thumbnails / faces / AI tagging)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bulk Rerun Dto.
+ *
+ * @stability experimental
+ */
+export interface BulkRerunDto {
+  circleId: string;
+  ids: string[];
+}
+
+/**
+ * bulk Rerun Tags.
+ *
+ * @stability experimental
+ */
+export async function bulkRerunTags(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/tags/rerun', dto);
+}
+
+/**
+ * Per-reason breakdown of the ids the server declined to queue. The three
+ * counts plus `queued` always sum to `requested` — an ineligible item never
+ * fails the whole batch (unlike the single-item endpoint, which 400s).
+ *
+ * @stability experimental
+ */
+export interface BulkEnhanceSkipped {
+  /** Not a photo (or its storage object is not an image). */
+  notPhoto: number;
+  /** Over the `pictureEnhancement.maxInputMegapixels` guard. */
+  tooLarge: number;
+  /**
+   * Already has a live (pending/processing/ready) enhancement. A `ready` result
+   * is a completed, already-billed render awaiting a decision and is never
+   * superseded by a batch.
+   */
+  alreadyLive: number;
+}
+
+/**
+ * Bulk Enhance Result.
+ *
+ * @stability experimental
+ */
+export interface BulkEnhanceResult {
+  batchId: string;
+  requested: number;
+  queued: number;
+  skipped: BulkEnhanceSkipped;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo in a selection (202).
+ * One `params` object applies to the whole batch. 400 when the feature is
+ * disabled, no model is configured, or the selection exceeds
+ * `pictureEnhancement.maxBatchSize` — render the server's message.
+ *
+ * @stability experimental
+ */
+export async function bulkEnhance(dto: {
+  circleId: string;
+  ids: string[];
+  params?: EnhanceParams;
+}): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>('/media/bulk/enhance', dto);
+}
+
+/**
+ * The filter half of a by-filter enhance request: the SAME shape the gallery
+ * already hands `addAlbumItemsByFilter`, with `circleId` required (the endpoint
+ * resolves the match set itself, so it cannot infer the circle).
+ *
+ * @stability experimental
+ */
+export type BulkEnhanceByFilterDto = AddAlbumItemsByFilterDto & {
+  circleId: string;
+  params?: EnhanceParams;
+};
+
+/**
+ * Fields the API's shared `mediaFilterFields` shape declares as
+ * `z.string().transform(...)` — query-string oriented, even in a POST body.
+ * See `serializeMediaFilter` below.
+ */
+const MEDIA_FILTER_BOOLEAN_KEYS = [
+  'favorite',
+  'missingGeo',
+  'missingCapturedAt',
+  'missingCamera',
+  'noFaces',
+] as const;
+
+/**
+ * Coerce the filter's boolean fields to the `'true'` / `'false'` STRINGS the
+ * API's `mediaFilterFields` shape parses.
+ *
+ * Those fields are `z.string().transform(...)` because the shape is shared with
+ * `GET /api/media`, where every value arrives as a query string — a real JSON
+ * `true` fails `z.string()` and the whole request 400s on validation. The web
+ * `MediaQueryParams` type models them as real booleans (correctly, for the GET
+ * path, where `URLSearchParams` stringifies them on the way out), so a POST body
+ * built from the same object has to do that stringification itself.
+ *
+ * Applied only here, on the new call — the existing `addAlbumItemsByFilter`
+ * path is left exactly as it is.
+ */
+function serializeMediaFilter(dto: BulkEnhanceByFilterDto): Record<string, unknown> {
+  const body: Record<string, unknown> = { ...dto };
+  for (const key of MEDIA_FILTER_BOOLEAN_KEYS) {
+    const value = body[key];
+    if (typeof value === 'boolean') body[key] = value ? 'true' : 'false';
+  }
+  return body;
+}
+
+/**
+ * Queue one AI enhancement per eligible photo MATCHING A FILTER (202) — the
+ * server resolves the match set, so photos the user has not scrolled to (and
+ * cannot see) are included. Issue #424.
+ *
+ * The endpoint never truncates to the cap: over `pictureEnhancement.maxBatchSize`
+ * it REFUSES with a 400 whose `details` carries `{ matchedCount, maxBatchSize }`,
+ * and a filter matching nothing is a 400 as well. `ApiError` already preserves
+ * `details`, so a caller can render the real numbers rather than a bare message.
+ *
+ * @stability experimental
+ */
+export async function bulkEnhanceByFilter(
+  dto: BulkEnhanceByFilterDto,
+): Promise<BulkEnhanceResult> {
+  return api.post<BulkEnhanceResult>(
+    '/media/bulk/enhance/by-filter',
+    serializeMediaFilter(dto),
+  );
+}
+
+/**
+ * bulk Rerun Faces.
+ *
+ * @stability experimental
+ */
+export async function bulkRerunFaces(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/faces/rerun', dto);
+}
+
+/**
+ * bulk Rerun Thumbnails.
+ *
+ * @stability experimental
+ */
+export async function bulkRerunThumbnails(dto: BulkRerunDto): Promise<{ queued: number }> {
+  return api.post<{ queued: number }>('/media/bulk/thumbnail/rerun', dto);
+}
+
+/**
+ * bulk Unarchive.
+ *
+ * @stability experimental
+ */
+export async function bulkUnarchive(dto: BulkArchiveDto): Promise<{ unarchived: number }> {
+  return api.patch<{ unarchived: number }>('/media/bulk/unarchive', dto);
+}
+
+/**
+ * list Archived.
+ *
+ * @stability experimental
+ */
+export async function listArchived(params: ListArchivedParams): Promise<MediaListResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', params.circleId);
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  return api.get<MediaListResponse>(`/media/archived?${searchParams.toString()}`);
+}
+
+/**
+ * list Trash.
+ *
+ * @stability experimental
+ */
+export async function listTrash(params: ListTrashParams): Promise<MediaListResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('circleId', params.circleId);
+  if (params.page) searchParams.set('page', String(params.page));
+  if (params.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  return api.get<MediaListResponse>(`/media/trash?${searchParams.toString()}`);
+}
+
+/**
+ * restore From Trash.
+ *
+ * @stability experimental
+ */
+export async function restoreFromTrash(dto: RestoreFromTrashDto): Promise<RestoreFromTrashResponse> {
+  return api.post<RestoreFromTrashResponse>('/media/trash/restore', dto);
+}
+
+/**
+ * delete Forever.
+ *
+ * @stability experimental
+ */
+export async function deleteForever(dto: DeleteForeverDto): Promise<{ deleted: number }> {
+  return api.post<{ deleted: number }>('/media/trash/delete-forever', dto);
+}
+
+/**
+ * Empty trash — start an async purge run (issue #165). No longer synchronous:
+ * returns the created run id + matched count; poll GET /trash-empty-runs/:id
+ * for progress. Delegates to the canonical trash-empty-runs service.
+ *
+ * @stability experimental
+ */
+export async function emptyTrash(
+  dto: EmptyTrashDto,
+): Promise<CreateTrashEmptyRunResponse> {
+  return createTrashEmptyRun(dto);
+}
+
+// ---------------------------------------------------------------------------
+// Geo search / reverse geocode
+// ---------------------------------------------------------------------------
+
+/**
+ * reverse Geocode.
+ *
+ * @stability experimental
+ */
+export async function reverseGeocode(lat: number, lng: number): Promise<GeoReverseResult | null> {
+  return api.get<GeoReverseResult | null>(`/media/geo/reverse?lat=${lat}&lng=${lng}`);
+}
+
+/**
+ * search Places.
+ *
+ * @stability experimental
+ */
+export async function searchPlaces(q: string, limit?: number): Promise<GeoSearchResult[]> {
+  const qs = new URLSearchParams({ q });
+  if (limit) qs.set('limit', String(limit));
+  return api.get<GeoSearchResult[]>(`/media/geo/search?${qs.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+/**
+ * get Dashboard.
+ *
+ * @stability experimental
+ */
+export async function getDashboard(circleId: string): Promise<DashboardResponse> {
+  return api.get<DashboardResponse>(`/media/dashboard?circleId=${encodeURIComponent(circleId)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Review counts
+// ---------------------------------------------------------------------------
+
+/**
+ * Lightweight companion to `getDashboard`: just the four review-queue counts.
+ *
+ * Use this when a surface needs a pending-work number for a badge and nothing
+ * else — the dashboard endpoint returns On This Day / recent / favorites with
+ * signed thumbnail URLs for every item, which is a lot of work to deliver one
+ * integer (issue #204).
+ *
+ * @stability experimental
+ */
+export async function getReviewCounts(circleId: string): Promise<ReviewCountsResponse> {
+  return api.get<ReviewCountsResponse>(
+    `/media/review-counts?circleId=${encodeURIComponent(circleId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metadata export
+// ---------------------------------------------------------------------------
+
+/**
+ * Export Filters.
+ *
+ * @stability experimental
+ */
+export interface ExportFilters {
+  type?: 'photo' | 'video';
+  from?: string; // ISO 8601
+  to?: string;   // ISO 8601
+  circleId?: string;
+}
+
+/**
+ * Trigger a browser download of the user's media metadata export.
+ *
+ * Uses a raw fetch (not the JSON-unwrapping `api.get`) because the response
+ * is a streaming binary attachment, not a JSON envelope. The bearer token is
+ * attached manually via `Authorization` header.
+ *
+ * Filename is derived from the `Content-Disposition` response header when
+ * present; otherwise falls back to `memoriahub-export-<date>.<ext>`.
+ *
+ * @stability experimental
+ */
+export async function exportMedia(
+  format: 'json' | 'csv',
+  filters?: ExportFilters,
+): Promise<void> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('format', format);
+  if (filters?.type) searchParams.set('type', filters.type);
+  if (filters?.from) searchParams.set('from', filters.from);
+  if (filters?.to) searchParams.set('to', filters.to);
+  if (filters?.circleId) searchParams.set('circleId', filters.circleId);
+
+  const token = api.getAccessToken();
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // RETRO-I6 (#588): a raw fetch bypasses `api.ts`, so apply its owner-scope rewrite here.
+  const endpoint = api.rewriteEndpoint(`/media/export?${searchParams.toString()}`);
+  const response = await fetch(`${api.baseUrl}${endpoint}`, {
+    method: 'GET',
+    headers,
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    // Try to read an error body (JSON or plain text)
+    const bodyText = await response.text().catch(() => '');
+    let message = `Export failed: ${response.status} ${response.statusText}`;
+    try {
+      const bodyJson = JSON.parse(bodyText) as { message?: string };
+      if (bodyJson.message) message = bodyJson.message;
+    } catch {
+      if (bodyText) message = bodyText;
+    }
+    const err = new Error(message) as Error & { status: number };
+    err.status = response.status;
+    throw err;
+  }
+
+  // Derive filename from Content-Disposition or fall back to a timestamped default
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  let filename: string;
+
+  const filenameMatch = /filename="?([^";\r\n]+)"?/.exec(disposition);
+  if (filenameMatch?.[1]) {
+    filename = filenameMatch[1];
+  } else {
+    const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const ext = format === 'csv' ? 'csv' : 'json';
+    filename = `memoriahub-export-${dateStr}.${ext}`;
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+
+  // Trigger browser download via a temporary anchor element
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+
+  // Revoke after a short delay to ensure the browser has started the download
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+}
+
+// ---------------------------------------------------------------------------
+// Explore — places and tags (for Search/Explore page)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explore Item.
+ *
+ * @stability experimental
+ */
+export interface ExploreItem {
+  name: string;
+  count: number;
+  coverThumbnailUrl: string | null;
+}
+
+/**
+ * get Explore Places.
+ *
+ * @stability experimental
+ */
+export async function getExplorePlaces(circleId: string): Promise<ExploreItem[]> {
+  return api.get<ExploreItem[]>(`/media/explore/places?circleId=${encodeURIComponent(circleId)}`);
+}
+
+/**
+ * get Explore Tags.
+ *
+ * @stability experimental
+ */
+export async function getExploreTags(circleId: string): Promise<ExploreItem[]> {
+  return api.get<ExploreItem[]>(`/media/explore/tags?circleId=${encodeURIComponent(circleId)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Explore — tiered locations (Countries / Regions / Cities)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explore Location Item.
+ *
+ * @stability experimental
+ */
+export interface ExploreLocationItem {
+  name: string;
+  countryCode?: string | null;
+  count: number;
+  coverThumbnailUrl: string | null;
+}
+
+/**
+ * Explore Locations.
+ *
+ * @stability experimental
+ */
+export interface ExploreLocations {
+  countries: ExploreLocationItem[];
+  regions: ExploreLocationItem[];
+  cities: ExploreLocationItem[];
+}
+
+/**
+ * get Explore Locations.
+ *
+ * @stability experimental
+ */
+export async function getExploreLocations(circleId: string): Promise<ExploreLocations> {
+  return api.get<ExploreLocations>(
+    `/media/explore/locations?circleId=${encodeURIComponent(circleId)}`,
+  );
+}
+
+/**
+ * get Explore Location Level.
+ *
+ * @stability experimental
+ */
+export async function getExploreLocationLevel(
+  circleId: string,
+  level: 'countries' | 'regions' | 'cities',
+): Promise<ExploreLocationItem[]> {
+  return api.get<ExploreLocationItem[]>(
+    `/media/explore/locations/${level}?circleId=${encodeURIComponent(circleId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Location facets (for SearchPanel cascading pick-lists)
+// ---------------------------------------------------------------------------
+
+/**
+ * Location Locality.
+ *
+ * @stability experimental
+ */
+export interface LocationLocality {
+  name: string;
+  count: number;
+}
+
+/**
+ * Location Region.
+ *
+ * @stability experimental
+ */
+export interface LocationRegion {
+  name: string;
+  count: number;
+  localities: LocationLocality[];
+}
+
+/**
+ * Location Country.
+ *
+ * @stability experimental
+ */
+export interface LocationCountry {
+  country: string;
+  countryCode: string | null;
+  count: number;
+  regions: LocationRegion[];
+}
+
+/**
+ * get Location Facets.
+ *
+ * @stability experimental
+ */
+export async function getLocationFacets(circleId: string): Promise<LocationCountry[]> {
+  return api.get<LocationCountry[]>(`/media/facets/locations?circleId=${encodeURIComponent(circleId)}`);
+}

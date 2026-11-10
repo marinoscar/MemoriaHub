@@ -26,14 +26,6 @@ import type { MockUser } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useOwnerScope', () => ({
-  useOwnerScope: vi.fn(),
-}));
-
-vi.mock('../../services/media', () => ({
-  getExploreLocationLevel: vi.fn(),
-}));
-
 vi.mock('../../services/locationGroups', async () => {
   const actual = await vi.importActual<typeof import('../../services/locationGroups')>(
     '../../services/locationGroups',
@@ -55,32 +47,21 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import LevelBrowsePage from '../../pages/Places/LevelBrowsePage';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { getExploreLocationLevel } from '../../services/media';
+import { http, HttpResponse } from 'msw';
+import { LevelBrowsePage } from '@marinoscar/memoriahub-web/media/ui';
+import { server } from '../mocks/server';
 import { listLocationGroups, mergeLocationGroups } from '../../services/locationGroups';
 import type { MergeLocationGroupsResult } from '../../services/locationGroups';
 
-const mockUseOwnerScope = vi.mocked(useOwnerScope);
-const mockGetLevel = vi.mocked(getExploreLocationLevel);
+// The packaged page loads its tiles over the host's API client, so the tier is
+// served by the MSW handler below; `mockGetLevel` stays the test's seam.
+const mockGetLevel = vi.fn();
 const mockListGroups = vi.mocked(listLocationGroups);
 const mockMerge = vi.mocked(mergeLocationGroups);
 
 // ---------------------------------------------------------------------------
 // Factories
 // ---------------------------------------------------------------------------
-
-function defaultCircleMock() {
-  return {
-    activeCircle: { id: 'circle-1', name: 'My Circle' },
-    activeCircleId: 'circle-1',
-    activeCircleRole: 'circle_admin' as const,
-    circles: [],
-    loading: false,
-    setActiveCircle: vi.fn(),
-    refreshCircles: vi.fn(),
-  };
-}
 
 /** Mirrors the real merge payload — the name lives at `group.canonicalName`. */
 function makeMergeResult(): MergeLocationGroupsResult {
@@ -127,7 +108,9 @@ describe('LevelBrowsePage — select mode (#407)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
+    server.use(
+      http.get('*/api/media/explore/locations/:level', async () => HttpResponse.json({ data: await mockGetLevel() })),
+    );
     mockGetLevel.mockResolvedValue([]);
     mockListGroups.mockResolvedValue({ items: [], meta: { total: 0, page: 1, pageSize: 200 } });
     mockMerge.mockResolvedValue(makeMergeResult());

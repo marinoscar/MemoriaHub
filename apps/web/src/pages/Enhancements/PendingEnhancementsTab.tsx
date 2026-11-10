@@ -30,14 +30,14 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { useEnhancements } from '../../hooks/useEnhancements';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { getMedia } from '../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 import { applyEnhancement, discardEnhancement } from '../../services/enhance';
 import type {
   EnhancementListItem,
   EnhancementSortOrder,
   EnhancementStatusFilter,
 } from '../../services/enhance';
-import type { MediaItem } from '../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import { MediaEnhancementDrawer } from '../../components/media/MediaEnhancementDrawer';
 import {
   ReplaceDownscaleNotice,

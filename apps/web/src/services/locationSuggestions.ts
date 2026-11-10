@@ -1,6 +1,6 @@
 import type { LocationSuggestionQuery } from '@marinoscar/memoriahub-contract/location';
 import { api } from './api';
-import type { SortOrder } from '../types/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 
 export type LocationSuggestionStatus = LocationSuggestionQuery['status'];
 export type LocationSuggestionMethod = 'interpolated' | 'nearest';

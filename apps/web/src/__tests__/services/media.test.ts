@@ -20,9 +20,9 @@ import {
   aggregateLocations,
   getThumbnails,
   getLocationExtent,
-} from '../../services/media';
-import type { MediaLocation, MapCluster, TagItem, LocationExtent } from '../../types/media';
-import type { ThumbnailRef } from '../../services/media';
+} from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaLocation, MapCluster, TagItem, LocationExtent } from '@marinoscar/memoriahub-web/media/headless';
+import type { ThumbnailRef } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Test data

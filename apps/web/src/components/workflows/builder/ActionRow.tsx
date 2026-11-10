@@ -14,8 +14,8 @@ import ArrowUpward from '@mui/icons-material/ArrowUpward';
 import ArrowDownward from '@mui/icons-material/ArrowDownward';
 import WarningAmber from '@mui/icons-material/WarningAmber';
 import { ActionParamEditor } from './ActionParamEditor';
-import type { ExploreItem } from '../../../services/media';
-import type { Album } from '../../../types/media';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import type { Album } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   WorkflowActionInstance,
   WorkflowActionDescriptor,

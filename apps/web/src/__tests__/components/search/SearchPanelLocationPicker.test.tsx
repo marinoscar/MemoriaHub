@@ -20,9 +20,11 @@ import { render } from '../../utils/test-utils';
 // Module mocks — declared BEFORE importing the module under test
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getLocationFacets: vi.fn(),
   getExploreTags: vi.fn(),
+
 }));
 
 vi.mock('../../../components/search/PersonMultiSelect', () => ({
@@ -31,7 +33,8 @@ vi.mock('../../../components/search/PersonMultiSelect', () => ({
   )),
 }));
 
-vi.mock('../../../components/media/LocationPickerMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationPickerMap: vi.fn(
     ({ onChange }: { onChange: (latlng: { lat: number; lng: number }) => void }) => (
       <button
@@ -42,6 +45,7 @@ vi.mock('../../../components/media/LocationPickerMap', () => ({
       </button>
     ),
   ),
+
 }));
 
 // ---------------------------------------------------------------------------
@@ -49,8 +53,8 @@ vi.mock('../../../components/media/LocationPickerMap', () => ({
 // ---------------------------------------------------------------------------
 
 import { SearchPanel } from '../../../components/search/SearchPanel';
-import { getLocationFacets, getExploreTags } from '../../../services/media';
-import { LocationPickerMap } from '../../../components/media/LocationPickerMap';
+import { getLocationFacets, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
 
 const mockGetLocationFacets = vi.mocked(getLocationFacets);
 const mockGetExploreTags = vi.mocked(getExploreTags);

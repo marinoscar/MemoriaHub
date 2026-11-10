@@ -19,8 +19,8 @@ import {
 import type { WorkflowActionDescriptor } from '../../../../types/workflows';
 
 // ActionParamEditor's 'tags' kind reads the circle's tag vocabulary.
-vi.mock('../../../../services/media', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../../services/media')>();
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>();
   return {
     ...actual,
     getExploreTags: vi.fn().mockResolvedValue([]),

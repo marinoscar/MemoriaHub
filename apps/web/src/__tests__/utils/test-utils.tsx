@@ -8,6 +8,11 @@ import { vi } from 'vitest';
 import { AuthContext } from '../../contexts/AuthContext';
 import { CircleContext } from '../../contexts/CircleContext';
 import { ThemeContextProvider } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useOwnerScope } from '../../contexts/OwnerScopeContext';
+import { MemoriahubWebHostProvider } from '@marinoscar/memoriahub-web/core/headless';
+import { buildMemoriahubHost } from '../../platform-memoriahub/host';
+import { useNavigate } from 'react-router-dom';
 import type { AuthProvider as AuthProviderType } from '../../types';
 import type { Circle, CircleRole } from '../../types/circles';
 
@@ -166,6 +171,30 @@ function MockAuthProvider({
   );
 }
 
+// The packaged slices' host over the same mocked contexts (RETRO-J11, #626): a
+// component from `@marinoscar/memoriahub-web` reads the host, not the legacy contexts.
+function MockMemoriahubHost({ children }: { children: ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const ownerScope = useOwnerScope();
+  const navigate = useNavigate();
+  const host = buildMemoriahubHost({
+    principal: user
+      ? {
+          id: user.id,
+          permissions: user.permissions ?? [],
+          roles: (user.roles ?? []).map((r) => r.name),
+          displayName: user.displayName ?? null,
+          timeZone: user.timezone ?? null,
+        }
+      : null,
+    authLoading: isLoading,
+    features: { flags: null, pictureEnhancement: null, isLoading: false, error: null, refresh: async () => undefined },
+    ownerScope,
+    navigate,
+  });
+  return <MemoriahubWebHostProvider host={host}>{children}</MemoriahubWebHostProvider>;
+}
+
 function createWrapper(options: WrapperOptions = {}) {
   const {
     route = '/',
@@ -189,7 +218,7 @@ function createWrapper(options: WrapperOptions = {}) {
             providers={providers}
           >
             <MockCircleProvider activeCircle={activeCircle} activeCircleRole={activeCircleRole}>
-              {children}
+              <MockMemoriahubHost>{children}</MockMemoriahubHost>
             </MockCircleProvider>
           </MockAuthProvider>
         </ThemeContextProvider>

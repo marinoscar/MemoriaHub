@@ -40,10 +40,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { LocationPickerMap } from '../../components/media/LocationPickerMap';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { listMedia } from '../../services/media';
-import type { MediaItem } from '../../types/media';
+import { listMedia } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import {
   addLocationGroupMembers,
   createLocationGroup,

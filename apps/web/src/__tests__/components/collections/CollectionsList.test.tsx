@@ -14,9 +14,9 @@ import { CollectionsList } from '../../../components/collections/CollectionsList
 import CollectionsHubPage from '../../../pages/Collections/CollectionsHubPage';
 import { COLLECTIONS } from '../../../config/collections';
 import { formatCollectionCount, collectionAccessibleName } from '../../../components/collections/CollectionsList';
-import type { Album, AlbumListResponse } from '../../../types/media';
+import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListResponse } from '../../../services/face';
-import type { ExploreLocations } from '../../../services/media';
+import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryCard, MemoryListResponse } from '../../../types/memories';
 
 // The packaged rail's collapse preference (RETRO-F1, #571), read by the hub
@@ -25,8 +25,8 @@ vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
   useShellRailPreference: () => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }),
 }));
-vi.mock('../../../services/media', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../services/media')>()),
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
@@ -42,7 +42,7 @@ vi.mock('../../../hooks/useMemoriesEnabled', () => ({
   useMemoriesEnabled: vi.fn(),
 }));
 
-import { listAlbums, getExploreLocations } from '../../../services/media';
+import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../../../services/face';
 import { listMemories } from '../../../services/memories';
 import { useMemoriesEnabled } from '../../../hooks/useMemoriesEnabled';

@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 
-vi.mock('../../../services/media', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../services/media')>();
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>();
   return { ...actual, listSharedAlbums: vi.fn(), listSharedMedia: vi.fn() };
 });
 vi.mock('../../../components/media/MediaLightbox', () => ({ MediaLightbox: () => null }));
 
 import { render } from '../../utils/test-utils';
 import SharedWithMePage from '../../../pages/Shared/SharedWithMePage';
-import { listSharedAlbums, listSharedMedia } from '../../../services/media';
+import { listSharedAlbums, listSharedMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const emptyMeta = { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 };
 

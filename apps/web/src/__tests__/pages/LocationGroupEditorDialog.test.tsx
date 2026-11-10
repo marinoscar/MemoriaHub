@@ -24,7 +24,8 @@ import { render, mockAdminUser } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../components/media/LocationPickerMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationPickerMap: ({
     onChange,
     radiusMeters,
@@ -41,10 +42,13 @@ vi.mock('../../components/media/LocationPickerMap', () => ({
       pick
     </button>
   ),
+
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn(),
+
 }));
 
 vi.mock('../../services/locationGroups', async () => {
@@ -68,7 +72,7 @@ vi.mock('../../services/locationGroups', async () => {
 
 import LocationGroupEditorDialog from '../../pages/Admin/LocationGroupEditorDialog';
 import { ApiError } from '../../services/api';
-import { listMedia } from '../../services/media';
+import { listMedia } from '@marinoscar/memoriahub-web/media/headless';
 import {
   addLocationGroupMembers,
   createLocationGroup,

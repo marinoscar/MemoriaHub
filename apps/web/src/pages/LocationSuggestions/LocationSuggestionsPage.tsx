@@ -37,15 +37,15 @@ import {
   startLocationAcceptRun,
   startLocationRejectRun,
 } from '../../services/locationSuggestionRuns';
-import { LocationMiniMap } from '../../components/media/LocationMiniMap';
+import { LocationMiniMap } from '@marinoscar/memoriahub-web/media/ui';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import { AdjustLocationDialog } from './AdjustLocationDialog';
 import type {
   LocationSuggestionSortBy,
   LocationSuggestionSummary,
 } from '../../services/locationSuggestions';
-import type { SortOrder } from '../../types/media';
-import { formatCivilDateTime } from '../../utils/civilDate';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
+import { formatCivilDateTime } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Sort model. The API defaults to `createdAt` / `desc`, so those two values are

@@ -31,7 +31,8 @@ vi.mock('../../hooks/usePeople', () => ({
   usePeople: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getExploreLocations: vi.fn().mockResolvedValue({
     countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
     regions: [],
@@ -40,10 +41,13 @@ vi.mock('../../services/media', () => ({
   getExploreTags: vi.fn().mockResolvedValue([
     { name: 'beach', count: 5, coverThumbnailUrl: null },
   ]),
+
 }));
 
-vi.mock('../../components/media/MediaGallery', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
+
 }));
 
 vi.mock('../../components/search/SearchPanel', () => ({

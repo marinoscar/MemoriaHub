@@ -18,14 +18,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
-import type { Album, AlbumListResponse } from '../../types/media';
+import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListResponse } from '../../services/face';
-import type { ExploreLocations } from '../../services/media';
+import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryCard, MemoryListResponse } from '../../types/memories';
 import type { Circle } from '../../types/circles';
 
-vi.mock('../../services/media', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/media')>()),
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
@@ -44,7 +44,7 @@ vi.mock('../../hooks/useMemoriesEnabled', () => ({
   useMemoriesEnabled: vi.fn(),
 }));
 
-import { listAlbums, getExploreLocations } from '../../services/media';
+import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../../services/face';
 import { listMemories } from '../../services/memories';
 import { useOwnerScope } from '../../hooks/useOwnerScope';

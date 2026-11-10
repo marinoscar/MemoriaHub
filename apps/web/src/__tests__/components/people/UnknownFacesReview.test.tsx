@@ -11,8 +11,10 @@ import type { PersonListItem, ClusterResult } from '../../../services/face';
 // Mock PersonGrid's dependency on services/media
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
+
 }));
 
 vi.mock('../../../services/face', () => ({

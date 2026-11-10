@@ -30,16 +30,18 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { BatchEnhanceDialog } from '../../../components/media/BatchEnhanceDialog';
-import type { BulkEnhanceResult } from '../../../services/media';
-import type { MediaItem } from '../../../types/media';
+import type { BulkEnhanceResult } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import { ApiError } from '../../../services/api';
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   bulkEnhance: vi.fn(),
   bulkEnhanceByFilter: vi.fn(),
+
 }));
 
-import { bulkEnhance, bulkEnhanceByFilter } from '../../../services/media';
+import { bulkEnhance, bulkEnhanceByFilter } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockBulkEnhance = vi.mocked(bulkEnhance);
 const mockBulkEnhanceByFilter = vi.mocked(bulkEnhanceByFilter);

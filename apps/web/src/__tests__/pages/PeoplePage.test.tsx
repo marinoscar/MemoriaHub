@@ -25,7 +25,8 @@ vi.mock('../../hooks/usePeople', () => ({
   usePerson: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
   // Used by UnassignedFacesSection's FaceThumbGrid to resolve fallback
   // thumbnails when a face has no faceThumbnailUrl of its own.
@@ -34,6 +35,7 @@ vi.mock('../../services/media', () => ({
     thumbnailUrl: 'https://example.com/thumb.jpg',
     downloadUrl: null,
   }),
+
 }));
 
 vi.mock('../../services/face', () => ({
