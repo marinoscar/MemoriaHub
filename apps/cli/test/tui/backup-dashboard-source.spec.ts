@@ -14,7 +14,7 @@
 import { jest } from '@jest/globals';
 
 import { BACKUP_EV, BackupTypedEmitter } from '../../src/backup/events.js';
-import type { DaemonClient, DaemonMessage } from '../../src/node/ipc-client.js';
+import type { DaemonClient, DaemonMessage } from '../../src/backup/ipc-client.js';
 import {
   MAX_LOG,
   MAX_RUNS,

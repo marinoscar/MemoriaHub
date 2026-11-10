@@ -74,7 +74,7 @@ describe('root menu', () => {
   it('logged in numbers the root items as digit accelerators in the documented order', async () => {
     const m = await menu(true);
     const frame = stripAnsi(await m.waitForFrame((f) => f.includes('Settings')));
-    for (const [i, label] of ['Sync ▸', 'Scan ▸', 'Backup', 'Worker Node ▸', 'Reports ▸', 'File Tools ▸', 'Settings ▸', 'Help'].entries()) {
+    for (const [i, label] of ['Sync ▸', 'Scan ▸', 'Backup', 'Worker Node', 'Reports ▸', 'File Tools ▸', 'Settings ▸', 'Help'].entries()) {
       expect(frame).toContain(`${i + 1}. ${label}`);
     }
     expect(frame).not.toContain('Login / Change server');
@@ -125,19 +125,17 @@ describe('submenus', () => {
 
   it('jumps straight into a submenu with its digit accelerator', async () => {
     const m = await menu(true);
-    await m.waitForFrame((f) => f.includes('Worker Node ▸'));
-    await m.press('4');
-    const frame = stripAnsi(await m.waitForFrame((f) => f.includes('Home › Worker Node')));
-    expect(frame).toContain('1. Node dashboard');
-    expect(frame).toContain('6. Enroll node (login + credential)');
+    await m.waitForFrame((f) => f.includes('Scan ▸'));
+    await m.press('2');
+    const frame = stripAnsi(await m.waitForFrame((f) => f.includes('Home › Scan')));
+    expect(frame).toContain('1. Scan all folders');
+    expect(frame).toContain('3. View last scan report');
   });
 
   it('shows the tree-supplied subtitle instead of the generic navigation hint', async () => {
     const m = await menu(true, 'scan');
     const frame = stripAnsi(await m.waitForFrame((f) => f.includes('Home › Scan')));
     expect(frame).toContain('Dry-run preview — reports what a sync would do, without uploading');
-    const node = stripAnsi(await (await menu(true, 'node')).waitForFrame((f) => f.includes('Home › Worker Node')));
-    expect(node).toContain('Daily operations first; first-run setup below');
   });
 
   it('draws the destructive entry with its ellipsis under the nested File Tools breadcrumb', async () => {
@@ -147,11 +145,11 @@ describe('submenus', () => {
     expect(frame).toContain('Find & delete screenshots…');
   });
 
-  it('a digit opens that entry (Worker Node: 3 is Stop worker)', async () => {
-    const m = await menu(true, 'node');
-    await m.waitForFrame((f) => f.includes('Stop worker'));
+  it('a digit opens that entry (Sync: 3 is Retry failed files)', async () => {
+    const m = await menu(true, 'sync');
+    await m.waitForFrame((f) => f.includes('Retry failed files'));
     await m.press('3');
-    expect(await m.waitForFrame((f) => f.includes('[opened node-stop]'))).toContain('node-stop');
+    expect(await m.waitForFrame((f) => f.includes('[opened retry]'))).toContain('retry');
   });
 
   it('Esc from a submenu goes back to the parent menu, one level at a time', async () => {
@@ -166,7 +164,7 @@ describe('submenus', () => {
     expect(parent).not.toContain('Home › File Tools › Find/Clean Screenshots');
     await m.press('esc');
     const root = stripAnsi(await m.waitForFrame((f) => f.includes('Settings ▸') && !f.includes('Home ›')));
-    expect(root).toContain('Worker Node ▸');
+    expect(root).toContain('Worker Node');
   });
 });
 
@@ -194,8 +192,7 @@ describe('every entry opens a screen', () => {
     const routes = new Set(tree.entries.map((e) => e.route));
     for (const action of [
       'sync-all', 'sync-select', 'retry', 'scan-all', 'scan-select', 'scan-report', 'backup-dashboard',
-      'node-dashboard', 'node-start', 'node-stop', 'node-logs', 'node-doctor', 'node-enroll', 'node-install-deps',
-      'node-register', 'node-config', 'node-list', 'node-service', 'jobs-monitor', 'convert-file', 'convert-select',
+      'node', 'jobs-monitor', 'convert-file', 'convert-select',
       'convert-all', 'organize', 'screenshots-find', 'screenshots-move', 'screenshots-delete', 'date-infer-diagnose',
       'date-infer-apply', 'folders', 'circles', 'app-settings', 'android', 'factory-reset', 'help',
       'report-overview', 'report-runs', 'report-storage', 'report-duplicates',
@@ -206,7 +203,7 @@ describe('every entry opens a screen', () => {
 });
 
 describe('the login gate', () => {
-  it.each(['circles', 'sync-all', 'backup-dashboard', 'node-dashboard', 'node-register', 'node-list', 'jobs-monitor'])(
+  it.each(['circles', 'sync-all', 'backup-dashboard', 'jobs-monitor'])(
     'shows one not-logged-in notice instead of %s when logged out',
     async (route) => {
       const screen = await renderTuiRoute(route, { session: { loggedIn: false }, useRegistered: true });

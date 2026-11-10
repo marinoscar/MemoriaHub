@@ -32,6 +32,7 @@ import { APP_ANDROID_COMMAND } from './extensions/android.js';
 import { APP_NODE_EXECUTORS, registerNodeExtensions } from './executors/index.js';
 import { MEMORY_VALVE_EXIT_CODE, WORKER_ENV_ALIASES } from './worker-env.js';
 import { APP_NODE_LIST_COMMAND } from './extensions/node-list.js';
+import { APP_NODE_OPTIONS } from './extensions/node-options.js';
 
 // =============================================================================
 // MemoriaHub's CLI, composed on the platform engine  (issue #577, RETRO-F3)
@@ -133,7 +134,7 @@ export const APP_CLI_OPTIONS: CreateCliOptions = {
   version: readVersion(),
   // `android` is the platform's group since RETRO-D5 (#586), registered after the 1.3 commands
   // (so `--help` lists it after `menu`); see extensions/android.ts.
-  extraCommands: [...APP_COMMAND_FACTORIES.map(register), CIRCLES_ALIAS, APP_ANDROID_COMMAND, APP_NODE_LIST_COMMAND],
+  extraCommands: [...APP_COMMAND_FACTORIES.map(register), CIRCLES_ALIAS, APP_ANDROID_COMMAND, APP_NODE_LIST_COMMAND, APP_NODE_OPTIONS],
   nodeExecutors: [...APP_NODE_EXECUTORS],
   node: { envAliases: WORKER_ENV_ALIASES, memoryValveExitCode: MEMORY_VALVE_EXIT_CODE },
   // The TUI: MemoriaHub's menu tree, screens, header chip and shared data (RETRO-F4, #582).

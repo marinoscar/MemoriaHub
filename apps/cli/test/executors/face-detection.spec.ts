@@ -1,7 +1,7 @@
 /**
- * test/node/compute/face-detection.spec.ts
+ * test/executors/face-detection.spec.ts
  *
- * Unit tests for node/compute/face-detection.ts.
+ * Unit tests for src/executors/compute/face-detection.ts (RETRO-C10: the CompreFace URL is MEMORIAHUB_COMPREFACE_URL).
  *
  * NOTE (issue #113): the Human WASM face provider (and AWS Rekognition) were
  * removed entirely. `@memoriahub/enrichment-compute/face` no longer exists as
@@ -29,11 +29,6 @@ import * as path from 'path';
 // Mocks — registered BEFORE importing the module under test.
 // ---------------------------------------------------------------------------
 
-const mockLoadConfig = jest.fn();
-jest.unstable_mockModule('../../../src/config.js', () => ({
-  loadConfig: mockLoadConfig,
-}));
-
 const mockPrepareImageForProcessing = jest.fn();
 jest.unstable_mockModule('@memoriahub/enrichment-compute/image', () => ({
   prepareImageForProcessing: mockPrepareImageForProcessing,
@@ -46,7 +41,8 @@ jest.unstable_mockModule('@memoriahub/enrichment-compute/face-compreface', () =>
   COMPREFACE_PROVIDER_KEY: 'compreface',
 }));
 
-const { default: computeFaceDetection } = await import('../../../src/node/compute/face-detection.js');
+const CTX = {} as never;
+const { default: computeFaceDetection } = await import('../../src/executors/compute/face-detection.js');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -60,7 +56,7 @@ beforeEach(() => {
   inputPath = path.join(tmpDir, 'input.jpg');
   fs.writeFileSync(inputPath, Buffer.from('fake-image-bytes'));
 
-  mockLoadConfig.mockReset();
+  delete process.env['MEMORIAHUB_COMPREFACE_URL'];
   mockPrepareImageForProcessing.mockReset();
   mockDetectComprefaceFaces.mockReset();
 
@@ -82,12 +78,10 @@ afterEach(() => {
 
 describe('computeFaceDetection', () => {
   it('calls detectComprefaceFaces with the configured comprefaceUrl and the prepared buffer', async () => {
-    mockLoadConfig.mockReturnValue({
-      node: { comprefaceUrl: 'http://localhost:9999' },
-    });
+    process.env['MEMORIAHUB_COMPREFACE_URL'] = 'http://localhost:9999';
     mockDetectComprefaceFaces.mockResolvedValue([]);
 
-    await computeFaceDetection(inputPath, {});
+    await computeFaceDetection(inputPath, {}, CTX);
 
     expect(mockDetectComprefaceFaces).toHaveBeenCalledWith(
       'http://localhost:9999',
@@ -96,10 +90,9 @@ describe('computeFaceDetection', () => {
   });
 
   it('defaults comprefaceUrl to http://localhost:3000 when unset', async () => {
-    mockLoadConfig.mockReturnValue({ node: {} });
     mockDetectComprefaceFaces.mockResolvedValue([]);
 
-    await computeFaceDetection(inputPath, {});
+    await computeFaceDetection(inputPath, {}, CTX);
 
     expect(mockDetectComprefaceFaces).toHaveBeenCalledWith(
       'http://localhost:3000',
@@ -107,14 +100,13 @@ describe('computeFaceDetection', () => {
     );
   });
 
-  it('defaults comprefaceUrl to http://localhost:3000 when loadConfig() returns null', async () => {
+  it('defaults comprefaceUrl to http://localhost:3000 when the variable is empty', async () => {
     // A missing/null config no longer throws — CompreFace is the only
     // supported provider, so there's nothing left to disambiguate; it simply
     // falls back to the default sidecar URL.
-    mockLoadConfig.mockReturnValue(null);
     mockDetectComprefaceFaces.mockResolvedValue([]);
 
-    await computeFaceDetection(inputPath, {});
+    await computeFaceDetection(inputPath, {}, CTX);
 
     expect(mockDetectComprefaceFaces).toHaveBeenCalledWith(
       'http://localhost:3000',
@@ -123,7 +115,6 @@ describe('computeFaceDetection', () => {
   });
 
   it('tags the result with the CompreFace provider/model version and maps faces to the DTO shape', async () => {
-    mockLoadConfig.mockReturnValue({ node: {} });
     mockDetectComprefaceFaces.mockResolvedValue([
       {
         boundingBox: { x: 10, y: 20, w: 100, h: 120 },
@@ -133,7 +124,7 @@ describe('computeFaceDetection', () => {
       },
     ]);
 
-    const result = (await computeFaceDetection(inputPath, {})) as {
+    const result = (await computeFaceDetection(inputPath, {}, CTX)) as {
       providerKey: string;
       modelVersion: string;
       imageWidth: number;
@@ -158,12 +149,11 @@ describe('computeFaceDetection', () => {
   });
 
   it('defaults a missing embedding to []', async () => {
-    mockLoadConfig.mockReturnValue({ node: {} });
     mockDetectComprefaceFaces.mockResolvedValue([
       { boundingBox: { x: 0, y: 0, w: 10, h: 10 }, confidence: 0.5 },
     ]);
 
-    const result = (await computeFaceDetection(inputPath, {})) as {
+    const result = (await computeFaceDetection(inputPath, {}, CTX)) as {
       faces: Array<{ embedding: number[] }>;
     };
 
@@ -171,14 +161,12 @@ describe('computeFaceDetection', () => {
   });
 
   it('propagates a network error from detectComprefaceFaces WITHOUT catching it', async () => {
-    mockLoadConfig.mockReturnValue({ node: {} });
     mockDetectComprefaceFaces.mockRejectedValue(new Error('ECONNREFUSED'));
 
-    await expect(computeFaceDetection(inputPath, {})).rejects.toThrow('ECONNREFUSED');
+    await expect(computeFaceDetection(inputPath, {}, CTX)).rejects.toThrow('ECONNREFUSED');
   });
 
   it('falls back to a direct sharp metadata read for dimensions when preprocessing reports 0x0', async () => {
-    mockLoadConfig.mockReturnValue({ node: {} });
     // prepareImageForProcessing failure convention: width/height 0, buffer unchanged.
     mockPrepareImageForProcessing.mockResolvedValue({ buffer: Buffer.alloc(0), width: 0, height: 0 });
     mockDetectComprefaceFaces.mockResolvedValue([]);
@@ -190,7 +178,7 @@ describe('computeFaceDetection', () => {
       .toBuffer();
     fs.writeFileSync(inputPath, jpeg);
 
-    const result = (await computeFaceDetection(inputPath, {})) as {
+    const result = (await computeFaceDetection(inputPath, {}, CTX)) as {
       imageWidth: number;
       imageHeight: number;
     };

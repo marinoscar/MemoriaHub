@@ -8,7 +8,6 @@ describe('translateLegacyArgs', () => {
     const plan = t(['sync', '--circle', 'x']);
     expect(plan.argv).toEqual(['sync', '--circle', 'x']);
     expect(plan.applied).toEqual([]);
-    expect(plan.legacyNode).toBe(false);
   });
 
   describe('no-color (IGNORE)', () => {
@@ -39,21 +38,6 @@ describe('translateLegacyArgs', () => {
     });
     it('leaves `menu` with other arguments to the app command', () => {
       expect(t(['menu', '--help']).argv).toEqual(['menu', '--help']);
-    });
-  });
-
-  describe('node-group (PORT)', () => {
-    it('routes every node invocation to the 1.3 command, flags intact', () => {
-      const argv = ['node', 'start', '--daemon', '--face-provider', 'compreface', '--types', 'a,b', '--poll', '5'];
-      const plan = t(argv);
-      expect(plan.legacyNode).toBe(true);
-      expect(plan.argv).toEqual(argv);
-    });
-    it('covers node list, which the platform lacks', () => {
-      expect(t(['node', 'list']).legacyNode).toBe(true);
-    });
-    it('does not capture a command that merely contains the word', () => {
-      expect(t(['sync', 'node']).legacyNode).toBe(false);
     });
   });
 

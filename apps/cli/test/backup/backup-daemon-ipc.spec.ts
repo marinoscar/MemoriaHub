@@ -2,6 +2,9 @@
  * test/backup/backup-daemon-ipc.spec.ts — Backup IPC verbs over a REAL daemon
  * host + unix socket (issue #318). Mirrors test/node/daemon-heap-snapshot.spec.ts.
  *
+ * (RETRO-C10: served by serveBackupControl on the backup control socket, no longer by the node daemon;
+ * the event stream is the daemon channel `backup`.)
+ *
  * Covers: backup-status snapshot round-trip (and the configured:false answer
  * when no BackupHost is attached), backup-run-now with busy rejection,
  * backup-cancel cooperative stop, backup-set-rate validation + live apply,
@@ -13,12 +16,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { startDaemonHost, type DaemonHost } from '../../src/node/daemon.js';
-import { NodeEngine } from '../../src/node/node-engine.js';
-import { connectToDaemon, type DaemonClient, type DaemonMessage } from '../../src/node/ipc-client.js';
-import type { ApiClient, ClaimedNodeJob } from '../../src/api.js';
-import type { ComputeDispatcher } from '../../src/node/capabilities.js';
-import type { NodeLogger } from '../../src/node/logger.js';
+import { serveBackupControl } from '../../src/backup/daemon-part.js';
+import { connectToDaemon, type DaemonClient, type DaemonMessage } from '../../src/backup/ipc-client.js';
+import type { BackupLogger } from '../../src/backup/logger.js';
 import {
   BackupHost,
   type BackupRunContext,
@@ -27,22 +27,7 @@ import type { BackupRunOutcome } from '../../src/backup/backup-engine.js';
 import { BACKUP_EV, BackupTypedEmitter, emptyStats } from '../../src/backup/events.js';
 import type { SettingsRepo } from '../../src/repo/settings.js';
 
-function stubApi(): ApiClient {
-  return {
-    claimNodeJobs: async () => ({ jobs: [] as ClaimedNodeJob[] }),
-    heartbeatNode: async () => ({}),
-    deregisterNode: async () => ({}),
-    renewLease: async () => ({}),
-    submitJobResult: async () => ({}),
-    reportJobFailure: async () => ({}),
-  } as unknown as ApiClient;
-}
-
-function stubDispatcher(): ComputeDispatcher {
-  return { compute: async () => ({ ok: true }) } as unknown as ComputeDispatcher;
-}
-
-function stubLogger(): NodeLogger & { lines: string[] } {
+function stubLogger(): BackupLogger & { lines: string[] } {
   const lines: string[] = [];
   return {
     lines,
@@ -93,9 +78,8 @@ async function sendCommand(client: DaemonClient, cmd: Record<string, unknown>): 
   );
 }
 
-describe('daemon backup IPC verbs', () => {
-  let engine: NodeEngine;
-  let host: DaemonHost;
+describe('backup control socket verbs', () => {
+  let stopControl: (() => Promise<void>) | undefined;
   let socketPath: string;
   let backupHost: BackupHost | undefined;
   let engines: FakeEngine[];
@@ -105,22 +89,6 @@ describe('daemon backup IPC verbs', () => {
     socketPath = tmpDirPath('node.sock');
     engines = [];
     resolveRun = null;
-
-    engine = new NodeEngine({
-      api: stubApi(),
-      dispatcher: stubDispatcher(),
-      nodeId: 'node-ipc-1',
-      options: {
-        concurrency: 1,
-        eligibleTypes: ['face_detection'],
-        pollIntervalMs: 60_000,
-        heartbeatIntervalMs: 60_000,
-      },
-      detectFn: async () => ({}),
-      downloadFn: async () => {
-        throw new Error('no downloads expected');
-      },
-    });
 
     backupHost = withBackup
       ? new BackupHost(
@@ -150,24 +118,13 @@ describe('daemon backup IPC verbs', () => {
         )
       : undefined;
 
-    host = await startDaemonHost(engine, stubLogger(), {
-      socketPath,
-      pidPath: tmpDirPath('node.pid'),
-      persistConcurrency: () => {},
-      exit: () => {},
-      ...(backupHost ? { backupHost } : {}),
-    });
+    stopControl = await serveBackupControl(backupHost, stubLogger(), socketPath);
   }
 
   afterEach(async () => {
     resolveRun?.({ runId: 'r', status: 'aborted', stats: emptyStats() });
     await backupHost?.waitForIdle();
-    await host.close();
-    try {
-      await engine.stop('test-cleanup');
-    } catch {
-      /* engine never started */
-    }
+    await stopControl?.();
   });
 
   it('backup-status answers configured:false when no BackupHost is attached', async () => {
@@ -257,28 +214,6 @@ describe('daemon backup IPC verbs', () => {
 
       const status = await sendCommand(client, { cmd: 'backup-status' });
       expect(status['rate']).toEqual({ concurrency: 4, maxMbps: 8 });
-    } finally {
-      client.close();
-    }
-  });
-
-  it('re-broadcasts engine events as { kind: backup-event, ev, payload, ts } frames', async () => {
-    await startHost(true);
-    const client = await connectToDaemon(socketPath);
-    try {
-      const frames: DaemonMessage[] = [];
-      client.onMessage((m) => {
-        if (m.kind === 'backup-event') frames.push(m);
-      });
-
-      await sendCommand(client, { cmd: 'backup-run-now' });
-      engines[0]!.emit(BACKUP_EV.ITEM_DONE, { id: 'item-1', outcome: 'downloaded', bytes: 7 });
-
-      const frame = await client.waitFor((m) => m.kind === 'backup-event', 3000);
-      expect(frame['ev']).toBe('item-done');
-      expect(frame['payload']).toEqual({ id: 'item-1', outcome: 'downloaded', bytes: 7 });
-      expect(typeof frame['ts']).toBe('string');
-      expect(Number.isFinite(Date.parse(frame['ts'] as string))).toBe(true);
     } finally {
       client.close();
     }

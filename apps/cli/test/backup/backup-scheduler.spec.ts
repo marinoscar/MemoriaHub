@@ -10,7 +10,7 @@
 
 import { jest } from '@jest/globals';
 import type { NodeBackupConfigResult } from '../../src/api.js';
-import type { NodeLogger } from '../../src/node/logger.js';
+import type { BackupLogger } from '../../src/backup/logger.js';
 import {
   BackupScheduler,
   SCHEDULER_BACKOFF_INTERVAL_MS,
@@ -21,7 +21,7 @@ import {
 
 const NOW = Date.parse('2026-08-09T12:00:00.000Z');
 
-function stubLogger(): NodeLogger & { lines: string[] } {
+function stubLogger(): BackupLogger & { lines: string[] } {
   const lines: string[] = [];
   return {
     lines,

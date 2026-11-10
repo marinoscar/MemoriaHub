@@ -42,7 +42,7 @@ import { thumbnailRegenExecutor } from './thumbnail.executor.js';
 import { videoFaceDetectionExecutor } from './video-face-detection.executor.js';
 import { workflowExecuteBatchExecutor } from './workflow-execute-batch.executor.js';
 import { CLIP_MODEL_ARTIFACT } from './models.js';
-import { registerInstallSteps } from './install-steps.js';
+import { registerInstallSteps, resetInstallStepsForTests } from './install-steps.js';
 import { NATIVE_MODULES } from './support.js';
 
 export const APP_NODE_EXECUTORS: readonly JobExecutor[] = [
@@ -65,6 +65,12 @@ const TESSERACT = `module:${NATIVE_MODULES['tesseract']}`;
 const COMPREFACE = 'service:compreface';
 
 let registered = false;
+
+/** Lets a test register again after `resetCliForTests()` cleared the platform registries. @internal */
+export function resetNodeExtensionsForTests(): void {
+  registered = false;
+  resetInstallStepsForTests();
+}
 
 /** Registers capabilities, requirements, the model, the install steps and the runtime hooks. Idempotent. */
 export function registerNodeExtensions(): void {

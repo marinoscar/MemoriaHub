@@ -136,7 +136,7 @@ describe('menu tree (platform helpers)', () => {
       ]);
     });
 
-    it('keeps the platform login, invoke, status, jobs, node and logout screens out of the menu in both states', () => {
+    it('keeps the platform login, invoke, status, jobs and logout screens out of the menu in both states', () => {
       for (const loggedIn of [false, true]) {
         const shown = routes(visible('root', loggedIn));
         for (const hidden of PLATFORM_HIDDEN_SCREENS) expect(shown).not.toContain(hidden);
@@ -285,30 +285,9 @@ describe('menu tree (platform helpers)', () => {
   });
 
   describe('Worker Node', () => {
-    it('orders daily operations first and first-run setup last', () => {
-      expect(labels(section('node').children)).toEqual([
-        'Node dashboard',
-        'Start worker (background)',
-        'Stop worker',
-        'Node logs',
-        'Node doctor',
-        'Enroll node (login + credential)',
-        'Install dependencies (Linux)',
-        'Register node',
-        'Node config',
-        'List nodes',
-        'Node service (systemd)',
-      ]);
-    });
-
-    it('exposes the three new onboarding/lifecycle actions', () => {
-      expect(routes(section('node').children)).toEqual(
-        expect.arrayContaining(['node-enroll', 'node-install-deps', 'node-stop']),
-      );
-    });
-
-    it('stays hidden when logged out (root Login is the logged-out entry point)', () => {
-      expect(visible('node', false)).toHaveLength(0);
+    it('is one root entry that opens the platform node screen (RETRO-C10)', () => {
+      const entry = APP_TUI_MENU.find((n) => n.id === 'node');
+      expect(entry).toMatchObject({ kind: 'entry', route: 'node', label: 'Worker Node' });
     });
   });
 
@@ -364,7 +343,6 @@ describe('menu tree (platform helpers)', () => {
       expect(crumb('sync')).toBe('Home › Sync');
       expect(crumb('reports')).toBe('Home › Reports');
       expect(crumb('settings')).toBe('Home › Settings');
-      expect(crumb('node')).toBe('Home › Worker Node');
       expect(crumb('file-tools')).toBe('Home › File Tools');
     });
 

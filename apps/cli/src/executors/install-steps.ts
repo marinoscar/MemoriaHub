@@ -39,7 +39,22 @@ async function tryCapture(context: InstallContext, command: string, args: string
   }
 }
 
+/** What `node install-deps --compreface-*` set for this run (see extensions/node-options.ts). */
+export const comprefaceInstallOptions: {
+  skip: boolean;
+  port: number;
+  processes?: number;
+  memory?: string;
+  cpus?: string;
+  recreate: boolean;
+} = { skip: false, port: 3000, recreate: false };
+
 let registered = false;
+
+/** @internal */
+export function resetInstallStepsForTests(): void {
+  registered = false;
+}
 
 /** Registers the steps once. */
 export function registerInstallSteps(): void {
@@ -92,8 +107,9 @@ export function registerInstallSteps(): void {
     id: 'compreface',
     label: 'CompreFace face-detection sidecar (docker)',
     requiresSudo: false,
-    supported: (context) => tryCapture(context, 'docker', ['--version']),
+    supported: (context) => !comprefaceInstallOptions.skip && tryCapture(context, 'docker', ['--version']),
     detect: async () => {
+      if (comprefaceInstallOptions.recreate) return false;
       try {
         const res = await fetch(`${comprefaceUrl().replace(/\/$/, '')}/status`, { signal: AbortSignal.timeout(3000) });
         return res.ok;
@@ -106,10 +122,19 @@ export function registerInstallSteps(): void {
         {
           name: COMPREFACE_CONTAINER_NAME,
           image: COMPREFACE_IMAGE,
-          args: ['-p', '3000:3000', '-e', `UWSGI_PROCESSES=${defaultComprefaceProcesses()}`, '-e', 'UWSGI_THREADS=1'],
+          args: [
+            '-p',
+            `${comprefaceInstallOptions.port}:3000`,
+            '-e',
+            `UWSGI_PROCESSES=${comprefaceInstallOptions.processes ?? defaultComprefaceProcesses()}`,
+            '-e',
+            'UWSGI_THREADS=1',
+            ...(comprefaceInstallOptions.memory ? ['--memory', comprefaceInstallOptions.memory] : []),
+            ...(comprefaceInstallOptions.cpus ? ['--cpus', comprefaceInstallOptions.cpus] : []),
+          ],
           verify: async () => {
             try {
-              return (await fetch('http://localhost:3000/status', { signal: AbortSignal.timeout(3000) })).ok;
+              return (await fetch(`http://localhost:${comprefaceInstallOptions.port}/status`, { signal: AbortSignal.timeout(3000) })).ok;
             } catch {
               return false;
             }
