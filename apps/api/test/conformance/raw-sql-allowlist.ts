@@ -1,8 +1,8 @@
 // The files allowed to issue raw SQL ($queryRaw / $executeRaw), each with the reason
 // (the `user-owned-data` conformance suite, RETRO-B2 #611). Raw SQL bypasses the
 // typed client, so every statement is listed where a reviewer sees it. Paths are
-// relative to apps/api/src (or to packages/memoriahub-api/src/media for the media slice,
-// RETRO-J5). A new file with raw SQL fails the suite until it is
+// relative to apps/api/src (or to packages/memoriahub-api/src/{media,tagging,search} for those slices,
+// RETRO-J5, RETRO-J7). A new file with raw SQL fails the suite until it is
 // added here with a reason; prefer the typed client.
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
@@ -27,7 +27,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'platform/onboarding/onboarding-data.adapter.ts', why: "The onboarding activation metrics (RETRO-H3, #599): the platform builds ONE aggregate statement over the registered funnel and milestone expressions and this port runs it in a READ ONLY transaction. Counts only, every value a bound parameter, the expressions developer-authored (refused at registration if they contain a semicolon)." },
   { file: 'platform/sharing/record-access.ts', why: "Grants on media items and albums (RETRO-I3, #573): above 1,000 shared records `accessibleWhere` returns the sharing slice's EXISTS condition (`accessibleSql`, the only sanctioned raw access to `grants`), resolved here to a bounded id list (LIMIT 10,000) inside the caller's org-scoped transaction. The table name is a fixed constant, every value a bound parameter." },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
-  { file: 'search/semantic-search.service.ts', why: 'pgvector KNN scoped by circle id.' },
-  { file: 'tagging/auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id.' },
+  { file: 'semantic-search.service.ts', why: 'pgvector KNN scoped by circle id. In the search slice package (packages/memoriahub-api/src/search).' },
+  { file: 'auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id. In the tagging slice package (packages/memoriahub-api/src/tagging).' },
   { file: 'workflows/runs/workflow-evaluate-item.handler.ts', why: 'Rolling micro-run append with row locks, scoped by workflow id.' },
 ];

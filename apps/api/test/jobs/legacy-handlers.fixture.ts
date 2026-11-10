@@ -4,7 +4,7 @@
  * a plain module so importing it never runs a spec.
  */
 
-import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
+import { AutoTaggingHandler, VideoAutoTaggingHandler } from '@marinoscar/memoriahub-api/tagging';
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
 import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
 import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
@@ -35,7 +35,7 @@ import { StorageReprocessHandler } from '../../src/media-processing/recovery/sto
 import { TrashEmptyEvaluateHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
-import { VideoAutoTaggingHandler } from '../../src/tagging/video-auto-tagging.handler';
+
 import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
 import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';

@@ -30,5 +30,22 @@ export const API_SOURCE_ROOT = join(__dirname, '..', '..', 'src');
  */
 export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'media');
 
+/**
+ * The tagging slice of `@marinoscar/memoriahub-api` (RETRO-J7, #618). Paths relative to this root
+ * in the raw-SQL allowlist are the slice's own (`auto-tagging.service.ts`).
+ */
+export const TAGGING_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'tagging');
+
+/**
+ * The search slice of `@marinoscar/memoriahub-api` (RETRO-J7, #618). Paths relative to this root
+ * in the raw-SQL allowlist are the slice's own (`semantic-search.service.ts`).
+ */
+export const SEARCH_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'search');
+
 /** Every root the two scans read. */
-export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT];
+export const CRON_SOURCE_ROOTS: readonly string[] = [
+  API_SOURCE_ROOT,
+  MEDIA_SLICE_SOURCE_ROOT,
+  TAGGING_SLICE_SOURCE_ROOT,
+  SEARCH_SLICE_SOURCE_ROOT,
+];
