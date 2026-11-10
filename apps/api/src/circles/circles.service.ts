@@ -315,7 +315,7 @@ export class CirclesService {
   // `/api/groups/:id/invites`), and delegate every read and write to
   // `GroupInvitesService`: the slice checks the caller is the group's admin,
   // stores the invite, audits it and sends `groups.invitation`; the notifier
-  // allowlists the invitee (`platform/sharing/invite-allowlist.service.ts`).
+  // allowlists the invitee (`SharingNotifierAdapter`, through `IDENTITY_ALLOWLIST`).
   // Behaviour that changed with the move: a second invite to an address with a
   // pending one is 409 `INVITE_PENDING` (it used to update the pending invite's
   // role: revoke and re-invite instead), an address that is already a member is

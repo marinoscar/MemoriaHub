@@ -106,7 +106,7 @@ describe('SharingNotifierAdapter', () => {
 
       await adapter.notifyAddress('groups.invitation', 'person-b@example.test', invitation, { actorUserId: 'admin-1' });
 
-      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', 'admin-1');
+      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', { addedById: 'admin-1', notes: 'Invited to a group', notify: false });
       expect(notifications.notifyAddress).toHaveBeenCalledTimes(1);
       expect(order).toEqual(['allowlist', 'notify']);
     });
@@ -116,7 +116,7 @@ describe('SharingNotifierAdapter', () => {
 
       await adapter.notify('groups.invitation', 'user-2', invitation, { actorUserId: null });
 
-      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', undefined);
+      expect(inviteAllowlist.ensureAllowed).toHaveBeenCalledWith('person-b@example.test', { addedById: null, notes: 'Invited to a group', notify: false });
     });
 
     it('allowlists nothing for any other event', async () => {

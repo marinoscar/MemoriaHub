@@ -1,11 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import type { NotifyOptions } from '@marinoscar/platform-api/notifications';
+import { IDENTITY_ALLOWLIST, type IdentityAllowlist } from '@marinoscar/platform-api/identity';
 import { SettingsResolver } from '@marinoscar/platform-api/settings';
 import { GROUPS_INVITATION_EVENT_KEY, type SharingNotifier, type SharingNotifyHint } from '@marinoscar/platform-api/sharing';
-
-import { InviteAllowlistService } from './invite-allowlist.service';
 
 // =============================================================================
 // SHARING_NOTIFIER -> the platform dispatcher (RETRO-I1, #562)
@@ -23,17 +22,19 @@ import { InviteAllowlistService } from './invite-allowlist.service';
 //
 //   - for `groups.invitation`, the invitee's allowlist entry BEFORE the e-mail
 //     goes out (RETRO-I5, #583: an invite implies the address may sign in;
-//     `invite-allowlist.service.ts`), whichever branch the slice takes (an
+//     `IDENTITY_ALLOWLIST.ensureAllowed`, platform next.29), whichever branch the slice takes (an
 //     address without an account, or an existing user).
 // =============================================================================
 
 @Injectable()
 export class SharingNotifierAdapter implements SharingNotifier {
+  private readonly logger = new Logger(SharingNotifierAdapter.name);
+
   constructor(
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
     private readonly settings: SettingsResolver,
-    private readonly inviteAllowlist: InviteAllowlistService,
+    @Inject(IDENTITY_ALLOWLIST) private readonly allowlist: IdentityAllowlist,
   ) {}
 
   async notify(eventKey: string, userId: string, data: unknown, hint?: SharingNotifyHint): Promise<void> {
@@ -50,7 +51,14 @@ export class SharingNotifierAdapter implements SharingNotifier {
   private async allowlistInvitee(eventKey: string, data: unknown, hint?: SharingNotifyHint): Promise<void> {
     if (eventKey !== GROUPS_INVITATION_EVENT_KEY || data === null || typeof data !== 'object') return;
     const email = (data as { recipientEmail?: unknown }).recipientEmail;
-    if (typeof email === 'string') await this.inviteAllowlist.ensureAllowed(email, hint?.actorUserId ?? undefined);
+    if (typeof email !== 'string' || !email.trim()) return;
+    try {
+      // Idempotent (an existing entry is untouched); `notify: false`: the group invitation is the one e-mail.
+      await this.allowlist.ensureAllowed(email, { addedById: hint?.actorUserId ?? null, notes: 'Invited to a group', notify: false });
+    } catch (err) {
+      // An administrator can allowlist the address by hand; the invitation still goes out.
+      this.logger.warn(`Allowlisting an invited address failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** The actor's zone, or nothing (no actor, no zone, or a failed read). */
