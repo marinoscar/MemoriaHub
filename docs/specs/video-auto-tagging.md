@@ -1,5 +1,7 @@
 # Video AI Auto-Tagging — End-to-End Reference
 
+> **Server-only, AI rule 3 (RETRO-C4, #590).** `video_auto_tagging` is a native platform `JobHandler` with no node pair: the API resolves the provider key and never brokers it to a worker node, and a node never claims the type. Any section below describing a node compute/persist split or a transient per-job credential for this type is historical. Provider throttles (HTTP 429/529, `retry-after`) are rethrown as the platform `RateLimitError` (deferral, no attempt consumed).
+
 | Field | Value |
 |-------|-------|
 | **Version** | 1.0 |

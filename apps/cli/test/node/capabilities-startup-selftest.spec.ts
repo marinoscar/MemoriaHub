@@ -92,7 +92,7 @@ describe('evaluateStartupSelfTest', () => {
       tesseract: { available: false, detail: 'language data not present' },
     };
 
-    const result = evaluateStartupSelfTest(caps, operationalResults, ['auto_tagging']);
+    const result = evaluateStartupSelfTest(caps, operationalResults, ['metadata_extraction']);
 
     expect(result.ok).toBe(true);
     expect(result.blockingFailures).toEqual([]);
@@ -109,11 +109,11 @@ describe('evaluateStartupSelfTest', () => {
       sharp: { available: false, detail: 'sharp self-test failed' },
     };
 
-    // auto_tagging requires sharp -> blocks.
-    const blockingResult = evaluateStartupSelfTest(caps, operationalResults, ['auto_tagging']);
+    // metadata_extraction requires sharp -> blocks.
+    const blockingResult = evaluateStartupSelfTest(caps, operationalResults, ['metadata_extraction']);
     expect(blockingResult.ok).toBe(false);
     expect(blockingResult.blockingFailures).toEqual([
-      { capability: 'sharp', jobType: 'auto_tagging', detail: 'sharp self-test failed' },
+      { capability: 'sharp', jobType: 'metadata_extraction', detail: 'sharp self-test failed' },
     ]);
     expect(blockingResult.degraded).toEqual([]);
 

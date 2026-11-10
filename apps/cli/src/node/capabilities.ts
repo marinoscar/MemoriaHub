@@ -140,6 +140,12 @@ async function probeCompreface(baseUrl: string): Promise<CapabilityStatus> {
 // the API's persistNodeResult re-does all authoritative DB work server-side.
 // The three workflow SWEEP/SQL types (`workflow_evaluate`,
 // `workflow_evaluate_item`, `workflow_history_purge`) stay server-only.
+//
+// `auto_tagging` and `video_auto_tagging` (and `picture_enhancement`) are NOT
+// here since RETRO-C4 (#590): AI jobs are server-only, permanently (EAB AI rule
+// 3). The server resolves the provider key and never brokers it to a node, so a
+// node never claims them. (Their `compute/` modules stay until RETRO-C10 deletes
+// the node executors.)
 export const NODE_JOB_TYPES = [
   'face_detection',
   'video_face_detection',
@@ -147,8 +153,6 @@ export const NODE_JOB_TYPES = [
   'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
-  'auto_tagging',
-  'video_auto_tagging',
   'geocode',
   'workflow_execute_batch',
 ] as const;
@@ -173,10 +177,6 @@ export const JOB_TYPE_REQUIREMENTS: Record<NodeJobType, string[]> = {
   metadata_extraction: ['sharp'],
   social_media_detection: ['ffprobe'], // tesseract optional → Tier-1-only mode
   thumbnail_regen: ['sharp', 'ffmpeg'],
-  auto_tagging: ['sharp'],
-  // Frame extraction (and optional audio extraction) means ffmpeg/ffprobe are
-  // hard requirements — a node without them must never claim this type.
-  video_auto_tagging: ['sharp', 'ffmpeg', 'ffprobe'],
   geocode: [],
   // Pure-JS declaration pass — no native libs, no model files, no ffmpeg.
   workflow_execute_batch: [],
@@ -442,11 +442,6 @@ export class ComputeDispatcher {
         'social_media_detection',
       ),
       thumbnail_regen: lazy(() => import('./compute/thumbnail.js'), 'thumbnail_regen'),
-      auto_tagging: lazy(() => import('./compute/auto-tagging.js'), 'auto_tagging'),
-      video_auto_tagging: lazy(
-        () => import('./compute/video-auto-tagging.js'),
-        'video_auto_tagging',
-      ),
       geocode: lazy(() => import('./compute/geocode.js'), 'geocode'),
       workflow_execute_batch: lazy(
         () => import('./compute/workflow-execute-batch.js'),
