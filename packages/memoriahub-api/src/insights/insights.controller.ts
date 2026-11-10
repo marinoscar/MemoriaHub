@@ -8,14 +8,22 @@
 
 import { Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { InsightsService, type InsightsMetrics, type RefreshState } from '@marinoscar/memoriahub-api/insights';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
+import { MemoriahubAuth } from '../core/index.js';
+import { InsightsService, type InsightsMetrics, type RefreshState } from './insights.service.js';
+
+const ADMIN_ROLE = 'admin';
+const SYSTEM_SETTINGS_READ = 'system_settings:read';
+const SYSTEM_SETTINGS_WRITE = 'system_settings:write';
 
 // ---------------------------------------------------------------------------
 // Response shapes
 // ---------------------------------------------------------------------------
 
+/**
+ * The `GET /api/admin/insights` response.
+ *
+ * @stability experimental
+ */
 export interface InsightsSnapshotDto {
   status: 'ready' | 'empty';
   metrics: InsightsMetrics | null;
@@ -24,6 +32,11 @@ export interface InsightsSnapshotDto {
   refresh: RefreshState;
 }
 
+/**
+ * The `POST /api/admin/insights/refresh` response.
+ *
+ * @stability experimental
+ */
 export interface InsightsRefreshDto {
   jobId: string;
   state: string;
@@ -33,6 +46,11 @@ export interface InsightsRefreshDto {
 // Controller
 // ---------------------------------------------------------------------------
 
+/**
+ * Admin storage insights, mounted at `/api/admin/insights` by the host (it is not registered by `forRoot()`).
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Storage Insights')
 @Controller('admin/insights')
 export class InsightsController {
@@ -42,8 +60,9 @@ export class InsightsController {
   // GET /admin/insights
   // -------------------------------------------------------------------------
 
+  /** The latest snapshot (or an empty one) with the refresh job state. */
   @Get()
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [SYSTEM_SETTINGS_READ] })
   @ApiOperation({ summary: 'Get latest storage insights snapshot with refresh state (Admin)' })
   @ApiResponse({
     status: 200,
@@ -73,8 +92,9 @@ export class InsightsController {
   // POST /admin/insights/refresh
   // -------------------------------------------------------------------------
 
+  /** Enqueues an immediate refresh at priority 0. */
   @Post('refresh')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [SYSTEM_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Enqueue an immediate storage insights refresh (Admin)' })
   @ApiResponse({
     status: 201,

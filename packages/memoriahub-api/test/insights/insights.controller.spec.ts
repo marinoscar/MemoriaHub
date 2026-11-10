@@ -10,11 +10,14 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MhLegacyJobStatus } from '@prisma/client';
-import { InsightsController } from './insights.controller';
-import { InsightsService } from '@marinoscar/memoriahub-api/insights';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
+const MhLegacyJobStatus = { pending: 'pending', running: 'running' } as const;
+import { MemoriahubAuthGuard } from '../../src/core/index.js';
+import { InsightsController } from '../../src/insights/insights.controller.js';
+import { InsightsService } from '../../src/insights/insights.service.js';
+import { MEMORIAHUB_PERMISSIONS_KEY as PERMISSIONS_KEY, MEMORIAHUB_ROLES_KEY as ROLES_KEY } from '../../src/core/auth/memoriahub-auth.constants.js';
+
+const ROLES = { ADMIN: 'admin' };
+const PERMISSIONS = { SYSTEM_SETTINGS_READ: 'system_settings:read', SYSTEM_SETTINGS_WRITE: 'system_settings:write' };
 
 // ---------------------------------------------------------------------------
 // Mock InsightsService
@@ -71,7 +74,7 @@ describe('InsightsController', () => {
         { provide: InsightsService, useValue: mockInsightsService },
       ],
     })
-      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
+      .overrideGuard(MemoriahubAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

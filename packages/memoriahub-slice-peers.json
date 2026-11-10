@@ -247,7 +247,8 @@
     "insights": {
       "peers": [
         "@nestjs/common",
-        "@nestjs/schedule"
+        "@nestjs/schedule",
+        "@nestjs/swagger"
       ]
     },
     "location": {
