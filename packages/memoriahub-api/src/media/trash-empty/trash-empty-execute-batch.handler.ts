@@ -1,20 +1,22 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+
+import { runJobPayload, vetoDeleteWhileRunActive, type MemoriahubRunJobInput } from '../../core/index.js';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { TrashEmptyRunItemStatus, TrashEmptyRunStatus } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { MediaService } from '../media.service';
-import {
-  runJobPayload,
-  vetoDeleteWhileRunActive,
-  type RunJobInput,
-} from '../../platform/jobs/run-engine-jobs';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../../ports/index.js';
+import { MEDIA_ITEM_PURGER, type MediaItemPurger } from '../archive-trash/media-item-purger.js';
+import type { MediaDb } from '../data/media-db.js';
+import { TRASH_EMPTY_ITEM_STATUS, TRASH_EMPTY_RUN_STATUS } from './trash-empty.constants.js';
+
+
 
 /** Payload shape for a `trash_empty_execute_batch` job. */
 interface TrashEmptyExecuteBatchPayload {
@@ -49,30 +51,41 @@ const tracer = trace.getTracer('trash-empty');
  * precisely because it CARRIES the node pair). `canDelete` refuses to delete a
  * pending batch of a run that is still `running`.
  */
+/**
+ * The `trash_empty_execute_batch` job handler.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
+/**
+ * Trash empty execute batch handler.
+ *
+ * @stability experimental
+ */
+export class TrashEmptyExecuteBatchHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'trash_empty_execute_batch';
 
   readonly label = 'Empty trash execute batch';
 
   /** 200 items: a batched hard-delete of rows and objects. 15 minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(TrashEmptyExecuteBatchHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly mediaService: MediaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEDIA_ITEM_PURGER) private readonly purger: MediaItemPurger,
     // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `trash_empty`). Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: RunJobInput): Promise<void> {
+  async process(job: MemoriahubRunJobInput): Promise<void> {
     const raw = runJobPayload<TrashEmptyExecuteBatchPayload>(job);
     if (typeof raw?.runId !== 'string' || raw.runId === '' || !Array.isArray(raw.itemIds)) {
       this.logger.warn(`trash_empty_execute_batch job ${job.id} missing payload; skipping`);
@@ -107,12 +120,12 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
   }
 
   /** Refuses to delete a pending batch of a run that is still running. */
-  canDelete(job: Job): Promise<string | null> {
+  canDelete(job: MemoriahubJob): Promise<string | null> {
     return vetoDeleteWhileRunActive(job, {
       engine: 'empty-trash run',
-      activeStatuses: [TrashEmptyRunStatus.running],
+      activeStatuses: [TRASH_EMPTY_RUN_STATUS.running],
       readRunStatus: async (runId) =>
-        (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } }))
+        ((await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } })) as { status: string } | null)
           ?.status ?? null,
     });
   }
@@ -120,10 +133,10 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
   private async executeBatch(payload: TrashEmptyExecuteBatchPayload): Promise<void> {
     const { runId, itemIds } = payload;
 
-    const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
+    const run = (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } })) as { status: string } | null;
     if (!run) return; // run gone → nothing to do
     // Cooperative cancellation: a cancelled run stops all not-yet-started batches.
-    if (run.status === TrashEmptyRunStatus.cancelled) return;
+    if (run.status === TRASH_EMPTY_RUN_STATUS.cancelled) return;
 
     // Claim: flip still-'matched' items to 'deleted' in one atomic updateMany.
     // claim.count is how many THIS attempt newly owns (already-handled rows are
@@ -132,30 +145,30 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
       where: {
         runId,
         mediaItemId: { in: itemIds },
-        status: TrashEmptyRunItemStatus.matched,
+        status: TRASH_EMPTY_ITEM_STATUS.matched,
       },
-      data: { status: TrashEmptyRunItemStatus.deleted },
+      data: { status: TRASH_EMPTY_ITEM_STATUS.deleted },
     });
     const claimedCount = claim.count;
 
     // Read back every row now in 'deleted' for this batch's itemIds — includes
     // rows claimed by a PRIOR attempt that crashed before purging, so a retry
     // re-purges them (the underlying MediaItem still exists in that case).
-    const claimedRows = await this.prisma.trashEmptyRunItem.findMany({
+    const claimedRows = (await this.prisma.trashEmptyRunItem.findMany({
       where: {
         runId,
         mediaItemId: { in: itemIds },
-        status: TrashEmptyRunItemStatus.deleted,
+        status: TRASH_EMPTY_ITEM_STATUS.deleted,
       },
       select: { mediaItemId: true },
-    });
+    })) as Array<{ mediaItemId: string }>;
     const purgeIds = claimedRows.map((r) => r.mediaItemId);
 
     let failedCount = 0;
     if (purgeIds.length > 0) {
       // Hard-delete the claimed items. A successful purge cascade-deletes the
       // corresponding trash_empty_run_item row (onDelete: Cascade on mediaItem).
-      const { failedIds } = await this.mediaService.purgeMediaItemsBatched(purgeIds);
+      const { failedIds } = await this.purger.purgeMediaItemsBatched(purgeIds);
       failedCount = failedIds.length;
 
       if (failedIds.length > 0) {
@@ -164,10 +177,10 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
           where: {
             runId,
             mediaItemId: { in: failedIds },
-            status: TrashEmptyRunItemStatus.deleted,
+            status: TRASH_EMPTY_ITEM_STATUS.deleted,
           },
           data: {
-            status: TrashEmptyRunItemStatus.failed,
+            status: TRASH_EMPTY_ITEM_STATUS.failed,
             error: 'Hard-delete failed',
           },
         });
@@ -199,22 +212,22 @@ export class TrashEmptyExecuteBatchHandler implements JobHandler, OnModuleInit {
    */
   private async maybeFinalizeRun(runId: string): Promise<void> {
     const remaining = await this.prisma.trashEmptyRunItem.count({
-      where: { runId, status: TrashEmptyRunItemStatus.matched },
+      where: { runId, status: TRASH_EMPTY_ITEM_STATUS.matched },
     });
     if (remaining > 0) return;
 
     // Read the accumulated failed counter to decide the terminal status.
-    const run = await this.prisma.trashEmptyRun.findUnique({
+    const run = (await this.prisma.trashEmptyRun.findUnique({
       where: { id: runId },
       select: { failedCount: true },
-    });
+    })) as { failedCount: number } | null;
     const finalStatus =
       (run?.failedCount ?? 0) > 0
-        ? TrashEmptyRunStatus.completed_with_errors
-        : TrashEmptyRunStatus.completed;
+        ? TRASH_EMPTY_RUN_STATUS.completed_with_errors
+        : TRASH_EMPTY_RUN_STATUS.completed;
 
     const fin = await this.prisma.trashEmptyRun.updateMany({
-      where: { id: runId, status: TrashEmptyRunStatus.running },
+      where: { id: runId, status: TRASH_EMPTY_RUN_STATUS.running },
       data: { status: finalStatus, finishedAt: new Date() },
     });
 

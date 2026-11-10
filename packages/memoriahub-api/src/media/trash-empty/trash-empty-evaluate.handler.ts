@@ -1,25 +1,22 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+
+import { runJobPayload, vetoDeleteWhileRunActive, type MemoriahubRunJobInput } from '../../core/index.js';
 import {
-  Prisma,
-  TrashEmptyRun,
-  TrashEmptyRunItemStatus,
-  TrashEmptyRunStatus,
-} from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { TrashEmptyRunService } from './trash-empty-run.service';
-import {
-  runJobPayload,
-  vetoDeleteWhileRunActive,
-  type RunJobInput,
-} from '../../platform/jobs/run-engine-jobs';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { TRASH_EMPTY_ITEM_STATUS, TRASH_EMPTY_RUN_STATUS, type TrashEmptyRunRow } from './trash-empty.constants.js';
+import { TrashEmptyRunService } from './trash-empty-run.service.js';
+
+
 
 /** Payload shape for a `trash_empty_evaluate` job. */
 interface TrashEmptyEvaluatePayload {
@@ -49,30 +46,41 @@ const tracer = trace.getTracer('trash-empty');
  * derives it server-only and the `system` worker mode runs it. `canDelete`
  * refuses to delete a pending job of a run still `evaluating`.
  */
+/**
+ * The `trash_empty_evaluate` job handler.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
+/**
+ * Trash empty evaluate handler.
+ *
+ * @stability experimental
+ */
+export class TrashEmptyEvaluateHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'trash_empty_evaluate';
 
   readonly label = 'Empty trash evaluate';
 
   /** A keyset scan over one circle's trash: 15 minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(TrashEmptyEvaluateHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
     private readonly runService: TrashEmptyRunService,
     // App metrics (RETRO-T3, #628): `app.runs.finished{engine=trash_empty}`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: RunJobInput): Promise<void> {
+  async process(job: MemoriahubRunJobInput): Promise<void> {
     const payload = runJobPayload<TrashEmptyEvaluatePayload>(job);
     if (!payload?.runId) {
       this.logger.warn(`trash_empty_evaluate job ${job.id} missing runId payload; skipping`);
@@ -82,7 +90,7 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
 
     const run = await this.prisma.trashEmptyRun.findUnique({ where: { id: runId } });
     // Idempotent no-op: run gone, or already past evaluation.
-    if (!run || run.status !== TrashEmptyRunStatus.evaluating) return;
+    if (!run || run.status !== TRASH_EMPTY_RUN_STATUS.evaluating) return;
 
     await tracer.startActiveSpan(
       'trash_empty.evaluate',
@@ -109,20 +117,20 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
   }
 
   /** Refuses to delete a pending job whose run is still being evaluated. */
-  canDelete(job: Job): Promise<string | null> {
+  canDelete(job: MemoriahubJob): Promise<string | null> {
     return vetoDeleteWhileRunActive(job, {
       engine: 'empty-trash run',
-      activeStatuses: [TrashEmptyRunStatus.evaluating],
+      activeStatuses: [TRASH_EMPTY_RUN_STATUS.evaluating],
       readRunStatus: async (runId) =>
-        (await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } }))
+        ((await this.prisma.trashEmptyRun.findUnique({ where: { id: runId }, select: { status: true } })) as { status: string } | null)
           ?.status ?? null,
     });
   }
 
-  private async runEvaluation(job: RunJobInput, run: TrashEmptyRun): Promise<void> {
+  private async runEvaluation(job: MemoriahubRunJobInput, run: TrashEmptyRunRow): Promise<void> {
     const runId = run.id;
     try {
-      const orderBy: Prisma.MediaItemOrderByWithRelationInput[] = [
+      const orderBy = [
         { capturedAt: { sort: 'desc', nulls: 'last' } },
         { id: 'desc' },
       ];
@@ -131,20 +139,20 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
       let cursor: { capturedAt: Date | null; id: string } | null = null;
 
       for (;;) {
-        const baseWhere: Prisma.MediaItemWhereInput = {
+        const baseWhere: Record<string, unknown> = {
           circleId: run.circleId,
           deletedAt: { not: null },
         };
-        const where: Prisma.MediaItemWhereInput = cursor
+        const where: Record<string, unknown> = cursor
           ? { AND: [baseWhere, this.buildAfterCursor(cursor)] }
           : baseWhere;
 
-        const rows = await this.prisma.mediaItem.findMany({
+        const rows = (await this.prisma.mediaItem.findMany({
           where,
           orderBy,
           take: PAGE_SIZE,
           select: { id: true, capturedAt: true },
-        });
+        })) as Array<{ id: string; capturedAt: Date | null }>;
 
         if (rows.length === 0) break;
 
@@ -155,7 +163,7 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
           data: rows.map((r) => ({
             runId,
             mediaItemId: r.id,
-            status: TrashEmptyRunItemStatus.matched,
+            status: TRASH_EMPTY_ITEM_STATUS.matched,
           })),
           skipDuplicates: true,
         });
@@ -172,19 +180,19 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
       if (accepted === 0) {
         await this.prisma.trashEmptyRun.update({
           where: { id: runId },
-          data: { status: TrashEmptyRunStatus.completed, finishedAt: new Date() },
+          data: { status: TRASH_EMPTY_RUN_STATUS.completed, finishedAt: new Date() },
         });
         this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'completed' });
-        this.logTransition(run, TrashEmptyRunStatus.completed, { matchedCount: 0 });
+        this.logTransition(run, TRASH_EMPTY_RUN_STATUS.completed, { matchedCount: 0 });
         return;
       }
 
       await this.prisma.trashEmptyRun.update({
         where: { id: runId },
-        data: { status: TrashEmptyRunStatus.running, startedAt: new Date() },
+        data: { status: TRASH_EMPTY_RUN_STATUS.running, startedAt: new Date() },
       });
       await this.runService.enqueueExecuteBatches(runId, run.circleId);
-      this.logTransition(run, TrashEmptyRunStatus.running, { matchedCount: accepted });
+      this.logTransition(run, TRASH_EMPTY_RUN_STATUS.running, { matchedCount: accepted });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Mark the run terminally failed only once the job has exhausted its normal
@@ -196,14 +204,14 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
           .update({
             where: { id: runId },
             data: {
-              status: TrashEmptyRunStatus.failed,
+              status: TRASH_EMPTY_RUN_STATUS.failed,
               lastError: message,
               finishedAt: new Date(),
             },
           })
           .catch(() => undefined);
         this.metrics?.add('runsFinished', 1, { engine: 'trash_empty', outcome: 'failed' });
-        this.logTransition(run, TrashEmptyRunStatus.failed, { error: message });
+        this.logTransition(run, TRASH_EMPTY_RUN_STATUS.failed, { error: message });
       }
       throw err;
     }
@@ -216,7 +224,7 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
   private buildAfterCursor(cursor: {
     capturedAt: Date | null;
     id: string;
-  }): Prisma.MediaItemWhereInput {
+  }): Record<string, unknown> {
     if (cursor.capturedAt === null) {
       return { capturedAt: null, id: { lt: cursor.id } };
     }
@@ -234,8 +242,8 @@ export class TrashEmptyEvaluateHandler implements JobHandler, OnModuleInit {
   }
 
   private logTransition(
-    run: TrashEmptyRun,
-    toStatus: TrashEmptyRunStatus,
+    run: TrashEmptyRunRow,
+    toStatus: TrashEmptyRunRow['status'],
     extra: Record<string, unknown> = {},
   ): void {
     this.logger.log({

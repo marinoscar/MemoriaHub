@@ -24,6 +24,25 @@ import type { ExecutionContext } from '@nestjs/common';
 export const MEMORIAHUB_IDENTITY = Symbol.for('@marinoscar/memoriahub/MEMORIAHUB_IDENTITY');
 
 /**
+ * The kind of credential a request authenticated with.
+ *
+ * @stability experimental
+ */
+export type MemoriahubCredentialKind = 'jwt' | 'pat' | 'node';
+
+/**
+ * How the request authenticated.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubCredential {
+  /** The credential kind. */
+  kind: MemoriahubCredentialKind;
+  /** The id of the stored token, for a kind that has one (`pat`). */
+  tokenId?: string;
+}
+
+/**
  * The caller, as the port normalises it.
  *
  * @stability experimental
@@ -37,6 +56,8 @@ export interface MemoriahubPrincipal {
   roles: readonly string[];
   /** Every permission string the caller holds in the active organization. */
   permissions: ReadonlySet<string>;
+  /** The credential the request authenticated with, when the host tells. */
+  credential?: MemoriahubCredential;
 }
 
 /**
@@ -50,7 +71,10 @@ export interface MemoriahubIdentityPort {
    * Authenticates the request behind a Nest execution context.
    *
    * @param context - the execution context of the request.
-   * @returns the principal, or `null` when the request carries no valid credential.
+   * @returns the principal, or `null` when the request carries no valid credential. A binding that
+   *   rejects with a message of its own stores it on the request under
+   *   `MEMORIAHUB_AUTH_FAILURE_PROPERTY` so the guard answers with it; one that must refuse for another
+   *   reason (a credential used on a route it may not reach) throws the 403 itself.
    */
   authenticate(context: ExecutionContext): Promise<MemoriahubPrincipal | null>;
 

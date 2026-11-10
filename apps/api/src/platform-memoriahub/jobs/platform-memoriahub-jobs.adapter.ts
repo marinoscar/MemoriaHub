@@ -286,5 +286,6 @@ function toDomainJob(job: Job): MemoriahubJob {
     reason: job.reason ?? null,
     attempts: job.attempts,
     orgId: job.orgId,
+    status: job.status,
   };
 }

@@ -1,7 +1,7 @@
 /**
  * Media Sync devices as the web manages them (issue #515, epic #498).
  *
- * Mirrors the #505 DTOs in `apps/api/src/media-sync/dto/media-sync.dto.ts`.
+ * Mirrors the #505 DTOs in `packages/memoriahub-api/src/media/media-sync/media-sync.dto.ts`.
  * The web (JWT) can list, read, configure, command and unpair the caller's
  * own phones; reads need `media:read`, writes `media:write`. Another user's
  * device answers 404. Errors carry `details.reason` (spec §17.1).

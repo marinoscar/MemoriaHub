@@ -41,7 +41,7 @@ import {
   whereNoFaces,
   whereMissingGeo,
   wherePeople,
-} from '../../search/media-where.builder';
+} from '@marinoscar/memoriahub-api/media';
 
 // ---------------------------------------------------------------------------
 // Small local helpers (case-insensitive string, relative dates, string lists)

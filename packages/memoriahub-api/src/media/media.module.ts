@@ -3,6 +3,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { UploadEnrichmentRegistry } from './enrichment-fanout/upload-enrichment.registry.js';
 import { UploadEnrichmentService } from './enrichment-fanout/upload-enrichment.service.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
+import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service.js';
 import { MediaThumbnailService } from './thumbnails/media-thumbnail.service.js';
 import { UploadNotificationService } from './producers/upload-notification.service.js';
 import { MediaTouchModule } from './touch/media-touch.module.js';
@@ -25,6 +26,12 @@ export interface MediaModuleOptions {
  * `MemoriahubPortsModule.forRoot`) and exports what the host and the other slices inject:
  * the upload fan-out registry and service, the sidecar touch service, the `upload_completed`
  * producer and the Media Sync device service.
+ *
+ * The slice's controllers (`MediaSyncController`, `TrashEmptyRunsController`) are exported classes, not
+ * mounted by `forRoot()`: the host lists them in the `controllers` of the module where its routes belong,
+ * so the order of its OpenAPI document (which follows module order) stays the host's decision. The same
+ * goes for the job handlers that need the host's `MEDIA_ITEM_PURGER` (`TrashPurgeHandler`,
+ * `TrashEmptyExecuteBatchHandler`) and `TrashEmptyEvaluateHandler`: the host lists them as providers.
  *
  * Import it ONCE in the host (the registry is a singleton) and re-export it from the
  * host's own media module.
@@ -51,6 +58,7 @@ export class MediaModule {
         UploadNotificationService,
         MediaSyncService,
         MediaThumbnailService,
+        TrashEmptyRunService,
       ],
       exports: [
         MediaTouchModule,
@@ -59,6 +67,7 @@ export class MediaModule {
         UploadNotificationService,
         MediaSyncService,
         MediaThumbnailService,
+        TrashEmptyRunService,
       ],
     };
     return MediaModule.root;

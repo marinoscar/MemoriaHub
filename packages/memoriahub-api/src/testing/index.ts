@@ -10,3 +10,4 @@ export * from './fake-secrets.js';
 export * from './fake-settings.js';
 export * from './in-memory-object-store.js';
 export * from './recording-ports.js';
+export * from './auth-guard-conformance.js';

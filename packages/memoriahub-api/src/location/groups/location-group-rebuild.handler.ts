@@ -15,7 +15,7 @@ import {
 } from '../../ports/index.js';
 import type { LocationDb } from '../data/location-db.js';
 import { haversineKm } from '../geometry/haversine.js';
-import { whereNear } from '../geometry/where-near.js';
+import { whereNear } from '../../media/index.js';
 import { fold } from './normalize-location-name.js';
 import { LOCATION_GROUP_REBUILD_TYPE, type LocationGroupRebuildPayload } from './location-group-rebuild.service.js';
 

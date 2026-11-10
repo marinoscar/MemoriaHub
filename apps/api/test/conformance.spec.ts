@@ -99,6 +99,7 @@ import { Prisma } from '@prisma/client';
 
 import { DOCTOR_FORBIDDEN_SERVICES } from '@marinoscar/platform-api/doctor/testing';
 
+import { Module } from '@nestjs/common';
 import { AppModule } from '../src/app.module';
 // Declares the credential purposes the `credentials` suite reads.
 import { APP_CREDENTIAL_OWNERS } from '../src/platform/credentials/credential-purposes.manifest';
@@ -129,6 +130,8 @@ import { MEMORIAHUB_GROUP_OWNED_MODELS } from '../src/app-registrations/sharing'
 // The android-app slice's composition: the Media Sync device source it reads (RETRO-D5; AppModule imports it too).
 import '../src/platform/android-app/android-app.config';
 import { IS_PUBLIC_KEY } from '@marinoscar/platform-api/identity';
+import { discoverControllers } from '@marinoscar/platform-api/identity/testing';
+import { MEMORIAHUB_PERMISSIONS_KEY, MEMORIAHUB_ROLES_KEY, MemoriahubAuthGuard } from '@marinoscar/memoriahub-api/core';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
@@ -140,13 +143,43 @@ const PLATFORM_RAW_SQL_INDEX_NAMES: string[] = (
   ) as { indexes: { name: string }[] }
 ).indexes.map((index) => index.name);
 
+/** Nest's metadata key for the guards a controller or handler declares. */
+const GUARDS_METADATA = '__guards__';
+
+/**
+ * The root the platform's identity suite walks: every controller reachable from `AppModule` EXCEPT the
+ * ones the `@marinoscar/memoriahub-api` slices guard with `@MemoriahubAuth` (RETRO-J5, #613).
+ *
+ * The suite's route-access rule asks for the platform's `JwtAuthGuard` on the route, and a packaged slice
+ * cannot name that class (the host-neutral rule): its guard authenticates through the identity port, whose
+ * web-edition adapter delegates to `JwtAuthGuard`. Those routes are held to the same two rules by the
+ * `memoriahub-guarded routes` block below instead, so no route leaves the identity checks unproven.
+ */
+function handlersOf(controller: Function): Array<{ name: string; handler: Function }> {
+  return Object.getOwnPropertyNames(controller.prototype)
+    .filter((name) => name !== 'constructor')
+    .map((name) => ({ name, handler: controller.prototype[name] as Function }))
+    .filter(({ handler }) => typeof handler === 'function' && Reflect.getMetadata('path', handler) !== undefined);
+}
+
+function isMemoriahubGuarded(controller: Function): boolean {
+  return [controller, ...handlersOf(controller).map(({ handler }) => handler)].some((target) =>
+    ((Reflect.getMetadata(GUARDS_METADATA, target) ?? []) as unknown[]).includes(MemoriahubAuthGuard),
+  );
+}
+
+const IDENTITY_CONTROLLERS = discoverControllers(AppModule).filter((controller) => !isMemoriahubGuarded(controller));
+const MEMORIAHUB_GUARDED_CONTROLLERS = discoverControllers(AppModule).filter(isMemoriahubGuarded);
+@Module({ controllers: IDENTITY_CONTROLLERS })
+class IdentityConformanceRoot {}
+
 runPlatformConformance({
   sourceRoots: [...CRON_SOURCE_ROOTS],
   suites: {
     // Identity (RETRO-B2, #611). The walk reads Nest metadata from AppModule; the
     // registries are the ones `permission-manifest.ts` filled.
     identity: {
-      rootModule: AppModule,
+      rootModule: IdentityConformanceRoot,
       permissions: permissionRegistry.list(),
       roles: roleRegistry.list(),
       grants: permissionRegistry
@@ -353,4 +386,40 @@ runPlatformConformance({
       forbiddenServices: [...DOCTOR_FORBIDDEN_SERVICES],
     },
   },
+});
+
+// memoriahub-guarded routes: the identity suite's two route rules, for the controllers it cannot see (see
+// `isMemoriahubGuarded`). Every route of a controller a `@marinoscar/memoriahub-api` slice guards is
+// authenticated through `MemoriahubAuthGuard` (or deliberately public), and every permission and role it
+// names is registered.
+describe('memoriahub-guarded routes', () => {
+  it('finds the packaged controllers (a discovery mistake must not make this vacuous)', () => {
+    expect(MEMORIAHUB_GUARDED_CONTROLLERS.map((controller) => controller.name)).toEqual(
+      expect.arrayContaining(['MediaSyncController', 'TrashEmptyRunsController']),
+    );
+  });
+
+  it.each(MEMORIAHUB_GUARDED_CONTROLLERS.map((controller) => [controller.name, controller] as const))(
+    '%s: every route is behind MemoriahubAuthGuard and names only registered permissions and roles',
+    (_name, controller) => {
+      const permissions = new Set(permissionRegistry.list().map((entry: { id: string }) => entry.id));
+      const roles = new Set(roleRegistry.list().map((entry: { id: string }) => entry.id));
+      const problems: string[] = [];
+
+      for (const { name, handler } of handlersOf(controller)) {
+        const guards = [...(Reflect.getMetadata(GUARDS_METADATA, controller) ?? []), ...(Reflect.getMetadata(GUARDS_METADATA, handler) ?? [])];
+        const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, handler) === true || Reflect.getMetadata(IS_PUBLIC_KEY, controller) === true;
+        if (!isPublic && !guards.includes(MemoriahubAuthGuard)) problems.push(`${controller.name}#${name} is not behind MemoriahubAuthGuard`);
+
+        for (const permission of (Reflect.getMetadata(MEMORIAHUB_PERMISSIONS_KEY, handler) ?? []) as string[]) {
+          if (!permissions.has(permission)) problems.push(`${controller.name}#${name} names the unregistered permission "${permission}"`);
+        }
+        for (const role of (Reflect.getMetadata(MEMORIAHUB_ROLES_KEY, handler) ?? []) as string[]) {
+          if (!roles.has(role)) problems.push(`${controller.name}#${name} names the unregistered role "${role}"`);
+        }
+      }
+
+      expect(problems).toEqual([]);
+    },
+  );
 });

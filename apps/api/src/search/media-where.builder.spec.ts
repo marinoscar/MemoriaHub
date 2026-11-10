@@ -14,7 +14,7 @@ import {
   whereLocality,
   whereFavorite,
   whereType,
-} from './media-where.builder';
+} from '@marinoscar/memoriahub-api/media';
 import { buildWhereFromFields, SEARCHABLE_FIELDS } from './searchable-fields.registry';
 
 const CIRCLE_ID = 'circle-abc-123';
@@ -494,7 +494,7 @@ describe('buildWhereFromFields', () => {
 // ---------------------------------------------------------------------------
 // whereNear — bounding-box radius filter
 // ---------------------------------------------------------------------------
-import { whereNear } from './media-where.builder';
+import { whereNear } from '@marinoscar/memoriahub-api/media';
 
 describe('whereNear', () => {
   // Equator: cos(0) = 1, so lngDelta === latDelta
@@ -741,7 +741,7 @@ describe('buildMediaWhere — AND-composition collision survival', () => {
 // ---------------------------------------------------------------------------
 // whereNoFaces — standalone helper
 // ---------------------------------------------------------------------------
-import { whereNoFaces } from './media-where.builder';
+import { whereNoFaces } from '@marinoscar/memoriahub-api/media';
 
 describe('whereNoFaces', () => {
   it('returns { faces: { none: {} } } when value is true', () => {
@@ -756,7 +756,7 @@ describe('whereNoFaces', () => {
 // ---------------------------------------------------------------------------
 // whereMissingCapturedAt — standalone helper
 // ---------------------------------------------------------------------------
-import { whereMissingCapturedAt, whereMissingCamera } from './media-where.builder';
+import { whereMissingCapturedAt, whereMissingCamera } from '@marinoscar/memoriahub-api/media';
 
 describe('whereMissingCapturedAt', () => {
   it('returns { capturedAt: null } when value is true', () => {
@@ -884,7 +884,7 @@ describe('SEARCHABLE_FIELDS — noFaces field', () => {
 // ---------------------------------------------------------------------------
 // wherePeople — standalone helper
 // ---------------------------------------------------------------------------
-import { wherePeople } from './media-where.builder';
+import { wherePeople } from '@marinoscar/memoriahub-api/media';
 
 describe('wherePeople', () => {
   const ID_A = '11111111-1111-1111-1111-111111111111';
@@ -1033,7 +1033,7 @@ describe('andWhere — composing people with other filters', () => {
 // ---------------------------------------------------------------------------
 // whereCreatedAtRange — standalone helper (upload date range on createdAt)
 // ---------------------------------------------------------------------------
-import { whereCreatedAtRange } from './media-where.builder';
+import { whereCreatedAtRange } from '@marinoscar/memoriahub-api/media';
 
 describe('whereCreatedAtRange', () => {
   it('treats a midnight upper bound as exclusive next-midnight', () => {
