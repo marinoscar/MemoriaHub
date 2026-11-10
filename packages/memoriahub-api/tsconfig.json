@@ -1,0 +1,18 @@
+{
+  // Typecheck and ts-jest. Decorator metadata is on because core's module and
+  // the slices that arrive in J5-J10 are Nest providers.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node", "jest"]
+  },
+  "include": ["src", "test"],
+  "exclude": ["node_modules", "dist"]
+}

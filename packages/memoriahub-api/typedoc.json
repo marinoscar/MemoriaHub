@@ -1,0 +1,29 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "extends": ["../../typedoc.base.json"],
+  "tsconfig": "./tsconfig.build.json",
+  "entryPoints": [
+    "./src/ports/index.ts",
+    "./src/core/index.ts",
+    "./src/testing/index.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "name": "@marinoscar/memoriahub-api",
+  "out": "./docs-api/html",
+  "json": "./docs-api/api.json",
+  // The shared list minus "Property". Option and result interfaces carry their
+  // meaning in the TSDoc of the interface and of the method that takes or
+  // returns them; every exported declaration still needs TSDoc and `@stability`.
+  "requiredToBeDocumented": [
+    "Namespace",
+    "Enum",
+    "EnumMember",
+    "Variable",
+    "Function",
+    "Class",
+    "Interface",
+    "Method",
+    "Accessor",
+    "TypeAlias"
+  ]
+}
