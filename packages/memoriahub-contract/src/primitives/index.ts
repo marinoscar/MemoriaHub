@@ -95,3 +95,11 @@ export function isSupportedTimeZone(timezone: string): boolean {
     return false;
   }
 }
+
+/**
+ * A date or date-time string `Date.parse` accepts, as the admin backfill bodies
+ * take it for their `from` and `to` bounds.
+ *
+ * @stability stable
+ */
+export const flexibleDate = z.string().refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Invalid date' });

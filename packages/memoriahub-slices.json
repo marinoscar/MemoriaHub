@@ -45,6 +45,14 @@
     "search": [],
     "enhancement": [
       "media"
+    ],
+    "face": [],
+    "memories": [],
+    "tagging": [
+      "primitives"
+    ],
+    "social": [
+      "primitives"
     ]
   }
 }

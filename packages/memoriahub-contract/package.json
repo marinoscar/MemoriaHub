@@ -81,6 +81,26 @@
       "import": "./dist/esm/enhancement/index.js",
       "require": "./dist/cjs/enhancement/index.js"
     },
+    "./face": {
+      "types": "./dist/types/face/index.d.ts",
+      "import": "./dist/esm/face/index.js",
+      "require": "./dist/cjs/face/index.js"
+    },
+    "./memories": {
+      "types": "./dist/types/memories/index.d.ts",
+      "import": "./dist/esm/memories/index.js",
+      "require": "./dist/cjs/memories/index.js"
+    },
+    "./tagging": {
+      "types": "./dist/types/tagging/index.d.ts",
+      "import": "./dist/esm/tagging/index.js",
+      "require": "./dist/cjs/tagging/index.js"
+    },
+    "./social": {
+      "types": "./dist/types/social/index.d.ts",
+      "import": "./dist/esm/social/index.js",
+      "require": "./dist/cjs/social/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -96,6 +116,10 @@
     "media-sync",
     "search",
     "enhancement",
+    "face",
+    "memories",
+    "tagging",
+    "social",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

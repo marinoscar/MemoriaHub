@@ -9,3 +9,4 @@ export * from './location-suggestion-query.js';
 export * from './geo-credential.js';
 export * from './geo-feature.js';
 export * from './geo-test.js';
+export * from './location-group.js';

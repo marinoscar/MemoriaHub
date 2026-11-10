@@ -14,7 +14,11 @@
     "./src/media/index.ts",
     "./src/media-sync/index.ts",
     "./src/search/index.ts",
-    "./src/enhancement/index.ts"
+    "./src/enhancement/index.ts",
+    "./src/face/index.ts",
+    "./src/memories/index.ts",
+    "./src/tagging/index.ts",
+    "./src/social/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-contract",

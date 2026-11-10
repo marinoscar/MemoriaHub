@@ -13,3 +13,7 @@ export * from './media/index.js';
 export * from './media-sync/index.js';
 export * from './search/index.js';
 export * from './enhancement/index.js';
+export * from './face/index.js';
+export * from './memories/index.js';
+export * from './tagging/index.js';
+export * from './social/index.js';

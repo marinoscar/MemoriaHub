@@ -110,6 +110,26 @@
       "peers": [
         "zod"
       ]
+    },
+    "face": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "memories": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "tagging": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "social": {
+      "peers": [
+        "zod"
+      ]
     }
   }
 }
