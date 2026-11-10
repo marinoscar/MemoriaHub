@@ -1,13 +1,25 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+
+import { Prisma } from '../core/index.js';
+import { enqueueEnrichmentJob } from '../media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubSql,
+} from '../ports/index.js';
+import type { DedupDb } from './data/dedup-db.js';
 
 const PAGE_SIZE = 5000;
 const CHUNK_SIZE = 100;
 
+/**
+ * Options of {@link DuplicateBackfillService.backfillAllCircles}.
+ *
+ * @stability experimental
+ */
 export interface DuplicateBackfillOptions {
   from?: string;
   to?: string;
@@ -27,22 +39,29 @@ export interface DuplicateBackfillOptions {
  * embedding row are eligible — this is the closest available "not yet
  * processed" signal, since duplicate detection has no dedicated per-item
  * status table (unlike tagging/geocode/metadata).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class DuplicateBackfillService {
   private readonly logger = new Logger(DuplicateBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly scopes: MemoriahubAccessPort,
   ) {}
 
+  /**
+   * Queues `duplicate_detection_batch` jobs (100 media item ids each) for every library.
+   *
+   * @param opts - an optional capture-date range and a force flag.
+   */
   async backfillAllCircles(
     opts: DuplicateBackfillOptions,
   ): Promise<{ enqueued: number; circles: number; estimatedItems: number }> {
     // Every shared library (a platform group) plus every personal library (RETRO-N29).
-    const circles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
+    const circles = (await this.scopes.allScopeIds()).map((id) => ({ id }));
 
     let totalJobs = 0;
     let totalItems = 0;
@@ -79,10 +98,10 @@ export class DuplicateBackfillService {
 
       for (let i = 0; i < page.length; i += CHUNK_SIZE) {
         const chunk = page.slice(i, i + CHUNK_SIZE);
-        await this.enrichmentJobService.enqueue({
+        await enqueueEnrichmentJob(this.jobs, {
           type: 'duplicate_detection_batch',
           circleId,
-          reason: JobReason.backfill,
+          reason: 'backfill',
           priority: 100,
           payload: { mediaItemIds: chunk },
           // Many distinct batch jobs share circleId with a null mediaItemId —
@@ -110,7 +129,7 @@ export class DuplicateBackfillService {
     circleId: string,
     opts: { from?: Date; to?: Date; force: boolean; cursor?: string; limit: number },
   ): Promise<string[]> {
-    const conditions: Prisma.Sql[] = [
+    const conditions: MemoriahubSql[] = [
       Prisma.sql`circle_id = ${circleId}::uuid`,
       Prisma.sql`type = 'photo'`,
       Prisma.sql`deleted_at IS NULL`,

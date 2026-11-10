@@ -1,14 +1,16 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
+import { resolveCircleJob } from '../media/index.js';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { resolveCircleJob } from '../platform/jobs/media-item-job';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { DuplicateDetectionService } from './duplicate-detection.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  type MemoriahubAccessPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import { DuplicateDetectionService } from './duplicate-detection.service.js';
 
 interface DuplicateDetectionBatchPayload {
   mediaItemIds?: unknown;
@@ -39,28 +41,35 @@ interface DuplicateDetectionBatchPayload {
  * download and its own KNN + grouping; the node-eligible unit of this work is
  * `duplicate_detection`. A circle that no longer exists settles the job as a
  * no-op.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class DuplicateDetectionBatchHandler implements JobHandler, OnModuleInit {
+export class DuplicateDetectionBatchHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'duplicate_detection_batch';
+
+  /** The label in the admin job list. */
   readonly label = 'Duplicate detection (batch)';
+
   /** Up to 100 sequential downloads + embeds: a 30-minute ceiling. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(DuplicateDetectionBatchHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly scopes: MemoriahubAccessPort,
     private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one chunk of media item ids; throws at the end when any item failed so the queue retries the chunk. */
+  async process(job: MemoriahubJob): Promise<void> {
     if (job.subjectType === 'circle') {
       const circleId = await resolveCircleJob(this.scopes, job, this.logger);
       if (!circleId) return;

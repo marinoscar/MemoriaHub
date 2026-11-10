@@ -6,9 +6,9 @@
 
 import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
+import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
 import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';

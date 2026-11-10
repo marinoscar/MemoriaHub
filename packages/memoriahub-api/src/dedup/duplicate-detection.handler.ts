@@ -1,14 +1,17 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { duplicateDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
-import { PrismaService } from '../prisma/prisma.service';
-import { DuplicateDetectionService } from './duplicate-detection.service';
+
+import { resolveMediaItemJob } from '../media/index.js';
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import type { DedupDb } from './data/dedup-db.js';
+import { DuplicateDetectionService } from './duplicate-detection.service.js';
 
 /**
  * `duplicate_detection`: a native platform `JobHandler` (RETRO-C5, #594).
@@ -30,27 +33,40 @@ import { DuplicateDetectionService } from './duplicate-detection.service';
  * job as a no-op. Degraded (dHash-only) mode is logged once per process by
  * VisualEmbeddingService.
  */
+/**
+ * `duplicate_detection`: the per-photo near-duplicate job, node-eligible.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class DuplicateDetectionHandler implements JobHandler, OnModuleInit {
+export class DuplicateDetectionHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'duplicate_detection';
+
+  /** The label in the admin job list. */
   readonly label = 'Duplicate detection';
+
   /** One download, one CLIP embed, one KNN query and a hash scan: minutes, never ten. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
+
+  /** The node result contract (model, embedding, dHash). */
   readonly nodeResultSchema = duplicateDetectionResultSchema;
 
   private readonly logger = new Logger(DuplicateDetectionHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
     private readonly duplicateDetectionService: DuplicateDetectionService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one attempt on the server: download, compute, persist. */
+  async process(job: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
     await this.duplicateDetectionService.processMediaItem(context.mediaItemId);
@@ -63,7 +79,7 @@ export class DuplicateDetectionHandler implements JobHandler, OnModuleInit {
    * sharpness column write, exactly what the server path does when sharpness is
    * unavailable.
    */
-  async persistNodeResult(job: Job, result: unknown): Promise<void> {
+  async persistNodeResult(job: MemoriahubJob, result: unknown): Promise<void> {
     const parsed = duplicateDetectionResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;

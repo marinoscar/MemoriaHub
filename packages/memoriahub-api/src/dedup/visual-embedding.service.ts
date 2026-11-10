@@ -29,12 +29,12 @@
  */
 
 import {
+  Inject,
   Injectable,
   Logger,
-  OnApplicationBootstrap,
-  OnModuleDestroy,
+  type OnApplicationBootstrap,
+  type OnModuleDestroy,
 } from '@nestjs/common';
-import type { InferenceSession } from 'onnxruntime-node';
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
@@ -45,10 +45,10 @@ import {
   DEFAULT_CLIP_RECYCLE_AFTER,
   VISUAL_EMBEDDING_MODEL_TAG,
 } from '@marinoscar/memoriahub-compute/clip';
-import { PrismaService } from '../prisma/prisma.service';
-// Imported for the side effect of wiring the shared package's logger into
-// NestJS logging (and kept as the canonical orientation-prep import site).
-import '../media-processing/image-orientation.util';
+import { MEMORIAHUB_PRISMA, type MemoriahubPrismaClientLike } from '../ports/index.js';
+
+/** The ONNX inference session the compute package creates (its type is the package's, not this slice's peer). */
+type InferenceSession = Awaited<ReturnType<typeof createClipSession>>;
 
 // -----------------------------------------------------------------------------
 // Re-exports for import-compat — the pure functions/constants moved to the
@@ -78,6 +78,12 @@ const IDLE_RELEASE_MS = 5 * 60 * 1000; // 5 minutes
 // Service
 // -----------------------------------------------------------------------------
 
+/**
+ * Lazily loads the CLIP ViT-B/32 vision model (downloaded to `MODELS_DIR` on first use; degraded, hash-only
+ * matching when it is unavailable), embeds images, and persists the 512-d vectors.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(VisualEmbeddingService.name);
@@ -96,7 +102,7 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
   private embedsSinceLoad = 0;
   private inFlightEmbeds = 0;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(MEMORIAHUB_PRISMA) private readonly prisma: MemoriahubPrismaClientLike) {}
 
   /**
    * Boot-time native-runtime probe. Loud regression guard for GitHub issue #110:

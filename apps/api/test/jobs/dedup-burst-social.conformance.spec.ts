@@ -35,9 +35,9 @@ import {
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
+import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { SocialMediaDetectorService } from '../../src/social-media/social-media-detector.service';
 import { mediaItemJob } from '../helpers/platform-job';

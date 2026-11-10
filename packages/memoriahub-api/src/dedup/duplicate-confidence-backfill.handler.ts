@@ -1,13 +1,17 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { DuplicateGroupStatus, Prisma } from '@prisma/client';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../prisma/prisma.service';
-import { DuplicateDetectionService } from './duplicate-detection.service';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import type { DedupDb } from './data/dedup-db.js';
+import { DuplicateDetectionService } from './duplicate-detection.service.js';
+
+const DuplicateGroupStatus = { pending: 'pending' } as const;
 
 /** Optional payload for a `duplicate_confidence_backfill` job. */
 interface DuplicateConfidenceBackfillPayload {
@@ -37,27 +41,35 @@ const PAGE_SIZE = 500;
  * SERVER-ONLY by omission: no `nodeResultSchema` / `persistNodeResult` pair —
  * the computation is a pure pgvector query with no media bytes to stream, so
  * there is nothing for a distributed node to do.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class DuplicateConfidenceBackfillHandler implements JobHandler, OnModuleInit {
+export class DuplicateConfidenceBackfillHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'duplicate_confidence_backfill';
+
+  /** The label in the admin job list. */
   readonly label = 'Duplicate confidence backfill';
+
   /** A keyset pass over every pending group, one pgvector query each: a 30-minute ceiling, retried once. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(DuplicateConfidenceBackfillHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
     private readonly detection: DuplicateDetectionService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Keyset-fills `confidence` of every pending group that lacks it. */
+  async process(job: MemoriahubJob): Promise<void> {
     const payload = (job.payload as unknown as DuplicateConfidenceBackfillPayload | null) ?? {};
     const limit = typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : null;
 
@@ -71,7 +83,7 @@ export class DuplicateConfidenceBackfillHandler implements JobHandler, OnModuleI
       const remaining = limit === null ? PAGE_SIZE : Math.min(PAGE_SIZE, limit - scanned);
       if (remaining <= 0) break;
 
-      const where: Prisma.DuplicateGroupWhereInput = {
+      const where: Record<string, unknown> = {
         status: DuplicateGroupStatus.pending,
         confidence: null,
         ...(cursorId ? { id: { gt: cursorId } } : {}),

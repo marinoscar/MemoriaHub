@@ -13,7 +13,7 @@ import { JobReason } from '@prisma/client';
 import { UploadEnrichmentRegistry, UploadEnrichmentService } from '@marinoscar/memoriahub-api/media';
 
 import { registerBurstUploadEnrichment } from '../../src/burst/burst-upload-enrichment';
-import { registerDedupUploadEnrichment } from '../../src/dedup/dedup-upload-enrichment';
+import { registerDedupUploadEnrichment } from '@marinoscar/memoriahub-api/dedup';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 import { registerFaceUploadEnrichment } from '../../src/face/face-upload-enrichment';
 import { registerLocationInferenceUploadEnrichment } from '@marinoscar/memoriahub-api/location';
@@ -52,7 +52,7 @@ export function buildMediaEnrichment(
     service.enqueueVideoPostDetectionEnrichment(item as never, JobReason.upload),
   );
   registerBurstUploadEnrichment(registry, jobs);
-  registerDedupUploadEnrichment(registry, jobs);
+  registerDedupUploadEnrichment(registry, facadeAsJobsPort(jobs));
   registerLocationInferenceUploadEnrichment(registry, facadeAsJobsPort(jobs));
   return service;
 }

@@ -1,42 +1,46 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { UploadEnrichmentRegistry } from '@marinoscar/memoriahub-api/media';
-import { JobReason, MediaType } from '@prisma/client';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { featureSkipReason } from '../enrichment/upload/upload-enrichment-gates';
+import { UploadEnrichmentRegistry, enqueueEnrichmentJob, featureSkipReason } from '../media/index.js';
+import { MEMORIAHUB_JOBS, type MemoriahubJobsPort } from '../ports/index.js';
 
 /**
  * Registers the photo duplicate-detection fan-out with the media slice (RETRO-J5, #613):
  * `duplicate_detection` at priority 10 behind `features.duplicateDetection` and
  * `DUPLICATE_DETECTION_ENABLED`; no status upsert (by design, mirrors burst detection).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class DedupUploadEnrichment implements OnModuleInit {
   constructor(
     private readonly registry: UploadEnrichmentRegistry,
-    private readonly jobs: EnrichmentJobService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /** Registers the fan-out with the media slice. */
   onModuleInit(): void {
     registerDedupUploadEnrichment(this.registry, this.jobs);
   }
 }
 
-/** The registration itself, callable from a unit test without a Nest module. */
-export function registerDedupUploadEnrichment(
-  registry: UploadEnrichmentRegistry,
-  jobs: Pick<EnrichmentJobService, 'enqueue'>,
-): void {
+/**
+ * The registration itself, callable from a unit test without a Nest module.
+ *
+ * @param registry - the media slice's fan-out registry.
+ * @param jobs - the jobs port.
+ * @stability experimental
+ */
+export function registerDedupUploadEnrichment(registry: UploadEnrichmentRegistry, jobs: MemoriahubJobsPort): void {
   registry.register('duplicate_detection', {
-    mediaTypes: [MediaType.photo],
+    mediaTypes: ['photo'],
     order: 500,
     skipReason: (_item, ctx) => featureSkipReason(ctx.settings, 'duplicateDetection', 'DUPLICATE_DETECTION_ENABLED'),
     enqueue: async (item) => {
-      const job = await jobs.enqueue({
+      const job = await enqueueEnrichmentJob(jobs, {
         type: 'duplicate_detection',
         mediaItemId: item.id,
         circleId: item.circleId,
-        reason: JobReason.upload,
+        reason: 'upload',
         priority: 10,
       });
       return `job=${job.id}`;

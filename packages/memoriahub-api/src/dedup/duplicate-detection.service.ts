@@ -1,14 +1,32 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { BurstGroupStatus, DuplicateGroupStatus, MediaType, Prisma } from '@prisma/client';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import type { Readable } from 'node:stream';
 import { computeVisualHash, hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
 import { VISUAL_EMBEDDING_MODEL_TAG } from '@marinoscar/memoriahub-compute/clip';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import { VisualEmbeddingService } from './visual-embedding.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import type { MediaJobContext } from '../platform/jobs/media-item-job';
+
+import type { MediaItemJobContext } from '../media/index.js';
+import {
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import type { DedupDb, DedupTx } from './data/dedup-db.js';
+import { VisualEmbeddingService } from './visual-embedding.service.js';
+
+const BurstGroupStatus = { pending: 'pending' } as const;
+const DuplicateGroupStatus = { pending: 'pending' } as const;
+const MediaType = { photo: 'photo' } as const;
+type MediaJobContext = MediaItemJobContext;
+
+/** Consumes a stream into a buffer. */
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+  return Buffer.concat(chunks);
+}
 
 const DEFAULT_DEDUP_CONFIG = {
   similarityThreshold: 0.96,
@@ -77,12 +95,12 @@ export class DuplicateDetectionService {
   private readonly logger = new Logger(DuplicateDetectionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly visualEmbeddingService: VisualEmbeddingService,
     // App metrics (RETRO-T3, #628): `app.media.duplicates.grouped`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
   // ---------------------------------------------------------------------
@@ -294,7 +312,7 @@ export class DuplicateDetectionService {
     }
 
     try {
-      const provider = await this.resolver.getProviderFor(
+      const provider = await this.objectStore.forLocation(
         storageObject.storageProvider,
         storageObject.bucket,
       );
@@ -320,8 +338,8 @@ export class DuplicateDetectionService {
   // ---------------------------------------------------------------------
 
   private async linkAndGroup(item: EligibleItem): Promise<void> {
-    const settings = await this.systemSettings.getSettings();
-    const dedupConfig = settings.dedup ?? DEFAULT_DEDUP_CONFIG;
+    const { value: dedup } = await this.settings.readSystem<typeof DEFAULT_DEDUP_CONFIG | undefined>('dedup');
+    const dedupConfig = dedup ?? DEFAULT_DEDUP_CONFIG;
 
     const subjectBurstGroupId = item.burstGroupId;
     const circleId = item.circleId;
@@ -430,7 +448,7 @@ export class DuplicateDetectionService {
     // -----------------------------------------------------------------
     // Counted after the commit: `new_group` counts every member placed, `joined_group` the subject.
     let grouped: { outcome: 'new_group' | 'joined_group'; items: number } | null = null;
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx: DedupTx) => {
       const lockRows = await tx.$queryRaw<
         { burst_group_id: string | null; burst_status: string | null }[]
       >`
@@ -548,7 +566,7 @@ export class DuplicateDetectionService {
    */
   async recomputeGroupMeta(
     groupId: string,
-    db: Prisma.TransactionClient = this.prisma,
+    db: DedupTx = this.prisma,
   ): Promise<void> {
     const members = await db.mediaItem.findMany({
       where: { duplicateGroupId: groupId, deletedAt: null, archivedAt: null },
@@ -603,7 +621,7 @@ export class DuplicateDetectionService {
    */
   async computeGroupConfidence(
     memberIds: string[],
-    db: Prisma.TransactionClient = this.prisma,
+    db: DedupTx = this.prisma,
   ): Promise<number | null> {
     if (memberIds.length < 2) return null;
 

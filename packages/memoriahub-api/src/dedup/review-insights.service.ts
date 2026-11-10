@@ -1,8 +1,13 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
+import { Inject, Injectable } from '@nestjs/common';
 
-/** Per-domain review stats returned for both bursts and duplicates. */
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA, type MemoriahubAccessPort } from '../ports/index.js';
+import type { DedupDb } from './data/dedup-db.js';
+
+/**
+ * Per-domain review stats returned for both bursts and duplicates.
+ *
+ * @stability experimental
+ */
 export interface ReviewDomainStats {
   identified: number;
   pending: number;
@@ -28,13 +33,25 @@ interface ActionGroupRow {
   _sum: { keptCount: number | null; removedCount: number | null };
 }
 
+/**
+ * The per-circle aggregate of burst and duplicate review activity, computed live on every call.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class ReviewInsightsService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly membership: OwnerAccessService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly membership: MemoriahubAccessPort,
   ) {}
 
+  /**
+   * The burst and duplicate review counters of a circle (viewer).
+   *
+   * @param circleId - the owner scope.
+   * @param userId - the caller.
+   * @param perms - the caller's permissions.
+   */
   async getReviewInsights(circleId: string, userId: string, perms: string[]) {
     await this.membership.requireOwnerRole(userId, circleId, perms, 'viewer');
 

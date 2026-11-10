@@ -21,7 +21,7 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { BurstQueryDto } from './dto/burst-query.dto';
 import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';

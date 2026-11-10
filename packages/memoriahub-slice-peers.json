@@ -239,6 +239,13 @@
         "@nestjs/schedule",
         "@marinoscar/memoriahub-contract"
       ]
+    },
+    "dedup": {
+      "peers": [
+        "@nestjs/common",
+        "@marinoscar/memoriahub-compute",
+        "onnxruntime-node"
+      ]
     }
   },
   "memoriahub-web": {

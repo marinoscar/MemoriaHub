@@ -112,6 +112,12 @@
       "core",
       "testing",
       "media"
+    ],
+    "dedup": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   },
   "memoriahub-web": {

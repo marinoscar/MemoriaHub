@@ -55,6 +55,14 @@
       "types": "./dist/location/testing/index.d.ts",
       "default": "./dist/location/testing/index.js"
     },
+    "./dedup": {
+      "types": "./dist/dedup/index.d.ts",
+      "default": "./dist/dedup/index.js"
+    },
+    "./dedup/testing": {
+      "types": "./dist/dedup/testing/index.d.ts",
+      "default": "./dist/dedup/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -65,6 +73,7 @@
     "media",
     "insights",
     "location",
+    "dedup",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -84,7 +93,9 @@
     "@nestjs/common": "^11.1.12",
     "@nestjs/schedule": "^6.1.0",
     "@prisma/client-runtime-utils": "^7.8.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@marinoscar/memoriahub-compute": ">=0.0.0-0 || >=0.1.0-0",
+    "onnxruntime-node": "^1.27.0"
   },
   "peerDependenciesMeta": {
     "@marinoscar/memoriahub-contract": {
@@ -94,6 +105,12 @@
       "optional": true
     },
     "@nestjs/schedule": {
+      "optional": true
+    },
+    "@marinoscar/memoriahub-compute": {
+      "optional": true
+    },
+    "onnxruntime-node": {
       "optional": true
     }
   },
