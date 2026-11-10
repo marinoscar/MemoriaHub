@@ -23,5 +23,12 @@ import { join } from 'node:path';
 /** `apps/api/src`: every `@Cron` and `@OnEvent` this app declares. */
 export const API_SOURCE_ROOT = join(__dirname, '..', '..', 'src');
 
+/**
+ * The media slice of `@marinoscar/memoriahub-api` (RETRO-J5, #613): the workspace package ships
+ * `.ts` sources, so its crons and event listeners are scanned like the app's own. Paths in the
+ * findings and in the raw-SQL allowlist are relative to this root (`media-sync/media-sync.service.ts`).
+ */
+export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'media');
+
 /** Every root the two scans read. */
-export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT];
+export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT];

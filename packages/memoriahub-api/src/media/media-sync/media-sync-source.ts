@@ -1,8 +1,8 @@
 import { HttpStatus } from '@nestjs/common';
 
-import type { PrismaService } from '../prisma/prisma.service';
-import { MEDIA_SYNC_REASONS } from './media-sync.constants';
-import { mediaSyncRefusal } from './media-sync-refusal';
+import type { MediaModels } from '../data/media-db.js';
+import { MEDIA_SYNC_REASONS } from './media-sync.constants.js';
+import { mediaSyncRefusal } from './media-sync-refusal.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -14,11 +14,13 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * from attributing uploads to a device that is not theirs. A client that
  * sends no `sourceDeviceId`, or another `source`, is unaffected.
  *
- * A plain function over `PrismaService` rather than a provider, so the media
+ * A plain function over the database client rather than a provider, so the media
  * module can call it without importing the media-sync module.
+ *
+ * @stability experimental
  */
 export async function assertMediaSyncSourceDevice(
-  prisma: Pick<PrismaService, 'mediaSyncDevice'>,
+  prisma: Pick<MediaModels, 'mediaSyncDevice'>,
   userId: string,
   source: string,
   sourceDeviceId: string | undefined,

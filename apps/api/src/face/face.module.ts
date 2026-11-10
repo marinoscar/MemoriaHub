@@ -21,8 +21,9 @@ import { VideoFaceDetectionService } from './video-face-detection.service';
 import { VideoFaceDetectionHandler } from './video-face-detection.handler';
 import { FaceAutoArchiveSweepHandler } from './face-auto-archive-sweep.handler';
 import { MediaModule } from '../media/media.module';
-import { MediaTouchModule } from '../media/media-touch.module';
+import { MediaTouchModule } from '@marinoscar/memoriahub-api/media';
 import { ProfileModule } from '../profile/profile.module';
+import { FaceUploadEnrichment } from './face-upload-enrichment';
 
 /**
  * ProfileModule is imported for issue #354: PeopleService propagates a person's
@@ -35,6 +36,8 @@ import { ProfileModule } from '../profile/profile.module';
   imports: [CredentialsModule, MediaProcessingModule, OwnerAccessModule, EnrichmentModule, MediaModule, MediaTouchModule, ProfileModule],
   controllers: [FaceSettingsController, FaceDetectionController, PeopleController, AdminFaceBackfillController],
   providers: [
+    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
+    FaceUploadEnrichment,
     FaceSettingsService,
     FaceProviderRegistry,
     FaceDetectionCore,

@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MediaType, JobReason, MediaTagStatusType, MediaFaceStatusType, MediaSocialStatusType } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { UploadEnrichmentService } from '@marinoscar/memoriahub-api/media';
 
 /** Minimal shape of a MediaItem needed to decide which enrichment jobs to enqueue. */
 export interface EnrichmentMediaItem {
@@ -15,8 +16,11 @@ export interface EnrichmentMediaItem {
 /**
  * MediaEnrichmentService
  *
- * Single, authoritative source for all upload-time enrichment enqueueing
- * (auto_tagging, face_detection, video_face_detection, burst_detection).
+ * The upload-time enrichment entry point (auto_tagging, face_detection,
+ * video_face_detection, burst_detection, ...). Since RETRO-J5 (#613) the fan-out is the
+ * media slice's registry (`UploadEnrichmentRegistry`); this service keeps the
+ * post-detection video fan-out and the per-item rerun helpers until the slices
+ * they belong to move.
  *
  * Called directly from createMedia (synchronous, awaited) so that all
  * enrichment job rows exist before createMedia returns — regardless of
@@ -45,214 +49,19 @@ export class MediaEnrichmentService {
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: AppSystemSettingsService,
+    private readonly uploadEnrichment: UploadEnrichmentService,
   ) {}
 
   /**
    * Enqueue all upload-time enrichment jobs for a newly registered MediaItem.
    *
-   * Called with the item's own fields — no extra DB lookup needed.
-   * Uses a single getSettings() call (5-second TTL cache) to read all feature
-   * flags without extra DB round-trips during bulk imports.
+   * The fan-out is the media slice's `UploadEnrichmentService` walking the registrations each
+   * slice made (`tagging/tagging-upload-enrichment.ts`, `face/...`, `social-media/...`,
+   * `burst/...`, `dedup/...`, `location-inference/...`); this service no longer names them.
+   * Called with the item's own fields — no extra DB lookup needed. Never rethrows.
    */
   async enqueueUploadEnrichment(item: EnrichmentMediaItem): Promise<void> {
-    try {
-      if (item.deletedAt) {
-        this.logger.debug(
-          `MediaItem ${item.id} is deleted; skipping upload enrichment`,
-        );
-        return;
-      }
-
-      // Single cached settings read for all flags — avoids N×DB during bulk imports.
-      const settings = await this.systemSettings.getSettings();
-      const taggingOn = settings.features?.['autoTagging'] === true;
-      const faceOn = settings.features?.['faceRecognition'] === true;
-      const burstOn = settings.features?.['burstDetection'] === true;
-      const dedupOn = settings.features?.['duplicateDetection'] === true;
-      const locationInferenceOn = settings.features?.['locationInference'] === true;
-      const socialOn = settings.features?.['socialMediaDetection'] === true;
-
-      // Pre-compute env kill-switches once (exact expressions from old listeners).
-      const autoTagKilled = process.env['AUTO_TAG_ENABLED'] === 'false';
-      const faceAutoDetect = process.env['FACE_AUTO_DETECT'] ?? 'true';
-      const faceKilled = faceAutoDetect === 'false';
-      const burstKilled = process.env['BURST_DETECTION_ENABLED'] === 'false';
-      const dedupKilled = process.env['DUPLICATE_DETECTION_ENABLED'] === 'false';
-      const locationInferenceKilled = process.env['LOCATION_INFERENCE_ENABLED'] === 'false';
-      const socialKilled = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
-
-      const enqueued: string[] = [];
-      const skipped: string[] = [];
-
-      // ------------------------------------------------------------------
-      // Auto-tagging — photos only
-      // ------------------------------------------------------------------
-      if (item.type === MediaType.photo && taggingOn && !autoTagKilled) {
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'auto_tagging',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 20,
-        });
-
-        await this.prisma.mediaTagStatus.upsert({
-          where: { mediaItemId: item.id },
-          create: {
-            mediaItemId: item.id,
-            circleId: item.circleId,
-            status: MediaTagStatusType.pending,
-            tagCount: 0,
-          },
-          update: {
-            status: MediaTagStatusType.pending,
-          },
-        });
-
-        enqueued.push(`auto_tagging(job=${job.id})`);
-      } else if (item.type === MediaType.photo) {
-        const reason = !taggingOn ? 'feature disabled' : 'AUTO_TAG_ENABLED=false';
-        skipped.push(`auto_tagging(${reason})`);
-      }
-
-      // ------------------------------------------------------------------
-      // Face detection — photo path (priority 10)
-      // ------------------------------------------------------------------
-      if (item.type === MediaType.photo && faceOn && !faceKilled) {
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'face_detection',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 10,
-        });
-
-        await this.prisma.mediaFaceStatus.upsert({
-          where: { mediaItemId: item.id },
-          create: {
-            mediaItemId: item.id,
-            status: MediaFaceStatusType.pending,
-            faceCount: 0,
-          },
-          update: {
-            status: MediaFaceStatusType.pending,
-          },
-        });
-
-        enqueued.push(`face_detection(job=${job.id})`);
-      } else if (item.type === MediaType.photo) {
-        const reason = !faceOn ? 'feature disabled' : 'FACE_AUTO_DETECT=false';
-        skipped.push(`face_detection(${reason})`);
-      }
-
-      // ------------------------------------------------------------------
-      // Video routing — social-media detection first, else video face detection
-      // ------------------------------------------------------------------
-      // When social-media detection is enabled we run it FIRST and withhold
-      // video_face_detection until classification clears the item: the social
-      // handler fans out the post-detection enrichment on its clean path (and
-      // skips it entirely for detected social re-uploads). When social detection
-      // is off, video_face_detection is enqueued directly — unchanged behavior.
-      if (item.type === MediaType.video) {
-        if (socialOn && !socialKilled) {
-          const job = await this.enrichmentJobService.enqueue({
-            type: 'social_media_detection',
-            mediaItemId: item.id,
-            circleId: item.circleId,
-            reason: JobReason.upload,
-            priority: 10,
-          });
-
-          await this.prisma.mediaSocialStatus.upsert({
-            where: { mediaItemId: item.id },
-            create: {
-              mediaItemId: item.id,
-              status: MediaSocialStatusType.pending,
-            },
-            update: {
-              status: MediaSocialStatusType.pending,
-            },
-          });
-
-          enqueued.push(`social_media_detection(job=${job.id})`);
-        } else {
-          // Social detection off — preserve prior behavior: enqueue video face
-          // detection directly (priority 20 for upload). Pass the already-read
-          // settings so the video path still performs a single getSettings call.
-          await this.enqueueVideoPostDetectionEnrichment(item, JobReason.upload, settings);
-          skipped.push(
-            `social_media_detection(${socialKilled ? 'SOCIAL_MEDIA_DETECTION_ENABLED=false' : 'feature disabled'})`,
-          );
-        }
-      }
-
-      // ------------------------------------------------------------------
-      // Burst detection — photos only; no status upsert (by design)
-      // ------------------------------------------------------------------
-      if (item.type === MediaType.photo && burstOn && !burstKilled) {
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'burst_detection',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          // burst must run before dedup so it can claim items first (burst
-          // precedence). Claim order is (priority ASC, created_at ASC), so a
-          // lower number is claimed earlier — keep this below duplicate_detection.
-          priority: 5,
-        });
-
-        enqueued.push(`burst_detection(job=${job.id})`);
-      } else if (item.type === MediaType.photo) {
-        const reason = !burstOn ? 'feature disabled' : 'BURST_DETECTION_ENABLED=false';
-        skipped.push(`burst_detection(${reason})`);
-      }
-
-      // ------------------------------------------------------------------
-      // Duplicate detection — photos only; no status upsert (by design,
-      // mirrors burst_detection which has no per-item status table either)
-      // ------------------------------------------------------------------
-      if (item.type === MediaType.photo && dedupOn && !dedupKilled) {
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'duplicate_detection',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 10,
-        });
-
-        enqueued.push(`duplicate_detection(job=${job.id})`);
-      } else if (item.type === MediaType.photo) {
-        const reason = !dedupOn ? 'feature disabled' : 'DUPLICATE_DETECTION_ENABLED=false';
-        skipped.push(`duplicate_detection(${reason})`);
-      }
-
-      // ------------------------------------------------------------------
-      // Location inference — photos only; no status upsert (mirrors burst_detection)
-      // ------------------------------------------------------------------
-      if (item.type === MediaType.photo && locationInferenceOn && !locationInferenceKilled) {
-        const job = await this.enrichmentJobService.enqueue({
-          type: 'location_inference',
-          mediaItemId: item.id,
-          circleId: item.circleId,
-          reason: JobReason.upload,
-          priority: 10,
-        });
-        enqueued.push(`location_inference(job=${job.id})`);
-      } else if (item.type === MediaType.photo) {
-        const reason = !locationInferenceOn ? 'feature disabled' : 'LOCATION_INFERENCE_ENABLED=false';
-        skipped.push(`location_inference(${reason})`);
-      }
-
-      this.logger.log(
-        `MediaItem ${item.id} (${item.type}) upload enrichment: enqueued=[${enqueued.join(', ') || 'none'}] skipped=[${skipped.join(', ') || 'none'}]`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `MediaEnrichmentService.enqueueUploadEnrichment failed for MediaItem ${item.id}: ${message}`,
-      );
-      // Never rethrow — enrichment failure must not fail the parent createMedia call.
-    }
+    await this.uploadEnrichment.enqueueUploadEnrichment(item);
   }
 
   /**

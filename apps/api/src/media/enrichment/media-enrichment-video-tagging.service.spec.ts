@@ -17,6 +17,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaType, JobReason, MediaTagStatusType } from '@prisma/client';
 import { MediaEnrichmentService } from './media-enrichment.service';
+import { mediaEnrichmentProvider } from '../../../test/helpers/media-enrichment';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
@@ -80,7 +81,7 @@ describe('MediaEnrichmentService — video AI tagging routing', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        MediaEnrichmentService,
+        mediaEnrichmentProvider,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },

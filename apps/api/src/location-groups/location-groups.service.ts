@@ -8,7 +8,7 @@ import {
 import { LocationGroupLevel, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
 import { fold, stripNoise, suggestionKey } from './normalize-location-name';

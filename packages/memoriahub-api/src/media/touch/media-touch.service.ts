@@ -17,37 +17,45 @@
 //   - Deduplicates ids and no-ops on an empty array.
 //   - Explicitly sets `updatedAt = new Date()` because `updateMany` does not
 //     reliably apply @updatedAt.
-//   - Accepts an optional Prisma.TransactionClient so a caller already inside
+//   - Accepts an optional transaction client so a caller already inside
 //     a transaction can keep the touch atomic with its own writes. NOTE: when
 //     a tx client is passed, a failed touch statement aborts that transaction
 //     at the Postgres level even though this method swallows the error —
 //     prefer touching AFTER the transaction commits unless atomicity matters.
+// =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+
+import { MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import type { MediaDb, MediaTx } from '../data/media-db.js';
 
 /** Ids per UPDATE statement — bounds parameter-list size on huge batches. */
 const TOUCH_CHUNK_SIZE = 500;
 
+/**
+ * Propagates a related-row change onto the parent media item so the node backup
+ * change feed picks it up.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MediaTouchService {
   private readonly logger = new Logger(MediaTouchService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb) {}
 
   /**
    * Bump `updatedAt` on the given MediaItem ids so the backup change feed
    * picks them up. Best-effort; never throws.
+   *
+   * @param ids - the media item ids (duplicates are ignored).
+   * @param tx - the caller's transaction client, to keep the touch atomic with its writes.
    */
-  async touchMediaItems(
-    ids: string[],
-    tx?: Prisma.TransactionClient,
-  ): Promise<void> {
+  async touchMediaItems(ids: string[], tx?: MediaTx): Promise<void> {
     const unique = [...new Set(ids)];
     if (unique.length === 0) return;
 
-    const client = tx ?? this.prisma;
+    const client: MediaTx = tx ?? this.prisma;
 
     try {
       for (let i = 0; i < unique.length; i += TOUCH_CHUNK_SIZE) {

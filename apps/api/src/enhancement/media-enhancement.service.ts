@@ -13,7 +13,7 @@ import { ObjectReprocessService } from '../media-processing/recovery/object-repr
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { isPictureEnhancementEnabled } from '../settings/feature-gates';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';

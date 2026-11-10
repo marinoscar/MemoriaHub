@@ -36,8 +36,8 @@ import {
   UpdateConfigDto,
   UploadDiagnosticsDto,
 } from './dto/media-sync.dto';
-import { REPORTS_KEPT_PER_DEVICE, RUNS_KEPT_PER_DEVICE } from './media-sync.constants';
-import { MediaSyncService } from './media-sync.service';
+import { REPORTS_KEPT_PER_DEVICE, RUNS_KEPT_PER_DEVICE } from '@marinoscar/memoriahub-contract/media-sync';
+import { MediaSyncService } from '@marinoscar/memoriahub-api/media';
 
 // =============================================================================
 // /api/media-sync — the Android Media Sync device API (epic #498, issue #505)

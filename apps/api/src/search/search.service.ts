@@ -9,7 +9,7 @@ import {
 } from './searchable-fields.registry';
 import { SemanticSearchService } from './semantic-search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 
 // Re-export for controller convenience
 export type SearchFieldDescriptor = Pick<

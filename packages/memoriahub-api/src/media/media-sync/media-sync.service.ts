@@ -4,17 +4,11 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, type MediaSyncDevice, type MediaSyncDiagnosticReport, type MediaSyncRun } from '@prisma/client';
-
-import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { staticLogger } from '../common/logger/logger.service';
-import { PrismaService } from '../prisma/prisma.service';
 import {
   type CheckinInput,
   type CheckinResult,
@@ -34,9 +28,12 @@ import {
   type TargetOwner,
   type UpdateConfigInput,
   type UploadDiagnosticsInput,
-} from './dto/media-sync.dto';
-import { applyCommand, applyPatch, defaultConfig, readConfig } from './media-sync-config';
-import { mediaSyncRefusal } from './media-sync-refusal';
+} from '@marinoscar/memoriahub-contract/media-sync';
+
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA, type MemoriahubAccessPort } from '../../ports/index.js';
+import type { MediaDb, MediaTx } from '../data/media-db.js';
+import { applyCommand, applyPatch, defaultConfig, readConfig } from './media-sync-config.js';
+import { mediaSyncRefusal } from './media-sync-refusal.js';
 import {
   AUDIT_COMMAND,
   AUDIT_CONFIG_UPDATED,
@@ -48,7 +45,7 @@ import {
   type MediaSyncReason,
   REPORTS_KEPT_PER_DEVICE,
   RUNS_KEPT_PER_DEVICE,
-} from './media-sync.constants';
+} from './media-sync.constants.js';
 
 // =============================================================================
 // MediaSyncService — the Android Media Sync device API (epic #498, issue #505)
@@ -86,7 +83,52 @@ import {
 // ⚠ NEVER LOG TOKENS. The check-in log line carries ids and counts only.
 // =============================================================================
 
-type Tx = Prisma.TransactionClient;
+type Tx = MediaTx;
+
+/**
+ * Which credential family admitted the request. The host's identity decorator
+ * records it (the web edition: `@AuthCredential()`); the slice only reads it.
+ *
+ * @stability experimental
+ */
+export type MediaSyncCredential =
+  | { kind: 'jwt' }
+  | { kind: 'pat'; tokenId: string }
+  | { kind: 'node' };
+
+/** A `media_sync_devices` row as the slice reads it (the columns it names). */
+type MediaSyncDevice = {
+  id: string;
+  userId: string;
+  installationId: string;
+  name: string;
+  manufacturer: string | null;
+  model: string | null;
+  androidVersion: string | null;
+  sdkInt: number | null;
+  appVersion: string | null;
+  appVersionCode: number | null;
+  packageName: string | null;
+  timezone: string | null;
+  patId: string | null;
+  status: 'active' | 'revoked';
+  config: unknown;
+  configVersion: number;
+  appliedConfigVersion: number;
+  inventory: unknown;
+  stats: unknown;
+  permission: string | null;
+  networkState: string | null;
+  batteryOptimized: boolean | null;
+  lastSeenAt: Date | null;
+  lastSyncAt: Date | null;
+  lastSyncStatus: RunView['status'] | null;
+  lastError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+type MediaSyncRun = Record<string, any>;
+type MediaSyncDiagnosticReport = Record<string, any>;
 
 type DeviceWithPat = MediaSyncDevice & { pat: { expiresAt: Date; revokedAt: Date | null } | null };
 
@@ -98,7 +140,7 @@ type PatState = { expiresAt: Date; revokedAt: Date | null };
  * batched query instead of an `include`.
  */
 async function attachPats<T extends MediaSyncDevice>(
-  client: Pick<Prisma.TransactionClient, 'personalAccessToken'>,
+  client: Pick<MediaTx, 'personalAccessToken'>,
   devices: T[],
 ): Promise<Array<T & { pat: PatState | null }>> {
   const ids = [...new Set(devices.map((d) => d.patId).filter((id): id is string => !!id))];
@@ -112,9 +154,18 @@ async function attachPats<T extends MediaSyncDevice>(
   return devices.map((d) => ({ ...d, pat: d.patId ? (byId.get(d.patId) ?? null) : null }));
 }
 
-type CurrentRelease = { packageName: string; versionCode: number } | null;
+/**
+ * The server's current Android release as {@link updateStatus} reads it, or `null` when none is current.
+ *
+ * @stability experimental
+ */
+export type CurrentRelease = { packageName: string; versionCode: number } | null;
 
-/** The caller as the config validation needs it. */
+/**
+ * The caller as the config validation needs it.
+ *
+ * @stability experimental
+ */
 export interface MediaSyncCaller {
   id: string;
   permissions: string[];
@@ -125,6 +176,8 @@ export interface MediaSyncCaller {
  * applies when the device reports no package (an older app) or the same
  * package; `updateAvailable` needs the installed versionCode to be known and
  * lower.
+ *
+ * @stability experimental
  */
 export function updateStatus(
   device: { packageName: string | null; appVersionCode: number | null },
@@ -139,18 +192,29 @@ export function updateStatus(
   };
 }
 
+/** A Prisma unique-constraint violation (`P2002`), seen structurally. */
 function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'PrismaClientKnownRequestError' &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
 }
 
+/**
+ * The Android Media Sync device API: registration, desired config, commands,
+ * check-in, runs and diagnostics.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MediaSyncService {
   private readonly logger = new Logger(MediaSyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembership: OwnerAccessService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -167,7 +231,7 @@ export class MediaSyncService {
   async register(
     userId: string,
     input: RegisterDeviceInput,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
     now: Date = new Date(),
   ): Promise<{ device: DeviceView; created: boolean }> {
     if (credential?.kind !== 'pat') {
@@ -185,7 +249,7 @@ export class MediaSyncService {
         const { device, created, repaired } = await this.prisma.$transaction((tx) =>
           this.registerInTx(tx, userId, input, tokenId, targetCircleId, now),
         );
-        staticLogger.info(
+        this.logEvent(
           { event: 'media_sync.device.registered', userId, deviceId: device.id, reattached: !created, repaired },
           'Media sync device registered',
         );
@@ -249,7 +313,7 @@ export class MediaSyncService {
         userId,
         installationId: input.installationId,
         ...fields,
-        config: defaultConfig(targetCircleId) as Prisma.InputJsonObject,
+        config: defaultConfig(targetCircleId),
       },
       update: fields,
     });
@@ -270,6 +334,12 @@ export class MediaSyncService {
     return devices.map((device) => this.toDeviceView(device, release));
   }
 
+  /**
+   * One of the caller's devices.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id (another user's device is a 404).
+   */
   async get(userId: string, deviceId: string): Promise<DeviceView> {
     const device = await this.findOwned(userId, deviceId);
     return this.toDeviceView(device, await this.currentRelease());
@@ -282,7 +352,7 @@ export class MediaSyncService {
   async unpair(
     userId: string,
     deviceId: string,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
     now: Date = new Date(),
   ): Promise<void> {
     const device = await this.findOwnedForWrite(userId, deviceId, credential);
@@ -295,7 +365,7 @@ export class MediaSyncService {
         });
       }
     });
-    staticLogger.info({ event: 'media_sync.device.revoked', userId, deviceId: device.id }, 'Media sync device unpaired');
+    this.logEvent({ event: 'media_sync.device.revoked', userId, deviceId: device.id }, 'Media sync device unpaired');
   }
 
   // ---------------------------------------------------------------------------
@@ -315,7 +385,7 @@ export class MediaSyncService {
     caller: MediaSyncCaller,
     deviceId: string,
     input: UpdateConfigInput,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
   ): Promise<ConfigResult> {
     const device = await this.findOwnedForWrite(caller.id, deviceId, credential);
     this.assertActive(device);
@@ -367,7 +437,7 @@ export class MediaSyncService {
         changedKeys = patched.changedKeys;
         return patched.config;
       },
-      input.inventory !== undefined ? { inventory: input.inventory as Prisma.InputJsonArray } : {},
+      input.inventory !== undefined ? { inventory: input.inventory } : {},
     );
 
     const actor = credential?.kind === 'pat' ? 'device' : 'web';
@@ -376,7 +446,7 @@ export class MediaSyncService {
       configVersion: result.configVersion,
       changed: changedKeys,
     });
-    staticLogger.info(
+    this.logEvent(
       { event: AUDIT_CONFIG_UPDATED, userId: caller.id, deviceId: device.id, configVersion: result.configVersion, actor },
       'Media sync config updated',
     );
@@ -392,7 +462,7 @@ export class MediaSyncService {
     userId: string,
     deviceId: string,
     action: MediaSyncCommand,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
   ): Promise<ConfigResult> {
     const device = await this.findOwnedForWrite(userId, deviceId, credential);
     this.assertActive(device);
@@ -400,7 +470,7 @@ export class MediaSyncService {
     const result = await this.writeConfig(device.id, (current) => applyCommand(current, action));
     const actor = credential?.kind === 'pat' ? 'device' : 'web';
     await this.audit(userId, AUDIT_COMMAND, device.id, { action, actor, configVersion: result.configVersion });
-    staticLogger.info(
+    this.logEvent(
       { event: AUDIT_COMMAND, userId, deviceId: device.id, configVersion: result.configVersion, actor, action },
       'Media sync command',
     );
@@ -421,7 +491,7 @@ export class MediaSyncService {
     userId: string,
     deviceId: string,
     input: CheckinInput,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
     now: Date = new Date(),
   ): Promise<CheckinResult> {
     if (credential?.kind !== 'pat') {
@@ -444,15 +514,15 @@ export class MediaSyncService {
     this.assertActive(device);
 
     const run = input.run;
-    const deviceData: Prisma.MediaSyncDeviceUpdateManyMutationInput = {
-      stats: input.stats as Prisma.InputJsonObject,
+    const deviceData: Record<string, unknown> = {
+      stats: input.stats,
       permission: input.permission,
       networkState: input.networkState,
       batteryOptimized: input.batteryOptimized,
       // The phone cannot have applied a version the server never issued.
       appliedConfigVersion: Math.min(input.appliedConfigVersion, device.configVersion),
       lastSeenAt: now,
-      ...(input.inventory !== undefined ? { inventory: input.inventory as Prisma.InputJsonArray } : {}),
+      ...(input.inventory !== undefined ? { inventory: input.inventory } : {}),
       ...(input.appVersion !== undefined ? { appVersion: input.appVersion } : {}),
       ...(input.appVersionCode !== undefined ? { appVersionCode: input.appVersionCode } : {}),
       ...(run ? runStamp(run) : {}),
@@ -475,7 +545,7 @@ export class MediaSyncService {
       });
     });
 
-    staticLogger.info(
+    this.logEvent(
       {
         event: 'media_sync.checkin',
         userId,
@@ -501,6 +571,13 @@ export class MediaSyncService {
   // Runs and diagnostics
   // ---------------------------------------------------------------------------
 
+  /**
+   * The device's recent runs, newest first.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param limit - the most runs to return.
+   */
   async listRuns(userId: string, deviceId: string, limit: number): Promise<RunView[]> {
     const device = await this.findOwned(userId, deviceId);
     const runs = await this.prisma.mediaSyncRun.findMany({
@@ -516,7 +593,7 @@ export class MediaSyncService {
     userId: string,
     deviceId: string,
     input: UploadDiagnosticsInput,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
   ): Promise<ReportCreatedView> {
     const device = await this.findOwnedForWrite(userId, deviceId, credential);
     const report = await this.prisma.$transaction(async (tx) => {
@@ -524,14 +601,14 @@ export class MediaSyncService {
         data: {
           deviceId: device.id,
           summary: input.summary ? input.summary : null,
-          report: input.report as Prisma.InputJsonObject,
+          report: input.report,
         },
         select: { id: true, createdAt: true },
       });
       await trimReports(tx, device.id);
       return created;
     });
-    staticLogger.info(
+    this.logEvent(
       {
         event: 'media_sync.diagnostics.stored',
         userId,
@@ -544,6 +621,13 @@ export class MediaSyncService {
     return { id: report.id, createdAt: report.createdAt.toISOString() };
   }
 
+  /**
+   * The device's diagnostics reports (summaries), newest first.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param limit - the most reports to return.
+   */
   async listDiagnostics(userId: string, deviceId: string, limit: number): Promise<ReportSummaryView[]> {
     const device = await this.findOwned(userId, deviceId);
     const reports = await this.prisma.mediaSyncDiagnosticReport.findMany({
@@ -555,6 +639,13 @@ export class MediaSyncService {
     return reports.map((report) => ({ ...report, createdAt: report.createdAt.toISOString() }));
   }
 
+  /**
+   * One diagnostics report of the device.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param reportId - the report id (404 when it is not the device's).
+   */
   async getDiagnostics(userId: string, deviceId: string, reportId: string): Promise<ReportView> {
     const device = await this.findOwned(userId, deviceId);
     const report = await this.prisma.mediaSyncDiagnosticReport.findFirst({
@@ -567,6 +658,11 @@ export class MediaSyncService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /** One structured, token-free log line: ids and counts only. */
+  private logEvent(fields: Record<string, unknown>, message: string): void {
+    this.logger.log({ ...fields, message });
+  }
 
   private notFound(): NotFoundException {
     return new NotFoundException('Media sync device not found');
@@ -597,7 +693,7 @@ export class MediaSyncService {
   private async findOwnedForWrite(
     userId: string,
     deviceId: string,
-    credential: AuthCredentialInfo | null,
+    credential: MediaSyncCredential | null,
   ): Promise<DeviceWithPat> {
     const device = await this.findOwned(userId, deviceId);
     if (credential?.kind === 'pat' && device.patId !== credential.tokenId) {
@@ -616,10 +712,10 @@ export class MediaSyncService {
    * signup, so the fallback exists only for hand-made accounts.
    */
   private async defaultTargetCircle(userId: string): Promise<string> {
-    const personal = await this.circleMembership.personalLibraryOf(userId);
+    const personal = await this.access.personalLibraryOf(userId);
     if (personal) return personal;
 
-    const [firstWritableGroup] = await this.circleMembership.writableGroupsOf(userId);
+    const [firstWritableGroup] = await this.access.writableScopesOf(userId);
     if (firstWritableGroup) return firstWritableGroup;
 
     throw mediaSyncRefusal(
@@ -636,7 +732,7 @@ export class MediaSyncService {
    */
   private async resolveTargetOwner(caller: MediaSyncCaller, target: TargetOwner): Promise<string> {
     if (target.kind === 'group') return target.groupId;
-    const personal = await this.circleMembership.personalLibraryOf(caller.id);
+    const personal = await this.access.personalLibraryOf(caller.id);
     if (!personal) {
       throw mediaSyncRefusal(
         HttpStatus.FORBIDDEN,
@@ -666,13 +762,13 @@ export class MediaSyncService {
         { circleId },
       );
     try {
-      const { isSuperAdmin } = await this.circleMembership.requireOwnerRole(
+      const { isSuperAdmin } = await this.access.requireOwnerRole(
         caller.id,
         circleId,
         caller.permissions,
         'editor',
       );
-      if (isSuperAdmin && !(await this.scopes.exists(circleId))) throw forbidden();
+      if (isSuperAdmin && !(await this.access.scopeExists(circleId))) throw forbidden();
     } catch (error) {
       if (error instanceof ForbiddenException || error instanceof NotFoundException) throw forbidden();
       throw error;
@@ -688,7 +784,7 @@ export class MediaSyncService {
   private async writeConfig(
     deviceId: string,
     mutate: (current: MediaSyncConfig) => MediaSyncConfig,
-    extra: Prisma.MediaSyncDeviceUpdateManyMutationInput = {},
+    extra: Record<string, unknown> = {},
   ): Promise<ConfigResult> {
     for (let attempt = 1; attempt <= CONFIG_WRITE_ATTEMPTS; attempt++) {
       const row = await this.prisma.mediaSyncDevice.findUniqueOrThrow({
@@ -701,7 +797,7 @@ export class MediaSyncService {
       const expected = row.configVersion;
       const { count } = await this.prisma.mediaSyncDevice.updateMany({
         where: { id: deviceId, configVersion: expected, status: 'active' },
-        data: { ...extra, config: next as Prisma.InputJsonObject, configVersion: expected + 1 },
+        data: { ...extra, config: next, configVersion: expected + 1 },
       });
       if (count === 1) return { config: next, configVersion: expected + 1 };
     }
@@ -716,7 +812,7 @@ export class MediaSyncService {
           action,
           targetType: AUDIT_TARGET_TYPE,
           targetId: deviceId,
-          meta: meta as Prisma.InputJsonObject,
+          meta: meta,
         },
       });
     } catch (error) {
@@ -790,8 +886,8 @@ function readStats(stored: unknown): MediaSyncStats | null {
 }
 
 /** The device's last-sync fields a run updates. */
-function runStamp(run: CheckinRunInput): Prisma.MediaSyncDeviceUpdateManyMutationInput {
-  const stamp: Prisma.MediaSyncDeviceUpdateManyMutationInput = {
+function runStamp(run: CheckinRunInput): Record<string, unknown> {
+  const stamp: Record<string, unknown> = {
     lastSyncAt: new Date(run.finishedAt),
     lastSyncStatus: run.status,
   };
@@ -805,7 +901,7 @@ function runStamp(run: CheckinRunInput): Prisma.MediaSyncDeviceUpdateManyMutatio
   return stamp;
 }
 
-function runRow(deviceId: string, run: CheckinRunInput): Prisma.MediaSyncRunUncheckedCreateInput {
+function runRow(deviceId: string, run: CheckinRunInput): Record<string, unknown> {
   const details: Record<string, unknown> = {};
   if (run.failedSample !== undefined) details.failedSample = run.failedSample;
   if (run.perFolder !== undefined) details.perFolder = run.perFolder;
@@ -820,7 +916,7 @@ function runRow(deviceId: string, run: CheckinRunInput): Prisma.MediaSyncRunUnch
     filesDeduplicated: run.filesDeduplicated,
     bytesUploaded: BigInt(run.bytesUploaded),
     errorCode: run.errorCode ?? null,
-    ...(Object.keys(details).length > 0 ? { details: details as Prisma.InputJsonObject } : {}),
+    ...(Object.keys(details).length > 0 ? { details: details } : {}),
   };
 }
 

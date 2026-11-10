@@ -2,12 +2,8 @@ import { ForbiddenException, HttpException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { DeepMockProxy, mockDeep } from 'jest-mock-extended';
 
-import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { PrismaService } from '../prisma/prisma.service';
-import type { CheckinInput, MediaSyncConfig } from './dto/media-sync.dto';
-import { defaultConfig } from './media-sync-config';
-import { MediaSyncService, updateStatus } from './media-sync.service';
+import { MediaSyncService, defaultConfig, updateStatus, type MediaSyncCredential } from '@marinoscar/memoriahub-api/media';
+import type { CheckinInput, MediaSyncConfig } from '@marinoscar/memoriahub-contract/media-sync';
 
 const USER = '11111111-1111-4111-8111-111111111111';
 const OTHER_USER = '22222222-2222-4222-8222-222222222222';
@@ -22,8 +18,8 @@ const PERSONAL_CIRCLE = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const OTHER_CIRCLE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
 const NOW = new Date('2026-10-02T12:00:00.000Z');
-const JWT: AuthCredentialInfo = { kind: 'jwt' };
-const pat = (tokenId: string): AuthCredentialInfo => ({ kind: 'pat', tokenId });
+const JWT: MediaSyncCredential = { kind: 'jwt' };
+const pat = (tokenId: string): MediaSyncCredential => ({ kind: 'pat', tokenId });
 
 const INVENTORY = [
   { bucketId: '111', name: 'Camera', relativePath: 'DCIM/Camera/', photoCount: 10, videoCount: 2, bytes: 5000 },
@@ -108,24 +104,19 @@ function refusalOf(error: unknown): { status: number; reason?: string; details?:
 
 describe('MediaSyncService', () => {
   let prisma: DeepMockProxy<PrismaClient>;
-  let circles: { requireOwnerRole: jest.Mock; personalLibraryOf: jest.Mock; writableGroupsOf: jest.Mock };
-  let scopes: { exists: jest.Mock };
+  let access: { requireOwnerRole: jest.Mock; personalLibraryOf: jest.Mock; writableScopesOf: jest.Mock; scopeExists: jest.Mock };
   let service: MediaSyncService;
   let devices: DeviceRow[];
 
   beforeEach(() => {
     prisma = mockDeep<PrismaClient>();
-    circles = {
+    access = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'collaborator', isSuperAdmin: false }),
       personalLibraryOf: jest.fn().mockResolvedValue(PERSONAL_CIRCLE),
-      writableGroupsOf: jest.fn().mockResolvedValue([]),
+      writableScopesOf: jest.fn().mockResolvedValue([]),
+      scopeExists: jest.fn().mockResolvedValue(true),
     };
-    scopes = { exists: jest.fn().mockResolvedValue(true) };
-    service = new MediaSyncService(
-      prisma as unknown as PrismaService,
-      circles as unknown as OwnerAccessService,
-      scopes as never,
-    );
+    service = new MediaSyncService(prisma as never, access as never);
     devices = [deviceRow(), deviceRow({ id: DEVICE_B, installationId: 'b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1', patId: PAT_B })];
 
     (prisma.$transaction as jest.Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
@@ -242,8 +233,8 @@ describe('MediaSyncService', () => {
     });
 
     it('falls back to a collaborator circle, and refuses when the user has none', async () => {
-      circles.personalLibraryOf.mockResolvedValue(null);
-      circles.writableGroupsOf.mockResolvedValue([]);
+      access.personalLibraryOf.mockResolvedValue(null);
+      access.writableScopesOf.mockResolvedValue([]);
 
       const error = await service.register(USER, input, pat(PAT_A)).catch((e) => e);
       expect(refusalOf(error)).toMatchObject({ status: 409, reason: 'NO_TARGET_CIRCLE' });
@@ -348,7 +339,7 @@ describe('MediaSyncService', () => {
     });
 
     it('refuses a target circle the caller cannot write with 403 TARGET_CIRCLE_FORBIDDEN', async () => {
-      circles.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
+      access.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
 
       const error = await service.updateConfig(web, DEVICE_A, { targetCircleId: OTHER_CIRCLE }, JWT).catch((e) => e);
 
@@ -357,7 +348,7 @@ describe('MediaSyncService', () => {
         reason: 'TARGET_CIRCLE_FORBIDDEN',
         details: { reason: 'TARGET_CIRCLE_FORBIDDEN', circleId: OTHER_CIRCLE },
       });
-      expect(circles.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
+      expect(access.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
       expect(devices[0].configVersion).toBe(1);
     });
 
@@ -371,18 +362,18 @@ describe('MediaSyncService', () => {
         const result = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'group', groupId: OTHER_CIRCLE } }, JWT);
         expect(result.config.targetCircleId).toBe(OTHER_CIRCLE);
         expect(result.config).not.toHaveProperty('targetOwner');
-        expect(circles.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
+        expect(access.requireOwnerRole).toHaveBeenCalledWith(USER, OTHER_CIRCLE, ['media:write'], 'editor');
       });
 
       it("resolves { kind: 'me' } to the caller's personal library", async () => {
         devices[0].config = { ...(devices[0].config as Record<string, unknown>), targetCircleId: OTHER_CIRCLE };
         const result = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'me' } }, JWT);
-        expect(circles.personalLibraryOf).toHaveBeenCalledWith(USER);
+        expect(access.personalLibraryOf).toHaveBeenCalledWith(USER);
         expect(result.config.targetCircleId).toBe(PERSONAL_CIRCLE);
       });
 
       it('refuses with 403 TARGET_OWNER_FORBIDDEN (the targetCircleId refusal is unchanged)', async () => {
-        circles.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
+        access.requireOwnerRole.mockRejectedValue(new ForbiddenException('nope'));
         const error = await service
           .updateConfig(web, DEVICE_A, { targetOwner: { kind: 'group', groupId: OTHER_CIRCLE } }, JWT)
           .catch((e) => e);
@@ -395,7 +386,7 @@ describe('MediaSyncService', () => {
       });
 
       it("refuses 'me' with TARGET_OWNER_FORBIDDEN when the caller has no personal library", async () => {
-        circles.personalLibraryOf.mockResolvedValue(null);
+        access.personalLibraryOf.mockResolvedValue(null);
         const error = await service.updateConfig(web, DEVICE_A, { targetOwner: { kind: 'me' } }, JWT).catch((e) => e);
         expect(refusalOf(error)).toMatchObject({ status: 403, reason: 'TARGET_OWNER_FORBIDDEN' });
       });

@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import type { Principal } from '@marinoscar/platform-api/core';
 import { LinkGrantsService } from '@marinoscar/platform-api/sharing';
 
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The two resource types a MemoriaHub link can open. */

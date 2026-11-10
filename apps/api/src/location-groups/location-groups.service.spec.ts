@@ -19,7 +19,7 @@ import { LocationGroupsService, titleCase } from './location-groups.service';
 import { LocationGroupResolverService } from './location-group-resolver.service';
 import { LocationGroupRebuildService } from './location-group-rebuild.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';

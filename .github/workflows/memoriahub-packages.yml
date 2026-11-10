@@ -173,6 +173,10 @@ jobs:
 
       - run: npm ci
 
+      # TypeDoc resolves a slice's imports of another package (for example the
+      # media slice importing the contract) from that package's built output.
+      - run: npm run build:memoriahub-packages
+
       # TypeDoc for the packages (fails on an undocumented export or a broken
       # {@link}), then README, TSDoc tag and entry-point checks.
       - run: npm run check:memoriahub-package-docs

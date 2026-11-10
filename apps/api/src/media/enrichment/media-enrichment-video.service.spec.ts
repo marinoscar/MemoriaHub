@@ -29,6 +29,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaEnrichmentService } from './media-enrichment.service';
+import { mediaEnrichmentProvider } from '../../../test/helpers/media-enrichment';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
@@ -104,7 +105,7 @@ describe('MediaEnrichmentService — video_face_detection routing', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        MediaEnrichmentService,
+        mediaEnrichmentProvider,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },

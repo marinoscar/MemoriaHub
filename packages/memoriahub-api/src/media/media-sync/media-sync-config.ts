@@ -2,8 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { Logger } from '@nestjs/common';
 
-import { mediaSyncConfigSchema, type MediaSyncConfig, type UpdateConfigInput } from './dto/media-sync.dto';
-import type { MediaSyncCommand } from './media-sync.constants';
+import { mediaSyncConfigSchema, type MediaSyncConfig, type UpdateConfigInput } from '@marinoscar/memoriahub-contract/media-sync';
+import type { MediaSyncCommand } from './media-sync.constants.js';
 
 // =============================================================================
 // Media Sync desired config (epic #498, issue #505): defaults, reading the
@@ -17,6 +17,8 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000';
  * The config a newly registered phone starts with. `folders: []` means
  * NOTHING syncs until the user chooses folders, so pairing never triggers a
  * surprise upload of the whole phone.
+ *
+ * @stability experimental
  */
 export function defaultConfig(targetCircleId: string): MediaSyncConfig {
   return {
@@ -38,6 +40,8 @@ export function defaultConfig(targetCircleId: string): MediaSyncConfig {
  * module, so it normally parses; a row that does not (hand-edited, or written
  * by a future version with a field this one does not know) degrades to the
  * defaults overlaid with whatever valid fields it carries, never to a 500.
+ *
+ * @stability experimental
  */
 export function readConfig(stored: unknown): MediaSyncConfig {
   const parsed = mediaSyncConfigSchema.safeParse(stored);
@@ -65,7 +69,11 @@ const PATCHABLE_KEYS = [
   'uploadExisting',
 ] as const satisfies ReadonlyArray<keyof MediaSyncConfig & keyof UpdateConfigInput>;
 
-/** Applies a PATCH; returns the new config and the keys whose value changed. */
+/**
+ * Applies a PATCH; returns the new config and the keys whose value changed.
+ *
+ * @stability experimental
+ */
 export function applyPatch(
   current: MediaSyncConfig,
   patch: UpdateConfigInput,
@@ -81,7 +89,11 @@ export function applyPatch(
   return { config: next, changedKeys };
 }
 
-/** Applies a command. Every command produces a new config (and a version bump). */
+/**
+ * Applies a command. Every command produces a new config (and a version bump).
+ *
+ * @stability experimental
+ */
 export function applyCommand(current: MediaSyncConfig, action: MediaSyncCommand): MediaSyncConfig {
   switch (action) {
     case 'pause':

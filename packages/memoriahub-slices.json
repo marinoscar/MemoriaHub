@@ -96,6 +96,11 @@
     "testing": [
       "ports",
       "core"
+    ],
+    "media": [
+      "ports",
+      "core",
+      "testing"
     ]
   }
 }

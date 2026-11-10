@@ -64,11 +64,8 @@ import { applyLocation } from './geo/apply-location.util';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaThumbnailService } from './media-thumbnail.service';
-import { UploadNotificationService } from '../notification-producers/upload-notification.service';
-import { MediaTouchService } from './media-touch.service';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService, assertMediaSyncSourceDevice } from '@marinoscar/memoriahub-api/media';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
-import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source';
 import { metricNumber } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
 
 /**

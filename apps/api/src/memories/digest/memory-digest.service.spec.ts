@@ -19,7 +19,7 @@ import { MemoryType } from '@prisma/client';
 import { MemoryDigestService } from './memory-digest.service';
 import { EmailSettingsService } from '@marinoscar/platform-api/email';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';

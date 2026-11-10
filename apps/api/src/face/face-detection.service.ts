@@ -8,7 +8,7 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { FaceDetectionCore, ResolvedProvider } from './face-detection-core.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import type { DetectedFace } from './providers/face-provider.interface';
 
 @Injectable()

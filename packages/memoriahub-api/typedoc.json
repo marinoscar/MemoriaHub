@@ -5,7 +5,9 @@
   "entryPoints": [
     "./src/ports/index.ts",
     "./src/core/index.ts",
-    "./src/testing/index.ts"
+    "./src/testing/index.ts",
+    "./src/media/index.ts",
+    "./src/media/testing/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-api",

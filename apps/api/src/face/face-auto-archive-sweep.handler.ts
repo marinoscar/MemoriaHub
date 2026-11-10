@@ -9,7 +9,7 @@ import { resolveCircleJob } from '../platform/jobs/media-item-job';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceMatchingService } from './face-matching.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**

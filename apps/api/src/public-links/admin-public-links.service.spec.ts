@@ -6,7 +6,7 @@ import type { Principal } from '@marinoscar/platform-api/core';
 import type { LinkGrantsService } from '@marinoscar/platform-api/sharing';
 
 import { createMockPrismaService } from '../../test/mocks/prisma.mock';
-import type { MediaThumbnailService } from '../media/media-thumbnail.service';
+import type { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AdminPublicLinksService, linkStatusOf } from './admin-public-links.service';
 

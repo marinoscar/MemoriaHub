@@ -29,11 +29,10 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { UploadNotificationService } from '../notification-producers/upload-notification.service';
-import { MediaTouchService } from './media-touch.service';
-import { MediaThumbnailService } from './media-thumbnail.service';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
 
@@ -172,7 +171,7 @@ describe('MediaService.createMedia — fallback location', () => {
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

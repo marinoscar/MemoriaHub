@@ -11,6 +11,7 @@ import { SocialMediaBackfillService } from './social-media-backfill.service';
 import { SocialMediaMediaController } from './social-media-media.controller';
 import { AdminSocialMediaController } from './admin-social-media.controller';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { SocialMediaUploadEnrichment } from './social-media-upload-enrichment';
 
 /**
  * SocialMediaModule
@@ -40,6 +41,8 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
   ],
   controllers: [SocialMediaMediaController, AdminSocialMediaController],
   providers: [
+    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
+    SocialMediaUploadEnrichment,
     SocialMediaDetectorService,
     SocialMediaOcrService,
     SocialMediaDetectionHandler,

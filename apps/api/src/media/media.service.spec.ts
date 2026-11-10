@@ -20,12 +20,11 @@ import { GEO_LOCATION_PROVIDER } from './geo/geo-location-provider.interface';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { UploadNotificationService } from '../notification-producers/upload-notification.service';
-import { MediaTouchService } from './media-touch.service';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { mediaThumbnailsQuerySchema } from './dto/media-thumbnails-query.dto';
-import { MediaThumbnailService } from './media-thumbnail.service';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -292,7 +291,7 @@ describe('MediaService', () => {
         // stays faithful to production; its own dependencies (PrismaService,
         // STORAGE_PROVIDER, StorageProviderResolver) reuse the same mocks
         // registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },

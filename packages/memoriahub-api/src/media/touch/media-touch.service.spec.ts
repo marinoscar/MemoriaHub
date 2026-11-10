@@ -8,29 +8,22 @@
  *   - no-ops (no DB call) on an empty array
  *   - explicitly sets `updatedAt = new Date()` (updateMany does not apply @updatedAt)
  *   - swallows a failed updateMany and logs a warning instead of throwing
- *   - uses the passed Prisma.TransactionClient instead of the injected PrismaService
+ *   - uses the passed transaction client instead of the injected client
  */
-import { Test, TestingModule } from '@nestjs/testing';
-import { MediaTouchService } from './media-touch.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { MediaTouchService } from './media-touch.service.js';
+
+interface MockPrisma {
+  mediaItem: { updateMany: jest.Mock };
+}
 
 describe('MediaTouchService', () => {
   let service: MediaTouchService;
-  let mockPrisma: MockPrismaService;
+  let mockPrisma: MockPrisma;
 
-  beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
-    (mockPrisma.mediaItem.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+  beforeEach(() => {
+    mockPrisma = { mediaItem: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) } };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MediaTouchService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
-    }).compile();
-
-    service = module.get<MediaTouchService>(MediaTouchService);
+    service = new MediaTouchService(mockPrisma as never);
   });
 
   afterEach(() => {
@@ -180,7 +173,7 @@ describe('MediaTouchService', () => {
   // -------------------------------------------------------------------------
 
   describe('transaction client', () => {
-    it('writes through the passed Prisma.TransactionClient instead of the injected PrismaService', async () => {
+    it('writes through the passed transaction client instead of the injected client', async () => {
       const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
       const fakeTx = { mediaItem: { updateMany: txUpdateMany } } as any;
 
