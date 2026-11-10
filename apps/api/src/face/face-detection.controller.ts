@@ -33,7 +33,7 @@ import {
   MediaFaceStatusType,
 } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PeopleService } from './people.service';
+import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 
 // ---------------------------------------------------------------------------

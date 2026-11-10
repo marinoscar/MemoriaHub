@@ -23,7 +23,7 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { FaceSettingsService } from './face-settings.service';
+import { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';

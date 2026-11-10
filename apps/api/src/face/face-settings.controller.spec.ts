@@ -7,7 +7,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { FaceSettingsController } from './face-settings.controller';
-import { FaceSettingsService } from './face-settings.service';
+import { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
 
 // ---------------------------------------------------------------------------
 // Mock FaceSettingsService

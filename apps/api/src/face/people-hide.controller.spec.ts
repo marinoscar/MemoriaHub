@@ -9,7 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { RequestMethod } from '@nestjs/common';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { PeopleController } from './people.controller';
-import { PeopleService } from './people.service';
+import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { RequestUser, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 

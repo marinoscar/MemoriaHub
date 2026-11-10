@@ -17,7 +17,7 @@ import { createZodDto } from 'nestjs-zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
-import { FaceBackfillService } from './face-backfill.service';
+import { FaceBackfillService } from '@marinoscar/memoriahub-api/face';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { adminFaceBackfillSchema } from '@marinoscar/memoriahub-contract/face';
 

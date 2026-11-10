@@ -25,7 +25,7 @@ import {
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PeopleService } from './people.service';
+import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,

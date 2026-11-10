@@ -6,7 +6,7 @@ import {
 } from '@marinoscar/platform-api/doctor';
 
 import { PrismaService } from '../../../prisma/prisma.service';
-import { DEFAULT_FACE_VECTOR_BACKEND } from '../../../face/face-matching.service';
+import { DEFAULT_FACE_VECTOR_BACKEND } from '@marinoscar/memoriahub-api/face';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip, warn } from '../outcome';
 
 // Ported from `DoctorService.checkFacePgvector` (key `face.pgvector`).
