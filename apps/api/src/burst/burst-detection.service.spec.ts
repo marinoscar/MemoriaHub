@@ -34,7 +34,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, EnrichmentJob, JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
 import { computeVisualHash } from '../media-processing/visual-hash.util';

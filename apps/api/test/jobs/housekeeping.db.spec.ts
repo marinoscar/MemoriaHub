@@ -15,7 +15,7 @@ import { dropLibraries, newLibrary } from '../helpers/library';
 import { randomUUID } from 'crypto';
 import { Logger } from '@nestjs/common';
 
-import { InsightsService } from '../../src/insights/insights.service';
+import { InsightsService } from '@marinoscar/memoriahub-api/insights';
 import { MemoryDigestService } from '../../src/memories/digest/memory-digest.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';

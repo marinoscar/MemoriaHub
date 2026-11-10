@@ -1,29 +1,15 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { LocationGroupResolverService } from './location-group-resolver.service';
-import { LocationGroupRebuildService } from './location-group-rebuild.service';
-import { LocationGroupRebuildHandler } from './location-group-rebuild.handler';
+import { LocationModule } from '@marinoscar/memoriahub-api/location';
 
 /**
- * LocationGroupsModule (issue #373)
+ * LocationGroupsModule (issue #373; the slice moved into `@marinoscar/memoriahub-api/location` by RETRO-J10, #624)
  *
- * Exports LocationGroupResolverService — THE single component that computes
- * canonical location names — plus the rebuild enqueue helper. Every write path
- * that touches a `geoCanonical*` column imports this module.
- *
- * Cycle-free by construction: EnrichmentModule imports only PrismaModule +
- * and neither of those (nor this module) imports MediaModule /
- * GeoModule / LocationInferenceModule / WorkflowsModule — the four consumers.
+ * Exports LocationGroupResolverService, THE single component that computes canonical location
+ * names, the rebuild enqueue helper and the management service. Every write path that touches a
+ * `geoCanonical*` column imports this module.
  */
 @Module({
-  imports: [PrismaModule, EnrichmentModule, OwnerAccessModule],
-  providers: [
-    LocationGroupResolverService,
-    LocationGroupRebuildService,
-    LocationGroupRebuildHandler,
-  ],
-  exports: [LocationGroupResolverService, LocationGroupRebuildService],
+  imports: [LocationModule.forRoot()],
+  exports: [LocationModule],
 })
 export class LocationGroupsModule {}

@@ -4,7 +4,7 @@ import { createZodDto } from 'nestjs-zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
-import { LocationInferenceBackfillService } from './location-inference-backfill.service';
+import { LocationInferenceBackfillService } from '@marinoscar/memoriahub-api/location';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { adminLocationInferenceBackfillSchema } from '@marinoscar/memoriahub-contract/location';
 

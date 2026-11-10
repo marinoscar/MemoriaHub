@@ -8,7 +8,7 @@
 
 import { BadRequestException } from '@nestjs/common';
 import { AdminLocationInferenceController } from './admin-location-inference.controller';
-import { LocationInferenceBackfillService } from './location-inference-backfill.service';
+import { LocationInferenceBackfillService } from '@marinoscar/memoriahub-api/location';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 

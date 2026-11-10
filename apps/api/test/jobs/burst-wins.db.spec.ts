@@ -23,8 +23,8 @@ import { randomUUID } from 'node:crypto';
 
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
 import { BurstDetectionService } from '../../src/burst/burst-detection.service';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
-import { DuplicateDetectionService } from '../../src/dedup/duplicate-detection.service';
+import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';

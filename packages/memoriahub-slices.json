@@ -107,6 +107,23 @@
       "core",
       "testing",
       "media"
+    ],
+    "insights": [
+      "ports",
+      "core",
+      "media"
+    ],
+    "location": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "dedup": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   },
   "memoriahub-web": {

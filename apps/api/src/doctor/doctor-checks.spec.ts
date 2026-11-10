@@ -30,7 +30,7 @@ import type { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
 import type { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import type { SocialMediaOcrService } from '../social-media/social-media-ocr.service';
-import type { VisualEmbeddingService } from '../dedup/visual-embedding.service';
+import type { VisualEmbeddingService } from '@marinoscar/memoriahub-api/dedup';
 import {
   createMockPrismaService,
   MockPrismaService,

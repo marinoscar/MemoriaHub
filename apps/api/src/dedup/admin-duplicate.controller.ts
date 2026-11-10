@@ -15,8 +15,8 @@ import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { DuplicateBackfillService } from './duplicate-backfill.service';
-import { VisualEmbeddingService, VISUAL_EMBEDDING_MODEL_TAG } from './visual-embedding.service';
+import { DuplicateBackfillService } from '@marinoscar/memoriahub-api/dedup';
+import { VisualEmbeddingService, VISUAL_EMBEDDING_MODEL_TAG } from '@marinoscar/memoriahub-api/dedup';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { adminDuplicateBackfillSchema, adminDuplicateConfidenceBackfillSchema } from '@marinoscar/memoriahub-contract/dedup';
 

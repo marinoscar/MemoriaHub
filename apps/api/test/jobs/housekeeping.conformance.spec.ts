@@ -26,8 +26,7 @@ import {
   findJobHandlerContractViolations,
 } from '@marinoscar/platform-api/jobs/testing';
 
-import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler';
-import { InsightsService } from '../../src/insights/insights.service';
+import { InsightsService, StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
 import { MemoryDigestService } from '../../src/memories/digest/memory-digest.service';
 import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
@@ -259,10 +258,10 @@ function buildInsights(): StorageInsightsHandler {
       ins.runs += 1;
     },
   };
-  return new StorageInsightsHandler(registry, insights as never);
+  return new StorageInsightsHandler({ registerHandler: jest.fn() } as never, insights as never);
 }
 
-describeJobHandlerConformance('storage_insights', () => alias(buildInsights()), {
+describeJobHandlerConformance('storage_insights', () => alias(buildInsights() as unknown as JobHandler), {
   payloads: [
     {
       name: 'recomputes the snapshot (replacing the previous one)',

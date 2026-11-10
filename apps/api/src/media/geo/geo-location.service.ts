@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';
-import { GeoLocationResult } from './geo-location-provider.interface';
+import { GeoLocationResult } from '@marinoscar/memoriahub-api/location';
 import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 

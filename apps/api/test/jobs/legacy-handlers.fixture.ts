@@ -6,14 +6,12 @@
 
 import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
+import { DuplicateConfidenceBackfillHandler, DuplicateDetectionHandler, DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { FaceAutoArchiveSweepHandler, FaceDetectionHandler, VideoFaceDetectionHandler } from '@marinoscar/memoriahub-api/face';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
-import { LocationGroupRebuildHandler } from '../../src/location-groups/location-group-rebuild.handler';
-import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
+import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
+import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { LocationSuggestionRunEvaluateHandler } from '../../src/location-inference/runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inference/runs/location-suggestion-run-execute-batch.handler';
 import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
@@ -25,7 +23,7 @@ import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evalu
 import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
-import { StorageInsightsHandler } from '../../src/insights/storage-insights.handler';
+import { StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
 import { RetiredStorageMigrationHandler } from '../../src/platform/jobs/retired-job-types';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';

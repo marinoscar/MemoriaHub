@@ -8,6 +8,12 @@
     "./src/testing/index.ts",
     "./src/media/index.ts",
     "./src/media/testing/index.ts",
+    "./src/insights/index.ts",
+    "./src/insights/testing/index.ts",
+    "./src/location/index.ts",
+    "./src/location/testing/index.ts",
+    "./src/dedup/index.ts",
+    "./src/dedup/testing/index.ts",
     "./src/face/index.ts",
     "./src/face/testing/index.ts"
   ],

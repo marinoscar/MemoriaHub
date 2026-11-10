@@ -47,6 +47,30 @@
       "types": "./dist/face/testing/index.d.ts",
       "default": "./dist/face/testing/index.js"
     },
+    "./insights": {
+      "types": "./dist/insights/index.d.ts",
+      "default": "./dist/insights/index.js"
+    },
+    "./insights/testing": {
+      "types": "./dist/insights/testing/index.d.ts",
+      "default": "./dist/insights/testing/index.js"
+    },
+    "./location": {
+      "types": "./dist/location/index.d.ts",
+      "default": "./dist/location/index.js"
+    },
+    "./location/testing": {
+      "types": "./dist/location/testing/index.d.ts",
+      "default": "./dist/location/testing/index.js"
+    },
+    "./dedup": {
+      "types": "./dist/dedup/index.d.ts",
+      "default": "./dist/dedup/index.js"
+    },
+    "./dedup/testing": {
+      "types": "./dist/dedup/testing/index.d.ts",
+      "default": "./dist/dedup/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -56,6 +80,9 @@
     "testing",
     "media",
     "face",
+    "insights",
+    "location",
+    "dedup",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -80,7 +107,8 @@
     "@opentelemetry/api": "^1.9.1",
     "@prisma/client-runtime-utils": "^7.8.0",
     "nestjs-zod": "^5.4.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "onnxruntime-node": "^1.27.0"
   },
   "peerDependenciesMeta": {
     "@marinoscar/memoriahub-compute": {
@@ -105,6 +133,9 @@
       "optional": true
     },
     "nestjs-zod": {
+      "optional": true
+    },
+    "onnxruntime-node": {
       "optional": true
     }
   },

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CredentialsModule } from '../../platform/credentials/credentials.config';
 import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
-import { GEO_LOCATION_PROVIDER } from './geo-location-provider.interface';
+import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GoogleGeoLocationProvider } from './google-geo-location.provider';

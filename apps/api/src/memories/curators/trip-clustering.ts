@@ -18,7 +18,7 @@
 // behave, and adds no dependency. See docs/specs/memories.md §4.8.
 // =============================================================================
 
-import { haversineKm } from '../../common/geo/haversine.util';
+import { haversineKm } from '@marinoscar/memoriahub-api/location';
 
 export const MS_PER_DAY = 86_400_000;
 

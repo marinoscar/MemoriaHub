@@ -23,7 +23,7 @@ import {
   ObjectProcessedEvent,
   OBJECT_PROCESSED_EVENT,
 } from '../../src/media-processing/events/object-processed.event';
-import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
