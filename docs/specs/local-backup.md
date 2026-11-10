@@ -82,13 +82,15 @@ Worker node (laptop)                          MemoriaHub server
 6. POST /nodes/:id/backup/runs/:id/finish ──▶ Mark the run terminal
 ```
 
-Media bytes themselves never transit the API process — the `/changes` response carries a short-lived presigned GET URL per item (minted fresh on every page fetch), and the node streams directly from the storage provider, identical to how the compute node's claimed jobs stream input/output bytes (see [Distributed Nodes §2](distributed-nodes.md#2-security-model)). This keeps a multi-terabyte backup run from ever loading a single byte of media through the API's own process memory or bandwidth.
+Media bytes themselves never transit the API process — the `/changes` response carries a short-lived presigned GET URL per item (minted fresh on every page fetch), and the node streams directly from the storage provider, identical to how the compute node's claimed jobs stream input/output bytes (see [Distributed Nodes §2](distributed-nodes.md#1-security-model)). This keeps a multi-terabyte backup run from ever loading a single byte of media through the API's own process memory or bandwidth.
 
 ### 2.2 Why the Control Plane Lives at `/api/nodes/:id/backup/*`
 
 Every backup route is mounted under the existing node namespace and gated by `nodes:write` (the platform nodes slice's permission, RETRO-C2; it was `jobs:write`) + owner-scoping (`NodeBackupOwnershipService.assertOwnership`: 404 for an unknown node and for another user's node, never 403 (it was 403 for a foreign node before RETRO-C2); formerly `NodesService.assertOwnership` — 404 for an unknown node, 403 for a node owned by someone else). This is not incidental: `JwtAuthGuard#isNodeRoute` (`apps/api/src/auth/guards/jwt-auth.guard.ts`) accepts a `nod_`-prefixed durable node credential **only** on paths matching `/api/nodes` or `/api/nodes/*` — nowhere else in the API. Mounting backup anywhere else (e.g. a standalone `/api/backup/*` namespace) would have meant either widening the node-credential route allowlist (weakening its least-privilege guarantee for every other node use of that credential) or forcing backup nodes onto a full PAT, which the whole `nod_` credential type exists to avoid for an unattended, long-running process. Since a `nod_` credential is scoped by construction to media/settings/admin-inaccessible node routes, putting backup there for free gets it the same guarantee compute jobs already have: even a leaked backup-node credential can never read circle membership, settings, or any endpoint outside the node data/control plane.
 
 ### 2.3 `BackupEngine` Hosted Beside `NodeEngine`
+
+> **Since CLI 1.6 (RETRO-C10, #616, RETRO-C11 #620)** the node engine is the platform's `memoriahub node` worker, and the backup engine is hosted in the same process by a worker runtime hook (`apps/cli/src/backup/daemon-part.ts`): its events travel on the daemon channel `backup` and its commands over a control socket, `backup.sock`, in the node state directory (`~/.memoriahub/node/`). The hook is a `PLATFORM-ADOPTION-SHIM(RETRO-SEAM-DAEMON-COMMANDS)` until EAB #1145 lands. Wherever this section says `NodeEngine`, read "the platform node engine"; the isolation rules below (separate concurrency, a separate HTTP client and cooldown gate) are unchanged. `memoriahub backup init` suggests `memoriahub node enroll` when no node credential exists, and the daemon the backup depends on is `memoriahub node start --daemon` (or `node service install`). See [the fleet runbook](../runbooks/worker-fleet.md).
 
 On a machine running `memoriahub node start --daemon`, the daemon process hosts **two independent engines side by side**, not one feature layered on the other:
 
@@ -121,7 +123,7 @@ A backup-configured machine that never runs `node start --daemon` still works fo
 | CLI commands | `apps/cli/src/commands/backup.ts` | `init`, `run`, `status`, `verify`, `prune`, `restore`, `schedule`, `set-rate` |
 | CLI renderers | `apps/cli/src/render/headless-backup.ts`, `headless-verify.ts`, `headless-restore.ts` | Human/`--json` terminal output — engines never print |
 | CLI TUI | `apps/cli/src/tui/BackupDashboard.tsx`, `BackupVerify.tsx`, `BackupSettings.tsx` | Backup screens (a root menu entry opening the dashboard directly since issue #413; run/verify/settings are reached from inside it) |
-| Web admin UI | `apps/web/src/pages/Admin/NodeBackupPage.tsx` | Per-node config editor + run history at `/admin/settings/nodes/:id/backup` |
+| Web admin UI | `apps/web/src/pages/Admin/NodeBackupPage.tsx` | Per-node config editor + run history at `/admin/settings/workers/:id/backup` |
 
 ---
 
@@ -586,7 +588,7 @@ No active run required — a config-less node reads the owner's full circle scop
 
 ## 13. RBAC
 
-**No new permission was added.** Every route reuses the owner's `nodes:write` (RETRO-C2: it was `jobs:write`) (the same permission that already gates registering/managing a caller's own worker nodes and minting/revoking that owner's `nod_` credentials — see [Distributed Nodes](distributed-nodes.md#node-data-plane-distributed-workers--admin-worker-nodes) in CLAUDE.md). Two enforcement layers:
+**No new permission was added.** Every route reuses the owner's `nodes:write` (RETRO-C2: it was `jobs:write`) (the same permission that already gates registering/managing a caller's own worker nodes and minting/revoking that owner's `nod_` credentials — see [Distributed Nodes](distributed-nodes.md#8-local-media-backup-on-a-node) in CLAUDE.md). Two enforcement layers:
 
 - **Authentication**: `nod_` or PAT, both accepted only on `/api/nodes/*` (§2.2).
 - **Authorization**: `NodeBackupOwnershipService.assertOwnership(userId, nodeId)` on every call — 404 for a node id that doesn't exist and for one that belongs to a different owner (RETRO-C2: it was 403 for the latter). Circle scoping is enforced independently, inside `updateConfig`: every requested `circleIds` entry must be a circle the **node's owner** (not necessarily the caller, though in practice they are the same account) is a member of.

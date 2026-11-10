@@ -8,7 +8,7 @@
 > result-ingestion path, and no shared parity package. All of that has since been built,
 > and this document is kept **only as implementation history** — for the current, accurate
 > design and API surface, read [`docs/specs/distributed-nodes.md`](distributed-nodes.md)
-> (v2.0) instead. Do not use the checklist or "what remains" sections below as a task list;
+> (v3.0, rewritten for the platform engine) instead. Do not use the checklist or "what remains" sections below as a task list;
 > they describe a snapshot in time that no longer reflects the codebase.
 >
 > **The final architecture deviated from this handoff's plan in two significant ways:**
@@ -19,8 +19,8 @@
 >    `auto_tagging` and `geocode` use **transient, per-job provider credentials**
 >    (`POST /api/nodes/:id/jobs/:jobId/credentials`): the node fetches a plaintext key
 >    scoped to the one job it holds, calls the provider directly, and never persists the
->    key. See [distributed-nodes.md §2.7](distributed-nodes.md#27-security-tradeoff-transient-per-job-credentials-instead-of-an-ai-proxy)
->    for the full rationale and [§8.2](distributed-nodes.md#82-transient-credentials-gated-opt-in--formerly-ai-proxy)
+>    key. See [distributed-nodes.md §2.7](distributed-nodes.md)
+>    for the full rationale and [§8.2](distributed-nodes.md)
 >    for the per-type detail.
 > 2. **A worker daemon, systemd service mode, and TUI "attach" mode were added beyond this
 >    handoff's original scope.** None of §§1–8 below mention background/service operation —
@@ -30,7 +30,7 @@
 >    separately-launched TUI without stopping it. This produced `node start --daemon`, the
 >    pidfile + NDJSON IPC socket, `node service install|uninstall|status`, and the TUI's
 >    embedded-vs-attached dashboard source split — see
->    [distributed-nodes.md §9.3](distributed-nodes.md#93-worker-daemon-systemd-service-and-tui-attach).
+>    [distributed-nodes.md §9.3](distributed-nodes.md).
 >
 > Everything else below (the claim/lease model, the compute/persist split shape, the
 > parity-package concept, the job-type eligibility reasoning) held up largely as planned —
@@ -147,7 +147,7 @@ written, the server's face pipeline was `apps/api/src/face/providers/human.provi
 removed entirely; CompreFace (`apps/api/src/face/providers/compreface.provider.ts`, a thin
 adapter over the shared `@memoriahub/enrichment-compute/face-compreface` HTTP client, 128-d
 ArcFace MobileFaceNet embeddings) is now the sole face-detection pipeline, server and node
-alike. See [distributed-nodes.md §7](distributed-nodes.md#7-embedding--model-parity) for the
+alike. See [distributed-nodes.md §7](distributed-nodes.md) for the
 current parity story.
 
 **CLIP dedup — `apps/api/src/dedup/visual-embedding.service.ts`:**

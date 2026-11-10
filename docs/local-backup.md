@@ -34,6 +34,8 @@ This guide gets you from zero to a scheduled, self-healing backup in about ten m
 
 ## 2. Set Up a Backup Node in 10 Minutes
 
+> **CLI 1.6:** the daemon that runs scheduled backups is the platform node worker (`memoriahub node start --daemon`, state in `~/.memoriahub/node/`). A machine that ran 1.3 must run `memoriahub node register` once after the upgrade. Details: [worker setup](worker-node-setup.md) and [fleet runbook](runbooks/worker-fleet.md).
+
 ### Step 1 — Log in
 
 ```bash
