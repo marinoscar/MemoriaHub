@@ -37,7 +37,7 @@ import {
 
 import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from '../../src/media/trash-empty/trash-empty-execute-batch.handler';
-import { TrashPurgeHandler } from '../../src/media/trash-purge.handler';
+import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
 import { ReviewRunsRetentionHandler, STALE_RUN_ERROR } from '../../src/review-runs/review-runs-retention.handler';
@@ -687,8 +687,10 @@ describe('trash_empty_execute_batch finalize', () => {
 });
 
 function buildTrashPurge(): TrashPurgeHandler {
-  const settings = { getSettingValue: async () => 30 };
-  return new TrashPurgeHandler(registry, trPrisma() as never, settings as never, mediaService as never);
+  // The handler reaches the queue and the settings through the media slice's ports (RETRO-J5).
+  const jobsPort = { registerHandler: (handler: unknown) => registry.register(handler as never) };
+  const settings = { readSystem: async () => ({ value: { trash: { retentionDays: 30 } }, version: 1 }) };
+  return new TrashPurgeHandler(jobsPort as never, trPrisma() as never, settings as never, mediaService as never);
 }
 
 describeJobHandlerConformance('trash_purge', () => alias(buildTrashPurge()), {

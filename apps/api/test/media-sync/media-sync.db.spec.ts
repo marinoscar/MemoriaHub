@@ -16,7 +16,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { newLibrary } from '../helpers/library';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { buildOwnerAccessService } from '../helpers/owner-access';
-import { MediaSyncService } from '../../src/media-sync/media-sync.service';
+import { MediaSyncService } from '@marinoscar/memoriahub-api/media';
 import { checkinSchema, registerDeviceSchema } from '../../src/media-sync/dto/media-sync.dto';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
@@ -48,7 +48,17 @@ describeMaybeDb('Media Sync (DB_GATED: real PostgreSQL)', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
-    service = new MediaSyncService(prisma, buildOwnerAccessService(prisma), sqlScopeDirectory(prisma as never) as never);
+    // The media slice reads access through MEMORIAHUB_ACCESS; the slice of it MediaSyncService uses,
+    // over the same real-database stand-ins the spec always used.
+    const owner = buildOwnerAccessService(prisma);
+    const directory = sqlScopeDirectory(prisma as never);
+    const access = {
+      requireOwnerRole: (...args: Parameters<typeof owner.requireOwnerRole>) => owner.requireOwnerRole(...args),
+      personalLibraryOf: (userId: string) => owner.personalLibraryOf(userId),
+      writableScopesOf: (userId: string) => owner.writableGroupsOf(userId),
+      scopeExists: (scopeId: string) => directory.exists(scopeId),
+    };
+    service = new MediaSyncService(prisma as never, access as never);
 
     const user = await prisma.user.create({ data: { email: `media-sync-db-${Date.now()}@example.test` } });
     userId = user.id;

@@ -47,7 +47,7 @@ import {
 } from '@prisma/client';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -7,7 +7,7 @@ import {
 import { Prisma, Workflow, WorkflowSubject, WorkflowTrigger } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { isWorkflowsEnabled } from '../settings/feature-gates';
 import { RequestUser } from '@marinoscar/platform-api/identity';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';

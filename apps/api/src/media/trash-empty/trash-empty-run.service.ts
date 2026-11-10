@@ -17,7 +17,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
-import { MediaThumbnailService } from '../media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 
 /** Statuses counted against the per-circle concurrency guard (in-flight runs). */
 const ACTIVE_RUN_STATUSES: TrashEmptyRunStatus[] = [

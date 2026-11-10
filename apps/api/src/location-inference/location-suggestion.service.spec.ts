@@ -27,12 +27,13 @@ import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { GEO_LOCATION_PROVIDER } from '../media/geo/geo-location-provider.interface';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 // NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO
 // were removed in favour of the async run-based engine
 // (LocationSuggestionRunService). The former `describe('bulkAcceptSuggestions')`
@@ -104,7 +105,7 @@ describe('LocationSuggestionService', () => {
         LocationSuggestionService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

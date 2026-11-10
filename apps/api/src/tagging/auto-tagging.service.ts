@@ -17,7 +17,7 @@ import { prepareImageForProcessing } from '../media-processing/image-orientation
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 
 /**
  * System prompt sent alongside every tagging vision call. Extracted to a

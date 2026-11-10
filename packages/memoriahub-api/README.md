@@ -4,9 +4,9 @@ The NestJS side of the MemoriaHub domain: the **host ports** (injection tokens a
 
 ## Purpose and scope
 
-MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) will live in this package, slice by slice (RETRO-J5 to J10). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
+MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media` is the first, partly moved. A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
 
-This first release carries the ports, the module and the testing kit only. It moves no domain code, so the web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
+The package carries the ports, the module, the testing kit and the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
 
 Status: experimental. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
 
@@ -15,6 +15,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/ports`: the thirteen ports (tokens, interfaces, option and result shapes) and the two classes a slice throws across them ([slice README](src/ports/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/core`: `MemoriahubPortsModule.forRoot`, the optional-port defaults, the `Prisma` SQL helper, the domain error base class and the AI-to-job error helpers ([slice README](src/core/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/testing`: an in-memory fake of every port and `describeMemoriahubPortsConformance`, the kit a binding must pass ([slice README](src/testing/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/media`: the media slice, `MediaModule.forRoot` and `UploadEnrichmentRegistry` ([slice README](src/media/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/media/testing`: `describeMediaSliceConformance`, the kit the media slice's guarantees are checked with ([slice README](src/media/README.md#extension-point-catalog)).
 
 ## Install and peer dependencies
 
@@ -79,10 +81,12 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_WEBHOOKS`, `MemoriahubWebhooksPort` | token | outbound webhook events |
 | `MEMORIAHUB_METRICS`, `MemoriahubMetricsPort` | token | counters and histograms by registered name |
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
+| `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
+| `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
 
 ## Data
 
-None. The package stores nothing and ships no schema (the domain's Prisma fragments are `@marinoscar/memoriahub-db`).
+None of its own. The package ships no schema (the domain's Prisma fragments are `@marinoscar/memoriahub-db`). The media slice reads and writes `media_items`, `storage_objects`, `media_sync_devices`, `media_sync_runs`, `media_sync_diagnostic_reports`, `android_app_releases`, `personal_access_tokens` (the device's token state), `audit_events` and `users`, through narrow structural delegates (`MediaModels`) and never a generated client. A `BigInt` column (`bytes_uploaded`) leaves the slice as a string; `captured_at` is a civil timestamp the slice never converts.
 
 ## Permissions and settings
 
@@ -107,6 +111,8 @@ A key never crosses a port: the AI port resolves the credential on the host's si
 ## Conformance suite
 
 `describeMemoriahubPortsConformance(name, factory, harness, options)` from `@marinoscar/memoriahub-api/testing`: test-runner neutral, one section per port. The package runs it against its own fakes (`test/ports-conformance.spec.ts`); the web app runs it against the platform adapters (`apps/api/test/platform-memoriahub/`). A host adding a binding runs the same kit against it.
+
+`describeMediaSliceConformance(harness, { name, create })` from `@marinoscar/memoriahub-api/media/testing`: the media slice's guarantees (touch de-duplication and chunking, the fan-out registry's order and fallbacks, `upload_completed` folding for every role, PAT-only Media Sync registration and 404 for another user's device). The package runs it over the fakes with the services resolved from the real Nest module (`test/media-conformance.spec.ts`); the web app runs it with the notification port bound to the real adapter (`apps/api/test/media/media-slice-conformance.spec.ts`).
 
 ## Upgrade notes
 

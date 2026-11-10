@@ -1,0 +1,31 @@
+# media
+
+The media core of the MemoriaHub domain, moved onto the host ports slice by slice (RETRO-J5, #613). This first cut carries the upload enrichment fan-out registry, the sidecar touch service, the `upload_completed` producer and the Android Media Sync device service.
+
+## Purpose and scope
+
+Everything a media item needs that does not depend on another slice, written against `@marinoscar/memoriahub-api/ports` only (no platform import, no generated database client). The upload fan-out is a registry: tagging, face detection, burst, duplicate, location-inference and social-media slices register their enqueue and its gate with `UploadEnrichmentRegistry.register(type, gate)` instead of `media` importing them, which keeps the dependency one way. `MediaTouchService` bumps `media_items.updated_at` after a related-table write so the node backup change feed sees it. `UploadNotificationService` raises `media.upload_completed` as one rolling 15-minute row per recipient however many files an import registers. `MediaSyncService` is the Android Media Sync device API (register, versioned desired config, commands, check-in, runs, diagnostics) with owner-scoped 404s and PAT scoping. Status: experimental until the first published release.
+
+## Entry point
+
+`@marinoscar/memoriahub-api/media`. It imports the `ports` and `core` slices through their `index.ts` and nothing else of the package.
+
+## Peer dependencies
+
+`@nestjs/common`, `zod` and `@marinoscar/memoriahub-contract` (the Media Sync wire schemas and refusal reasons).
+
+## Configuration
+
+`MediaModule.forRoot(options)`; the options object is reserved and empty today. Import it once in the host and re-export it from the host's media module (the registry is a singleton). The slice reads no environment variable: a gate that honours a kill switch (`AUTO_TAG_ENABLED`) lives in the registration of the slice that owns the feature.
+
+## Extension-point catalog
+
+`UploadEnrichmentRegistry` is the extension point of the fan-out: a slice calls `register(type, { mediaTypes, order, skipReason, enqueue, onSkipped })` when it starts. `skipReason` answers `null` to enqueue or the logged reason to skip; `onSkipped` is the fallback of a skipped job (video: no social-media detection means face detection runs directly). The registrations run in ascending `order`; the priority of the job each enqueues is the registration's own.
+
+
+`MEDIA_ITEM_PURGER` (the `MediaItemPurger` interface) is the second: the host binds the batched hard delete of trashed items (rows, stored bytes, grants) that `TrashPurgeHandler` calls, until the gallery service moves into the slice.
+**What is in the slice and what is left in the web app.** In the slice: `UploadEnrichmentRegistry` and `UploadEnrichmentService` (fan-out), `MediaTouchService` and `MediaTouchModule`, `UploadNotificationService` (event key `media.upload_completed`, 15-minute window), `MediaThumbnailService` (batched signing, 24 hour URL TTL, cache), `MediaSyncService` (the Media Sync device API: owner-scoped 404, PAT scoping, versioned desired config), `assertMediaSyncSourceDevice`, the `trash_purge` handler and `TrashPurgeTask` (enqueue-only), the `MEDIA_ITEM_PURGER` hook and the conformance kit.
+
+Left in `apps/api` (each depends on something that is not in a port yet): the gallery service and controller (`MediaService`, its filters, bulk, albums, explore and locations; entangled with the search where-builder and the location-group resolver), `MediaMetadataSyncService`, the apply-location helpers and the geocode providers (they move with the location slice), the orientation edit, the thumbnail regen and repair handlers and the node persist service (they call the post-upload processing slice: `ObjectReprocessService`, `ThumbnailPruneService`), the trash-empty run, the metadata re-run slice, the Media Sync controller, DTOs and doctor checks (they use the host's identity decorators and the platform doctor), `MediaEnrichmentService`'s video post-detection fan-out and per-item rerun helpers, and the notification event declarations (the platform freezes its registries before the Nest container starts, so the events stay declared in `apps/api/src/app-registrations`).
+
+**Security notes.** A non-member of a library is a 404, never a 403 (the access port); Media Sync devices are owner-scoped the same way and a PAT linked to a device reaches only that device. Registration and check-in refuse a session token with `400 PAT_REQUIRED`. Logs carry ids and counts, never a token. Public share links serve the original bytes: EXIF (GPS included) is not stripped. A `BigInt` column leaves the slice as a string; `captured_at` is a civil timestamp rendered in UTC, never in the viewer's zone.

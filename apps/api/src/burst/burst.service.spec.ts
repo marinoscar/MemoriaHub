@@ -23,7 +23,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
@@ -34,6 +34,7 @@ import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,7 +250,7 @@ describe('BurstService', () => {
         BurstService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        MediaThumbnailService,
+        thumbnailServiceOverMocks,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: OwnerAccessService, useValue: mockMembership },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },

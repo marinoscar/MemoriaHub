@@ -28,8 +28,7 @@ import {
   PurgeArchivedFacesDto,
 } from './dto/people.dto';
 import { MergePeopleDto } from './dto/merge-people.dto';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaThumbnailService, MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { UserAvatarService } from '../profile/user-avatar.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

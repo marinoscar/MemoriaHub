@@ -218,6 +218,14 @@
         "@nestjs/common",
         "zod"
       ]
+    },
+    "media": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@marinoscar/memoriahub-contract",
+        "zod"
+      ]
     }
   },
   "memoriahub-web": {

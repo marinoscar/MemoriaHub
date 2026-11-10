@@ -4,7 +4,8 @@ import { AiPortModule } from '../ai-port/ai-port.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { MediaTouchModule } from '../media/media-touch.module';
+import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
+import { TaggingUploadEnrichment } from './tagging-upload-enrichment';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AutoTaggingHandler } from './auto-tagging.handler';
 import { AutoTaggingService } from './auto-tagging.service';
@@ -17,7 +18,7 @@ import { TaggingBackfillService } from './tagging-backfill.service';
 import { AdminTaggingController } from './admin-tagging.controller';
 
 @Module({
-  imports: [EnrichmentModule, AiPortModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaTouchModule],
+  imports: [EnrichmentModule, AiPortModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaCoreModule.forRoot()],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
   providers: [
     AutoTaggingHandler,
@@ -27,6 +28,8 @@ import { AdminTaggingController } from './admin-tagging.controller';
     VideoInputResolver,
     TagLabelsService,
     TaggingBackfillService,
+    // The photo upload fan-out, registered with the media slice (RETRO-J5).
+    TaggingUploadEnrichment,
   ],
   exports: [AutoTaggingService, VideoAutoTaggingService],
 })

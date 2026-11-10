@@ -16,6 +16,7 @@ import { LocationGroupsModule } from '../location-groups/location-groups.module'
 import { LocationSuggestionRunsController } from './runs/location-suggestion-runs.controller';
 import { LocationSuggestionRunEvaluateHandler } from './runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-suggestion-run-execute-batch.handler';
+import { LocationInferenceUploadEnrichment } from './location-inference-upload-enrichment';
 
 /**
  * LocationInferenceModule
@@ -50,6 +51,8 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
     LocationSuggestionRunsController,
   ],
   providers: [
+    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
+    LocationInferenceUploadEnrichment,
     LocationInferenceService,
     LocationInferenceHandler,
     LocationInferenceBackfillService,

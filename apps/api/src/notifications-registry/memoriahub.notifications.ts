@@ -33,6 +33,7 @@
 // still render. Every link is root-relative (the platform drops anything else).
 // =============================================================================
 
+import { UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
 import { createHash } from 'node:crypto';
 
 import type { NotificationType } from '@prisma/client';
@@ -51,7 +52,7 @@ export const MEMORIAHUB_EVENT_KEYS = {
   reviewDuplicates: 'review.duplicates',
   reviewLocationSuggestions: 'review.location_suggestions',
   reviewEnhancements: 'review.enhancements',
-  uploadCompleted: 'media.upload_completed',
+  uploadCompleted: UPLOAD_COMPLETED_EVENT_KEY,
   enrichmentFailed: 'media.enrichment_failed',
   workflowRunCompleted: 'workflows.run_completed',
   shareExpiring: 'shares.expiring',
@@ -90,8 +91,8 @@ export interface MemoriaHubFold {
   readonly windowMs: number | null;
 }
 
-/** The upload roll-up window (epic #240, issue #247). */
-export const UPLOAD_COMPLETED_WINDOW_MS = 15 * 60 * 1000;
+/** The upload roll-up window (epic #240, issue #247): the media slice's, which raises the event. */
+export { UPLOAD_COMPLETED_WINDOW_MS };
 /** The memories roll-up window (epic #300, issue #311). */
 export const MEMORIES_READY_WINDOW_MS = 24 * 60 * 60 * 1000;
 

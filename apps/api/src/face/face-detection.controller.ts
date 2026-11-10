@@ -34,7 +34,7 @@ import {
 } from '@prisma/client';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 
 // ---------------------------------------------------------------------------
 // DTOs

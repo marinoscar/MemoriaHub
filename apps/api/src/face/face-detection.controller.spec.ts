@@ -16,7 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { PeopleService } from './people.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { JobReason, MhLegacyJobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
 import { RequestUser } from '@marinoscar/platform-api/identity';

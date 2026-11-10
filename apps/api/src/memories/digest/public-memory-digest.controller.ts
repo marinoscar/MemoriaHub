@@ -70,7 +70,7 @@ import { FastifyReply } from 'fastify';
 import { Readable } from 'stream';
 
 import { Public } from '@marinoscar/platform-api/identity';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import {

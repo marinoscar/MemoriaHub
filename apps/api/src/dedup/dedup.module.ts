@@ -16,6 +16,7 @@ import { VisualEmbeddingService } from './visual-embedding.service';
 import { ReviewInsightsController } from './review-insights.controller';
 import { ReviewInsightsService } from './review-insights.service';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
+import { DedupUploadEnrichment } from './dedup-upload-enrichment';
 
 @Module({
   imports: [
@@ -32,6 +33,8 @@ import { ReviewRunsModule } from '../review-runs/review-runs.module';
   ],
   controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
   providers: [
+    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
+    DedupUploadEnrichment,
     DuplicateService,
     DuplicateDetectionService,
     DuplicateDetectionHandler,

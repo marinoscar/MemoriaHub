@@ -8,7 +8,7 @@ import { createZodDto } from 'nestjs-zod';
 import { createTagLabelSchema, updateTagLabelSchema } from '@marinoscar/memoriahub-contract/tagging';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import { PrismaService } from '../prisma/prisma.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 
 // ---------------------------------------------------------------------------
 // DTOs
