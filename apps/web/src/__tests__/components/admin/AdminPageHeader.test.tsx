@@ -189,6 +189,7 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // 17 since RETRO-D5 (#586): the Android admin page is the android-app
     // slice's packaged AndroidAppPage.
     // 16 since RETRO-E4 (#607): the AI page is the AI slice's packaged AiConfigPage.
-    expect(adopters.length).toBeGreaterThanOrEqual(16);
+    // 15 since RETRO-C2 (#581): the Worker Nodes page is the nodes slice's packaged WorkersPage.
+    expect(adopters.length).toBeGreaterThanOrEqual(15);
   });
 });
