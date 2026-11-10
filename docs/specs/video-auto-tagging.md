@@ -132,7 +132,7 @@ What it adds:
 
 The output token budget is raised per-request to 2048 (from Anthropic's hardcoded 1024). A multi-frame description plus a tag list does not reliably fit in 1024, and a truncated response fails `parseAnalysisResult`'s JSON parse — an opaque failure mode.
 
-Both the prompt builder and the system prompt live in `packages/enrichment-compute/src/ai`, **not** in the API app, so the server and a worker node compose byte-identical prompts. A prompt string duplicated across two executors is exactly the thing that drifts silently.
+Both the prompt builder and the system prompt live in `apps/api/src/tagging/video-tagging-prompt.ts` (SDK-free; they move into the tagging slice package later). They used to live in the compute package's `./ai` subpath so that the server and a worker node composed byte-identical prompts; AI jobs are server-only now and the subpath was removed (RETRO-J1, #593), so the API is the only caller. Do not copy the prompt into a second place: a prompt string duplicated across two callers is exactly the thing that drifts silently.
 
 ---
 
@@ -258,7 +258,7 @@ Three changes:
 - **Parsing stays server-side.** A node cannot validate tags against a vocabulary it cannot read, so it returns raw text plus frame/transcript provenance (`videoAutoTaggingResultSchema`).
 - An unsupported tagging provider **declines** with `CapabilityUnavailableError`, leaving the job server-only rather than failing it.
 
-**Parity is the acceptance bar.** Frame timestamps (`computeSeekTimestamps`), image preparation (`prepareImageForProcessing` at `TAG_MAX_IMAGE_DIM`), the prompt, and the vision request body all come from `packages/enrichment-compute` — the same code the server runs.
+**Parity is the acceptance bar.** Frame timestamps (`computeSeekTimestamps`), image preparation (`prepareImageForProcessing` at `TAG_MAX_IMAGE_DIM`) and the frame extraction come from `packages/memoriahub-compute` — the same code the server runs; the prompt and the model call are the server's alone.
 
 ---
 

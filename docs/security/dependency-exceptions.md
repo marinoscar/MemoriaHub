@@ -56,11 +56,11 @@ Rationale:
 
 ## Related inventory: deprecation-warning ownership (issue #219)
 
-Epic #214's success criterion #3 is *"`npm install` emits no deprecation warning traceable to a direct first-party dependency."* **That criterion is now met.** `fluent-ffmpeg` was the sole violator and has been removed (issue #219 Track A) — replaced by a thin in-house `spawn()` wrapper in `packages/enrichment-compute/src/ffmpeg/`, since 2.1.3 was both the latest published version and marked "no longer supported", with no maintained successor under that name. Walking every dependent edge in `package-lock.json` shows no other deprecated package has a first-party workspace (`apps/api`, `apps/web`, `apps/cli`, `packages/enrichment-compute`) as a direct parent:
+Epic #214's success criterion #3 is *"`npm install` emits no deprecation warning traceable to a direct first-party dependency."* **That criterion is now met.** `fluent-ffmpeg` was the sole violator and has been removed (issue #219 Track A) — replaced by a thin in-house `spawn()` wrapper in `packages/memoriahub-compute/src/ffmpeg/`, since 2.1.3 was both the latest published version and marked "no longer supported", with no maintained successor under that name. Walking every dependent edge in `package-lock.json` shows no other deprecated package has a first-party workspace (`apps/api`, `apps/web`, `apps/cli`, `packages/memoriahub-compute`) as a direct parent:
 
 | deprecated package | pulled in by | first-party direct dependent? |
 |---|---|---|
-| ~~`fluent-ffmpeg@2.1.3`~~ | ~~`apps/api`, `packages/enrichment-compute`~~ | **Was the only one — REMOVED (#219 Track A); no longer in `package-lock.json`** |
+| ~~`fluent-ffmpeg@2.1.3`~~ | ~~`apps/api`, `packages/memoriahub-compute`~~ | **Was the only one — REMOVED (#219 Track A); no longer in `package-lock.json`** |
 | `inflight@1.0.6` | `glob@7` under `archiver-utils`, `fstream`, `test-exclude`, `zip-stream` | No |
 | `rimraf@2.7.1` | `fstream`, `gaxios` | No |
 | `lodash.isequal@4.5.0` | `@fast-csv/format`, `jest-mock-extended` | No |
