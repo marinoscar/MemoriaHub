@@ -14,6 +14,8 @@
     "./src/location/testing/index.ts",
     "./src/dedup/index.ts",
     "./src/dedup/testing/index.ts",
+    "./src/memories/index.ts",
+    "./src/memories/testing/index.ts",
     "./src/face/index.ts",
     "./src/face/testing/index.ts"
   ],

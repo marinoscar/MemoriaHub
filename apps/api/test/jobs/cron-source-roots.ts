@@ -32,11 +32,11 @@ export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', '
 
 /**
  * The package's domain slices moved by RETRO-J10 (#624) (insights, location, dedup, burst, social,
- * enhancement): each root is scanned like the app's own tree and its raw-SQL allowlist paths are
+ * enhancement) and RETRO-J8 (#619) (memories): each root is scanned like the app's own tree and its raw-SQL allowlist paths are
  * relative to it.
  */
 const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
-export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup'].map((slice) => join(SLICES_ROOT, slice));
+export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup', 'memories'].map((slice) => join(SLICES_ROOT, slice));
 
 /**
  * The face slice of `@marinoscar/memoriahub-api` (RETRO-J6, #615), scanned like the media slice. It

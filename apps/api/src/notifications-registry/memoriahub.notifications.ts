@@ -34,6 +34,7 @@
 // =============================================================================
 
 import { UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
+import { MEMORIES_READY_EVENT_KEY, MEMORIES_READY_WINDOW_MS } from '@marinoscar/memoriahub-api/memories';
 import { createHash } from 'node:crypto';
 
 import type { NotificationType } from '@prisma/client';
@@ -56,7 +57,7 @@ export const MEMORIAHUB_EVENT_KEYS = {
   enrichmentFailed: 'media.enrichment_failed',
   workflowRunCompleted: 'workflows.run_completed',
   shareExpiring: 'shares.expiring',
-  memoriesReady: 'memories.ready',
+  memoriesReady: MEMORIES_READY_EVENT_KEY,
 } as const;
 
 export type MemoriaHubEventKey = (typeof MEMORIAHUB_EVENT_KEYS)[keyof typeof MEMORIAHUB_EVENT_KEYS];
@@ -93,8 +94,8 @@ export interface MemoriaHubFold {
 
 /** The upload roll-up window (epic #240, issue #247): the media slice's, which raises the event. */
 export { UPLOAD_COMPLETED_WINDOW_MS };
-/** The memories roll-up window (epic #300, issue #311). */
-export const MEMORIES_READY_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** The memories roll-up window (epic #300, issue #311): the memories slice's, which raises the event. */
+export { MEMORIES_READY_WINDOW_MS };
 
 const STATE: MemoriaHubFold = { kind: 'state', scope: 'circle', matchKeys: [], windowMs: null };
 const EVENT_IN_CIRCLE: MemoriaHubFold = { kind: 'event', scope: 'circle', matchKeys: [], windowMs: null };

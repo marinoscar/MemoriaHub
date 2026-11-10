@@ -1,0 +1,457 @@
+/**
+ * Unit tests for MemoryGenerationHandler (epic #300, issues #302 + #303).
+ *
+ * Two things are worth asserting here, and both are contracts rather than
+ * behavior of any single curator:
+ *
+ *  1. The QUEUE contract (#302): it self-registers under the right type, it is
+ *     server-only (no node-result pair), and a job that reaches the worker while
+ *     the feature is disabled SUCCEEDS as a no-op rather than throwing —
+ *     throwing would burn retry attempts and light up the admin job dashboard
+ *     for a deliberately-off feature.
+ *
+ *  2. The CURATOR-ISOLATION contract (#303): curators are gated individually by
+ *     their own settings toggle, a curator that throws does not abort the run or
+ *     fail the job, and its retention tail still runs. This is a stated
+ *     acceptance criterion of #303, not defensive programming — a circle with
+ *     bad geo data must still get its On This Day memories.
+ */
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler.js';
+import { MemoriesSettingsService } from '../../src/memories/memories-settings.util.js';
+import { MEMORIES_GENERATION_HOOK, MEMORIES_OPTIONS } from '../../src/memories/host/memories-options.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubJob as Job,
+  type MemoriahubJobHandler as JobHandler,
+} from '../../src/ports/index.js';
+import { circleJob, subjectScopes } from '../helpers/job-fixtures.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+import {
+  MEMORY_CURATORS,
+  MemoryCurator,
+  MemoryCuratorContext,
+  MemoryCuratorResult,
+} from '../../src/memories/curators/memory-curator.interface.js';
+import { MemoryTitleService } from '../../src/memories/titles/memory-title.service.js';
+import { MemoriesNotificationService } from '../../src/memories/notifications/memories-notification.service.js';
+
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return circleJob('memory_generation', 'circle-a', overrides);
+}
+
+function result(over: Partial<MemoryCuratorResult> = {}): MemoryCuratorResult {
+  return { created: 0, refreshed: 0, skipped: 0, tombstoned: 0, ...over };
+}
+
+/** A curator test double whose gate, run and purge are all controllable. */
+function fakeCurator(name: string, over: Partial<MemoryCurator> = {}): jest.Mocked<MemoryCurator> {
+  return {
+    name,
+    isEnabled: jest.fn().mockReturnValue(true),
+    run: jest.fn().mockResolvedValue(result()),
+    purge: jest.fn().mockResolvedValue(0),
+    ...over,
+  } as unknown as jest.Mocked<MemoryCurator>;
+}
+
+describe('MemoryGenerationHandler', () => {
+  let handler: MemoryGenerationHandler;
+  let registered: JobHandler[];
+  let generationHook: { memoriesCreated: jest.Mock };
+  let settings: { getSettings: jest.Mock };
+  let titles: { beginRun: jest.Mock };
+  let memoriesNotifications: { recordGeneratedAsync: jest.Mock };
+  let curators: MemoryCurator[];
+
+  const originalEnv = process.env['MEMORIES_ENABLED'];
+
+  async function build(withCurators: MemoryCurator[] = []): Promise<void> {
+    curators = withCurators;
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        MemoryGenerationHandler,
+        MemoriesSettingsService,
+        { provide: MEMORIES_OPTIONS, useValue: { digest: { signingKey: () => Buffer.alloc(32) } } },
+        { provide: MEMORIES_GENERATION_HOOK, useValue: generationHook },
+        { provide: MEMORIAHUB_JOBS, useValue: { registerHandler: (h: JobHandler) => registered.push(h) } },
+        { provide: MEMORIAHUB_ACCESS, useValue: subjectScopes(['circle-a']) },
+        { provide: MEMORIAHUB_SETTINGS, useValue: settingsPortFrom(() => settings.getSettings()) },
+        { provide: MemoryTitleService, useValue: titles },
+        { provide: MemoriesNotificationService, useValue: memoriesNotifications },
+        { provide: MEMORY_CURATORS, useValue: curators },
+      ],
+    }).compile();
+
+    handler = module.get(MemoryGenerationHandler);
+  }
+
+  beforeEach(async () => {
+    registered = [];
+    generationHook = { memoriesCreated: jest.fn().mockResolvedValue(undefined) };
+    settings = {
+      getSettings: jest.fn().mockResolvedValue({ features: { memories: true } }),
+    };
+    // The handler only ever OPENS the titling budget (#306); `generate` is
+    // reached through MemoryCurationService, which these fake curators replace.
+    titles = {
+      beginRun: jest.fn((options: { backfill: boolean; aiTitlesEnabled: boolean }) => ({
+        ...options,
+        maxAiCalls: options.backfill ? 100 : Number.POSITIVE_INFINITY,
+        aiCalls: 0,
+        stopped: false,
+        stopReason: null,
+      })),
+    };
+    memoriesNotifications = { recordGeneratedAsync: jest.fn() };
+    delete process.env['MEMORIES_ENABLED'];
+    await build();
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env['MEMORIES_ENABLED'];
+    else process.env['MEMORIES_ENABLED'] = originalEnv;
+  });
+
+  it('self-registers under type "memory_generation" on module init', () => {
+    handler.onModuleInit();
+
+    expect(handler.type).toBe('memory_generation');
+    expect(registered).toEqual([handler]);
+  });
+
+  it('is SERVER-ONLY: carries no node-result pair', () => {
+    handler.onModuleInit();
+
+    // Viewed through the interface, since the class deliberately declares
+    // neither optional member at all.
+    const asHandler: JobHandler = handler;
+    expect(asHandler.nodeResultSchema).toBeUndefined();
+    expect(asHandler.persistNodeResult).toBeUndefined();
+    // Server-only = the node pair is absent, and the profile is the permanent one.
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
+  });
+
+  it('succeeds as a no-op when no curators are registered', async () => {
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+  });
+
+  it('succeeds as a no-op when features.memories is off', async () => {
+    settings.getSettings.mockResolvedValue({ features: { memories: false } });
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+    // The gate must short-circuit BEFORE any curator work, not merely discard
+    // its output — a disabled feature costs one cached settings read.
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('succeeds as a no-op when MEMORIES_ENABLED=false overrides an enabled flag', async () => {
+    process.env['MEMORIES_ENABLED'] = 'false';
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+    // The kill switch short-circuits the gate before the settings are read at all.
+    expect(settings.getSettings).not.toHaveBeenCalled();
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('a circle deleted since the job was queued is a no-op', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await expect(handler.process(makeJob({ subjectId: 'circle-gone' }))).resolves.toBeUndefined();
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('a job that is not about a circle is malformed and throws', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await expect(handler.process(makeJob({ subjectType: null, subjectId: null }))).rejects.toThrow(
+      'not about a circle',
+    );
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('declares its label and execution profile', () => {
+    expect(handler.label).toBe('Memory generation');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
+  });
+
+  it('runs every enabled curator and passes one shared context', async () => {
+    const a = fakeCurator('a');
+    const b = fakeCurator('b');
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    expect(a.run).toHaveBeenCalledTimes(1);
+    expect(b.run).toHaveBeenCalledTimes(1);
+    const ctxA = a.run.mock.calls[0]![0];
+    const ctxB = b.run.mock.calls[0]![0];
+    expect(ctxA.circleId).toBe('circle-a');
+    expect(ctxA.backfill).toBe(false);
+    // One wall clock for the whole run: a pass straddling midnight must not
+    // have curator A anchoring on today and curator B on tomorrow.
+    expect(ctxB.now).toBe(ctxA.now);
+    // Defaults are resolved for the curators, not left undefined.
+    expect(ctxA.settings.onThisDay.lookbackYears).toBe(10);
+    expect(ctxA.settings.maxItemsPerMemory).toBe(30);
+  });
+
+  it('skips a curator whose per-type toggle is off, but still runs the others', async () => {
+    const off = fakeCurator('off', { isEnabled: jest.fn().mockReturnValue(false) });
+    const on = fakeCurator('on');
+    await build([off, on]);
+
+    await handler.process(makeJob());
+
+    expect(off.run).not.toHaveBeenCalled();
+    expect(off.purge).not.toHaveBeenCalled();
+    expect(on.run).toHaveBeenCalled();
+  });
+
+  it('ISOLATION: a throwing curator does not abort the run or fail the job', async () => {
+    const boom = fakeCurator('boom', {
+      run: jest.fn().mockRejectedValue(new Error('curator exploded')),
+    });
+    const healthy = fakeCurator('healthy');
+    await build([boom, healthy]);
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+
+    expect(healthy.run).toHaveBeenCalledTimes(1);
+    // The retention tail still runs for the failed curator: its rows are stale
+    // regardless of whether this pass produced new ones.
+    expect(boom.purge).toHaveBeenCalledTimes(1);
+  });
+
+  it('ISOLATION: a throwing purge does not fail the job either', async () => {
+    const curator = fakeCurator('leaky', {
+      purge: jest.fn().mockRejectedValue(new Error('purge exploded')),
+    });
+    await build([curator]);
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+    expect(curator.run).toHaveBeenCalled();
+  });
+
+  it('tolerates a curator with no purge hook', async () => {
+    const curator = fakeCurator('no-tail');
+    delete (curator as Partial<MemoryCurator>).purge;
+    await build([curator]);
+
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+  });
+
+  it('propagates payload.backfill into the curator context', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await handler.process(makeJob({ payload: { backfill: true } as never }));
+
+    expect(curator.run.mock.calls[0]![0].backfill).toBe(true);
+  });
+
+  // --- #306: the run-wide AI-titling budget ---------------------------------
+
+  it('AI TITLING: opens ONE titling run per job and shares it with every curator', async () => {
+    const a = fakeCurator('a');
+    const b = fakeCurator('b');
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    // One budget per job, not one per curator — a provider rate limit must stop
+    // titling for the whole run, and a backfill cap must be job-wide.
+    expect(titles.beginRun).toHaveBeenCalledTimes(1);
+    const runA = (a.run.mock.calls[0]![0] as MemoryCuratorContext).titling;
+    const runB = (b.run.mock.calls[0]![0] as MemoryCuratorContext).titling;
+    expect(runA).toBeDefined();
+    expect(runB).toBe(runA);
+  });
+
+  it('AI TITLING: passes the resolved memories.aiTitles.enabled flag through', async () => {
+    settings.getSettings.mockResolvedValue({
+      features: { memories: true },
+      memories: { aiTitles: { enabled: false } },
+    });
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(titles.beginRun).toHaveBeenCalledWith({ backfill: false, aiTitlesEnabled: false });
+  });
+
+  it('AI TITLING: a backfill job opens a backfill-capped budget', async () => {
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob({ payload: { backfill: true } as never }));
+
+    expect(titles.beginRun).toHaveBeenCalledWith({ backfill: true, aiTitlesEnabled: true });
+  });
+
+  // --- #315: backfill sharding ----------------------------------------------
+  //
+  // A library backfill is split into bounded jobs so no single one approaches
+  // ENRICHMENT_JOB_TIMEOUT_MS. The handler's half of that contract is honouring
+  // the shard descriptor in the payload — and, just as importantly, behaving
+  // exactly as before when there isn't one.
+
+  it('SHARDING: runs only the curators named in the payload', async () => {
+    const otd = fakeCurator('on_this_day');
+    const trip = fakeCurator('trip');
+    const theme = fakeCurator('theme');
+    await build([otd, trip, theme]);
+
+    await handler.process(
+      makeJob({ payload: { backfill: true, curators: ['on_this_day', 'theme'] } as never }),
+    );
+
+    expect(otd.run).toHaveBeenCalled();
+    expect(theme.run).toHaveBeenCalled();
+    expect(trip.run).not.toHaveBeenCalled();
+    // A curator outside the shard must not even have its retention tail run —
+    // another shard owns that type entirely.
+    expect(trip.purge).not.toHaveBeenCalled();
+  });
+
+  it('SHARDING: an absent curator list still runs the whole registry', async () => {
+    const a = fakeCurator('a');
+    const b = fakeCurator('b');
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    expect(a.run).toHaveBeenCalled();
+    expect(b.run).toHaveBeenCalled();
+  });
+
+  it('SHARDING: an unknown curator name is a logged no-op, not a failure', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    // A payload written by another release must never poison the queue.
+    await expect(
+      handler.process(makeJob({ payload: { backfill: true, curators: ['nope'] } as never })),
+    ).resolves.toBeUndefined();
+    expect(curator.run).not.toHaveBeenCalled();
+  });
+
+  it('SHARDING: passes anchorMonths through to the curator context', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await handler.process(
+      makeJob({
+        payload: { backfill: true, curators: ['on_this_day'], anchorMonths: [7] } as never,
+      }),
+    );
+
+    expect(curator.run.mock.calls[0]![0].anchorMonths).toEqual([7]);
+  });
+
+  it('SHARDING: a scheduled run carries no anchorMonths at all', async () => {
+    const curator = fakeCurator('on_this_day');
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(curator.run.mock.calls[0]![0].anchorMonths).toBeUndefined();
+  });
+
+  it('SHARDING: forwards the shard AI-title cap to beginRun', async () => {
+    const curator = fakeCurator('a');
+    await build([curator]);
+
+    await handler.process(makeJob({ payload: { backfill: true, aiTitleCap: 5 } as never }));
+
+    // Divided, not multiplied: N shards must not cost N x #306's per-job cap.
+    expect(titles.beginRun).toHaveBeenCalledWith({
+      backfill: true,
+      aiTitlesEnabled: true,
+      maxAiCalls: 5,
+    });
+  });
+
+  // --- #311: the memories_ready notification hook ---------------------------
+
+  it('NOTIFY: fires memories_ready once with the run-wide created total', async () => {
+    const a = fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 4 })) });
+    const b = fakeCurator('b', { run: jest.fn().mockResolvedValue(result({ created: 2 })) });
+    await build([a, b]);
+
+    await handler.process(makeJob());
+
+    // ONE call carrying the summed total — the whole point of the counted-event
+    // primitive is that a batch of six memories is one row, not six.
+    expect(memoriesNotifications.recordGeneratedAsync).toHaveBeenCalledTimes(1);
+    const arg = memoriesNotifications.recordGeneratedAsync.mock.calls[0]![0] as {
+      circleId: string;
+      createdCount: number;
+      since: Date;
+    };
+    expect(arg.circleId).toBe('circle-a');
+    expect(arg.createdCount).toBe(6);
+    // `since` is the run's shared wall clock, so the producer's "newest memory
+    // of THIS run" lookup sees exactly this pass's rows.
+    expect(arg.since).toBe((a.run.mock.calls[0]![0] as MemoryCuratorContext).now);
+  });
+
+  it('NOTIFY: a refresh-only run notifies nobody', async () => {
+    const curator = fakeCurator('a', {
+      run: jest.fn().mockResolvedValue(result({ refreshed: 9, skipped: 3 })),
+    });
+    await build([curator]);
+
+    await handler.process(makeJob());
+
+    expect(memoriesNotifications.recordGeneratedAsync).not.toHaveBeenCalled();
+  });
+
+  it('NOTIFY: a disabled feature never reaches the producer', async () => {
+    settings.getSettings.mockResolvedValue({ features: { memories: false } });
+    await build([fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 3 })) })]);
+
+    await handler.process(makeJob());
+
+    expect(memoriesNotifications.recordGeneratedAsync).not.toHaveBeenCalled();
+  });
+
+  it('HOOK: a run that created memories tells the host once', async () => {
+    const a = fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 2 })) });
+    await build([a]);
+
+    await handler.process(makeJob());
+
+    expect(generationHook.memoriesCreated).toHaveBeenCalledTimes(1);
+    expect(generationHook.memoriesCreated).toHaveBeenCalledWith('circle-a', (a.run.mock.calls[0]![0] as MemoryCuratorContext).now);
+  });
+
+  it('HOOK: a refresh-only run does not', async () => {
+    await build([fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ refreshed: 4 })) })]);
+
+    await handler.process(makeJob());
+
+    expect(generationHook.memoriesCreated).not.toHaveBeenCalled();
+  });
+
+  it('NOTIFY: a throwing producer never fails the generation job', async () => {
+    memoriesNotifications.recordGeneratedAsync.mockImplementation(() => {
+      throw new Error('notification exploded');
+    });
+    await build([fakeCurator('a', { run: jest.fn().mockResolvedValue(result({ created: 1 })) })]);
+
+    // The producer's public entry point is documented as never throwing, but
+    // the handler must not depend on that promise to keep a job green.
+    await expect(handler.process(makeJob())).resolves.toBeUndefined();
+  });
+});

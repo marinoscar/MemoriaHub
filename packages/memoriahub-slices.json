@@ -124,6 +124,14 @@
       "core",
       "testing",
       "media"
+    ],
+    "memories": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "face",
+      "location"
     ]
   },
   "memoriahub-web": {

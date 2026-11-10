@@ -71,6 +71,14 @@
       "types": "./dist/dedup/testing/index.d.ts",
       "default": "./dist/dedup/testing/index.js"
     },
+    "./memories": {
+      "types": "./dist/memories/index.d.ts",
+      "default": "./dist/memories/index.js"
+    },
+    "./memories/testing": {
+      "types": "./dist/memories/testing/index.d.ts",
+      "default": "./dist/memories/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -83,6 +91,7 @@
     "insights",
     "location",
     "dedup",
+    "memories",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
