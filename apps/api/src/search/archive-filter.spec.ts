@@ -7,7 +7,7 @@
 import {
   buildMediaWhere,
   whereExcludeArchived,
-} from './media-where.builder';
+} from '@marinoscar/memoriahub-api/media';
 import { buildWhereFromFields, SEARCHABLE_FIELDS } from './searchable-fields.registry';
 
 const CIRCLE_ID = 'circle-archive-test-001';

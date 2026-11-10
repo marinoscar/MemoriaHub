@@ -9,7 +9,7 @@ import { LocationGroupLevel, Prisma } from '@prisma/client';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
 import { PrismaService } from '../prisma/prisma.service';
-import { whereNear } from '../search/media-where.builder';
+import { whereNear } from '@marinoscar/memoriahub-api/media';
 import { haversineKm } from '../common/geo/haversine.util';
 import { fold } from './normalize-location-name';
 import {

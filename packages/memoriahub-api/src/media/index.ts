@@ -18,3 +18,4 @@ export * from './archive-trash/trash-purge.task.js';
 export * from './constants/permissions.js';
 export * from './media-sync/media-sync.controller.js';
 export * from './media-sync/media-sync.dto.js';
+export * from './where/media-where.builder.js';
