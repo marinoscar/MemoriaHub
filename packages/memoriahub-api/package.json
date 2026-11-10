@@ -95,6 +95,14 @@
       "types": "./dist/review-runs/testing/index.d.ts",
       "default": "./dist/review-runs/testing/index.js"
     },
+    "./workflows": {
+      "types": "./dist/workflows/index.d.ts",
+      "default": "./dist/workflows/index.js"
+    },
+    "./workflows/testing": {
+      "types": "./dist/workflows/testing/index.d.ts",
+      "default": "./dist/workflows/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -110,6 +118,7 @@
     "location",
     "dedup",
     "review-runs",
+    "workflows",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

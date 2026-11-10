@@ -144,6 +144,12 @@
       "core",
       "testing",
       "media"
+    ],
+    "workflows": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   },
   "memoriahub-web": {

@@ -1,0 +1,505 @@
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { trace, SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
+import { workflowExecuteBatchResultSchema } from '@marinoscar/memoriahub-compute/dto';
+
+import { runJobPayload, vetoDeleteWhileRunActive, type MemoriahubRunJobInput } from '../../core/index.js';
+import {
+  MEMORIAHUB_IDENTITY,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubIdentityPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../../ports/index.js';
+import { WorkflowActionExecutor } from '../actions/workflow-action.executor.js';
+import type { WorkflowAction, WorkflowActionContext } from '../actions/action-executor.types.js';
+import { WorkflowConditionCompiler, type CompiledWorkflow } from '../compiler/workflow-condition.compiler.js';
+import type { WorkflowsDb } from '../data/workflows-db.js';
+import type { WorkflowDefinition } from '../definition/workflow-definition.schema.js';
+import { revalidateItemMatches } from '../execution/item-revalidation.util.js';
+import { WORKFLOW_RUN_OBSERVER, type WorkflowRunObserver } from '../workflow-run-observer.js';
+import {
+  WORKFLOW_RUN_ITEM_STATUS,
+  WORKFLOW_RUN_STATUS,
+  type WorkflowRunItemStatusKey as WorkflowRunItemStatus,
+  type WorkflowRunRow as WorkflowRun,
+} from '../workflows.constants.js';
+
+/** Payload shape for a `workflow_execute_batch` job. */
+interface WorkflowExecuteBatchPayload {
+  runId: string;
+  itemIds: string[];
+}
+
+/** One per-action outcome record persisted in workflow_run_items.action_results. */
+interface OutcomeRecord {
+  type: string;
+  status: 'applied' | 'skipped' | 'failed';
+  reason?: string;
+  detail?: string;
+}
+
+/** Terminal per-item outcome (drives run counters). */
+type ItemResult =
+  | 'applied'
+  | 'partially_applied'
+  | 'failed'
+  | 'skipped'
+  | 'already_terminal';
+
+/** Re-check the run's cancellation flag every N items. */
+const CANCEL_CHECK_INTERVAL = 25;
+
+/** OTEL tracer for the Media Workflow Automation compute path. */
+const tracer = trace.getTracer('workflows');
+
+/**
+ * Media Workflow Automation — batch execution handler (issue #140).
+ *
+ * Applies the run's ordered actions to each item in the batch's `itemIds`,
+ * per-item: an idempotency claim (only status='matched' items are eligible),
+ * a drift re-validation, ordered action execution via WorkflowActionExecutor,
+ * then a conditional terminal-status write. Increments the run's counters and,
+ * once the run drains (no 'matched' items left), finalizes it to completed /
+ * completed_with_errors.
+ *
+ * NODE-ELIGIBLE (issue #144): this handler carries the nodeResultSchema /
+ * persistNodeResult pair so a distributed worker node can CLAIM a batch and
+ * submit a result — but the compute/persist split is deliberately thin. A
+ * workflow batch is DB-bound (no CPU-heavy compute to offload), so the node
+ * only produces a per-item "intended outcome" declaration from the frozen
+ * action list in its claim params; `persistNodeResult` then re-runs the FULL
+ * authoritative pipeline (`executeBatch`) server-side from the trusted
+ * `job.payload`, exactly as `process()` does. The point is posture completeness
+ * (an `ENRICHMENT_WORKER_MODE=off` fleet-only deployment must still execute
+ * workflows), not CPU offload. The type is ALSO kept server-claimable in
+ * `system` mode (`JOBS_SYSTEM_MODE_EXTRA_TYPES`, pinned by
+ * `platform/jobs/legacy-env.ts`) so a `system`-mode deployment keeps working;
+ * the platform claim is `FOR UPDATE SKIP LOCKED`, so both claim paths are safe.
+ *
+ * A native platform `JobHandler` (RETRO-C7, #604): the only node-eligible type
+ * of the three run engines. `canDelete` refuses to delete a pending batch of a
+ * run that is still `running`: without it the run never drains and never
+ * finalizes.
+ */
+@Injectable()
+export class WorkflowExecuteBatchHandler implements MemoriahubJobHandler, OnModuleInit {
+  readonly type = 'workflow_execute_batch';
+
+  readonly label = 'Workflow execute batch';
+
+  /** Up to `workflows.batchSize` items, each a few DB writes: 10 minutes, three attempts. */
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+
+  /**
+   * Node-eligibility (distributed workers): the shape a node submits via
+   * POST /api/nodes/:id/jobs/:jobId/result for this job type. Advisory only —
+   * `persistNodeResult` re-does the authoritative work from `job.payload`.
+   */
+  readonly nodeResultSchema = workflowExecuteBatchResultSchema;
+
+  private readonly logger = new Logger(WorkflowExecuteBatchHandler.name);
+
+  constructor(
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: WorkflowsDb,
+    @Inject(MEMORIAHUB_IDENTITY) private readonly identity: MemoriahubIdentityPort,
+    private readonly compiler: WorkflowConditionCompiler,
+    private readonly executor: WorkflowActionExecutor,
+    // The webhook event and the run-completed notification (the host's; the engine only calls them).
+    @Optional() @Inject(WORKFLOW_RUN_OBSERVER) private readonly observer?: WorkflowRunObserver,
+    // App metrics (RETRO-T3, #628): `app.runs.finished` / `app.runs.items` (engine `workflow`). Optional for hand-built tests.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+  ) {}
+
+  onModuleInit(): void {
+    this.jobs.registerHandler(this);
+  }
+
+  async process(job: MemoriahubRunJobInput): Promise<void> {
+    const payload = this.readPayload(job);
+    if (!payload) {
+      this.logger.warn(`workflow_execute_batch job ${job.id} missing payload; skipping`);
+      return;
+    }
+    await this.runBatchSpan('workflow.execute_batch', payload);
+  }
+
+  /** Refuses to delete a pending batch of a run that is still running. */
+  canDelete(job: MemoriahubJob): Promise<string | null> {
+    return vetoDeleteWhileRunActive(job, {
+      engine: 'workflow run',
+      activeStatuses: [WORKFLOW_RUN_STATUS.running],
+      readRunStatus: async (runId) =>
+        ((await this.prisma.workflowRun.findUnique({ where: { id: runId }, select: { status: true } })) as {
+          status: string;
+        } | null)?.status ?? null,
+    });
+  }
+
+  /** The trusted `{ runId, itemIds }` from the job row, or null when malformed. */
+  private readPayload(job: Pick<MemoriahubRunJobInput, 'payload'>): WorkflowExecuteBatchPayload | null {
+    const payload = runJobPayload<WorkflowExecuteBatchPayload>(job);
+    if (typeof payload?.runId !== 'string' || payload.runId === '' || !Array.isArray(payload.itemIds)) {
+      return null;
+    }
+    return { runId: payload.runId, itemIds: payload.itemIds.filter((id): id is string => typeof id === 'string') };
+  }
+
+  /**
+   * Persist a node-computed result (issue #144 — the persist half of the
+   * compute/persist split).
+   *
+   * SECURITY: the node's `result` is IGNORED as a source of truth. The
+   * authoritative item set comes from the TRUSTED `job.payload` (`runId`,
+   * `itemIds`), and this method re-runs the identical `executeBatch` pipeline
+   * `process()` runs — per-item idempotent claim, drift re-validation (so a
+   * stale node result can never bypass the guard), `move_to_circle`'s
+   * cross-circle dedup + both-circle permission checks, counters, and run
+   * finalization. Late submissions after lease expiry are already 409-rejected
+   * by the nodes slice's job-scoped lease guard, so no
+   * extra staleness check is needed here. A throw routes the job through the
+   * shared failure/retry state machine, exactly as an in-process throw would.
+   */
+  async persistNodeResult(job: MemoriahubJob, _result: unknown): Promise<void> {
+    const payload = this.readPayload(job);
+    if (!payload) {
+      this.logger.warn(
+        `workflow_execute_batch job ${job.id} missing payload; skipping node persist`,
+      );
+      return;
+    }
+    // The submitted result was already validated against nodeResultSchema by the
+    // ingestion endpoint; we deliberately do not read `items` from it — the
+    // server re-does the authoritative work from job.payload.
+    await this.runBatchSpan('workflow.execute_batch.persist_node_result', payload);
+  }
+
+  /** OTEL-wrapped batch execution shared by process() and persistNodeResult(). */
+  private async runBatchSpan(
+    spanName: string,
+    payload: WorkflowExecuteBatchPayload,
+  ): Promise<void> {
+    await tracer.startActiveSpan(
+      spanName,
+      {
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          'workflow.run_id': payload.runId,
+          'workflow.batch_size': payload.itemIds.length,
+        },
+      },
+      async (span) => {
+        try {
+          await this.executeBatch(payload, span);
+          span.setStatus({ code: SpanStatusCode.OK });
+        } catch (err) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          span.recordException(err as Error);
+          throw err;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  private async executeBatch(
+    payload: WorkflowExecuteBatchPayload,
+    span: Span,
+  ): Promise<void> {
+    const { runId, itemIds } = payload;
+
+    const run = (await this.prisma.workflowRun.findUnique({ where: { id: runId } })) as WorkflowRun | null;
+    if (!run) return; // run gone → nothing to do
+    if (run.status === WORKFLOW_RUN_STATUS.cancelled) return; // no-op on a cancelled run
+
+    span.setAttribute('workflow.id', run.workflowId);
+    span.setAttribute('workflow.circle_id', run.circleId);
+
+    const definition = run.definitionSnapshot as unknown as WorkflowDefinition;
+    const compiled = this.compiler.compile(run.circleId, definition);
+
+    // Ordered action list: strip `type` off each definition action; the rest is
+    // the action's params bag the executor reads by key.
+    const actions: WorkflowAction[] = definition.actions.map((a) => {
+      const { type, ...params } = a as Record<string, unknown>;
+      return { type: String(type), params };
+    });
+
+    // Actor = approver (else the run creator). Both fall through startedById set
+    // at create time; guard defensively if somehow absent.
+    const actorUserId = run.approvedById ?? run.startedById;
+    if (!actorUserId) {
+      this.logger.warn(`Run ${runId} has no actor; cannot execute batch`);
+      return;
+    }
+    const actorPermissions = await this.loadActorPermissions(actorUserId);
+
+    // Fresh per-batch handledGroups Set. Within-batch group dedup is handled by
+    // the Set; ACROSS batches, once one batch resolves/dismisses a group its
+    // status flips off 'pending', so the executor's own status check skips it in
+    // later batches ('no_pending_target'). A per-batch Set is therefore correct —
+    // no cross-batch persistence of the Set is needed.
+    const ctx: WorkflowActionContext = {
+      runId,
+      circleId: run.circleId,
+      actorUserId,
+      actorPermissions,
+      handledGroups: new Set<string>(),
+    };
+
+    for (let i = 0; i < itemIds.length; i++) {
+      // Periodic cancellation check — bail out of the remaining items.
+      if (i > 0 && i % CANCEL_CHECK_INTERVAL === 0) {
+        const fresh = (await this.prisma.workflowRun.findUnique({
+          where: { id: runId },
+          select: { status: true },
+        })) as { status: string } | null;
+        if (fresh?.status === WORKFLOW_RUN_STATUS.cancelled) return;
+      }
+
+      const result = await this.processItem(runId, itemIds[i], actions, compiled, ctx);
+      await this.applyCounters(runId, result);
+    }
+
+    await this.maybeFinalizeRun(runId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-item processing
+  // ---------------------------------------------------------------------------
+
+  private async processItem(
+    runId: string,
+    itemId: string,
+    actions: WorkflowAction[],
+    compiled: CompiledWorkflow,
+    ctx: WorkflowActionContext,
+  ): Promise<ItemResult> {
+    try {
+      // Idempotency claim: only items still 'matched' are eligible. On a batch
+      // retry, an already-terminal (or excluded) item's count is 0 → skip WITHOUT
+      // re-counting (it was counted by the original run).
+      const claim = await this.prisma.workflowRunItem.updateMany({
+        where: { runId, mediaItemId: itemId, status: WORKFLOW_RUN_ITEM_STATUS.matched },
+        data: { updatedAt: new Date() },
+      });
+      if (claim.count === 0) return 'already_terminal';
+
+      // Drift re-validation: the item may have changed between selection and now.
+      const stillMatches = await revalidateItemMatches(this.prisma, compiled, itemId);
+      if (!stillMatches) {
+        await this.finalizeItem(runId, itemId, WORKFLOW_RUN_ITEM_STATUS.skipped, null, null);
+        return 'skipped';
+      }
+
+      // Execute actions in definition order; stop after a terminal (hard_delete).
+      const outcomes: OutcomeRecord[] = [];
+      let appliedCount = 0;
+      let firstFailedDetail: string | undefined;
+      for (const action of actions) {
+        const outcome = await this.executor.execute(action, { id: itemId }, ctx);
+        outcomes.push({
+          type: action.type,
+          status: outcome.status,
+          reason: outcome.reason,
+          detail: outcome.detail,
+        });
+        if (outcome.status === 'applied') appliedCount += 1;
+        else if (outcome.status === 'failed' && firstFailedDetail === undefined) {
+          firstFailedDetail = outcome.detail ?? 'action failed';
+        }
+        if (outcome.terminal) break;
+      }
+
+      // Item status: any failure with prior progress → partially_applied; a
+      // failure with no progress → failed; some progress → applied; all skips → skipped.
+      let status: WorkflowRunItemStatus;
+      if (firstFailedDetail !== undefined && appliedCount > 0) {
+        status = WORKFLOW_RUN_ITEM_STATUS.partially_applied;
+      } else if (firstFailedDetail !== undefined) {
+        status = WORKFLOW_RUN_ITEM_STATUS.failed;
+      } else if (appliedCount > 0) {
+        status = WORKFLOW_RUN_ITEM_STATUS.applied;
+      } else {
+        status = WORKFLOW_RUN_ITEM_STATUS.skipped;
+      }
+
+      // NOTE: a successful hard_delete purges the MediaItem, which cascade-deletes
+      // this workflow_run_item row; the conditional write below then updates 0 rows
+      // (harmless) and the item is counted via the returned result instead.
+      await this.finalizeItem(runId, itemId, status, outcomes, firstFailedDetail ?? null);
+
+      switch (status) {
+        case WORKFLOW_RUN_ITEM_STATUS.partially_applied:
+          return 'partially_applied';
+        case WORKFLOW_RUN_ITEM_STATUS.failed:
+          return 'failed';
+        case WORKFLOW_RUN_ITEM_STATUS.applied:
+          return 'applied';
+        default:
+          return 'skipped';
+      }
+    } catch (err) {
+      // An unexpected throw (outside the executor's own catch) must not fail the
+      // whole batch — record the item failed and continue.
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Item ${itemId} (run ${runId}) failed unexpectedly: ${detail}`);
+      await this.finalizeItem(runId, itemId, WORKFLOW_RUN_ITEM_STATUS.failed, null, detail).catch(
+        () => undefined,
+      );
+      return 'failed';
+    }
+  }
+
+  /** Write an item's terminal status, guarded on it still being 'matched'. */
+  private async finalizeItem(
+    runId: string,
+    itemId: string,
+    status: WorkflowRunItemStatus,
+    outcomes: OutcomeRecord[] | null,
+    error: string | null,
+  ): Promise<void> {
+    const data: Record<string, unknown> = { status, error };
+    if (outcomes) {
+      data.actionResults = outcomes;
+    }
+    await this.prisma.workflowRunItem.updateMany({
+      where: { runId, mediaItemId: itemId, status: WORKFLOW_RUN_ITEM_STATUS.matched },
+      data,
+    });
+  }
+
+  /** Increment the run's aggregate counters for one processed item. */
+  private async applyCounters(runId: string, result: ItemResult): Promise<void> {
+    if (result === 'already_terminal') return; // counted by the original run
+
+    const data: Record<string, unknown> = {
+      processedCount: { increment: 1 },
+    };
+    switch (result) {
+      case 'applied':
+        data.succeededCount = { increment: 1 };
+        break;
+      case 'partially_applied':
+        // Counts as both progress AND an error, forcing completed_with_errors.
+        data.succeededCount = { increment: 1 };
+        data.failedCount = { increment: 1 };
+        break;
+      case 'failed':
+        data.failedCount = { increment: 1 };
+        break;
+      case 'skipped':
+        data.skippedCount = { increment: 1 };
+        break;
+    }
+    await this.prisma.workflowRun.update({ where: { id: runId }, data });
+    // A partially applied item counts as failed (it also forces completed_with_errors).
+    this.metrics?.add('runItems', 1, {
+      engine: 'workflow',
+      outcome: result === 'applied' ? 'applied' : result === 'skipped' ? 'skipped' : 'failed',
+    });
+  }
+
+  /**
+   * Finalize the run once every item has left 'matched'. Race-safe: the
+   * transition is a conditional updateMany on status='running', so only ONE
+   * batch (the last to drain the queue) wins and audits.
+   */
+  private async maybeFinalizeRun(runId: string): Promise<void> {
+    const remaining = await this.prisma.workflowRunItem.count({
+      where: { runId, status: WORKFLOW_RUN_ITEM_STATUS.matched },
+    });
+    if (remaining > 0) return;
+
+    // Drift-safe error decision from the surviving item rows (hard_deleted items
+    // are gone — they were successes, never failures).
+    const grouped = (await this.prisma.workflowRunItem.groupBy({
+      by: ['status'],
+      where: { runId },
+      _count: { _all: true },
+    })) as Array<{ status: string; _count: { _all: number } }>;
+    const errorItems = grouped
+      .filter(
+        (g) =>
+          g.status === WORKFLOW_RUN_ITEM_STATUS.failed ||
+          g.status === WORKFLOW_RUN_ITEM_STATUS.partially_applied,
+      )
+      .reduce((sum, g) => sum + g._count._all, 0);
+
+    const finalStatus =
+      errorItems > 0
+        ? WORKFLOW_RUN_STATUS.completed_with_errors
+        : WORKFLOW_RUN_STATUS.completed;
+
+    const fin = await this.prisma.workflowRun.updateMany({
+      where: { id: runId, status: WORKFLOW_RUN_STATUS.running },
+      data: { status: finalStatus, finishedAt: new Date() },
+    });
+
+    if (fin.count > 0) {
+      const run = (await this.prisma.workflowRun.findUnique({ where: { id: runId } })) as WorkflowRun | null;
+      if (run?.startedById) {
+        await this.audit(run.startedById, 'workflow_run:completed', runId, {
+          status: finalStatus,
+          errorItems,
+        });
+      }
+      this.logger.log({
+        event: 'workflow_run.finalized',
+        runId,
+        workflowId: run?.workflowId ?? null,
+        circleId: run?.circleId ?? null,
+        status: finalStatus,
+        errorItems,
+      });
+      this.executor.clearRunCache(runId);
+
+      this.metrics?.add('runsFinished', 1, { engine: 'workflow', outcome: finalStatus });
+      // Terminal — fire-and-forget notification (epic #240, issue #247).
+      // Inside the `fin.count > 0` guard, so ONLY the batch that won the
+      // conditional finalize notifies; a loser produces nothing. The producer
+      // additionally skips on_media_enriched micro-runs, which also terminate
+      // through this exact path.
+      this.observer?.notifyRunFinishedAsync(runId);
+      // Webhook `workflows.run.completed` (RETRO-H4, #603), same won-the-finalize guard; never throws.
+      await this.observer?.runFinished(runId);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /** Resolve the actor's effective (distinct) system permission-string list. */
+  private async loadActorPermissions(userId: string): Promise<string[]> {
+    return [...(await this.identity.permissionsOf(userId))];
+  }
+
+  private async audit(
+    actorUserId: string,
+    action: string,
+    targetId: string,
+    meta: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.auditEvent
+      .create({
+        data: {
+          actorUserId,
+          action,
+          targetType: 'workflow_run',
+          targetId,
+          meta,
+        },
+      })
+      .catch(() => undefined);
+  }
+}

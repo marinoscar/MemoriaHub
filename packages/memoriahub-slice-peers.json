@@ -304,6 +304,18 @@
         "@opentelemetry/api",
         "nestjs-zod"
       ]
+    },
+    "workflows": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@nestjs/swagger",
+        "@opentelemetry/api",
+        "nestjs-zod",
+        "zod"
+      ]
     }
   },
   "memoriahub-web": {
