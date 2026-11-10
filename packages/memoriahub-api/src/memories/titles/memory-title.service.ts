@@ -47,7 +47,7 @@
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { aiRateLimit } from '../../core/index.js';
+import { aiRateLimit, readAiSelection } from '../../core/index.js';
 import {
   MEMORIAHUB_AI,
   MEMORIAHUB_PRISMA,
@@ -206,19 +206,6 @@ export class MemoryTitleService {
   ) {}
 
   /**
-   * The admin's `ai.features.memories` selection, or `null` when unset or half-filled. The `ai` settings
-   * namespace carries the selections (set through the host's AI settings page).
-   */
-  private async selection(): Promise<{ provider: string; model: string } | null> {
-    const { value } = await this.settings.readSystem<
-      { features?: Record<string, { provider?: string | null; model?: string | null } | null> } | undefined
-    >('ai');
-    const chosen = value?.features?.['memories'];
-    if (!chosen?.provider || !chosen?.model) return null;
-    return { provider: chosen.provider, model: chosen.model };
-  }
-
-  /**
    * Open a per-job budget. Called ONCE by `MemoryGenerationHandler`, carried on
    * `MemoryCuratorContext.titling`, and handed to `upsertMemory` by curators.
    *
@@ -272,7 +259,7 @@ export class MemoryTitleService {
       return null;
     }
 
-    const config = await this.selection();
+    const config = await readAiSelection(this.settings, 'memories');
     if (!config) {
       this.logger.debug('No ai.features.memories provider configured; using template titles');
       return null;
