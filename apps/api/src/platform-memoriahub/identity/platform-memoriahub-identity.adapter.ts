@@ -10,6 +10,7 @@ import {
   type RequestWithPrincipal,
 } from '@marinoscar/platform-api/identity';
 import { Trace } from '@marinoscar/platform-api/otel-core';
+import { MEMORIAHUB_AUTH_FAILURE_PROPERTY } from '@marinoscar/memoriahub-api/core';
 import type { MemoriahubIdentityPort, MemoriahubPrincipal } from '@marinoscar/memoriahub-api/ports';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -37,11 +38,18 @@ export class PlatformMemoriahubIdentityAdapter implements MemoriahubIdentityPort
     try {
       await this.jwt.canActivate(context);
     } catch (error) {
-      if (error instanceof UnauthorizedException) return null;
+      if (error instanceof UnauthorizedException) {
+        // The guard of the package answers with the platform's own message (an expired personal access
+        // token reads differently from a missing header), so a slice's route refuses exactly as `@Auth()` did.
+        context.switchToHttp().getRequest<Record<string, unknown>>()[MEMORIAHUB_AUTH_FAILURE_PROPERTY] = error.message;
+        return null;
+      }
       throw error;
     }
 
-    const request = context.switchToHttp().getRequest<RequestWithPrincipal & { user?: AuthenticatedUser }>();
+    const request = context
+      .switchToHttp()
+      .getRequest<RequestWithPrincipal & { user?: AuthenticatedUser; authCredential?: { kind: 'jwt' | 'pat' | 'node'; tokenId?: string } }>();
     const user = request.user;
     if (!user) return null;
 
@@ -55,6 +63,7 @@ export class PlatformMemoriahubIdentityAdapter implements MemoriahubIdentityPort
       orgId: activeOrgIdOf(request) ?? null,
       roles: principal?.roles ?? requestUser.roles,
       permissions: new Set(principal?.permissions ?? requestUser.permissions),
+      ...(request.authCredential ? { credential: { ...request.authCredential } } : {}),
     };
   }
 
