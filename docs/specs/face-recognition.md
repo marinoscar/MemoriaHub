@@ -10,6 +10,9 @@
 
 ---
 
+
+> **Code location (RETRO-J6, #615).** The face slice lives in `@marinoscar/memoriahub-api/face` (`packages/memoriahub-api/src/face/`, [slice README](../../packages/memoriahub-api/src/face/README.md)): detection, matching, clustering, people, auto-archive, the backfills, the settings service and the CompreFace adapter, behind the `MEMORIAHUB_*` ports. `apps/api/src/face/` is the host binding (`FaceModule`, the four controllers and their DTO classes). Routes, job type strings, settings and environment variable names are unchanged.
+
 ## Table of Contents
 
 1. [Overview and Product Goal](#1-overview-and-product-goal)
@@ -86,7 +89,7 @@ See **[docs/specs/enrichment-queue.md](enrichment-queue.md)** for the worker lif
 
 ### FaceProvider Interface
 
-All providers implement the `FaceProvider` interface defined in `apps/api/src/face/providers/face-provider.interface.ts`.
+All providers implement the `FaceProvider` interface defined in `packages/memoriahub-api/src/face/providers/face-provider.interface.ts`.
 
 **Properties:**
 
@@ -146,7 +149,7 @@ It requires no API key, runs as a stateless sidecar on the same Docker network, 
 
 ### Provider Registry
 
-`apps/api/src/face/providers/face-provider.registry.ts` maintains a simple Map:
+`packages/memoriahub-api/src/face/providers/face-provider.registry.ts` maintains a simple Map:
 
 ```typescript
 new Map([
@@ -156,7 +159,7 @@ new Map([
 
 **To add a new provider:**
 
-1. Implement the `FaceProvider` interface under `apps/api/src/face/providers/`.
+1. Implement the `FaceProvider` interface under `packages/memoriahub-api/src/face/providers/`.
 2. Add one entry to the registry Map: `['your-key', new YourProvider()]`.
 
 No further wiring is required. The provider will appear in the admin UI and settings endpoints automatically.
@@ -215,7 +218,7 @@ Backfill skips items already in `processed` or `no_faces` status unless `force: 
 
 For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[docs/specs/enrichment-queue.md](enrichment-queue.md)**.
 
-**Job handlers (RETRO-C3, #585).** `face_detection`, `video_face_detection` and `face_auto_archive_sweep` are native platform `JobHandler`s (`apps/api/src/face/*.handler.ts`) registered with `JobHandlerRegistry`:
+**Job handlers (RETRO-C3, #585).** `face_detection`, `video_face_detection` and `face_auto_archive_sweep` are native platform `JobHandler`s (`packages/memoriahub-api/src/face/*.handler.ts`) registered with `JobHandlerRegistry`:
 
 | Type | Label | Profile | Eligibility |
 |---|---|---|---|
@@ -227,7 +230,7 @@ The handler reads the media item from `job.subjectId` (`subjectType: 'media_item
 
 ### processMediaItem — 12 Steps
 
-`FaceDetectionService.processMediaItem` in `apps/api/src/face/face-detection.service.ts`:
+`FaceDetectionService.processMediaItem` in `packages/memoriahub-api/src/face/face-detection.service.ts`:
 
 **Step 1.** Upsert `MediaFaceStatus` to `processing`.
 
@@ -266,11 +269,11 @@ The handler reads the media item from `job.subjectId` (`subjectType: 'media_item
 
 ### Overview
 
-`VideoFaceDetectionHandler` (`apps/api/src/face/video-face-detection.handler.ts`) implements the `video_face_detection` enrichment job type. It extracts JPEG frames from a video using ffmpeg, runs the active face provider on each frame using shared `FaceDetectionCore` logic, deduplicates faces across frames by embedding similarity, and writes one `Face` row per identity cluster per video.
+`VideoFaceDetectionHandler` (`packages/memoriahub-api/src/face/video-face-detection.handler.ts`) implements the `video_face_detection` enrichment job type. It extracts JPEG frames from a video using ffmpeg, runs the active face provider on each frame using shared `FaceDetectionCore` logic, deduplicates faces across frames by embedding similarity, and writes one `Face` row per identity cluster per video.
 
-Shared logic (`FaceDetectionCore`, `apps/api/src/face/face-detection-core.service.ts`) is used by both the photo `face_detection` handler and this video handler for provider resolution, per-frame detection, bounding box normalization, L2 embedding normalization, face persistence, and person matching.
+Shared logic (`FaceDetectionCore`, `packages/memoriahub-api/src/face/face-detection-core.service.ts`) is used by both the photo `face_detection` handler and this video handler for provider resolution, per-frame detection, bounding box normalization, L2 embedding normalization, face persistence, and person matching.
 
-Frame extraction is implemented in `VideoFrameExtractionService` (`apps/api/src/face/video-frame-extraction.service.ts`), which delegates to the shared parity package's `@marinoscar/memoriahub-compute/video` to seek to each computed timestamp and output a single JPEG frame per seek. ffmpeg is invoked through that package's own thin `spawn()` wrapper (`@marinoscar/memoriahub-compute/ffmpeg`) — issue #219 removed the deprecated `fluent-ffmpeg` dependency it previously used. The argv is unchanged (`-ss <t> -i <video> -y -vframes 1 <out>`, an INPUT seek) and pinned by `packages/memoriahub-compute/test/ffmpeg.test.mjs`.
+Frame extraction is implemented in `VideoFrameExtractionService` (`packages/memoriahub-api/src/face/video-frame-extraction.service.ts`), which delegates to the shared parity package's `@marinoscar/memoriahub-compute/video` to seek to each computed timestamp and output a single JPEG frame per seek. ffmpeg is invoked through that package's own thin `spawn()` wrapper (`@marinoscar/memoriahub-compute/ffmpeg`) — issue #219 removed the deprecated `fluent-ffmpeg` dependency it previously used. The argv is unchanged (`-ss <t> -i <video> -y -vframes 1 <out>`, an INPUT seek) and pinned by `packages/memoriahub-compute/test/ffmpeg.test.mjs`.
 
 ### Enqueue Routing
 
@@ -679,7 +682,7 @@ The runtime value is `face.autoArchive.matchThreshold` (system setting, 0.30–0
 
 #### The Archived Reference Pool
 
-"Archived" here means the same `Face.hiddenAt IS NOT NULL` state used by the manual per-face archive above — specifically the subset with `personId IS NULL` (unassigned). This pool is the reference set every incoming or existing face is compared against. It is loaded via `FaceMatchingService.matchFaceToArchived` (one embedding vs. the pool) and `FaceMatchingService.findLiveMatchesAgainstArchived` (the inverse: the whole live unassigned pool vs. the reference set), both in `apps/api/src/face/face-matching.service.ts`. The pool is capped at `FACE_ARCHIVE_MAX_CANDIDATES` (default `5000`) per circle, ordered most-recently-hidden first, so a truncated scan favors the freshest archive decisions. Both methods are read-only and accept a pre-loaded `candidates`/`archivedCandidates` array so callers that already queried the pool once per job don't pay for it twice.
+"Archived" here means the same `Face.hiddenAt IS NOT NULL` state used by the manual per-face archive above — specifically the subset with `personId IS NULL` (unassigned). This pool is the reference set every incoming or existing face is compared against. It is loaded via `FaceMatchingService.matchFaceToArchived` (one embedding vs. the pool) and `FaceMatchingService.findLiveMatchesAgainstArchived` (the inverse: the whole live unassigned pool vs. the reference set), both in `packages/memoriahub-api/src/face/face-matching.service.ts`. The pool is capped at `FACE_ARCHIVE_MAX_CANDIDATES` (default `5000`) per circle, ordered most-recently-hidden first, so a truncated scan favors the freshest archive decisions. Both methods are read-only and accept a pre-loaded `candidates`/`archivedCandidates` array so callers that already queried the pool once per job don't pay for it twice.
 
 **Memory bound:** holding the full candidate set in memory costs `candidates × embeddingDim × 8 bytes` (float64 JS numbers) — at the default cap of 5000 and CompreFace's fixed 128-d embedding, that's `5000 × 128 × 8 ≈ 5 MB` per job, comfortably inside a worker's heap even on a constrained VPS. Lower `FACE_ARCHIVE_MAX_CANDIDATES` on memory-constrained deployments with very large archived pools.
 
@@ -689,7 +692,7 @@ pgvector seam: like `matchFaceToPerson`, both methods currently fall through to 
 
 Auto-archive can hide a face through three independent code paths, all gated on the same `features.faceAutoArchive` system setting (checked fresh on every call, never cached) and the `FACE_AUTO_ARCHIVE` env kill-switch:
 
-1. **Detection-time (new faces).** `FaceDetectionCore.persistAndMatchFaces` (`apps/api/src/face/face-detection-core.service.ts`, shared by both the photo `face_detection` handler and the video handler) reads the gate once per job. For each newly-created face that finds no person match and has a non-empty embedding, it lazily loads the archived reference pool (once per job, only if needed) and calls `matchFaceToArchived`. Matches are collected and batch-archived (`updateMany`) after the person-matching loop completes, rather than one `UPDATE` per face. A settings-read failure or matching error is logged and swallowed — it must never abort face detection itself.
+1. **Detection-time (new faces).** `FaceDetectionCore.persistAndMatchFaces` (`packages/memoriahub-api/src/face/face-detection-core.service.ts`, shared by both the photo `face_detection` handler and the video handler) reads the gate once per job. For each newly-created face that finds no person match and has a non-empty embedding, it lazily loads the archived reference pool (once per job, only if needed) and calls `matchFaceToArchived`. Matches are collected and batch-archived (`updateMany`) after the person-matching loop completes, rather than one `UPDATE` per face. A settings-read failure or matching error is logged and swallowed — it must never abort face detection itself.
 2. **Archive-time retroactive sweep (existing live faces).** `PeopleService.hideFaces` (`PATCH /api/people/faces/bulk/hide`) performs the user's requested manual archive first, then — best-effort, never failing the request — takes the just-archived face(s) as a small reference set and calls `findLiveMatchesAgainstArchived` to sweep the *rest* of the live unassigned pool for anything that now resembles them. Matches are archived in the same call, and the response's `hidden` count is the combined total (manual + swept); the audit event records the swept count separately under `meta.autoHidden`. This is what makes archiving a face immediately clear out its look-alikes instead of waiting for them to be re-detected later.
 3. **Admin backfill (whole existing backlog).** `POST /api/admin/face/auto-archive/backfill` enqueues one server-only `face_auto_archive_sweep` enrichment job per circle that already has at least one archived unassigned face (`FaceBackfillService.autoArchiveBackfillAllCircles`). Unlike paths 1–2, which only ever look forward from a specific event, the sweep job (`FaceAutoArchiveSweepHandler`, type `face_auto_archive_sweep`) walks the circle's *entire* live unassigned pool in cursor-paginated batches (500 per page — offset pagination is unsafe here because hiding matches removes rows from the `hiddenAt: null` set mid-sweep) against the archived reference set loaded once up front. Use this after enabling `features.faceAutoArchive` on a circle that already has both an archived backlog and an unassigned-faces backlog predating the toggle.
 

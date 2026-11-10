@@ -2188,10 +2188,10 @@ For the complete specification, see **[docs/specs/face-recognition.md](specs/fac
 |-----------|------|------|
 | `FaceEnqueueListener` | `apps/api/src/face/processing/face-enqueue.listener.ts` | Listens for `OBJECT_PROCESSED_EVENT`; inserts `FaceJob(reason:upload)` if circle has `faceRecognitionEnabled=true` and `FACE_AUTO_DETECT` is not `false` |
 | `FaceJobWorker` | `apps/api/src/face/processing/face-job.worker.ts` | Poll loop (configurable `FACE_JOB_POLL_MS`); claims jobs via `UPDATE … RETURNING`; max 3 attempts; disabled via `FACE_WORKER_ENABLED=false` |
-| `FaceDetectionService` | `apps/api/src/face/face-detection.service.ts` | Streams image from S3, calls active provider, persists Face rows, updates `MediaFaceStatus` |
-| `FaceMatchingService` | `apps/api/src/face/face-matching.service.ts` | L2-normalizes embeddings; cosine similarity vs per-person centroids; assigns `personId` when ≥ `FACE_MATCH_THRESHOLD` |
-| `FaceClusteringService` | `apps/api/src/face/face-clustering.service.ts` | Greedy union-find over unknown faces; creates provisional Person records for clusters ≥ `FACE_CLUSTER_MIN_SIZE` |
-| `PeopleService` | `apps/api/src/face/people.service.ts` | CRUD + merge + delete for Person records; centroid recomputation on assign/merge |
+| `FaceDetectionService` | `packages/memoriahub-api/src/face/face-detection.service.ts` | Streams image from S3, calls active provider, persists Face rows, updates `MediaFaceStatus` |
+| `FaceMatchingService` | `packages/memoriahub-api/src/face/face-matching.service.ts` | L2-normalizes embeddings; cosine similarity vs per-person centroids; assigns `personId` when ≥ `FACE_MATCH_THRESHOLD` |
+| `FaceClusteringService` | `packages/memoriahub-api/src/face/face-clustering.service.ts` | Greedy union-find over unknown faces; creates provisional Person records for clusters ≥ `FACE_CLUSTER_MIN_SIZE` |
+| `PeopleService` | `packages/memoriahub-api/src/face/people.service.ts` | CRUD + merge + delete for Person records; centroid recomputation on assign/merge |
 | `FaceSettingsController` | `apps/api/src/face/face-settings.controller.ts` | Admin-only: provider credentials, active detection feature, backfill, biometric erase |
 | `FaceDetectionController` | `apps/api/src/face/face-detection.controller.ts` | Media-scoped: list faces, status, rerun, backfill, biometric erase |
 | `PeopleController` | `apps/api/src/face/people.controller.ts` | People CRUD, face assignment, clustering, merge |
