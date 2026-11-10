@@ -7,7 +7,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "setup:deps": "cd ../.. && npm run build --workspace=@marinoscar/memoriahub-compute && npm run prisma:generate --workspace=api",
+    "setup:deps": "cd ../.. && npm run build --workspace=@marinoscar/memoriahub-compute && npm run build --workspace=@marinoscar/memoriahub-contract && npm run prisma:generate --workspace=api",
     "pretypecheck": "npm run setup:deps",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'No linter configured'",

@@ -4,7 +4,8 @@
   "commit": false,
   "fixed": [
     [
-      "@marinoscar/memoriahub-compute"
+      "@marinoscar/memoriahub-compute",
+      "@marinoscar/memoriahub-contract"
     ]
   ],
   "linked": [],

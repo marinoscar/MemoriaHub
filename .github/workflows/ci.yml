@@ -88,6 +88,7 @@ jobs:
       # before anything importing it can typecheck. (apps/web imports neither
       # this package nor Prisma — see the web-test job.)
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -127,6 +128,7 @@ jobs:
       - run: npm ci
 
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -172,13 +174,16 @@ jobs:
       # 1.5 GB for the full install, and the suite passes identically on the
       # reduced tree. Worth doing here specifically because eight shards each
       # pay this cost. If apps/web ever depends on another workspace, this
-      # filter must gain it or the job will fail to resolve it.
-      - run: npm ci --workspace=web --include-workspace-root
+      # filter must gain it or the job will fail to resolve it: it depends on
+      # @marinoscar/memoriahub-contract (types only, erased by the test
+      # transform, so no build step is needed here).
+      - run: npm ci --workspace=web --workspace=@marinoscar/memoriahub-contract --include-workspace-root
 
       # Deliberately NO memoriahub-compute build and NO `prisma generate` here:
-      # apps/web imports neither (verified — no @memoriahub/* dependency and no
-      # source reference), so both would be dead weight on all eight shards. If
-      # web ever gains such an import, add the build step back.
+      # apps/web imports neither (verified — no source reference), so both would
+      # be dead weight on all eight shards. If web ever gains such an import, add
+      # the build step back. Its one package import, memoriahub-contract, is
+      # `import type` only.
       - run: npm run test:ci --workspace=web -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   openapi:
@@ -207,6 +212,7 @@ jobs:
       # Same rationale as the build job: apps/api imports
       # @marinoscar/memoriahub-compute by subpath against its git-ignored dist/.
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -301,6 +307,7 @@ jobs:
       # Same rationale as the typecheck job: apps/cli imports
       # @marinoscar/memoriahub-compute by subpath against its git-ignored dist/.
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
 
       # apps/cli/src/infra-conformance.spec.ts runs `nginx -t` over infra/nginx
       # (issue #566); without a binary that case is registered as skipped.

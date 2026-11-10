@@ -29,6 +29,10 @@ FROM base AS deps
 COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/package.json
+# The wire-schema package (zod only) apps/web takes its API types from, and the
+# shared tool that gives its CommonJS build a module-format stub.
+COPY packages/memoriahub-contract ./packages/memoriahub-contract/
+COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
 # --ignore-scripts: before this context widening, the build context was
 # scoped to apps/web, so the root package.json (and its postinstall,
 # scripts/patch-react-transition-group.js) was never even visible to this
@@ -40,11 +44,15 @@ COPY apps/web/package.json ./apps/web/package.json
 # keeps this build byte-for-byte equivalent to the pre-widening behavior.
 RUN npm install --ignore-scripts
 
+# apps/web type-checks against the package's built dist/ (git-ignored).
+RUN npm run build -w @marinoscar/memoriahub-contract
+
 # -----------------------------------------------------------------------------
 # Development stage
 # -----------------------------------------------------------------------------
 FROM base AS development
 COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages /app/packages
 COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
 COPY apps/web ./apps/web
 WORKDIR /app/apps/web
@@ -56,6 +64,7 @@ CMD ["npm", "run", "dev", "--", "--host"]
 # -----------------------------------------------------------------------------
 FROM base AS build
 COPY --from=deps /app/node_modules /app/node_modules
+COPY --from=deps /app/packages /app/packages
 COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
 COPY apps/web ./apps/web
 WORKDIR /app/apps/web
