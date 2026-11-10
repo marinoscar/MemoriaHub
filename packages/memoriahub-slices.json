@@ -101,6 +101,12 @@
       "ports",
       "core",
       "testing"
+    ],
+    "face": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   },
   "memoriahub-web": {

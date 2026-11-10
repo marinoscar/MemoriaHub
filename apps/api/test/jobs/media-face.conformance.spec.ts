@@ -33,10 +33,12 @@ import {
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 import { Readable } from 'stream';
 
-import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
-import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
-import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
-import { VideoFaceDetectionService } from '../../src/face/video-face-detection.service';
+import {
+  FaceAutoArchiveSweepHandler,
+  FaceDetectionHandler,
+  VideoFaceDetectionHandler,
+  VideoFaceDetectionService,
+} from '@marinoscar/memoriahub-api/face';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
 import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
@@ -103,7 +105,8 @@ function reset(): void {
 reset();
 
 const registry = { register: jest.fn() } as unknown as JobHandlerRegistry;
-const throttle = { registerProviderKey: jest.fn() };
+/** The queue port the face handlers register with (RETRO-J6): registration goes to the recording registry. */
+const jobsPort = { registerHandler: (handler: unknown) => (registry as unknown as { register: (h: unknown) => void }).register(handler) };
 const jobScope = { run: async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn({}) };
 
 /** The subject lookups every handler starts with. */
@@ -132,11 +135,10 @@ const snapshot = () => ({ writes: [...world.writes.entries()].sort(), downloads:
 
 const buildFaceDetection = () =>
   new FaceDetectionHandler(
-    registry,
-    throttle as never,
+    jobsPort as never,
     subjectLookups() as never,
     { ...recordingService('processMediaItem'), ...recordingService('persistFaces') } as never,
-  );
+  ) as unknown as JobHandler;
 
 describe('face_detection', () => {
   staticContract('face_detection', buildFaceDetection);
@@ -171,7 +173,7 @@ describe('face_detection', () => {
 
 let videoRow: Record<string, unknown>;
 
-function buildVideoFaceDetection(): VideoFaceDetectionHandler {
+function buildVideoFaceDetection(): JobHandler {
   const prisma = {
     ...subjectLookups(),
     mediaItem: {
@@ -182,8 +184,8 @@ function buildVideoFaceDetection(): VideoFaceDetectionHandler {
         return 'socialMediaSource' in args.select ? { ...exists, ...videoRow } : exists;
       },
     },
-    systemSettings: { findUnique: async () => ({ key: 'global', value: { face: { video: { enabled: true } } } }) },
   };
+  const systemSettings = { face: async () => ({ video: { enabled: true } }) };
   const core = {
     markProcessing: async () => undefined,
     resolveProviderAndCreds: async () => ({ providerKey: 'compreface', modelVersion: 'v1', provider: {}, creds: {} }),
@@ -193,7 +195,7 @@ function buildVideoFaceDetection(): VideoFaceDetectionHandler {
     markFailed: async () => undefined,
   };
   const resolver = {
-    getProviderFor: async () => ({
+    forLocation: async () => ({
       download: async () => {
         world.downloads += 1;
         return Readable.from(Buffer.from('video'));
@@ -209,8 +211,9 @@ function buildVideoFaceDetection(): VideoFaceDetectionHandler {
     { recordModel: async () => undefined } as never,
     { touchMediaItems: async () => undefined } as never,
     { get: async () => CIRCLE_ID } as never,
+    systemSettings as never,
   );
-  return new VideoFaceDetectionHandler(registry, prisma as never, service);
+  return new VideoFaceDetectionHandler(jobsPort as never, prisma as never, service, {}) as unknown as JobHandler;
 }
 
 const VIDEO_STORAGE_OBJECT = {
@@ -285,7 +288,7 @@ describe('video_face_detection', () => {
 const ARCHIVED = { id: 'face-archived', embedding: [1, 0] };
 let liveFaces: Array<{ id: string; embedding: number[]; mediaItemId: string; hiddenAt: Date | null }>;
 
-function buildAutoArchiveSweep(): FaceAutoArchiveSweepHandler {
+function buildAutoArchiveSweep(): JobHandler {
   const prisma = {
     ...subjectLookups(),
     face: {
@@ -317,13 +320,13 @@ function buildAutoArchiveSweep(): FaceAutoArchiveSweepHandler {
   };
   const settings = { getSettings: async () => ({ features: { faceAutoArchive: true }, face: { autoArchive: { matchThreshold: 0.45 } } }) };
   return new FaceAutoArchiveSweepHandler(
-    registry,
+    jobsPort as never,
     prisma as never,
-    { exists: async (id: string) => world.circles.has(id) } as never,
+    { scopeExists: async (id: string) => world.circles.has(id) } as never,
     matching as never,
     settings as never,
     { touchMediaItems: async () => undefined } as never,
-  );
+  ) as unknown as JobHandler;
 }
 
 describe('face_auto_archive_sweep', () => {

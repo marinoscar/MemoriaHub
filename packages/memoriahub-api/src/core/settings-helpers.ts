@@ -20,3 +20,26 @@ export async function isFeatureEnabled(
   const { value } = await settings.readSystem<Record<string, unknown>>('features');
   return value?.[flag] === true;
 }
+
+/**
+ * Why a feature's upload-time job is NOT wanted, or `null` when it is: the `features.<flag>` system
+ * setting must be on and the kill switch must not be `false`. The gate every slice registers with the
+ * media slice's upload fan-out.
+ *
+ * @param settings - the settings port.
+ * @param flag - the flag under the `features` namespace.
+ * @param killSwitchEnv - the environment variable that forces the feature off when it is `false`.
+ * @returns `null` to enqueue, else `feature disabled` or `<ENV>=false`.
+ * @stability experimental
+ */
+export async function featureSkipReason(
+  settings: MemoriahubSettingsPort,
+  flag: string,
+  killSwitchEnv: string,
+): Promise<string | null> {
+  const { value } = await settings.readSystem<Record<string, unknown>>('features');
+  const on = value?.[flag] === true;
+  const killed = process.env[killSwitchEnv] === 'false';
+  if (on && !killed) return null;
+  return !on ? 'feature disabled' : `${killSwitchEnv}=false`;
+}

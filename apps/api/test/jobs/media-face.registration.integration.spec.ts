@@ -12,18 +12,12 @@
 import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
-import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
-import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
-import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
 import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
 const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [
-  ['face_detection', FaceDetectionHandler],
-  ['video_face_detection', VideoFaceDetectionHandler],
-  ['face_auto_archive_sweep', FaceAutoArchiveSweepHandler],
   ['metadata_extraction', MetadataExtractionHandler],
   ['thumbnail_regen', ThumbnailRegenHandler],
   ['thumbnail_repair', ThumbnailRepairHandler],
@@ -46,8 +40,19 @@ describe('media/face job handlers on the booted app (RETRO-C3)', () => {
     expect(registry.get(type)).toBeInstanceOf(HandlerClass);
   });
 
+  // The three face types are the packaged face slice's (RETRO-J6): it registers them through the
+  // `MEMORIAHUB_JOBS` port, so the registry holds the port's adaptation of the handler, not the class.
+  it.each([
+    ['face_detection', 'Face detection (photo)'],
+    ['video_face_detection', 'Face detection (video)'],
+    ['face_auto_archive_sweep', 'Face auto-archive sweep'],
+  ])('%s is registered by the face slice through the jobs port', (type, label) => {
+    expect(registry.get(type)).toMatchObject({ type, label });
+  });
+
   it('none of the six goes through the legacy adapter', () => {
     const legacy = context.app.get(EnrichmentHandlerRegistry).types();
+    for (const type of ['face_detection', 'video_face_detection', 'face_auto_archive_sweep']) expect(legacy).not.toContain(type);
     for (const [type] of NATIVE) expect(legacy).not.toContain(type);
   });
 

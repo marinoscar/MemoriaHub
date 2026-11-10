@@ -39,6 +39,14 @@
       "types": "./dist/media/testing/index.d.ts",
       "default": "./dist/media/testing/index.js"
     },
+    "./face": {
+      "types": "./dist/face/index.d.ts",
+      "default": "./dist/face/index.js"
+    },
+    "./face/testing": {
+      "types": "./dist/face/testing/index.d.ts",
+      "default": "./dist/face/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -47,6 +55,7 @@
     "core",
     "testing",
     "media",
+    "face",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -62,6 +71,7 @@
     "test:db": "jest -c jest.config.js --selectProjects db --runInBand --passWithNoTests"
   },
   "peerDependencies": {
+    "@marinoscar/memoriahub-compute": ">=0.0.0-0 || >=0.1.0-0",
     "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
@@ -73,6 +83,9 @@
     "zod": "^4.4.3"
   },
   "peerDependenciesMeta": {
+    "@marinoscar/memoriahub-compute": {
+      "optional": true
+    },
     "@marinoscar/memoriahub-contract": {
       "optional": true
     },

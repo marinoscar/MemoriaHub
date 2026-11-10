@@ -20,7 +20,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { SocialMediaOcrService } from './social-media-ocr.service';
-import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
+import { VideoFrameExtractionService } from '@marinoscar/memoriahub-api/face';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 const mockCreateWorker = jest.fn();

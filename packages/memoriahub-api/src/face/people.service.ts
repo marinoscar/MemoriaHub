@@ -1,0 +1,1874 @@
+// =============================================================================
+// PeopleService
+// =============================================================================
+
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  Optional,
+} from '@nestjs/common';
+import type {
+  AssignFaces,
+  Cluster,
+  BulkPeople,
+  CreatePerson,
+  ListPeopleQuery,
+  ListUnassignedFacesQuery,
+  MergePeople,
+  UpdatePerson,
+} from '@marinoscar/memoriahub-contract/face';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubMetricsPort,
+} from '../ports/index.js';
+import { JobReason } from './host/face-enums.js';
+import { envSwitchOn } from './host/face-config.js';
+import type { FaceDb } from './host/face-db.js';
+import { FACE_PERSON_AVATARS, type FacePersonAvatars } from './host/face-host-hooks.js';
+import { FaceJobs } from './host/face-jobs.js';
+import { FaceSystemSettings } from './host/face-system-settings.js';
+import { FaceClusteringService } from './face-clustering.service.js';
+import { FaceMatchingService } from './face-matching.service.js';
+import { MediaThumbnailService, MediaTouchService } from '../media/index.js';
+
+/**
+ * The people API: list, get, create, update, assign, unassign, merge, delete, hide, unhide and purge people and single faces, manual association of a person to a photo, and clustering. Every method checks the caller's role in the library first: a non-member gets a 404, a member below the role a 403.
+ *
+ * @stability experimental
+ */
+@Injectable()
+export class PeopleService {
+  private readonly logger = new Logger(PeopleService.name);
+
+  constructor(
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
+    private readonly clusteringService: FaceClusteringService,
+    private readonly matchingService: FaceMatchingService,
+    private readonly enrichmentJobService: FaceJobs,
+    private readonly systemSettings: FaceSystemSettings,
+    private readonly mediaThumbnailService: MediaThumbnailService,
+    private readonly mediaTouch: MediaTouchService,
+    // Profile picture management (issue #354): an account can be linked to a
+    // Person and display that person's picture, so a change to the person's
+    // chosen picture must propagate. FaceModule -> ProfileModule is the only edge
+    // between the two; ProfileModule must never import FaceModule back.
+    @Inject(FACE_PERSON_AVATARS) private readonly userAvatarService: FacePersonAvatars,
+    // App metrics (RETRO-T3, #628): `app.people.assignments{mode=manual}`. Optional for hand-built tests.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // listPeople
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Lists the people of a library.
+   *
+   * @param query - the filters and paging.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async listPeople(
+    query: ListPeopleQuery,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const { circleId, includeUnlabeled, hidden, albumId, page, pageSize } =
+      query;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const skip = (page - 1) * pageSize;
+
+    const where = {
+      circleId,
+      deletedAt: null,
+      mergedIntoId: null,
+      ...(hidden
+        ? { hiddenAt: { not: null } }
+        : { hiddenAt: null }),
+      ...(includeUnlabeled ? {} : { name: { not: null } }),
+      // Optional album scope: keep only people with at least one face on a
+      // non-deleted / non-archived media item belonging to the album.
+      ...(albumId
+        ? {
+            faces: {
+              some: {
+                mediaItem: {
+                  albumItems: { some: { albumId } },
+                  deletedAt: null,
+                  archivedAt: null,
+                },
+              },
+            },
+          }
+        : {}),
+    };
+
+    const [persons, totalItems] = await Promise.all([
+      this.prisma.person.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: [{ favorite: 'desc' }, { name: 'asc' }],
+        include: {
+          _count: { select: { faces: true } },
+          coverFace: {
+            select: {
+              id: true,
+              mediaItemId: true,
+              boundingBox: true,
+              frameThumbnailKey: true,
+            },
+          },
+          // Fetch a small set of faces for cover-fallback resolution
+          faces: {
+            where: { mediaItem: { deletedAt: null, archivedAt: null } },
+            orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
+            take: 1,
+            select: {
+              id: true,
+              mediaItemId: true,
+              boundingBox: true,
+              confidence: true,
+              frameThumbnailKey: true,
+            },
+          },
+        },
+      }),
+      this.prisma.person.count({ where }),
+    ]);
+
+    // Resolve each person's cover face, then batch-sign all cover
+    // frame-thumbnail keys with a single StorageObject query.
+    const coverPicks = persons.map((p) =>
+      this.pickCoverFace(p.coverFace, p.faces ?? []),
+    );
+    const coverKeyToUrl = await this.mediaThumbnailService.signThumbsBatched(
+      coverPicks
+        .map((c) => c?.frameThumbnailKey ?? null)
+        .filter((k): k is string => !!k),
+    );
+
+    const items = persons.map((p, i) => {
+      const resolved = coverPicks[i];
+      const coverFace = resolved
+        ? {
+            faceId: resolved.id,
+            mediaItemId: resolved.mediaItemId,
+            boundingBox: resolved.boundingBox,
+            faceThumbnailUrl: resolved.frameThumbnailKey
+              ? coverKeyToUrl.get(resolved.frameThumbnailKey) ?? null
+              : null,
+          }
+        : null;
+      return {
+        id: p.id,
+        name: p.name,
+        isUnlabeled: p.name === null,
+        favorite: p.favorite,
+        faceCount: p._count.faces,
+        coverFace,
+        profileMediaItemId: p.profileMediaItemId ?? null,
+        profileCrop: p.profileCrop ?? null,
+        hiddenAt: p.hiddenAt,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      };
+    });
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // listUnassignedFaces
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Lists the faces that belong to no person (live, or archived).
+   *
+   * @param query - the filters and paging.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async listUnassignedFaces(
+    userId: string,
+    userPermissions: string[],
+    query: ListUnassignedFacesQuery,
+  ) {
+    const { circleId, archived, page, pageSize } = query;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const skip = (page - 1) * pageSize;
+
+    const where = {
+      personId: null,
+      circleId,
+      mediaItem: { deletedAt: null, archivedAt: null },
+      // Default: hide archived faces from the live unassigned pool.
+      // archived=true: return only archived faces.
+      ...(archived ? { hiddenAt: { not: null } } : { hiddenAt: null }),
+    };
+
+    const [faces, totalItems] = await Promise.all([
+      this.prisma.face.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          mediaItemId: true,
+          boundingBox: true,
+          confidence: true,
+          createdAt: true,
+          hiddenAt: true,
+          frameThumbnailKey: true,
+        },
+      }),
+      this.prisma.face.count({ where }),
+    ]);
+
+    // Batch-sign all frame-thumbnail keys with a single StorageObject query.
+    const frameKeyToUrl = await this.mediaThumbnailService.signThumbsBatched(
+      faces
+        .map((f) => f.frameThumbnailKey)
+        .filter((k): k is string => !!k),
+    );
+
+    const items = faces.map((f) => ({
+      faceId: f.id,
+      mediaItemId: f.mediaItemId,
+      boundingBox: f.boundingBox,
+      confidence: f.confidence,
+      createdAt: f.createdAt,
+      hiddenAt: f.hiddenAt,
+      faceThumbnailUrl: f.frameThumbnailKey
+        ? frameKeyToUrl.get(f.frameThumbnailKey) ?? null
+        : null,
+    }));
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // getPerson
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Reads one person with their faces.
+   *
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async getPerson(
+    personId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+      include: {
+        faces: {
+          select: {
+            id: true,
+            mediaItemId: true,
+            boundingBox: true,
+            confidence: true,
+            manuallyAssigned: true,
+            createdAt: true,
+            frameThumbnailKey: true,
+          },
+          orderBy: [{ confidence: 'desc' }, { createdAt: 'desc' }],
+        },
+        coverFace: {
+          select: {
+            id: true,
+            mediaItemId: true,
+            boundingBox: true,
+            frameThumbnailKey: true,
+          },
+        },
+      },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      person.circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    return {
+      id: person.id,
+      name: person.name,
+      isUnlabeled: person.name === null,
+      favorite: person.favorite,
+      circleId: person.circleId,
+      coverFace: await this.resolveCoverFace(person.coverFace, person.faces),
+      profileMediaItemId: person.profileMediaItemId ?? null,
+      profileCrop: person.profileCrop ?? null,
+      faces: await (async () => {
+        // Batch-sign all frame-thumbnail keys with a single StorageObject query.
+        const frameKeyToUrl =
+          await this.mediaThumbnailService.signThumbsBatched(
+            person.faces
+              .map((f: { frameThumbnailKey?: string | null }) => f.frameThumbnailKey)
+              .filter((k: string | null | undefined): k is string => !!k),
+          );
+        return person.faces.map((f: any) => ({
+          faceId: f.id,
+          mediaItemId: f.mediaItemId,
+          boundingBox: f.boundingBox,
+          confidence: f.confidence,
+          manuallyAssigned: f.manuallyAssigned,
+          createdAt: f.createdAt,
+          faceThumbnailUrl: f.frameThumbnailKey
+            ? frameKeyToUrl.get(f.frameThumbnailKey) ?? null
+            : null,
+        }));
+      })(),
+      createdAt: person.createdAt,
+      updatedAt: person.updatedAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // createPerson
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Creates a person, optionally assigning faces to them.
+   *
+   * @param dto - the new person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async createPerson(
+    dto: CreatePerson,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      dto.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const person = await this.prisma.person.create({
+      data: {
+        circleId: dto.circleId,
+        addedById: userId,
+        name: dto.name ?? null,
+      },
+    });
+
+    if (dto.faceIds && dto.faceIds.length > 0) {
+      // Verify all faces exist in the same circle
+      await this.assertFacesInCircle(dto.faceIds, dto.circleId);
+
+      const assigned = await this.prisma.face.updateMany({
+        where: { id: { in: dto.faceIds }, circleId: dto.circleId },
+        data: { personId: person.id, manuallyAssigned: true },
+      });
+      this.metrics?.add('peopleAssignments', assigned?.count ?? 0, { mode: 'manual' });
+
+      // Auto-set coverFaceId to the first assigned face when none was set
+      if (!person.coverFaceId) {
+        await this.prisma.person.update({
+          where: { id: person.id },
+          data: { coverFaceId: dto.faceIds[0] },
+        });
+      }
+
+      // Re-enqueue auto-tagging for media items that now have a person assigned
+      const createAffected = await this.fetchAffectedMediaItems(dto.faceIds);
+      await this.enqueueAutoTaggingForMediaItems(createAffected);
+      // Backup change feed: face→person assignment doesn't bump MediaItem.updatedAt (issue #310)
+      await this.mediaTouch.touchMediaItems(createAffected.map((m) => m.mediaItemId));
+    }
+
+    this.logger.log(
+      `Person created: ${person.id} (name=${person.name ?? 'unlabeled'}) by user ${userId}`,
+    );
+
+    return { id: person.id, name: person.name, circleId: person.circleId };
+  }
+
+  // ---------------------------------------------------------------------------
+  // updatePerson
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Renames a person or sets their cover face or profile picture, and refreshes the avatar of any account linked to them.
+   *
+   * @param personId - the person.
+   * @param dto - the changes.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async updatePerson(
+    personId: string,
+    dto: UpdatePerson,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      person.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // If coverFaceId is being set, verify the face belongs to this person
+    if (dto.coverFaceId !== undefined && dto.coverFaceId !== null) {
+      const face = await this.prisma.face.findUnique({
+        where: { id: dto.coverFaceId },
+      });
+      if (!face || face.personId !== personId) {
+        throw new BadRequestException(
+          `Face ${dto.coverFaceId} does not belong to person ${personId}`,
+        );
+      }
+    }
+
+    // Validate profileMediaItemId when being set (non-null)
+    if (dto.profileMediaItemId != null) {
+      const mediaItem = await this.prisma.mediaItem.findUnique({
+        where: { id: dto.profileMediaItemId },
+        select: { id: true, circleId: true, deletedAt: true },
+      });
+
+      if (!mediaItem || mediaItem.deletedAt) {
+        throw new BadRequestException(
+          `MediaItem ${dto.profileMediaItemId} not found`,
+        );
+      }
+
+      if (mediaItem.circleId !== person.circleId) {
+        throw new BadRequestException(
+          `MediaItem ${dto.profileMediaItemId} does not belong to the same circle as this person`,
+        );
+      }
+
+      // Assert the person actually appears in this media item (a face with this personId)
+      const faceInMedia = await this.prisma.face.findFirst({
+        where: { mediaItemId: dto.profileMediaItemId, personId },
+        select: { id: true },
+      });
+      if (!faceInMedia) {
+        throw new BadRequestException(
+          `Person ${personId} has no detected face in MediaItem ${dto.profileMediaItemId}`,
+        );
+      }
+    }
+
+    // Build update data carefully to avoid Prisma relation/scalar type conflicts
+    const updateData: Record<string, unknown> = {};
+    if (dto.name !== undefined) updateData['name'] = dto.name;
+    if (dto.coverFaceId !== undefined) updateData['coverFaceId'] = dto.coverFaceId;
+    if (dto.favorite !== undefined) updateData['favorite'] = dto.favorite;
+    if (dto.profileMediaItemId !== undefined) {
+      updateData['profileMediaItemId'] = dto.profileMediaItemId;
+      updateData['profileCrop'] =
+        dto.profileMediaItemId === null ? null : (dto.profileCrop ?? null);
+    }
+
+    const updated = await this.prisma.person.update({
+      where: { id: personId },
+      data: updateData as any,
+    });
+
+    // Backup change feed: sidecars embed person names/favorite, so a rename or
+    // favorite flip must surface every item this person appears in (issue #310).
+    // Renames are rare; touching thousands of items is acceptable.
+    if (dto.name !== undefined || dto.favorite !== undefined) {
+      await this.touchMediaForPersons([personId], person.circleId);
+    }
+
+    // Profile picture management (issue #354): any account linked to this person
+    // AND displaying its picture needs a fresh render. Best-effort and
+    // fire-and-forget — the person update must never fail because an avatar
+    // could not be re-rendered (same posture as the notification producers).
+    // refreshAvatarsForPerson is itself total; the try/catch is belt-and-braces.
+    if (dto.profileMediaItemId !== undefined || dto.profileCrop !== undefined) {
+      try {
+        await this.userAvatarService.refreshAvatarsForPerson(personId);
+      } catch (err) {
+        this.logger.warn(
+          `Linked-avatar refresh failed for person ${personId} (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    this.logger.log(`Person updated: ${personId} by user ${userId}`);
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      favorite: updated.favorite,
+      coverFaceId: updated.coverFaceId,
+      profileMediaItemId: updated.profileMediaItemId ?? null,
+      profileCrop: updated.profileCrop ?? null,
+      updatedAt: updated.updatedAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // assignFaces
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Assigns faces to a person (a manual assignment that re-clustering never undoes).
+   *
+   * @param personId - the person.
+   * @param dto - the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async assignFaces(
+    personId: string,
+    dto: AssignFaces,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      person.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Verify each face exists in the same circle
+    await this.assertFacesInCircle(dto.faceIds, person.circleId);
+
+    const assigned = await this.prisma.face.updateMany({
+      where: { id: { in: dto.faceIds }, circleId: person.circleId },
+      data: { personId, manuallyAssigned: true },
+    });
+    this.metrics?.add('peopleAssignments', assigned?.count ?? 0, { mode: 'manual' });
+
+    // Auto-set coverFaceId to the first assigned face when person has none
+    if (!person.coverFaceId) {
+      await this.prisma.person.update({
+        where: { id: personId },
+        data: { coverFaceId: dto.faceIds[0] },
+      });
+    }
+
+    // Re-enqueue auto-tagging for affected media items (people names changed)
+    const affectedItems = await this.fetchAffectedMediaItems(dto.faceIds);
+    await this.enqueueAutoTaggingForMediaItems(affectedItems);
+
+    // Backup change feed: face→person assignment doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems(affectedItems.map((m) => m.mediaItemId));
+
+    this.logger.log(
+      `Assigned ${dto.faceIds.length} face(s) to person ${personId} by user ${userId}`,
+    );
+
+    return { personId, assignedCount: dto.faceIds.length };
+  }
+
+  // ---------------------------------------------------------------------------
+  // unassignFace
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns a face to the unknown pool.
+   *
+   * @param personId - the person.
+   * @param faceId - the face.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async unassignFace(
+    personId: string,
+    faceId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      person.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const face = await this.prisma.face.findUnique({ where: { id: faceId } });
+
+    if (!face || face.personId !== personId) {
+      throw new NotFoundException(
+        `Face ${faceId} not found or not assigned to person ${personId}`,
+      );
+    }
+
+    await this.prisma.face.update({
+      where: { id: faceId },
+      data: { personId: null, manuallyAssigned: false },
+    });
+
+    // Re-enqueue auto-tagging — the person name is no longer in this media item's context
+    await this.enqueueAutoTaggingForMediaItems([
+      { mediaItemId: face.mediaItemId, circleId: person.circleId },
+    ]);
+
+    // Backup change feed: face unassignment doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([face.mediaItemId]);
+
+    this.logger.log(
+      `Unassigned face ${faceId} from person ${personId} by user ${userId}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // clusterUnknowns
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Clusters the unknown, live faces of a library into provisional people.
+   *
+   * @param circleId - the library.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async clusterUnknowns(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'admin',
+    );
+
+    if (!(await this.systemSettings.isFeatureEnabled('faceRecognition'))) {
+      throw new BadRequestException('Face recognition is disabled globally.');
+    }
+
+    const result = await this.clusteringService.clusterUnknownFaces(
+      circleId,
+      userId,
+    );
+
+    this.logger.log(
+      `clusterUnknowns: circle ${circleId} by user ${userId} — ` +
+        `${result.clustersCreated} cluster(s), ${result.facesAssigned} face(s)`,
+    );
+
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // mergePeople
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Merges one person into another: the faces move, the source is soft-deleted and account links carry over.
+   *
+   * @param dto - the source and the survivor.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async mergePeople(
+    dto: MergePeople,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const { sourceId, targetId } = dto;
+
+    const [source, target] = await Promise.all([
+      this.prisma.person.findUnique({ where: { id: sourceId } }),
+      this.prisma.person.findUnique({ where: { id: targetId } }),
+    ]);
+
+    if (!source || source.deletedAt) {
+      throw new NotFoundException(`Source person ${sourceId} not found`);
+    }
+    if (!target || target.deletedAt) {
+      throw new NotFoundException(`Target person ${targetId} not found`);
+    }
+    if (source.circleId !== target.circleId) {
+      throw new BadRequestException('Both persons must belong to the same circle');
+    }
+    if (source.mergedIntoId !== null) {
+      throw new BadRequestException(`Source person ${sourceId} has already been merged`);
+    }
+
+    const circleId = source.circleId;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const now = new Date();
+
+    // Capture media items affected by the merge BEFORE the transaction moves faces.
+    // Both source's current media items (faces moving to target) and target's existing
+    // media items (new faces arriving) may need re-tagging.
+    const [sourceMI, targetMI] = await Promise.all([
+      this.fetchAffectedMediaItemsByPersonId(sourceId),
+      this.fetchAffectedMediaItemsByPersonId(targetId),
+    ]);
+    // Merge deduplicated by mediaItemId
+    const mergedMIMap = new Map<string, { mediaItemId: string; circleId: string }>();
+    for (const item of [...sourceMI, ...targetMI]) {
+      mergedMIMap.set(item.mediaItemId, item);
+    }
+    const allMergeAffected = [...mergedMIMap.values()];
+
+    const updatedTarget = await this.prisma.$transaction(async (tx) => {
+      // 1. Reassign all faces from source to target
+      await tx.face.updateMany({
+        where: { personId: sourceId },
+        data: { personId: targetId },
+      });
+
+      // 2. Carry over coverFace if target has none but source did
+      let coverFaceId = target.coverFaceId;
+      if (!coverFaceId && source.coverFaceId) {
+        // source.coverFaceId face is now assigned to target
+        coverFaceId = source.coverFaceId;
+      }
+
+      // 3. Soft-delete source; set mergedIntoId; clear coverFaceId
+      await tx.person.update({
+        where: { id: sourceId },
+        data: {
+          mergedIntoId: targetId,
+          deletedAt: now,
+          coverFaceId: null,
+        },
+      });
+
+      // 4. Update target's coverFaceId if carrying it over
+      const updatedT = await tx.person.update({
+        where: { id: targetId },
+        data: {
+          ...(coverFaceId && !target.coverFaceId ? { coverFaceId } : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          circleId: true,
+          coverFaceId: true,
+          _count: { select: { faces: true } },
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      // 5. Carry any account->person link over to the target (issue #354),
+      //    mirroring the coverFaceId carry-over above and inside the SAME
+      //    transaction so a link never survives a rolled-back merge. The
+      //    rendered avatar bytes need no refresh: their URL addresses the USER,
+      //    not the person, so it stays valid.
+      await this.userAvatarService.carryLinkedUsersOnMerge(tx, sourceId, targetId);
+
+      // 6. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'person:merge',
+          targetType: 'person',
+          targetId: targetId,
+          meta: { sourceId, targetId, circleId } as any,
+        },
+      });
+
+      return updatedT;
+    });
+
+    // 7. Recompute target centroid (best-effort; failure logged, not thrown)
+    try {
+      await this.matchingService.computePersonCentroid(targetId);
+    } catch (err) {
+      this.logger.warn(`Centroid recompute failed post-merge for person ${targetId}: ${err}`);
+    }
+
+    // Re-enqueue auto-tagging for all media items affected by the merge
+    await this.enqueueAutoTaggingForMediaItems(allMergeAffected);
+
+    // Backup change feed: the merge rewired Face.personId rows only (issue #310)
+    await this.mediaTouch.touchMediaItems(allMergeAffected.map((m) => m.mediaItemId));
+
+    this.logger.log(
+      `Person merge: ${sourceId} → ${targetId} in circle ${circleId} by user ${userId}`,
+    );
+
+    return {
+      id: updatedTarget.id,
+      name: updatedTarget.name,
+      circleId: updatedTarget.circleId,
+      coverFaceId: updatedTarget.coverFaceId,
+      faceCount: updatedTarget._count.faces,
+      mergedSourceId: sourceId,
+      updatedAt: updatedTarget.updatedAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // deletePerson
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Soft-deletes a person; their faces return to the unknown pool and linked accounts are unlinked.
+   *
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async deletePerson(
+    personId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const person = await this.prisma.person.findUnique({
+      where: { id: personId },
+    });
+
+    if (!person || person.deletedAt) {
+      throw new NotFoundException(`Person ${personId} not found`);
+    }
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      person.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Capture affected media items BEFORE the transaction releases faces to the unknown pool
+    const deleteAffected = await this.fetchAffectedMediaItemsByPersonId(personId);
+
+    const { unlinkedUserIds, resetUserIds } = await this.prisma.$transaction(
+      async (tx) => {
+        // 1. Release faces back to unknown pool
+        await tx.face.updateMany({
+          where: { personId },
+          data: { personId: null, manuallyAssigned: false },
+        });
+
+        // 2. Soft-delete person
+        await tx.person.update({
+          where: { id: personId },
+          data: {
+            deletedAt: new Date(),
+            coverFaceId: null, // clear FK
+          },
+        });
+
+        // 3. Detach every account linked to the person being deleted
+        //    (issue #406) — a soft-delete does NOT trigger
+        //    User.linkedPersonId's `onDelete: SetNull` FK action (that only
+        //    fires on a genuine row delete), so the link would otherwise
+        //    dangle forever. Must run in THIS transaction so it can never be
+        //    left half-cleaned by a later failure. The avatar-state reset for
+        //    any actively 'person'-sourced account happens after commit —
+        //    see resetAvatarsAfterUnlink below.
+        const unlinkResult = await this.userAvatarService.unlinkUsersFromPerson(
+          tx,
+          personId,
+        );
+
+        // 4. Audit
+        await tx.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            action: 'person:delete',
+            targetType: 'person',
+            targetId: personId,
+            meta: { circleId: person.circleId, name: person.name } as any,
+          },
+        });
+
+        return unlinkResult;
+      },
+    );
+
+    // Re-enqueue auto-tagging for all media items that lost a person assignment
+    await this.enqueueAutoTaggingForMediaItems(deleteAffected);
+
+    // Backup change feed: faces released to the unknown pool (issue #310)
+    await this.mediaTouch.touchMediaItems(deleteAffected.map((m) => m.mediaItemId));
+
+    // Best-effort: fall any account that was actively displaying this
+    // now-deleted person's derived picture back to the OAuth picture
+    // (issue #406). Must run AFTER the transaction commits — it reaps
+    // storage bytes, which does not belong inside a DB transaction.
+    if (resetUserIds.length > 0) {
+      await this.userAvatarService.resetAvatarsAfterUnlink(resetUserIds);
+    }
+
+    this.logger.log(
+      `Person ${personId} soft-deleted by user ${userId}; faces returned to unknown pool` +
+        (unlinkedUserIds.length > 0
+          ? `; unlinked ${unlinkedUserIds.length} account(s) from the person` +
+            (resetUserIds.length > 0
+              ? ` (${resetUserIds.length} avatar reset to oauth)`
+              : '')
+          : ''),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // hidePeople
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Hides people from the people views (reversible; nothing is deleted).
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async hidePeople(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ hidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const { count } = await this.prisma.person.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        deletedAt: null,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: new Date() },
+    });
+
+    // Backup change feed: person hide is a Person-row-only write (issue #310)
+    await this.touchMediaForPersons(ids, circleId);
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'person:hide',
+        targetType: 'person',
+        targetId: ids[0],
+        meta: { circleId, ids, count } as any,
+      },
+    });
+
+    this.logger.log(
+      `hidePeople: ${count} person(s) hidden in circle ${circleId} by user ${userId}`,
+    );
+
+    return { hidden: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // unhidePeople
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Brings hidden people back.
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async unhidePeople(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ unhidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const { count } = await this.prisma.person.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        deletedAt: null,
+        hiddenAt: { not: null },
+      },
+      data: { hiddenAt: null },
+    });
+
+    // Backup change feed: person unhide is a Person-row-only write (issue #310)
+    await this.touchMediaForPersons(ids, circleId);
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'person:unhide',
+        targetType: 'person',
+        targetId: ids[0],
+        meta: { circleId, ids, count } as any,
+      },
+    });
+
+    this.logger.log(
+      `unhidePeople: ${count} person(s) unhidden in circle ${circleId} by user ${userId}`,
+    );
+
+    return { unhidden: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // purgePeople
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Permanently deletes people and their faces, reclaiming the embeddings; the photos stay.
+   *
+   * @param dto - the library and the people.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async purgePeople(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
+    const affectedMediaItems = await this.prisma.face.findMany({
+      where: { personId: { in: ids }, circleId },
+      select: {
+        mediaItemId: true,
+        mediaItem: { select: { circleId: true } },
+      },
+      distinct: ['mediaItemId'],
+    });
+
+    const dedupedMedia: Array<{ mediaItemId: string; circleId: string }> = [];
+    const seen = new Set<string>();
+    for (const f of affectedMediaItems) {
+      if (!seen.has(f.mediaItemId)) {
+        seen.add(f.mediaItemId);
+        dedupedMedia.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+      }
+    }
+
+    let deleted = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Hard-delete all Face rows for these people
+      await tx.face.deleteMany({
+        where: { personId: { in: ids }, circleId },
+      });
+
+      // 2. Hard-delete the Person rows
+      const result = await tx.person.deleteMany({
+        where: { id: { in: ids }, circleId },
+      });
+      deleted = result.count;
+
+      // 3. Audit
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'person:purge',
+          targetType: 'person',
+          targetId: ids[0],
+          meta: { circleId, ids, count: deleted } as any,
+        },
+      });
+    });
+
+    // Re-enqueue auto-tagging for all affected media items (people removed from context)
+    await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    // Backup change feed: Face + Person rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
+
+    this.logger.log(
+      `purgePeople: ${deleted} person(s) permanently deleted in circle ${circleId} by user ${userId}`,
+    );
+
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // hideFaces  (archive individual unassigned faces)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Archives unassigned faces, then sweeps the live unassigned faces that match them when auto-archive is on.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async hideFaces(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ hidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Manual hide: leave hiddenReason unset (null) so manual archives stay
+    // distinguishable from auto-archive-match hides below.
+    const { count } = await this.prisma.face.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        personId: null,
+        hiddenAt: null,
+      },
+      data: { hiddenAt: new Date() },
+    });
+
+    // Face ids whose parent MediaItems must be touched for the backup change
+    // feed (issue #310): the manual hides plus any auto-archive sweep hides.
+    const touchFaceIds: string[] = [...ids];
+
+    // Best-effort auto-archive sweep: retroactively hide the currently-visible
+    // unassigned faces that match the just-archived person(s), so the queue is
+    // cleared without waiting for re-detection. Never fail the archive because
+    // of the sweep — the manual hide above has already succeeded.
+    let autoHidden = 0;
+    try {
+      const settings = await this.systemSettings.getSettings();
+      const autoArchiveOn =
+        settings.features?.faceAutoArchive === true && envSwitchOn('FACE_AUTO_ARCHIVE');
+
+      if (autoArchiveOn) {
+        // Reference set: embeddings of the faces the user just archived.
+        const justArchived = await this.prisma.face.findMany({
+          where: {
+            id: { in: ids },
+            circleId,
+            personId: null,
+            hiddenAt: { not: null },
+            embedding: { isEmpty: false },
+          },
+          select: { id: true, embedding: true },
+        });
+
+        if (justArchived.length > 0) {
+          const threshold = settings.face?.autoArchive?.matchThreshold;
+          const liveMatchIds =
+            await this.matchingService.findLiveMatchesAgainstArchived(circleId, {
+              archivedCandidates: justArchived,
+              threshold,
+            });
+          const sweepIds = liveMatchIds.filter((id) => !ids.includes(id));
+
+          if (sweepIds.length > 0) {
+            const { count: swept } = await this.prisma.face.updateMany({
+              where: {
+                id: { in: sweepIds },
+                circleId,
+                personId: null,
+                hiddenAt: null,
+              },
+              data: { hiddenAt: new Date(), hiddenReason: 'auto_archive_match' },
+            });
+            autoHidden = swept;
+            touchFaceIds.push(...sweepIds);
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `hideFaces: auto-archive sweep failed in circle ${circleId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    // Backup change feed: Face.hiddenAt is a Face-row-only write (issue #310)
+    await this.touchMediaForFaceIds(touchFaceIds, circleId);
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'face:hide',
+        targetType: 'face',
+        targetId: ids[0],
+        meta: { circleId, ids, count, autoHidden } as any,
+      },
+    });
+
+    this.logger.log(
+      `hideFaces: ${count} face(s) archived (+${autoHidden} auto-archive match) in circle ${circleId} by user ${userId}`,
+    );
+
+    return { hidden: count + autoHidden };
+  }
+
+  // ---------------------------------------------------------------------------
+  // unhideFaces  (unarchive individual unassigned faces)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Restores archived unassigned faces.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async unhideFaces(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ unhidden: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    const { count } = await this.prisma.face.updateMany({
+      where: {
+        id: { in: ids },
+        circleId,
+        personId: null,
+        hiddenAt: { not: null },
+      },
+      data: { hiddenAt: null },
+    });
+
+    // Backup change feed: Face.hiddenAt is a Face-row-only write (issue #310)
+    await this.touchMediaForFaceIds(ids, circleId);
+
+    await this.prisma.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        action: 'face:unhide',
+        targetType: 'face',
+        targetId: ids[0],
+        meta: { circleId, ids, count } as any,
+      },
+    });
+
+    this.logger.log(
+      `unhideFaces: ${count} face(s) unarchived in circle ${circleId} by user ${userId}`,
+    );
+
+    return { unhidden: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // purgeFaces  (permanently delete individual faces)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Permanently deletes unassigned faces, reclaiming the embeddings; the photos stay.
+   *
+   * @param dto - the library and the faces.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async purgeFaces(
+    dto: BulkPeople,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    const { circleId, ids } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
+    const affectedMediaItems = await this.prisma.face.findMany({
+      where: { id: { in: ids }, circleId },
+      select: {
+        mediaItemId: true,
+        mediaItem: { select: { circleId: true } },
+      },
+      distinct: ['mediaItemId'],
+    });
+
+    const dedupedMedia: Array<{ mediaItemId: string; circleId: string }> = [];
+    const seen = new Set<string>();
+    for (const f of affectedMediaItems) {
+      if (!seen.has(f.mediaItemId)) {
+        seen.add(f.mediaItemId);
+        dedupedMedia.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+      }
+    }
+
+    let deleted = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Hard-delete the Face rows (reclaims embedding storage). Not scoped to
+      // personId: null — matches purgePeople's permissiveness; the UI only ever
+      // passes archived unassigned face ids.
+      const result = await tx.face.deleteMany({
+        where: { id: { in: ids }, circleId },
+      });
+      deleted = result.count;
+
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'face:purge',
+          targetType: 'face',
+          targetId: ids[0],
+          meta: { circleId, ids, count: deleted } as any,
+        },
+      });
+    });
+
+    // Re-enqueue auto-tagging for all affected media items (faces removed from context)
+    await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    // Backup change feed: Face rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
+
+    this.logger.log(
+      `purgeFaces: ${deleted} face(s) permanently deleted in circle ${circleId} by user ${userId}`,
+    );
+
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // purgeArchivedFaces  (permanently delete ALL archived unassigned faces in a circle)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Permanently deletes every archived unassigned face of a library.
+   *
+   * @param dto - the library.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async purgeArchivedFaces(
+    dto: Cluster,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    const { circleId } = dto;
+
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // Deliberately NO mediaItem: { deletedAt: null, archivedAt: null } sub-filter:
+    // archived faces on since-trashed/archived media are cleaned up too, so the
+    // deleted count may exceed what the visible archived-faces list shows.
+    const where = { circleId, personId: null, hiddenAt: { not: null } };
+
+    // Capture affected media items BEFORE deleting faces (so we can re-enqueue tagging)
+    const affectedMediaItems = await this.prisma.face.findMany({
+      where,
+      select: {
+        mediaItemId: true,
+        mediaItem: { select: { circleId: true } },
+      },
+      distinct: ['mediaItemId'],
+    });
+
+    const dedupedMedia: Array<{ mediaItemId: string; circleId: string }> = [];
+    const seen = new Set<string>();
+    for (const f of affectedMediaItems) {
+      if (!seen.has(f.mediaItemId)) {
+        seen.add(f.mediaItemId);
+        dedupedMedia.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+      }
+    }
+
+    let deleted = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Hard-delete the archived Face rows (reclaims embedding storage).
+      const result = await tx.face.deleteMany({ where });
+      deleted = result.count;
+
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          action: 'face:purge_archived',
+          targetType: 'circle',
+          targetId: circleId,
+          meta: { circleId, count: deleted } as any,
+        },
+      });
+    });
+
+    // Re-enqueue auto-tagging for all affected media items (faces removed from context)
+    await this.enqueueAutoTaggingForMediaItems(dedupedMedia);
+
+    // Backup change feed: Face rows hard-deleted (issue #310)
+    await this.mediaTouch.touchMediaItems(dedupedMedia.map((m) => m.mediaItemId));
+
+    this.logger.log(
+      `purgeArchivedFaces: ${deleted} archived face(s) permanently deleted in circle ${circleId} by user ${userId}`,
+    );
+
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // addPersonToMedia
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Associates a person (by id, or by name, creating them) with a photo whose face detection missed them.
+   *
+   * @param mediaItemId - the photo.
+   * @param dto - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async addPersonToMedia(
+    mediaItemId: string,
+    userId: string,
+    userPermissions: string[],
+    dto: { personId?: string; name?: string },
+  ): Promise<{ personId: string; personName: string | null; faceId: string; mediaItemId: string }> {
+    // 1. Load media item
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: mediaItemId },
+      select: { id: true, circleId: true, deletedAt: true },
+    });
+    if (!mediaItem || mediaItem.deletedAt) {
+      throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
+    }
+
+    // 2. Assert collaborator access
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      mediaItem.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // 3. Resolve person
+    let person: { id: string; name: string | null };
+    if (dto.personId) {
+      const found = await this.prisma.person.findUnique({
+        where: { id: dto.personId },
+        select: { id: true, name: true, circleId: true, deletedAt: true },
+      });
+      if (!found || found.deletedAt || found.circleId !== mediaItem.circleId) {
+        throw new NotFoundException(`Person ${dto.personId} not found in this circle`);
+      }
+      person = { id: found.id, name: found.name };
+    } else {
+      // find-or-create by case-insensitive name match
+      const existing = await this.prisma.person.findFirst({
+        where: {
+          circleId: mediaItem.circleId,
+          name: { equals: dto.name!, mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select: { id: true, name: true },
+      });
+      if (existing) {
+        person = existing;
+      } else {
+        const created = await this.prisma.person.create({
+          data: {
+            circleId: mediaItem.circleId,
+            addedById: userId,
+            name: dto.name!,
+          },
+          select: { id: true, name: true },
+        });
+        person = created;
+      }
+    }
+
+    // 4. Idempotency check
+    const existingFace = await this.prisma.face.findFirst({
+      where: { mediaItemId, personId: person.id },
+    });
+    if (existingFace) {
+      return { personId: person.id, personName: person.name, faceId: existingFace.id, mediaItemId };
+    }
+
+    // 5. Create manual Face row
+    const face = await this.prisma.face.create({
+      data: {
+        mediaItemId,
+        circleId: mediaItem.circleId,
+        personId: person.id,
+        providerKey: 'manual',
+        modelVersion: 'manual',
+        embedding: [],
+        boundingBox: { x: 0, y: 0, w: 0, h: 0 },
+        confidence: null,
+        manuallyAssigned: true,
+      },
+    });
+    this.metrics?.add('peopleAssignments', 1, { mode: 'manual' });
+
+    // 6. Enqueue auto-tagging rerun so description/embedding reflect the new person
+    await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
+
+    // 7. Backup change feed: the manual Face row doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
+
+    this.logger.log(
+      `Manual person association created: person ${person.id} → media ${mediaItemId} by user ${userId}`,
+    );
+
+    return { personId: person.id, personName: person.name, faceId: face.id, mediaItemId };
+  }
+
+  // ---------------------------------------------------------------------------
+  // removePersonFromMedia
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Removes a manual association; detected faces are untouched.
+   *
+   * @param mediaItemId - the photo.
+   * @param personId - the person.
+   * @param userId - the caller.
+   * @param userPermissions - the caller's permissions.
+   */
+  async removePersonFromMedia(
+    mediaItemId: string,
+    personId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ deleted: number }> {
+    // 1. Load media item
+    const mediaItem = await this.prisma.mediaItem.findUnique({
+      where: { id: mediaItemId },
+      select: { id: true, circleId: true, deletedAt: true },
+    });
+    if (!mediaItem || mediaItem.deletedAt) {
+      throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
+    }
+
+    // 2. Assert collaborator access
+    await this.circleMembershipService.requireOwnerRole(
+      userId,
+      mediaItem.circleId,
+      userPermissions,
+      'editor',
+    );
+
+    // 3. Delete manual Face rows
+    const { count } = await this.prisma.face.deleteMany({
+      where: { mediaItemId, personId, providerKey: 'manual' },
+    });
+
+    // 4. If nothing deleted, 404
+    if (count === 0) {
+      throw new NotFoundException(
+        'No manual association exists for this person on this media item',
+      );
+    }
+
+    // 5. Enqueue auto-tagging rerun so description/embedding reflect the removed person
+    await this.enqueueAutoTaggingForMediaItems([{ mediaItemId, circleId: mediaItem.circleId }]);
+
+    // 6. Backup change feed: the manual Face delete doesn't bump MediaItem.updatedAt (issue #310)
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
+
+    this.logger.log(
+      `Manual person association removed: person ${personId} → media ${mediaItemId} by user ${userId}`,
+    );
+
+    return { deleted: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolve a cover face for display.
+   * If the person has a persisted coverFaceId (and it was eagerly loaded), use it.
+   * Otherwise fall back to the most relevant face from the provided list
+   * (already sorted by confidence DESC, createdAt DESC by the caller).
+   * The fallback is NOT persisted — it is purely for the response payload.
+   *
+   * Returns faceThumbnailUrl (signed from frameThumbnailKey) so the frontend
+   * can render video-sourced cover faces without cropping the full media image.
+   * Photo cover faces return faceThumbnailUrl: null (no frameThumbnailKey).
+   */
+  /**
+   * Pick the cover face (explicit coverFace, else the first/best face) without
+   * signing. Shared by the single-item `resolveCoverFace` and the batched
+   * list path so both stay in sync on selection logic.
+   */
+  private pickCoverFace(
+    coverFace: { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null,
+    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null; frameThumbnailKey?: string | null }>,
+  ): { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null {
+    return coverFace ?? faces[0] ?? null;
+  }
+
+  private async resolveCoverFace(
+    coverFace: { id: string; mediaItemId: string; boundingBox: unknown; frameThumbnailKey?: string | null } | null,
+    faces: Array<{ id: string; mediaItemId: string; boundingBox: unknown; confidence?: number | null; frameThumbnailKey?: string | null }>,
+  ): Promise<{ faceId: string; mediaItemId: string; boundingBox: unknown; faceThumbnailUrl: string | null } | null> {
+    const resolved = this.pickCoverFace(coverFace, faces);
+    if (!resolved) return null;
+    const faceThumbnailUrl = resolved.frameThumbnailKey
+      ? await this.mediaThumbnailService.signThumb({ thumbnailStorageKey: resolved.frameThumbnailKey })
+      : null;
+    return {
+      faceId: resolved.id,
+      mediaItemId: resolved.mediaItemId,
+      boundingBox: resolved.boundingBox,
+      faceThumbnailUrl,
+    };
+  }
+
+  private async assertFacesInCircle(
+    faceIds: string[],
+    circleId: string,
+  ): Promise<void> {
+    const found = await this.prisma.face.findMany({
+      where: { id: { in: faceIds }, circleId },
+      select: { id: true },
+    });
+
+    if (found.length !== faceIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = faceIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `Faces not found in circle: ${missing.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * For each affected mediaItemId → circleId pair, enqueue an auto_tagging rerun
+   * when auto-tagging is enabled globally. Failures are logged and swallowed —
+   * they must never propagate to the caller.
+   */
+  private async enqueueAutoTaggingForMediaItems(
+    mediaItems: Array<{ mediaItemId: string; circleId: string }>,
+  ): Promise<void> {
+    if (!(await this.systemSettings.isFeatureEnabled('autoTagging'))) {
+      return;
+    }
+    for (const { mediaItemId, circleId } of mediaItems) {
+      try {
+        await this.enrichmentJobService.enqueue({
+          type: 'auto_tagging',
+          mediaItemId,
+          circleId,
+          reason: JobReason.rerun,
+          priority: 0,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Failed to enqueue auto-tagging rerun for MediaItem ${mediaItemId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch all media items containing a
+   * face assigned to any of the given persons. Best-effort — failures inside
+   * MediaTouchService are swallowed, and the lookup itself is guarded here so a
+   * feed-bookkeeping failure never fails the user action.
+   */
+  private async touchMediaForPersons(
+    personIds: string[],
+    circleId: string,
+  ): Promise<void> {
+    try {
+      const faces = await this.prisma.face.findMany({
+        where: { personId: { in: personIds }, circleId },
+        select: { mediaItemId: true },
+        distinct: ['mediaItemId'],
+      });
+      await this.mediaTouch.touchMediaItems(faces.map((f) => f.mediaItemId));
+    } catch (err) {
+      this.logger.warn(
+        `touchMediaForPersons failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch the parent media items of the
+   * given face ids. Best-effort, mirrors touchMediaForPersons.
+   */
+  private async touchMediaForFaceIds(
+    faceIds: string[],
+    circleId: string,
+  ): Promise<void> {
+    if (faceIds.length === 0) return;
+    try {
+      const faces = await this.prisma.face.findMany({
+        where: { id: { in: faceIds }, circleId },
+        select: { mediaItemId: true },
+        distinct: ['mediaItemId'],
+      });
+      await this.mediaTouch.touchMediaItems(faces.map((f) => f.mediaItemId));
+    } catch (err) {
+      this.logger.warn(
+        `touchMediaForFaceIds failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Given a set of face IDs, return the distinct {mediaItemId, circleId} pairs.
+   * Used to collect what needs re-tagging after face→person assignment changes.
+   */
+  private async fetchAffectedMediaItems(
+    faceIds: string[],
+  ): Promise<Array<{ mediaItemId: string; circleId: string }>> {
+    if (faceIds.length === 0) return [];
+
+    const faces = await this.prisma.face.findMany({
+      where: { id: { in: faceIds } },
+      select: {
+        mediaItemId: true,
+        mediaItem: {
+          select: {
+            circleId: true,
+          },
+        },
+      },
+    });
+
+    // Deduplicate by mediaItemId
+    const seen = new Set<string>();
+    const result: Array<{ mediaItemId: string; circleId: string }> = [];
+    for (const f of faces) {
+      if (seen.has(f.mediaItemId)) continue;
+      seen.add(f.mediaItemId);
+      result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+    }
+    return result;
+  }
+
+  /**
+   * Fetch distinct {mediaItemId, circleId} pairs for all faces currently assigned
+   * to a person. Used before faces are unlinked (merge source / delete-person)
+   * so the IDs are captured before the transaction.
+   */
+  private async fetchAffectedMediaItemsByPersonId(
+    personId: string,
+  ): Promise<Array<{ mediaItemId: string; circleId: string }>> {
+    const faces = await this.prisma.face.findMany({
+      where: { personId },
+      select: {
+        mediaItemId: true,
+        mediaItem: {
+          select: {
+            circleId: true,
+          },
+        },
+      },
+    });
+
+    const seen = new Set<string>();
+    const result: Array<{ mediaItemId: string; circleId: string }> = [];
+    for (const f of faces) {
+      if (seen.has(f.mediaItemId)) continue;
+      seen.add(f.mediaItemId);
+      result.push({ mediaItemId: f.mediaItemId, circleId: f.mediaItem.circleId });
+    }
+    return result;
+  }
+}
