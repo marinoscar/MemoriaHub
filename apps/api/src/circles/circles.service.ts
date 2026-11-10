@@ -1,27 +1,65 @@
 import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
-  ForbiddenException,
-  BadRequestException,
 } from '@nestjs/common';
+import {
+  GroupInvitesService,
+  GroupMembershipService,
+  GroupsService,
+  SHARING_PERMISSIONS,
+} from '@marinoscar/platform-api/sharing';
+import type { UserPrincipal } from '@marinoscar/platform-api/core';
+import type { GroupDto, GroupInviteDto } from '@marinoscar/platform-contract/sharing';
+import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { RequestUser } from '@marinoscar/platform-api/identity';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE, OwnerAccessService } from '../platform/sharing/owner-scope';
-import { GroupInvitesService, SHARING_PERMISSIONS } from '@marinoscar/platform-api/sharing';
-import type { UserPrincipal } from '@marinoscar/platform-api/core';
-import type { GroupInviteDto } from '@marinoscar/platform-contract/sharing';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { PersonalLibraryStore, personalLibraryName } from '../platform/sharing/personal-library.store';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
-import { NotificationsService } from '@marinoscar/platform-api/notifications';
-
 import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { CircleRole } from '@prisma/client';
-import { RequestUser } from '@marinoscar/platform-api/identity';
+import { GROUP_ROLE_TO_CIRCLE_ROLE, type CircleRoleName } from './circle-role';
+import { GroupMemberMirrorListener } from './group-member-mirror.listener';
 import { CreateCircleDto } from './dto/create-circle.dto';
 import { UpdateCircleDto } from './dto/update-circle.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { CreateInviteDto } from './dto/create-invite.dto';
+
+// =============================================================================
+// `/api/circles/*` served from platform groups and personal libraries (RETRO-K1, #588)
+// =============================================================================
+//
+// The routes and their JSON shapes are unchanged (the Android app still calls
+// `GET /api/circles/:id`), but nothing here reads `circles` / `circle_members`
+// any more: a shared circle is the platform group of the same id (`GroupsService`,
+// `GroupMembershipService`), a personal circle is the caller's personal library
+// (`PersonalLibraryStore`), and the circle role names are the group roles mapped
+// back (`admin` -> `circle_admin`, `editor` -> `collaborator`).
+// =============================================================================
+
+/** Pages read for one list (100 each). */
+const PAGE_SIZE = 100;
+const MAX_PAGES = 50;
+
+/** The circle shape the clients read. */
+export interface CircleView {
+  id: string;
+  name: string;
+  description: string | null;
+  ownerId: string;
+  isPersonal: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count: { members: number; mediaItems?: number };
+  memberRole?: CircleRoleName;
+}
 
 @Injectable()
 export class CirclesService {
@@ -33,6 +71,11 @@ export class CirclesService {
     private readonly notifications: NotificationsService,
     private readonly groupInvites: GroupInvitesService,
     private readonly defaultOrgId: DefaultOrgId,
+    private readonly groups: GroupsService,
+    private readonly groupMembers: GroupMembershipService,
+    private readonly personal: PersonalLibraryStore,
+    private readonly scopes: OwnerScopeSweepService,
+    private readonly mirror: GroupMemberMirrorListener,
   ) {}
 
   /** Base URL for building absolute links in emails. */
@@ -43,29 +86,19 @@ export class CirclesService {
   // ----- Circles -----
 
   async create(userId: string, dto: CreateCircleDto) {
-    const created = await this.prisma.$transaction(async (tx) => {
-      const circle = await tx.circle.create({
-        data: {
-          name: dto.name,
-          description: dto.description,
-          ownerId: userId,
-          isPersonal: false,
-        },
-      });
-      await tx.circleMember.create({
-        data: { circleId: circle.id, userId, role: CircleRole.circle_admin },
-      });
-      this.logger.log(`Circle created: ${circle.id} by user ${userId}`);
-      return circle;
-    });
-    // The circle and its admin are mirrored into a group in the same
-    // transaction (RETRO-I2 trigger); drop the creator's cached memberships so
-    // the next access check sees the new group (RETRO-I3).
+    const principal = await this.principalOf({ id: userId, email: '', roles: [], permissions: [] });
+    const group = await this.groups.create(principal, { name: dto.name, description: dto.description });
+    // PLATFORM-ADOPTION-SHIM(RETRO-K1): until RETRO-K2 drops `circles`, every content row's `circle_id`
+    // still has a foreign key to it, so the group's circle row is written here, before the response
+    // (the group-created listener would do it asynchronously). K2 deletes this call.
+    await this.mirror.ensureCircleFor(group.id, group.name, group.description, userId);
     this.membership.invalidateMembers([userId]);
-    return created;
+    this.logger.log(`Circle created: ${group.id} by user ${userId}`);
+    return this.groupView(group, 'admin');
   }
 
   async list(user: RequestUser, all: boolean) {
+    const principal = await this.principalOf(user);
     if (all) {
       // `groups:admin` is the platform name of `circles:manage_any` (RETRO-I3).
       const isSuperAdmin =
@@ -74,67 +107,57 @@ export class CirclesService {
       if (!isSuperAdmin) {
         throw new ForbiddenException('circles:manage_any permission required');
       }
-      const items = await this.prisma.circle.findMany({
-        include: { _count: { select: { members: true } } },
-        orderBy: { name: 'asc' },
-      });
+      const items = [
+        ...(await this.listGroups(principal, 'all')).map((g) => this.groupView(g, null)),
+        ...(await this.allPersonalViews()),
+      ].sort((a, b) => a.name.localeCompare(b.name));
       return { items, total: items.length, page: 1, pageSize: items.length, totalPages: 1 };
     }
 
-    const memberships = await this.prisma.circleMember.findMany({
-      where: { userId: user.id },
-      include: {
-        circle: {
-          include: { _count: { select: { members: true } } },
-        },
-      },
-      orderBy: { circle: { name: 'asc' } },
-    });
-    const items = memberships.map((m) => ({ ...m.circle, memberRole: m.role }));
+    const items: CircleView[] = (await this.listGroups(principal, 'mine')).map((g) => this.groupView(g, g.myRole));
+    const library = await this.personalView(user.id);
+    if (library) items.push({ ...library, memberRole: 'circle_admin' });
+    items.sort((a, b) => a.name.localeCompare(b.name));
     return { items, total: items.length, page: 1, pageSize: items.length, totalPages: 1 };
   }
 
   async getById(user: RequestUser, id: string) {
     await this.membership.requireOwnerRole(user.id, id, user.permissions, 'viewer');
+    const mediaItems = await this.prisma.mediaItem.count({ where: { circleId: id } });
 
-    return this.prisma.circle.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: {
-            members: true,
-            mediaItems: true,
-          },
-        },
-      },
-    });
+    const library = await this.personalViewById(id);
+    if (library) return { ...library, _count: { members: 1, mediaItems } };
+
+    const group = await this.groups.get(await this.principalOf(user), id).catch(notFoundAs(`Circle ${id} not found`));
+    const view = this.groupView(group, group.myRole);
+    return { ...view, _count: { members: group.memberCount, mediaItems } };
   }
 
   async update(user: RequestUser, id: string, dto: UpdateCircleDto) {
     await this.membership.requireOwnerRole(user.id, id, user.permissions, 'admin');
-
-    return this.prisma.circle.update({
-      where: { id },
-      data: {
+    if ((await this.personal.ownerOf(id)) !== null) {
+      throw new BadRequestException('A personal library cannot be renamed');
+    }
+    const group = await this.groups
+      .update(await this.principalOf(user), id, {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
-      },
-    });
+      })
+      .catch(notFoundAs(`Circle ${id} not found`));
+    return this.groupView(group, group.myRole);
   }
 
   async remove(user: RequestUser, id: string) {
     await this.membership.requireOwnerRole(user.id, id, user.permissions, 'admin');
-
-    const circle = await this.prisma.circle.findUnique({
-      where: { id },
-      select: { isPersonal: true, ownerId: true },
-    });
-    if (!circle) throw new NotFoundException(`Circle ${id} not found`);
-    if (circle.isPersonal) {
+    if ((await this.personal.ownerOf(id)) !== null) {
       throw new BadRequestException('Cannot delete a personal circle');
     }
+    const summary = await this.scopes.summary(id);
+    if (!summary) throw new NotFoundException(`Circle ${id} not found`);
 
-    const members = await this.prisma.circleMember.findMany({ where: { circleId: id }, select: { userId: true } });
+    const members = await this.scopes.membersOf(id);
+    // PLATFORM-ADOPTION-SHIM(RETRO-K1): deleting the circle row cascades the content (its foreign keys)
+    // and the RETRO-I2 trigger deletes the mirrored group. RETRO-K2 deletes the group instead.
     await this.prisma.circle.delete({ where: { id } });
     this.membership.invalidateMembers(members.map((m) => m.userId));
     this.logger.log(`Circle ${id} deleted by user ${user.id}`);
@@ -144,22 +167,39 @@ export class CirclesService {
 
   async listMembers(user: RequestUser, circleId: string) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'viewer');
-    const items = await this.prisma.circleMember.findMany({
-      where: { circleId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            displayName: true,
-            providerDisplayName: true,
-            profileImageUrl: true,
-            providerProfileImageUrl: true,
-          },
+
+    const ownerId = await this.personal.ownerOf(circleId);
+    if (ownerId) {
+      const users = await this.userRows([ownerId]);
+      const library = await this.personal.get(circleId);
+      const items = [
+        {
+          id: `${circleId}:${ownerId}`,
+          circleId,
+          userId: ownerId,
+          role: 'circle_admin' as CircleRoleName,
+          createdAt: (library?.createdAt ?? new Date()).toISOString(),
+          updatedAt: (library?.createdAt ?? new Date()).toISOString(),
+          user: users.get(ownerId) ?? null,
         },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+      ];
+      return { items, total: items.length };
+    }
+
+    const principal = await this.principalOf(user);
+    const rows: Awaited<ReturnType<GroupMembershipService['list']>>['items'] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const list = await this.groupMembers
+        .list(principal, circleId, { page, pageSize: PAGE_SIZE })
+        .catch(notFoundAs(`Circle ${circleId} not found`));
+      rows.push(...list.items);
+      if (page >= list.totalPages) break;
+    }
+    const users = await this.userRows(rows.map((m) => m.userId));
+    // The former list was oldest first.
+    const items = rows
+      .map((m) => this.memberView(circleId, m, users.get(m.userId) ?? null))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return { items, total: items.length };
   }
 
@@ -174,25 +214,19 @@ export class CirclesService {
     if (!targetUser) throw new NotFoundException(`User ${dto.userId} not found`);
     await this.assertNotPersonal(circleId);
 
-    const member = await this.prisma.circleMember.upsert({
-      where: { circleId_userId: { circleId, userId: dto.userId } },
-      update: { role: dto.role },
-      create: { circleId, userId: dto.userId, role: dto.role },
-      include: {
-        user: {
-          select: { id: true, email: true, displayName: true, providerDisplayName: true },
-        },
-      },
+    const member = await this.groupMembers.add(await this.principalOf(user), circleId, {
+      userId: dto.userId,
+      role: LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE[dto.role],
     });
-
     this.membership.invalidateMembers([dto.userId]);
 
+    const users = await this.userRows([dto.userId]);
+    const row = users.get(dto.userId) ?? null;
     // Membership-confirmation email (best-effort, fire-and-forget).
-    if (member.user?.email) {
-      await this.sendMembershipEmail(circleId, member.user.email, dto.role);
+    if (row?.email) {
+      await this.sendMembershipEmail(circleId, row.email, dto.role);
     }
-
-    return member;
+    return this.memberView(circleId, member, row);
   }
 
   /**
@@ -204,17 +238,15 @@ export class CirclesService {
     role: string,
   ): Promise<void> {
     try {
-      const circle = await this.prisma.circle.findUnique({
-        where: { id: circleId },
-        select: { name: true, description: true },
-      });
+      const circle = await this.scopes.summary(circleId);
       if (!circle) return;
+      const description = circle.kind === 'group' ? await this.groupDescription(circleId) : null;
 
       // Detached and after the membership write committed (RETRO-D3): the event's
       // only channel is email, bound to the `membership-confirmation` template.
       void this.notifications.notifyAddress(MEMORIAHUB_EMAIL_EVENT_KEYS.membershipConfirmed, recipientEmail, {
         circleName: circle.name,
-        circleDescription: circle.description ?? undefined,
+        circleDescription: description ?? undefined,
         role,
         viewUrl: `${this.appUrl()}/circles/${circleId}`,
       });
@@ -234,30 +266,14 @@ export class CirclesService {
     dto: UpdateMemberRoleDto,
   ) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
+    await this.assertNotPersonal(circleId);
 
-    const existing = await this.prisma.circleMember.findUnique({
-      where: { circleId_userId: { circleId, userId: targetUserId } },
-    });
-    if (!existing) {
-      throw new NotFoundException(`User ${targetUserId} is not a member of circle ${circleId}`);
-    }
-
-    // Guard: cannot demote the last circle_admin
-    if (existing.role === CircleRole.circle_admin && dto.role !== CircleRole.circle_admin) {
-      const adminCount = await this.prisma.circleMember.count({
-        where: { circleId, role: CircleRole.circle_admin },
-      });
-      if (adminCount <= 1) {
-        throw new BadRequestException('Cannot demote the last circle admin');
-      }
-    }
-
-    const updated = await this.prisma.circleMember.update({
-      where: { circleId_userId: { circleId, userId: targetUserId } },
-      data: { role: dto.role },
-    });
+    const updated = await this.groupMembers
+      .changeRole(await this.principalOf(user), circleId, targetUserId, LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE[dto.role])
+      .catch(lastAdminAs('Cannot demote the last circle admin', `User ${targetUserId} is not a member of circle ${circleId}`));
     this.membership.invalidateMembers([targetUserId]);
-    return updated;
+    const users = await this.userRows([targetUserId]);
+    return this.memberView(circleId, updated, users.get(targetUserId) ?? null);
   }
 
   async removeMember(user: RequestUser, circleId: string, targetUserId: string) {
@@ -269,41 +285,124 @@ export class CirclesService {
       // Self-leave: must at least be a member (viewer-level)
       await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'viewer');
     }
+    await this.assertNotPersonal(circleId);
 
-    const existing = await this.prisma.circleMember.findUnique({
-      where: { circleId_userId: { circleId, userId: targetUserId } },
-    });
-    if (!existing) {
-      throw new NotFoundException(`User ${targetUserId} is not a member of circle ${circleId}`);
-    }
-
-    // Guard: cannot remove last circle_admin
-    if (existing.role === CircleRole.circle_admin) {
-      const adminCount = await this.prisma.circleMember.count({
-        where: { circleId, role: CircleRole.circle_admin },
-      });
-      if (adminCount <= 1) {
-        throw new BadRequestException('Cannot remove the last circle admin');
-      }
-    }
-
-    await this.prisma.circleMember.delete({
-      where: { circleId_userId: { circleId, userId: targetUserId } },
-    });
+    await this.groupMembers
+      .remove(await this.principalOf(user), circleId, targetUserId)
+      .catch(lastAdminAs('Cannot remove the last circle admin', `User ${targetUserId} is not a member of circle ${circleId}`));
     this.membership.invalidateMembers([targetUserId]);
   }
 
   /**
-   * A personal circle has no group (RETRO-I2, circles-to-groups.md §2): its
+   * A personal library has no group (RETRO-I2, circles-to-groups.md §2): its
    * rows belong to its owner alone, and a member added to it would hold no
    * access since RETRO-I3 decides access on groups. Refuse instead of adding
    * a member who can see nothing.
    */
   private async assertNotPersonal(circleId: string): Promise<void> {
-    const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { isPersonal: true } });
-    if (circle?.isPersonal) {
+    if ((await this.personal.ownerOf(circleId)) !== null) {
       throw new BadRequestException('A personal circle cannot have other members');
     }
+  }
+
+  // ----- Shapes -----
+
+  private groupView(group: GroupDto, role: string | null): CircleView {
+    return {
+      id: group.id,
+      name: group.name,
+      description: group.description,
+      ownerId: group.createdById ?? '',
+      isPersonal: false,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt,
+      _count: { members: group.memberCount },
+      ...(role ? { memberRole: GROUP_ROLE_TO_CIRCLE_ROLE[role] ?? 'viewer' } : {}),
+    };
+  }
+
+  private memberView(
+    circleId: string,
+    member: { groupId?: string; userId: string; role: string; createdAt: string },
+    user: UserRow | null,
+  ) {
+    return {
+      id: `${circleId}:${member.userId}`,
+      circleId,
+      userId: member.userId,
+      role: GROUP_ROLE_TO_CIRCLE_ROLE[member.role] ?? 'viewer',
+      createdAt: member.createdAt,
+      updatedAt: member.createdAt,
+      user,
+    };
+  }
+
+  private async personalViewById(scopeId: string): Promise<CircleView | null> {
+    const library = await this.personal.get(scopeId);
+    return library ? this.libraryView(library) : null;
+  }
+
+  private async personalView(userId: string): Promise<CircleView | null> {
+    const id = await this.personal.idOf(userId);
+    return id ? this.personalViewById(id) : null;
+  }
+
+  private libraryView(library: Awaited<ReturnType<PersonalLibraryStore['get']>> & object): CircleView {
+    return {
+      id: library.id,
+      name: personalLibraryName(library),
+      description: null,
+      ownerId: library.ownerId,
+      isPersonal: true,
+      createdAt: library.createdAt.toISOString(),
+      updatedAt: library.createdAt.toISOString(),
+      _count: { members: 1 },
+    };
+  }
+
+  private async allPersonalViews(): Promise<CircleView[]> {
+    const out: CircleView[] = [];
+    let after: string | undefined;
+    for (;;) {
+      const page = await this.personal.page(after, 500);
+      out.push(...page.map((library) => this.libraryView(library)));
+      if (page.length < 500) break;
+      after = page[page.length - 1]!.id;
+    }
+    return out;
+  }
+
+  private async listGroups(principal: UserPrincipal, scope: 'mine' | 'all'): Promise<GroupDto[]> {
+    const out: GroupDto[] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const list = await this.groups.list(principal, { scope, page, pageSize: PAGE_SIZE });
+      out.push(...list.items);
+      if (page >= list.totalPages) break;
+    }
+    return out;
+  }
+
+  private async groupDescription(groupId: string): Promise<string | null> {
+    const group = await this.groups.get(await this.principalOf({ id: SYSTEM_READER_ID, email: '', roles: [], permissions: [SHARING_PERMISSIONS.GROUPS_ADMIN] }), groupId).catch(() => null);
+    return group?.description ?? null;
+  }
+
+  private async userRows(userIds: readonly string[]): Promise<Map<string, UserRow>> {
+    const out = new Map<string, UserRow>();
+    if (userIds.length === 0) return out;
+    const rows = await this.prisma.user.findMany({
+      where: { id: { in: [...userIds] } },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+        providerDisplayName: true,
+        profileImageUrl: true,
+        providerProfileImageUrl: true,
+      },
+    });
+    for (const row of rows) out.set(row.id, row);
+    return out;
   }
 
   // ----- Invites -----
@@ -325,7 +424,7 @@ export class CirclesService {
   async listInvites(user: RequestUser, circleId: string) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
     if (await this.isPersonal(circleId)) return { items: [], total: 0 };
-    const principal = await this.invitePrincipal(user);
+    const principal = await this.principalOf(user);
     const items: LegacyCircleInvite[] = [];
     for (let page = 1; page <= INVITE_LIST_MAX_PAGES; page++) {
       const list = await this.groupInvites.list(principal, circleId, {
@@ -345,7 +444,7 @@ export class CirclesService {
   async createInvite(user: RequestUser, circleId: string, dto: CreateInviteDto) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
     await this.assertNotPersonal(circleId);
-    const invite = await this.groupInvites.create(await this.invitePrincipal(user), circleId, {
+    const invite = await this.groupInvites.create(await this.principalOf(user), circleId, {
       email: dto.email,
       role: LEGACY_CIRCLE_ROLE_TO_OWNER_ROLE[dto.role],
     });
@@ -355,13 +454,12 @@ export class CirclesService {
   async revokeInvite(user: RequestUser, circleId: string, inviteId: string) {
     await this.membership.requireOwnerRole(user.id, circleId, user.permissions, 'admin');
     if (await this.isPersonal(circleId)) throw new NotFoundException(`Invite ${inviteId} not found`);
-    await this.groupInvites.revoke(await this.invitePrincipal(user), circleId, inviteId);
+    await this.groupInvites.revoke(await this.principalOf(user), circleId, inviteId);
     this.logger.log(`Invite ${inviteId} revoked by user ${user.id}`);
   }
 
   private async isPersonal(circleId: string): Promise<boolean> {
-    const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { isPersonal: true } });
-    return circle?.isPersonal === true;
+    return (await this.personal.ownerOf(circleId)) !== null;
   }
 
   /**
@@ -369,7 +467,7 @@ export class CirclesService {
    * so the active organization is the default one; `circles:manage_any` is the
    * deprecated name of `groups:admin` (the slice's bypass), kept one release.
    */
-  private async invitePrincipal(user: RequestUser): Promise<UserPrincipal> {
+  private async principalOf(user: Pick<RequestUser, 'id' | 'email' | 'roles' | 'permissions'> & { activeOrgId?: string | null }): Promise<UserPrincipal> {
     const permissions = user.permissions.includes(PERMISSIONS.CIRCLES_MANAGE_ANY)
       ? [...user.permissions, SHARING_PERMISSIONS.GROUPS_ADMIN]
       : user.permissions;
@@ -385,23 +483,48 @@ export class CirclesService {
   }
 }
 
+type UserRow = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  providerDisplayName: string | null;
+  profileImageUrl: string | null;
+  providerProfileImageUrl: string | null;
+};
+
+const SYSTEM_READER_ID = '00000000-0000-0000-0000-000000000000';
+
+/** Maps the slice's "group not found" onto the circle routes' 404 body. */
+function notFoundAs(message: string): (err: unknown) => never {
+  return (err) => {
+    if (err instanceof NotFoundException) throw new NotFoundException(message);
+    throw err;
+  };
+}
+
+/** The slice's `LAST_GROUP_ADMIN` 409 is the former 400; a missing member stays 404. */
+function lastAdminAs(lastAdminMessage: string, notMemberMessage: string): (err: unknown) => never {
+  return (err) => {
+    if (err instanceof ConflictException) {
+      const body = err.getResponse() as { code?: string } | string;
+      const code = typeof body === 'object' ? body.code : undefined;
+      if (code === 'LAST_GROUP_ADMIN') throw new BadRequestException(lastAdminMessage);
+    }
+    if (err instanceof NotFoundException) throw new NotFoundException(notMemberMessage);
+    throw err;
+  };
+}
+
 /** Pages read for one invite list (100 each): a circle with more than 1000 invites lists the newest 1000. */
 const INVITE_LIST_PAGE_SIZE = 100;
 const INVITE_LIST_MAX_PAGES = 10;
-
-/** Group role -> the circle role the web still shows. */
-const GROUP_ROLE_TO_CIRCLE_ROLE: Readonly<Record<string, CircleRole>> = Object.freeze({
-  admin: CircleRole.circle_admin,
-  editor: CircleRole.collaborator,
-  viewer: CircleRole.viewer,
-});
 
 /** The former `circle_invites` row shape the web reads (`apps/web/src/types/circles.ts`). */
 export interface LegacyCircleInvite {
   id: string;
   circleId: string;
   email: string;
-  role: CircleRole;
+  role: CircleRoleName;
   notes: null;
   addedById: string | null;
   addedAt: string;
@@ -414,7 +537,7 @@ export function toLegacyInvite(invite: GroupInviteDto): LegacyCircleInvite {
     id: invite.id,
     circleId: invite.groupId,
     email: invite.email,
-    role: GROUP_ROLE_TO_CIRCLE_ROLE[invite.role] ?? CircleRole.viewer,
+    role: GROUP_ROLE_TO_CIRCLE_ROLE[invite.role] ?? 'viewer',
     notes: null,
     addedById: invite.invitedById,
     addedAt: invite.createdAt,

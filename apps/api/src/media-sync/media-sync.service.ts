@@ -11,6 +11,7 @@ import {
 import { Prisma, type MediaSyncDevice, type MediaSyncDiagnosticReport, type MediaSyncRun } from '@prisma/client';
 
 import { type AuthCredentialInfo } from '@marinoscar/platform-api/identity';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { staticLogger } from '../common/logger/logger.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -149,6 +150,7 @@ export class MediaSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly circleMembership: OwnerAccessService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -614,19 +616,11 @@ export class MediaSyncService {
    * signup, so the fallback exists only for hand-made accounts.
    */
   private async defaultTargetCircle(userId: string): Promise<string> {
-    const personal = await this.prisma.circle.findFirst({
-      where: { ownerId: userId, isPersonal: true },
-      select: { id: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (personal) return personal.id;
+    const personal = await this.circleMembership.personalLibraryOf(userId);
+    if (personal) return personal;
 
-    const membership = await this.prisma.circleMember.findFirst({
-      where: { userId, role: { in: ['collaborator', 'circle_admin'] } },
-      select: { circleId: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (membership) return membership.circleId;
+    const [firstWritableGroup] = await this.circleMembership.writableGroupsOf(userId);
+    if (firstWritableGroup) return firstWritableGroup;
 
     throw mediaSyncRefusal(
       HttpStatus.CONFLICT,
@@ -678,10 +672,7 @@ export class MediaSyncService {
         caller.permissions,
         'editor',
       );
-      if (isSuperAdmin) {
-        const circle = await this.prisma.circle.findUnique({ where: { id: circleId }, select: { id: true } });
-        if (!circle) throw forbidden();
-      }
+      if (isSuperAdmin && !(await this.scopes.exists(circleId))) throw forbidden();
     } catch (error) {
       if (error instanceof ForbiddenException || error instanceof NotFoundException) throw forbidden();
       throw error;

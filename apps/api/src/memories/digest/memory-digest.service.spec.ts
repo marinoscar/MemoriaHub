@@ -20,6 +20,7 @@ import { MemoryDigestService } from './memory-digest.service';
 import { EmailSettingsService } from '@marinoscar/platform-api/email';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { verifyDigestImageToken, verifyDigestUnsubscribeToken } from './digest-token.util';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
@@ -73,6 +74,14 @@ describe('MemoryDigestService', () => {
   let prisma: any;
   let email: { sendEmail: jest.Mock; isConfigured: jest.Mock };
   let settings: { getSettings: jest.Mock };
+  let scopes: { summary: jest.Mock; membersOf: jest.Mock };
+
+  /** Seeds the library the digest reads: its summary, member ids and user rows (null = deleted). */
+  const setCircle = (row: { name: string; members: Array<{ user: any }> } | null) => {
+    scopes.summary.mockResolvedValue(row ? { id: CIRCLE_ID, name: row.name, kind: 'group' } : null);
+    scopes.membersOf.mockResolvedValue((row?.members ?? []).map((m) => ({ userId: m.user.id, role: 'viewer' })));
+    prisma.user.findMany.mockResolvedValue((row?.members ?? []).map((m) => m.user));
+  };
 
   beforeAll(() => {
     process.env.SECRETS_ENCRYPTION_KEY = VALID_KEY;
@@ -81,12 +90,14 @@ describe('MemoryDigestService', () => {
 
   beforeEach(async () => {
     prisma = {
-      circle: { findUnique: jest.fn().mockResolvedValue(circleRow()) },
+      user: { findMany: jest.fn() },
       memory: { findMany: jest.fn().mockResolvedValue([memoryRow()]) },
       job: { findFirst: jest.fn().mockResolvedValue(null) },
       userSettings: { findMany: jest.fn().mockResolvedValue([]) },
     };
     settings = { getSettings: jest.fn().mockResolvedValue(settingsWith()) };
+    scopes = { summary: jest.fn(), membersOf: jest.fn() };
+    setCircle(circleRow());
     // The fixture's `email` key stands in for the platform `email` settings row
     // (RETRO-D2): readiness is derived from it with the sender's own predicate.
     email = {
@@ -108,6 +119,7 @@ describe('MemoryDigestService', () => {
         MemoryDigestService,
         { provide: PrismaService, useValue: prisma },
         { provide: AppSystemSettingsService, useValue: settings },
+        { provide: OwnerScopeSweepService, useValue: scopes },
         { provide: NotificationsService, useValue: { notifyNow } },
         // Email readiness: the platform `email` row (the fixture's `email` key stands in for it).
         { provide: EmailSettingsService, useValue: { get: jest.fn(async () => (await settings.getSettings()).email ?? {}) } },
@@ -165,7 +177,7 @@ describe('MemoryDigestService', () => {
     expect(result.skippedReason).toBe('gate');
     expect(email.sendEmail).not.toHaveBeenCalled();
     // Gate closes before any circle/member read.
-    expect(prisma.circle.findUnique).not.toHaveBeenCalled();
+    expect(scopes.summary).not.toHaveBeenCalled();
   });
 
   it('NEVER sends an empty digest when there is no new content', async () => {
@@ -178,7 +190,7 @@ describe('MemoryDigestService', () => {
   });
 
   it('sends nothing for a circle that has been deleted', async () => {
-    prisma.circle.findUnique.mockResolvedValue(null);
+    setCircle(null);
 
     const result = await service.sendForCircle(CIRCLE_ID);
 
@@ -261,7 +273,7 @@ describe('MemoryDigestService', () => {
   });
 
   it('skips a member with no email address', async () => {
-    prisma.circle.findUnique.mockResolvedValue({
+    setCircle({
       name: 'Familia',
       members: [{ user: { id: USER_A, email: null, displayName: null } }],
     });

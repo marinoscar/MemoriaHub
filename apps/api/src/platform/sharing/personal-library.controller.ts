@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PersonalLibraryStore } from './personal-library.store';
 
 /** The display name the clients show for the personal library. */
 export const PERSONAL_LIBRARY_NAME = 'My library';
@@ -34,15 +34,11 @@ export class PersonalLibraryDto extends createZodDto(personalLibrarySchema) {}
 
 @Injectable()
 export class PersonalLibraryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly store: PersonalLibraryStore) {}
 
-  /** The caller's personal library (their former personal circle). */
+  /** The caller's personal library. */
   async forUser(userId: string): Promise<PersonalLibraryDto> {
-    const row = await this.prisma.circle.findFirst({
-      where: { ownerId: userId, isPersonal: true },
-      select: { id: true },
-    });
-    return { id: row?.id ?? null, name: PERSONAL_LIBRARY_NAME };
+    return { id: await this.store.idOf(userId), name: PERSONAL_LIBRARY_NAME };
   }
 }
 
@@ -68,6 +64,6 @@ export class PersonalLibraryController {
 @Module({
   imports: [PrismaModule],
   controllers: [PersonalLibraryController],
-  providers: [PersonalLibraryService],
+  providers: [PersonalLibraryService, PersonalLibraryStore],
 })
 export class PersonalLibraryModule {}

@@ -36,6 +36,9 @@ export const STORAGE_PROCESSING_RECOVERY_REASON = 'storage-processing-recovery';
 /** The admin backfills' and the location rebuild's listing of every group (RETRO-N29). */
 export const OWNER_SCOPE_SWEEP_REASON = 'owner-scope-sweep';
 
+/** The sweeps' and crons' reads of a group's members (RETRO-K1). */
+export const OWNER_SCOPE_MEMBERS_REASON = 'owner-scope-members';
+
 let registered = false;
 
 /** Registers the app's reasons once per process. */
@@ -61,6 +64,12 @@ export function registerMemoriaHubSystemAccessReasons(): void {
       'The admin backfills (metadata, face, burst, duplicate, tagging, social media) and the location-group rebuild ' +
       'list the id of every group in every organization through GroupsService.listForSystem, read-only, ' +
       'to enqueue or run per-library work; they are system sweeps with no organization to scope to.',
+  });
+  registerSystemAccessReason({
+    id: OWNER_SCOPE_MEMBERS_REASON,
+    description:
+      'The memories, review-queue and notification crons read the members (ids and roles) of one group through ' +
+      'GroupMembershipService.membersForSystem to pick recipients; they are system jobs with no caller to scope to.',
   });
 }
 

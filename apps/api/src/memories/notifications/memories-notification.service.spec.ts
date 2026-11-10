@@ -12,6 +12,8 @@ import { MemoryType } from '@prisma/client';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { createPlatformNotificationsMock, type RecordedNotification } from '../../../test/mocks/platform-notifications.mock';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
+import { scopesOverCircleLookup } from '../../../test/mocks/scopes.mock';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   MEMORIES_READY_LINK,
@@ -47,6 +49,7 @@ describe('MemoriesNotificationService', () => {
       providers: [
         MemoriesNotificationService,
         { provide: PrismaService, useValue: prisma },
+        { provide: OwnerScopeSweepService, useValue: scopesOverCircleLookup(prisma.circle.findUnique) },
         { provide: NotificationsService, useValue: platform.mock },
       ],
     }).compile();

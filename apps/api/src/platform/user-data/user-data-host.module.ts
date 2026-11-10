@@ -1,6 +1,7 @@
 import { Injectable, Module, type OnModuleInit } from '@nestjs/common';
 import { USER_DATA_DB, type UserDataDbPort, type UserDataSystemReason } from '@marinoscar/platform-api/user-data';
 
+import { OwnerAccessModule } from '../sharing/owner-access.module';
 import { MediaModule } from '../../media/media.module';
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import { MediaProcessingModule } from '../../media-processing/media-processing.module';
@@ -43,7 +44,7 @@ export class MemoriaHubFactoryResetBinding implements OnModuleInit {
 }
 
 @Module({
-  imports: [MediaModule, MediaProcessingModule],
+  imports: [MediaModule, MediaProcessingModule, OwnerAccessModule],
   providers: [
     MemoriaHubUserDataService,
     MemoriaHubFactoryResetBinding,

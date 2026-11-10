@@ -1,9 +1,9 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { CircleRole } from '@prisma/client';
+import { circleRoleSchema } from '../circle-role';
 
 export const addMemberSchema = z.object({
   userId: z.string().uuid(),
-  role: z.nativeEnum(CircleRole).default(CircleRole.viewer),
+  role: circleRoleSchema.default('viewer'),
 });
 export class AddMemberDto extends createZodDto(addMemberSchema) {}

@@ -5,6 +5,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { OwnerScopeParamsInterceptor } from './platform/sharing/owner-scope-params';
+import { PersonalLibraryStore } from './platform/sharing/personal-library.store';
 
 import { PrismaModule } from './prisma/prisma.module';
 import './settings/registry';
@@ -275,6 +276,7 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     },
     // RETRO-I3 (#573): `ownerGroupId` / `scope=me` -> the routes' `circleId` (deprecated alias),
     // rewritten after the guards and before the validation pipe (platform/sharing/owner-scope-params.ts).
+    PersonalLibraryStore,
     {
       provide: APP_INTERCEPTOR,
       useClass: OwnerScopeParamsInterceptor,

@@ -22,6 +22,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { JobReason, MhLegacyJobStatus } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_GENERATION_JOB_TYPE } from '../memories-generation.task';
 import { MemoryBackfillService } from './memory-backfill.service';
@@ -35,18 +36,20 @@ const SHARDS = MEMORY_BACKFILL_SHARDS.length;
 describe('MemoryBackfillService', () => {
   let service: MemoryBackfillService;
   let prisma: {
-    circle: { findMany: jest.Mock; findUnique: jest.Mock };
     job: { findMany: jest.Mock };
   };
+  let scopes: { allScopeIds: jest.Mock; allScopes: jest.Mock; exists: jest.Mock; userNames: jest.Mock };
   let enrichment: { enqueue: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
-      circle: {
-        findMany: jest.fn().mockResolvedValue([]),
-        findUnique: jest.fn().mockResolvedValue(null),
-      },
       job: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    scopes = {
+      allScopeIds: jest.fn().mockResolvedValue([]),
+      allScopes: jest.fn().mockResolvedValue([]),
+      exists: jest.fn().mockResolvedValue(false),
+      userNames: jest.fn().mockResolvedValue(new Map()),
     };
     enrichment = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
@@ -54,6 +57,7 @@ describe('MemoryBackfillService', () => {
       providers: [
         MemoryBackfillService,
         { provide: PrismaService, useValue: prisma },
+        { provide: OwnerScopeSweepService, useValue: scopes },
         { provide: EnrichmentJobService, useValue: enrichment },
       ],
     }).compile();
@@ -99,7 +103,7 @@ describe('MemoryBackfillService', () => {
   // -------------------------------------------------------------------------
   describe('all circles', () => {
     it('enqueues the whole shard plan for every circle', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }, { id: 'c2' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1', 'c2']);
 
       const result = await service.backfillLibrary();
 
@@ -108,7 +112,7 @@ describe('MemoryBackfillService', () => {
     });
 
     it('enqueues background-priority, dedup-skipping backfill jobs', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1']);
 
       await service.backfillLibrary();
 
@@ -130,7 +134,7 @@ describe('MemoryBackfillService', () => {
     });
 
     it('produces one on_this_day job per month', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1']);
 
       await service.backfillLibrary();
 
@@ -143,20 +147,14 @@ describe('MemoryBackfillService', () => {
       expect(new Set(months).size).toBe(12);
     });
 
-    it('pages through circles with a keyset cursor', async () => {
-      // 100 is the page size — a full page must trigger a second read.
-      const page1 = Array.from({ length: 100 }, (_u, i) => ({ id: `c${i}` }));
-      prisma.circle.findMany
-        .mockResolvedValueOnce(page1)
-        .mockResolvedValueOnce([{ id: 'last' }]);
+    it('walks the ids in chunks of 100', async () => {
+      const ids = Array.from({ length: 101 }, (_u, i) => `c${i}`);
+      scopes.allScopeIds.mockResolvedValueOnce(ids);
 
       const result = await service.backfillLibrary();
 
-      expect(prisma.circle.findMany).toHaveBeenCalledTimes(2);
-      expect(prisma.circle.findMany.mock.calls[1]![0]).toMatchObject({
-        cursor: { id: 'c99' },
-        skip: 1,
-      });
+      expect(prisma.job.findMany).toHaveBeenCalledTimes(2);
+      expect(prisma.job.findMany.mock.calls[1]![0].where.subjectId.in).toEqual(['c100']);
       expect(result.circles).toBe(101);
     });
 
@@ -171,7 +169,7 @@ describe('MemoryBackfillService', () => {
   // -------------------------------------------------------------------------
   describe('in-flight skipping', () => {
     it('skips a circle that already has a generation job pending or running', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'busy' }, { id: 'free' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['busy', 'free']);
       prisma.job.findMany.mockResolvedValueOnce([{ subjectId: 'busy' }]);
 
       const result = await service.backfillLibrary();
@@ -183,7 +181,7 @@ describe('MemoryBackfillService', () => {
     });
 
     it('checks in-flight jobs once per page, not once per circle', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1', 'c2', 'c3']);
 
       await service.backfillLibrary();
 
@@ -202,16 +200,16 @@ describe('MemoryBackfillService', () => {
   // -------------------------------------------------------------------------
   describe('single circle', () => {
     it('enqueues only that circle and never pages', async () => {
-      prisma.circle.findUnique.mockResolvedValueOnce({ id: 'c9' });
+      scopes.exists.mockResolvedValueOnce(true);
 
       const result = await service.backfillLibrary({ circleId: 'c9' });
 
       expect(result).toEqual({ enqueued: SHARDS, circles: 1, skipped: 0 });
-      expect(prisma.circle.findMany).not.toHaveBeenCalled();
+      expect(scopes.allScopeIds).not.toHaveBeenCalled();
     });
 
     it('throws NotFound for an unknown circle rather than reporting success', async () => {
-      prisma.circle.findUnique.mockResolvedValueOnce(null);
+      scopes.exists.mockResolvedValueOnce(false);
 
       await expect(service.backfillLibrary({ circleId: 'nope' })).rejects.toBeInstanceOf(
         NotFoundException,
@@ -220,7 +218,7 @@ describe('MemoryBackfillService', () => {
     });
 
     it('still honours the in-flight skip', async () => {
-      prisma.circle.findUnique.mockResolvedValueOnce({ id: 'c9' });
+      scopes.exists.mockResolvedValueOnce(true);
       prisma.job.findMany.mockResolvedValueOnce([{ subjectId: 'c9' }]);
 
       const result = await service.backfillLibrary({ circleId: 'c9' });
@@ -232,7 +230,7 @@ describe('MemoryBackfillService', () => {
   // -------------------------------------------------------------------------
   describe('failure isolation', () => {
     it('keeps going when one shard enqueue throws', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1']);
       enrichment.enqueue
         .mockRejectedValueOnce(new Error('deadlock'))
         .mockResolvedValue({ id: 'job' });
@@ -243,7 +241,7 @@ describe('MemoryBackfillService', () => {
     });
 
     it('does not count a circle whose every shard failed', async () => {
-      prisma.circle.findMany.mockResolvedValueOnce([{ id: 'c1' }]);
+      scopes.allScopeIds.mockResolvedValueOnce(['c1']);
       enrichment.enqueue.mockRejectedValue(new Error('down'));
 
       const result = await service.backfillLibrary();
@@ -255,11 +253,17 @@ describe('MemoryBackfillService', () => {
   // -------------------------------------------------------------------------
   describe('listLibraries (RETRO-I6 #588)', () => {
     it('lists the groups by name, then the personal libraries by owner', async () => {
-      prisma.circle.findMany.mockResolvedValue([
-        { id: 'g-1', name: 'Group Alpha', isPersonal: false, owner: { displayName: 'Person A', email: 'a@example.test' } },
-        { id: 'p-2', name: 'Personal', isPersonal: true, owner: { displayName: null, email: 'b@example.test' } },
-        { id: 'p-1', name: 'Personal', isPersonal: true, owner: { displayName: 'Person A', email: 'a@example.test' } },
+      scopes.allScopes.mockResolvedValue([
+        { id: 'g-1', name: 'Group Alpha', kind: 'group', ownerId: null, createdById: 'u-9' },
+        { id: 'p-2', name: "b@example.test's Library", kind: 'personal', ownerId: 'u-2', createdById: null },
+        { id: 'p-1', name: "Person A's Library", kind: 'personal', ownerId: 'u-1', createdById: null },
       ]);
+      scopes.userNames.mockResolvedValue(
+        new Map([
+          ['u-1', { name: 'Person A', email: 'a@example.test' }],
+          ['u-2', { name: null, email: 'b@example.test' }],
+        ]),
+      );
 
       await expect(service.listLibraries()).resolves.toEqual([
         { id: 'g-1', kind: 'group', name: 'Group Alpha' },

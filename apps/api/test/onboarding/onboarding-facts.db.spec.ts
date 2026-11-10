@@ -19,6 +19,10 @@ import {
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { GroupInvitesService } from '@marinoscar/platform-api/sharing';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
+import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../../src/platform/sharing/owner-scope-sweep.service';
+import { buildOwnerAccessService } from '../helpers/owner-access';
+import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -38,7 +42,11 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
           ? { list: async () => ({ items: [], total: pendingTotal, page: 1, pageSize: 1, totalPages: 1 }) }
           : token === DefaultOrgId
             ? { get: async () => randomUUID() }
-            : prisma,
+            : token === OwnerAccessService
+              ? buildOwnerAccessService(prisma)
+              : token === OwnerScopeSweepService
+                ? sqlScopeDirectory(prisma as never)
+                : prisma,
     }) as unknown as OnboardingRequestContext;
 
   beforeAll(async () => {

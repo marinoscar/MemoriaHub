@@ -17,6 +17,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { Test, TestingModule } from '@nestjs/testing';
 import { BurstService } from './burst.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
@@ -186,6 +187,7 @@ function makeDetailGroup(overrides: Partial<{
 describe('BurstService', () => {
   let service: BurstService;
   let mockPrisma: MockPrismaService;
+  let mockScopes: { allScopeIds: jest.Mock };
   let mockMembership: { requireOwnerRole: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
@@ -197,6 +199,7 @@ describe('BurstService', () => {
   beforeEach(async () => {
     mockPrisma = createMockPrismaService();
     mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
+    mockScopes = { allScopeIds: jest.fn().mockResolvedValue([]) };
     mockEnrichmentJobService = { enqueue: jest.fn() };
     // Default: duplicateDetection feature disabled, so the re-enqueue helper
     // in resolve/dismiss is a no-op unless a test explicitly enables it.
@@ -261,6 +264,7 @@ describe('BurstService', () => {
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
         { provide: DuplicateDetectionService, useValue: mockDuplicateDetectionService },
         { provide: ReviewRunService, useValue: mockReviewRuns },
+        { provide: OwnerScopeSweepService, useValue: mockScopes },
       ],
     }).compile();
 
@@ -1230,7 +1234,7 @@ describe('BurstService', () => {
 
   describe('backfillAllCircles', () => {
     function setupCircles(circleIds: string[]) {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue(circleIds.map((id) => ({ id })));
+      mockScopes.allScopeIds.mockResolvedValue(circleIds);
       // force=false path (default opts): no succeeded jobs, no eligible items —
       // keeps the per-circle enqueue loop a no-op so these tests isolate the
       // eviction remediation step.

@@ -19,6 +19,8 @@ import { AppSystemSettingsService } from '../../src/platform/settings/app-system
 import { AiDeploymentKeySource } from '../../src/ai-port/ai-deployment-key-source';
 import { GroupInvitesService } from '@marinoscar/platform-api/sharing';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
+import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../../src/platform/sharing/owner-scope-sweep.service';
 
 const CALLER = '00000000-0000-4000-8000-000000000001';
 
@@ -26,7 +28,6 @@ function makePrisma() {
   return {
     mediaItem: { count: jest.fn().mockResolvedValue(1) },
     album: { count: jest.fn().mockResolvedValue(0) },
-    circleMember: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn().mockResolvedValue(0) },
     person: { count: jest.fn().mockResolvedValue(1) },
     mediaSyncDevice: { count: jest.fn().mockResolvedValue(0) },
     personalAccessToken: { count: jest.fn().mockResolvedValue(1) },
@@ -37,6 +38,9 @@ function makePrisma() {
 
 const ORG = '00000000-0000-4000-8000-0000000000aa';
 const groupInvites = { list: jest.fn() };
+// RETRO-K1: memberships come from the platform groups and the personal library, not `circle_members`.
+const access = { rolesOf: jest.fn().mockResolvedValue([]), scopesOf: jest.fn().mockResolvedValue(['c1', 'c2']) };
+const scopes = { membersOf: jest.fn().mockResolvedValue([]) };
 
 function ctx(
   prisma: ReturnType<typeof makePrisma>,
@@ -57,6 +61,8 @@ function ctx(
       if (token === StorageConfigService) return storageConfig;
       if (token === GroupInvitesService) return groupInvites;
       if (token === DefaultOrgId) return { get: async () => ORG };
+      if (token === OwnerAccessService) return access;
+      if (token === OwnerScopeSweepService) return scopes;
       throw new Error('unexpected token');
     },
   } as unknown as OnboardingRequestContext;
@@ -73,33 +79,33 @@ describe('MemoriaHub onboarding facts', () => {
 
   it('circle membership reads nothing more without a collaborator membership', async () => {
     const prisma = makePrisma();
+    access.rolesOf.mockResolvedValue([{ scopeId: 'g0', role: 'viewer', personal: false }]);
+    scopes.membersOf.mockClear();
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctx(prisma))).resolves.toEqual({
       collaboratorCircles: 0,
       otherMembers: 0,
       pendingInvites: 0,
     });
-    expect(prisma.circleMember.count).not.toHaveBeenCalled();
+    expect(scopes.membersOf).not.toHaveBeenCalled();
     expect(groupInvites.list).not.toHaveBeenCalled();
   });
 
   it('circle membership counts other members, then pending group invites of administered shared circles', async () => {
     const prisma = makePrisma();
     groupInvites.list.mockReset();
-    prisma.circleMember.findMany.mockResolvedValue([
-      { circleId: 'c1', role: 'collaborator', circle: { isPersonal: false } },
-      { circleId: 'c2', role: 'circle_admin', circle: { isPersonal: true } },
-      { circleId: 'c3', role: 'circle_admin', circle: { isPersonal: false } },
+    access.rolesOf.mockResolvedValue([
+      { scopeId: 'c1', role: 'editor', personal: false },
+      { scopeId: 'c2', role: 'admin', personal: true },
+      { scopeId: 'c3', role: 'admin', personal: false },
+      { scopeId: 'c4', role: 'viewer', personal: false },
     ]);
+    // Alone in both groups.
+    scopes.membersOf.mockResolvedValue([{ userId: CALLER, role: 'admin' }]);
     groupInvites.list.mockResolvedValue({ items: [{}], total: 1, page: 1, pageSize: 1, totalPages: 1 });
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctx(prisma))).resolves.toEqual({
       collaboratorCircles: 3,
       otherMembers: 0,
       pendingInvites: 1,
-    });
-    expect(prisma.circleMember.findMany.mock.calls[0][0].take).toBe(100);
-    expect(prisma.circleMember.count).toHaveBeenCalledWith({
-      where: { circleId: { in: ['c1', 'c2', 'c3'] }, userId: { not: CALLER } },
-      take: 1,
     });
     // Only the administered SHARED circle is probed (a personal circle has no group), as the caller.
     expect(groupInvites.list).toHaveBeenCalledTimes(1);
@@ -113,8 +119,8 @@ describe('MemoriaHub onboarding facts', () => {
   it('circle membership reads no invite once another member is in', async () => {
     const prisma = makePrisma();
     groupInvites.list.mockReset();
-    prisma.circleMember.findMany.mockResolvedValue([{ circleId: 'c3', role: 'circle_admin', circle: { isPersonal: false } }]);
-    prisma.circleMember.count.mockResolvedValue(1);
+    access.rolesOf.mockResolvedValue([{ scopeId: 'c3', role: 'admin', personal: false }]);
+    scopes.membersOf.mockResolvedValue([{ userId: CALLER, role: 'admin' }, { userId: 'other', role: 'viewer' }]);
     await expect(CIRCLE_MEMBERSHIP_FACT.resolve(ctx(prisma))).resolves.toEqual({
       collaboratorCircles: 1,
       otherMembers: 1,
@@ -123,7 +129,7 @@ describe('MemoriaHub onboarding facts', () => {
     expect(groupInvites.list).not.toHaveBeenCalled();
   });
 
-  it('people named counts live, unmerged, named people in the caller\'s circles', async () => {
+  it('people named counts live, unmerged, named people in the caller\'s libraries', async () => {
     const prisma = makePrisma();
     await expect(PEOPLE_NAMED_FACT.resolve(ctx(prisma))).resolves.toEqual({ named: 1 });
     expect(prisma.person.count.mock.calls[0][0]).toEqual({
@@ -131,7 +137,7 @@ describe('MemoriaHub onboarding facts', () => {
         name: { not: null },
         deletedAt: null,
         mergedIntoId: null,
-        circle: { members: { some: { userId: CALLER } } },
+        circleId: { in: ['c1', 'c2'] },
       },
       take: 1,
     });

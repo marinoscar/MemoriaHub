@@ -39,6 +39,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { JobReason } from '@prisma/client';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MEMORY_GENERATION_JOB_TYPE } from '../memories-generation.task';
 import { MEMORY_BACKFILL_SHARDS, memoryBackfillPayload } from './memory-backfill.shards';
@@ -82,29 +83,29 @@ export class MemoryBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /**
    * The libraries an admin can target with the backfill: every shared library
    * (group) by name, then every personal library by its owner. Replaces the
-   * picker's former `GET /api/circles?all=true` (RETRO-I6, #588). Reads the
-   * app's own scope table, the one the backfill itself walks.
+   * picker's former `GET /api/circles?all=true` (RETRO-I6, #588). Read through the scope
+   * directory (RETRO-K1): groups from the platform, personal libraries from the store.
    */
   async listLibraries(): Promise<MemoryBackfillLibrary[]> {
-    const rows = await this.prisma.circle.findMany({
-      select: { id: true, name: true, isPersonal: true, owner: { select: { displayName: true, email: true } } },
-      orderBy: [{ isPersonal: 'asc' }, { name: 'asc' }, { id: 'asc' }],
-      take: MEMORY_BACKFILL_LIBRARIES_MAX,
-    });
+    const scopes = (await this.scopes.allScopes()).slice(0, MEMORY_BACKFILL_LIBRARIES_MAX);
+    const owners = await this.scopes.userNames(scopes.map((s) => s.ownerId).filter((id): id is string => !!id));
     const groups: MemoryBackfillLibrary[] = [];
     const personal: MemoryBackfillLibrary[] = [];
-    for (const row of rows) {
-      if (row.isPersonal) {
-        personal.push({ id: row.id, kind: 'personal', name: row.owner?.displayName || row.owner?.email || row.name });
+    for (const scope of scopes) {
+      if (scope.kind === 'personal') {
+        const owner = scope.ownerId ? owners.get(scope.ownerId) : undefined;
+        personal.push({ id: scope.id, kind: 'personal', name: owner?.name || owner?.email || scope.name });
       } else {
-        groups.push({ id: row.id, kind: 'group', name: row.name });
+        groups.push({ id: scope.id, kind: 'group', name: scope.name });
       }
     }
+    groups.sort((a, b) => a.name.localeCompare(b.name));
     personal.sort((a, b) => a.name.localeCompare(b.name));
     return [...groups, ...personal];
   }
@@ -121,32 +122,17 @@ export class MemoryBackfillService {
     const result: MemoryBackfillResult = { enqueued: 0, circles: 0, skipped: 0 };
 
     if (opts.circleId) {
-      const circle = await this.prisma.circle.findUnique({
-        where: { id: opts.circleId },
-        select: { id: true },
-      });
+      const exists = await this.scopes.exists(opts.circleId);
       // 404 rather than a silent no-op: an admin who mistypes a circle id must
       // not get back a cheerful `{ enqueued: 0 }` that reads like success.
-      if (!circle) {
+      if (!exists) {
         throw new NotFoundException(`Circle ${opts.circleId} not found`);
       }
-      await this.processPage([circle.id], result);
+      await this.processPage([opts.circleId], result);
     } else {
-      let cursor: string | undefined;
-      for (;;) {
-        const circles = await this.prisma.circle.findMany({
-          select: { id: true },
-          orderBy: { id: 'asc' },
-          take: CIRCLE_PAGE_SIZE,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        });
-        if (circles.length === 0) break;
-
-        const circleIds = circles.map((c) => c.id);
-        await this.processPage(circleIds, result);
-
-        if (circles.length < CIRCLE_PAGE_SIZE) break;
-        cursor = circleIds[circleIds.length - 1]!;
+      const allIds = await this.scopes.allScopeIds();
+      for (let offset = 0; offset < allIds.length; offset += CIRCLE_PAGE_SIZE) {
+        await this.processPage(allIds.slice(offset, offset + CIRCLE_PAGE_SIZE), result);
       }
     }
 

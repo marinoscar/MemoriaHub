@@ -33,6 +33,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { isSupportedTimeZone } from '../common/time/zone.util';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import type { WorkerNode } from '@marinoscar/platform-api/jobs';
 import { NodeBackupOwnershipService } from './node-backup-ownership.service';
@@ -82,6 +83,7 @@ export class NodeBackupService {
     private readonly storageResolver: StorageProviderResolver,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly config: ConfigService,
+    private readonly access: OwnerAccessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -248,11 +250,7 @@ export class NodeBackupService {
     }
     if (dto.circleIds !== undefined && dto.circleIds.length > 0) {
       // Every requested circle must be one the node OWNER belongs to.
-      const memberships = await this.prisma.circleMember.findMany({
-        where: { userId: node.createdById, circleId: { in: dto.circleIds } },
-        select: { circleId: true },
-      });
-      const memberIds = new Set(memberships.map((m) => m.circleId));
+      const memberIds = new Set(await this.access.scopesOf(node.createdById));
       const invalid = dto.circleIds.filter((id) => !memberIds.has(id));
       if (invalid.length > 0) {
         throw new BadRequestException(

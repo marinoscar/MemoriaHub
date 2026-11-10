@@ -28,24 +28,19 @@ export const MEMORIAHUB_EXPORT_PERMISSION = 'media:read';
 /** The column types MemoriaHub's datasets use (no `date`: civil timestamps are written as text). */
 export const MEMORIAHUB_EXPORT_COLUMN_TYPES: readonly ExportColumnType[] = ['string', 'number', 'boolean', 'datetime'];
 
-/** The user's personal circle, as a `circle` relation filter. */
-export function personalCircleOf(userId: string): Record<string, unknown> {
-  return { isPersonal: true, ownerId: userId };
-}
-
 /**
- * Rows of a circle-content model (`MediaItem`, `Album`, `Person`): everything in the
- * user's personal circle, plus what the user added in a shared circle. A row the user
- * added inside SOMEONE ELSE's personal circle is never included.
+ * Rows of a library-content model (`MediaItem`, `Album`, `Person`): everything in the
+ * user's personal library (`owner_user_id`), plus what the user added in a shared
+ * library (a group-owned row). A row the user added inside SOMEONE ELSE's personal
+ * library is never included. The owner columns decide it (RETRO-K1), not `circles`.
  */
 export function ownedCircleContentWhere(userId: string): Record<string, unknown> {
   return {
-    OR: [
-      { circle: personalCircleOf(userId) },
-      { addedById: userId, circle: { OR: [{ isPersonal: false }, { ownerId: userId }] } },
-    ],
+    OR: [{ ownerUserId: userId }, { addedById: userId, ownerGroupId: { not: null } }],
   };
 }
+
+export { OWNER_NAME_SELECT, libraryName } from '../sharing/owner-name';
 
 /** A column. */
 export function column(key: string, label: string, type: ExportColumnType = 'string'): ExportColumn {

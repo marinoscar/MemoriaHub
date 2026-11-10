@@ -1,8 +1,8 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { CircleRole } from '@prisma/client';
+import { circleRoleSchema } from '../circle-role';
 
 export const updateMemberRoleSchema = z.object({
-  role: z.nativeEnum(CircleRole),
+  role: circleRoleSchema,
 });
 export class UpdateMemberRoleDto extends createZodDto(updateMemberRoleSchema) {}

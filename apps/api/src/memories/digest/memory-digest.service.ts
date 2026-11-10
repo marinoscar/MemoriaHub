@@ -77,6 +77,7 @@ import {
   signDigestImageToken,
   signDigestUnsubscribeToken,
 } from './digest-token.util';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 /** The enrichment job type this feature schedules. */
@@ -189,6 +190,7 @@ export class MemoryDigestService {
     private readonly emailSettings: EmailSettingsService,
     private readonly notifications: NotificationsService,
     private readonly thumbnails: MediaThumbnailService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   // ===========================================================================
@@ -362,22 +364,26 @@ export class MemoryDigestService {
       return result;
     }
 
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: {
-        name: true,
-        // Every member, every per-circle role: reading a digest needs no write
-        // access, so a `viewer` is a legitimate recipient. Same audience
-        // rationale as `upload_completed` / `memories_ready`, and deliberately
-        // unlike the collaborator-only review-queue notifications.
-        members: {
-          select: {
-            user: { select: { id: true, email: true, displayName: true } },
-          },
-        },
-      },
+    // Every member, every role: reading a digest needs no write access, so a
+    // `viewer` is a legitimate recipient (same audience rationale as
+    // `upload_completed` / `memories_ready`, unlike the editor-only review-queue
+    // notifications). Groups and personal libraries both come through the scope
+    // directory (RETRO-K1): no read of `circles` / `circle_members`.
+    const summary = await this.scopes.summary(circleId);
+    const scopeMembers = summary ? await this.scopes.membersOf(circleId) : [];
+    if (!summary || scopeMembers.length === 0) {
+      result.skippedReason = 'no_circle';
+      return result;
+    }
+    const userRows = await this.prisma.user.findMany({
+      where: { id: { in: scopeMembers.map((m) => m.userId) } },
+      select: { id: true, email: true, displayName: true },
     });
-    if (!circle || circle.members.length === 0) {
+    const circle = {
+      name: summary.name,
+      members: userRows.map((user) => ({ user })),
+    };
+    if (circle.members.length === 0) {
       result.skippedReason = 'no_circle';
       return result;
     }

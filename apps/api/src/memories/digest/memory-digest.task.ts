@@ -35,6 +35,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { JobReason } from '@prisma/client';
 
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   MEMORY_DIGEST_JOB_TYPE,
@@ -70,6 +71,7 @@ export class MemoryDigestTask {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly enrichmentJobService: EnrichmentJobService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly digest: MemoryDigestService,
@@ -128,17 +130,12 @@ export class MemoryDigestTask {
 
       const cutoff = new Date(now.getTime() - this.digest.windowMs(frequency));
 
-      let cursor: string | undefined;
-      for (;;) {
-        const circles = await this.prisma.circle.findMany({
-          select: { id: true },
-          orderBy: { id: 'asc' },
-          take: CIRCLE_PAGE_SIZE,
-          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-        });
-        if (circles.length === 0) break;
+      // Every library (groups through the platform, personal libraries from the store),
+      // walked in pages of CIRCLE_PAGE_SIZE ids (RETRO-K1).
+      const allScopeIds = await this.scopes.allScopeIds();
+      for (let offset = 0; offset < allScopeIds.length; offset += CIRCLE_PAGE_SIZE) {
+        const circleIds = allScopeIds.slice(offset, offset + CIRCLE_PAGE_SIZE);
 
-        const circleIds = circles.map((c) => c.id);
 
         // Two batched reads per page instead of two per circle.
         const [inFlight, lastSucceeded] = await Promise.all([
@@ -222,8 +219,6 @@ export class MemoryDigestTask {
           }
         }
 
-        if (circles.length < CIRCLE_PAGE_SIZE) break;
-        cursor = circleIds[circleIds.length - 1]!;
       }
 
       if (result.enqueued > 0 || result.errors > 0) {

@@ -18,10 +18,13 @@
 
 import { Module } from '@nestjs/common';
 
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { UploadNotificationService } from './upload-notification.service';
 import { WorkflowRunNotificationService } from './workflow-run-notification.service';
 
 @Module({
+  // RETRO-K1: the scope directory (OwnerScopeSweepService); OwnerAccessModule imports nothing of the media graph.
+  imports: [OwnerAccessModule],
   providers: [UploadNotificationService, WorkflowRunNotificationService],
   exports: [UploadNotificationService, WorkflowRunNotificationService],
 })

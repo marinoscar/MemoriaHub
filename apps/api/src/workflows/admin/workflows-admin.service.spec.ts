@@ -69,7 +69,8 @@ function makeWorkflow(overrides: Record<string, unknown> = {}) {
     cronExpression: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-02T00:00:00Z'),
-    circle: { id: CIRCLE_ID, name: 'Family circle' },
+    ownerGroup: { name: 'Family circle' },
+    ownerUser: null,
     createdBy: { id: USER_ID, email: 'admin@example.com', displayName: 'Admin' },
     ...overrides,
   };
@@ -97,7 +98,8 @@ function makeRun(overrides: Record<string, unknown> = {}) {
     finishedAt: null,
     lastError: null,
     workflow: { id: WORKFLOW_ID, name: 'Screenshot cleanup' },
-    circle: { id: CIRCLE_ID, name: 'Family circle' },
+    ownerGroup: { name: 'Family circle' },
+    ownerUser: null,
     ...overrides,
   };
 }
@@ -297,7 +299,7 @@ describe('WorkflowsAdminService', () => {
 
     it('handles a null circle and null createdBy gracefully', async () => {
       (prisma.workflow.findMany as jest.Mock).mockResolvedValue([
-        makeWorkflow({ circle: null, createdBy: null }),
+        makeWorkflow({ ownerGroup: null, ownerUser: null, createdBy: null }),
       ]);
 
       const result = await service.listWorkflows({ page: 1, pageSize: 20 });
@@ -421,7 +423,7 @@ describe('WorkflowsAdminService', () => {
 
     it('handles a null workflow/circle relation gracefully', async () => {
       (prisma.workflowRun.findMany as jest.Mock).mockResolvedValue([
-        makeRun({ workflow: null, circle: null }),
+        makeRun({ workflow: null, ownerGroup: null, ownerUser: null }),
       ]);
 
       const result = await service.listRuns({ page: 1, pageSize: 20 });

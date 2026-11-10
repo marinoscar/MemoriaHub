@@ -6,6 +6,7 @@ import { SharingHostModule } from './sharing-host.module';
 import { OwnerAccessService } from './owner-scope';
 import { OwnerScopeSweepService } from './owner-scope-sweep.service';
 import { RecordAccessService } from './record-access';
+import { PersonalLibraryStore } from './personal-library.store';
 
 /**
  * Owner-scope access decisions on platform group membership (RETRO-I3, #573).
@@ -17,7 +18,7 @@ import { RecordAccessService } from './record-access';
  */
 @Module({
   imports: [PrismaModule, sharingModule, SharingHostModule],
-  providers: [OwnerAccessService, RecordAccessService, OwnerScopeSweepService],
-  exports: [OwnerAccessService, RecordAccessService, OwnerScopeSweepService],
+  providers: [OwnerAccessService, RecordAccessService, OwnerScopeSweepService, PersonalLibraryStore],
+  exports: [OwnerAccessService, RecordAccessService, OwnerScopeSweepService, PersonalLibraryStore],
 })
 export class OwnerAccessModule {}

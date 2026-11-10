@@ -57,6 +57,7 @@ import {
   MEMORIAHUB_EVENT_KEYS,
   MEMORIES_READY_WINDOW_MS,
 } from '../../notifications-registry/memoriahub.notifications';
+import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /** Rolling aggregation window for `memories.ready`. See header. */
@@ -93,6 +94,7 @@ export class MemoriesNotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /**
@@ -121,14 +123,10 @@ export class MemoriesNotificationService {
       return { recipients: 0, skipped: true };
     }
 
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: input.circleId },
-      select: {
-        name: true,
-        // Every member, every role — see the audience note in the header.
-        members: { select: { userId: true } },
-      },
-    });
+    // Every member, every role — see the audience note in the header (RETRO-K1: through the scope directory).
+    const summary = await this.scopes.summary(input.circleId);
+    const members = summary ? await this.scopes.membersOf(input.circleId) : [];
+    const circle = summary ? { name: summary.name, members } : null;
     // Circle deleted between the generation run and this call.
     if (!circle || circle.members.length === 0) {
       return { recipients: 0, skipped: true };

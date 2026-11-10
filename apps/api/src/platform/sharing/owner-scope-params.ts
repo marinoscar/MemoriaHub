@@ -37,7 +37,7 @@ import {
 } from '@nestjs/common';
 import type { Observable } from 'rxjs';
 
-import { PrismaService } from '../../prisma/prisma.service';
+import { PersonalLibraryStore } from './personal-library.store';
 
 /** The personal-library scope value. */
 export const OWNER_SCOPE_ME = 'me';
@@ -95,7 +95,7 @@ type RequestLike = {
 
 @Injectable()
 export class OwnerScopeParamsInterceptor implements NestInterceptor {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly store: PersonalLibraryStore) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     if (context.getType() !== 'http') return next.handle();
@@ -112,10 +112,6 @@ export class OwnerScopeParamsInterceptor implements NestInterceptor {
   /** The caller's personal library id (its former personal circle), or null. */
   private async personalLibraryOf(userId: string | undefined): Promise<string | null> {
     if (!userId) return null;
-    const row = await this.prisma.circle.findFirst({
-      where: { ownerId: userId, isPersonal: true },
-      select: { id: true },
-    });
-    return row?.id ?? null;
+    return this.store.idOf(userId);
   }
 }

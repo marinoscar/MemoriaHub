@@ -43,6 +43,7 @@ import {
   MEMORIAHUB_EVENT_KEYS,
   UPLOAD_COMPLETED_WINDOW_MS,
 } from '../notifications-registry/memoriahub.notifications';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Rolling aggregation window for `media.upload_completed`. See header. */
@@ -80,6 +81,7 @@ export class UploadNotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   /**
@@ -139,14 +141,10 @@ export class UploadNotificationService {
     const cached = readCache(this.circleCache, circleId);
     if (cached !== undefined) return cached;
 
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: circleId },
-      select: {
-        name: true,
-        // Every member, every role — see the audience note in the header.
-        members: { select: { userId: true } },
-      },
-    });
+    // Every member, every role — see the audience note in the header (RETRO-K1: through the scope directory).
+    const summary = await this.scopes.summary(circleId);
+    const members = summary ? await this.scopes.membersOf(circleId) : [];
+    const circle = summary ? { name: summary.name, members } : null;
 
     const value: CircleLookup | null = circle
       ? { name: circle.name, memberIds: circle.members.map((m) => m.userId) }

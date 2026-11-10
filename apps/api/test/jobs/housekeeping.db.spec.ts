@@ -59,7 +59,7 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
   });
 
   it('memory_digest watermark: the newest SUCCEEDED row of the circle, never a failed or running one', async () => {
-    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never, {} as never);
+    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never, {} as never, {} as never);
     const subject = { subjectType: 'circle', subjectId: circleId };
 
     await expect(digest.lastDigestAt(circleId)).resolves.toBeNull();

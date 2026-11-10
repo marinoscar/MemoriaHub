@@ -14,6 +14,8 @@ import {
   NodeBackupQueryService,
   BackupFeedItem,
 } from './node-backup-query.service';
+import { OwnerAccessService } from '../platform/sharing/owner-scope';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
@@ -90,7 +92,7 @@ function makeFeedItem(overrides: Partial<any> = {}): BackupFeedItem {
     sourceDeviceId: 'device-abc',
     sourceDeviceName: "Oscar's iPhone",
     metadata: { foo: 'bar' },
-    circle: { name: 'Family' },
+    circleName: 'Family',
     storageObject: {
       id: 'obj-1',
       size: BigInt('123456789012'),
@@ -146,6 +148,7 @@ function makeFeedItem(overrides: Partial<any> = {}): BackupFeedItem {
 
 describe('NodeBackupQueryService', () => {
   let service: NodeBackupQueryService;
+  const access = { scopesOf: jest.fn() };
   let mockPrisma: MockPrismaService;
   let mockSystemSettings: { getSettings: jest.Mock };
 
@@ -160,6 +163,8 @@ describe('NodeBackupQueryService', () => {
         NodeBackupQueryService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: OwnerAccessService, useValue: access },
+        { provide: OwnerScopeSweepService, useValue: { summary: jest.fn().mockResolvedValue({ name: 'Family' }) } },
       ],
     }).compile();
 
@@ -176,27 +181,16 @@ describe('NodeBackupQueryService', () => {
 
   describe('resolveScope', () => {
     it('returns ALL member circle ids when configured circleIds is empty (empty = all circles)', async () => {
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([
-        { circleId: 'circle-a' },
-        { circleId: 'circle-b' },
-        { circleId: 'circle-c' },
-      ]);
+      access.scopesOf.mockResolvedValue(['circle-a', 'circle-b', 'circle-c']);
 
       const scope = await service.resolveScope('owner-1', []);
 
-      expect(mockPrisma.circleMember.findMany).toHaveBeenCalledWith({
-        where: { userId: 'owner-1' },
-        select: { circleId: true },
-      });
+      expect(access.scopesOf).toHaveBeenCalledWith('owner-1');
       expect(scope.sort()).toEqual(['circle-a', 'circle-b', 'circle-c'].sort());
     });
 
     it('intersects membership with a non-empty configured circleIds list', async () => {
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([
-        { circleId: 'circle-a' },
-        { circleId: 'circle-b' },
-        { circleId: 'circle-c' },
-      ]);
+      access.scopesOf.mockResolvedValue(['circle-a', 'circle-b', 'circle-c']);
 
       const scope = await service.resolveScope('owner-1', ['circle-b', 'circle-d']);
 
@@ -206,9 +200,7 @@ describe('NodeBackupQueryService', () => {
     });
 
     it('returns an empty array when the intersection is empty', async () => {
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([
-        { circleId: 'circle-a' },
-      ]);
+      access.scopesOf.mockResolvedValue(['circle-a']);
 
       const scope = await service.resolveScope('owner-1', ['circle-z']);
 
@@ -216,7 +208,7 @@ describe('NodeBackupQueryService', () => {
     });
 
     it('returns an empty array when the owner has no memberships at all', async () => {
-      (mockPrisma.circleMember.findMany as jest.Mock).mockResolvedValue([]);
+      access.scopesOf.mockResolvedValue([]);
 
       const scope = await service.resolveScope('owner-1', []);
 

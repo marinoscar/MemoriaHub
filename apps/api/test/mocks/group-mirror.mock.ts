@@ -21,12 +21,19 @@
 const ROLE_MAP: Record<string, string> = { viewer: 'viewer', collaborator: 'editor', circle_admin: 'admin' };
 
 function lastLookedUpCircleId(prisma: any): string | undefined {
-  const calls: any[][] = prisma.circle?.findUnique?.mock?.calls ?? [];
-  for (let i = calls.length - 1; i >= 0; i -= 1) {
-    const id = calls[i]?.[0]?.where?.id;
-    if (typeof id === 'string') return id;
+  // `OwnerAccessService` asks the PersonalLibraryStore (`circle.findFirst`, RETRO-K1) or, in older
+  // suites, `circle.findUnique`; the most recent call of either names the scope.
+  let best: { order: number; id: string } | undefined;
+  for (const name of ['findUnique', 'findFirst']) {
+    const mock = prisma.circle?.[name]?.mock;
+    const calls: any[][] = mock?.calls ?? [];
+    const orders: number[] = mock?.invocationCallOrder ?? [];
+    for (let i = 0; i < calls.length; i += 1) {
+      const id = calls[i]?.[0]?.where?.id;
+      if (typeof id === 'string' && (!best || (orders[i] ?? 0) > best.order)) best = { order: orders[i] ?? 0, id };
+    }
   }
-  return undefined;
+  return best?.id;
 }
 
 /** A `groupMember` delegate whose `findMany` reflects the mocked circle membership. */

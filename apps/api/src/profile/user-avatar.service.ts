@@ -14,6 +14,7 @@ import { extname } from 'path';
 import { Readable } from 'stream';
 
 import { buildFaceCropThumbnail } from '@marinoscar/memoriahub-compute/face-video';
+import { OWNER_NAME_SELECT, libraryName } from '../platform/sharing/owner-name';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
@@ -1179,7 +1180,7 @@ export class UserAvatarService {
         name: true,
         circleId: true,
         deletedAt: true,
-        circle: { select: { name: true } },
+        ...OWNER_NAME_SELECT,
       },
     });
 
@@ -1189,7 +1190,7 @@ export class UserAvatarService {
       id: person.id,
       name: person.name,
       circleId: person.circleId,
-      circleName: person.circle.name,
+      circleName: libraryName(person) ?? '',
     };
   }
 }

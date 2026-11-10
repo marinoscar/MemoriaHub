@@ -39,6 +39,8 @@ import {
 import { memoriaHubCircleContentRemovalHook } from '../../src/platform/user-data/user-removal.hook';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
+import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -138,7 +140,14 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     Object.assign(media, { prisma, resolver, logger: new Logger('MediaService') });
     // The system client over the app's client (PrismaSystemService.asSystem in the app).
     const system = { asSystem: (reason: string) => forSystem(prisma, reason as never) };
-    service = new MemoriaHubUserDataService(prisma, media, resolver as never, system as never);
+    service = new MemoriaHubUserDataService(
+      prisma,
+      media,
+      resolver as never,
+      system as never,
+      sqlScopeDirectory(prisma) as never,
+      new PersonalLibraryStore(prisma),
+    );
     bindMemoriaHubFactoryResetDeps({ service });
   });
 

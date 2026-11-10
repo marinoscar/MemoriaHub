@@ -27,11 +27,8 @@
 // Roles: `circle_admin` -> `admin`, `collaborator` -> `editor`, `viewer` ->
 // `viewer` (the group role registry's ranks: manage 3, write 2, read 1).
 //
-// The `circles` table is read ONLY to tell a personal scope from a group one
-// (`is_personal`, `owner_id`): it is the app's own table, never a sharing
-// table, so the `no-direct-access` conformance rule holds. When circles are
-// dropped (RETRO-I5/I6) a scope id with no group resolves to the caller's own
-// personal library instead.
+// A personal scope is told from a group one by the `PersonalLibraryStore` (RETRO-K1);
+// any other id is a group id.
 // =============================================================================
 
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -45,7 +42,7 @@ import {
 
 import { PERMISSIONS } from '../../common/constants/roles.constants';
 import { DefaultOrgId } from '../../common/tenancy/default-org-id';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PersonalLibraryStore } from './personal-library.store';
 
 /** A role inside an owner scope: the platform's built-in group roles. */
 export type OwnerRole = 'viewer' | 'editor' | 'admin';
@@ -89,7 +86,7 @@ export class OwnerAccessService {
   private readonly logger = new Logger(OwnerAccessService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly personal: PersonalLibraryStore,
     private readonly principalGroups: PrincipalGroupsProvider,
     private readonly defaultOrgId: DefaultOrgId,
   ) {}
@@ -99,22 +96,52 @@ export class OwnerAccessService {
    * group of the same id otherwise; `null` for an unknown id.
    */
   async resolveOwner(scopeId: string): Promise<ResourceOwner | null> {
-    const circle = await this.prisma.circle.findUnique({
-      where: { id: scopeId },
-      select: { id: true, isPersonal: true, ownerId: true },
-    });
-    if (!circle) return null;
-    if (circle.isPersonal) return { kind: 'user', userId: circle.ownerId };
+    const ownerId = await this.personal.ownerOf(scopeId);
+    if (ownerId) return { kind: 'user', userId: ownerId };
+    // Not a personal library: a group of the same id. No group lookup here (the slice
+    // answers "not a member" for an unknown id, which is the 404 of an unknown scope).
     return { kind: 'group', groupId: scopeId };
   }
 
-  /** The user's personal library id (their former personal circle), or `null` when they have none. */
+  /** The user's personal library id, or `null` when they have none. */
   async personalLibraryOf(userId: string): Promise<string | null> {
-    const row = await this.prisma.circle.findFirst({
-      where: { ownerId: userId, isPersonal: true },
-      select: { id: true },
-    });
-    return row?.id ?? null;
+    return this.personal.idOf(userId);
+  }
+
+  /**
+   * The groups the user can write in (role `editor` or `admin`), by id. The
+   * membership comes from the slice's `PrincipalGroupsProvider` (cached).
+   */
+  async writableGroupsOf(userId: string): Promise<string[]> {
+    const memberships = await this.principalGroups.groupsFor(await this.principalFor(userId));
+    return memberships
+      .filter((m) => m.role === 'editor' || m.role === 'admin')
+      .map((m) => m.groupId)
+      .sort();
+  }
+
+  /**
+   * The user's role in each scope they belong to: their personal library as
+   * `admin`, then each group with their group role.
+   */
+  async rolesOf(userId: string): Promise<Array<{ scopeId: string; role: OwnerRole; personal: boolean }>> {
+    const personal = await this.personal.idOf(userId);
+    const memberships = await this.principalGroups.groupsFor(await this.principalFor(userId));
+    const out: Array<{ scopeId: string; role: OwnerRole; personal: boolean }> = memberships
+      .map((m) => ({ scopeId: m.groupId, role: m.role as OwnerRole, personal: false }))
+      .sort((a, b) => a.scopeId.localeCompare(b.scopeId));
+    return personal ? [{ scopeId: personal, role: 'admin', personal: true }, ...out] : out;
+  }
+
+  /**
+   * Every scope id the user belongs to: their personal library, then every
+   * group they are a member of (any role).
+   */
+  async scopesOf(userId: string): Promise<string[]> {
+    const personal = await this.personal.idOf(userId);
+    const memberships = await this.principalGroups.groupsFor(await this.principalFor(userId));
+    const ids = memberships.map((m) => m.groupId).sort();
+    return personal ? [personal, ...ids] : ids;
   }
 
   /**
