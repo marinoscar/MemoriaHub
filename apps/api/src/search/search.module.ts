@@ -1,18 +1,19 @@
 import { Module } from '@nestjs/common';
-import { SearchController } from './search.controller';
-import { SearchAgentController } from './agent/search-agent.controller';
-import { SearchService } from './search.service';
-import { SemanticSearchService } from './semantic-search.service';
-import { PrismaModule } from '../prisma/prisma.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { AiPortModule } from '../ai-port/ai-port.module';
-import { SearchAgentService } from './agent/search-agent.service';
-import { MediaModule } from '../media/media.module';
+import {
+  SearchAgentController,
+  SearchController,
+  SearchModule as SearchCoreModule,
+} from '@marinoscar/memoriahub-api/search';
 
+/**
+ * Search (RETRO-J7, #618). Deterministic, semantic and agentic search live in
+ * `@marinoscar/memoriahub-api/search`; they reach the platform only through the ports bound in
+ * `platform-memoriahub/`. This module mounts the slice's controllers where the old ones sat (the
+ * OpenAPI document follows module order) and re-exports the packaged slice.
+ */
 @Module({
-  imports: [PrismaModule, OwnerAccessModule, AiPortModule, MediaModule],
+  imports: [SearchCoreModule.forRoot()],
   controllers: [SearchController, SearchAgentController],
-  providers: [SearchService, SemanticSearchService, SearchAgentService],
-  exports: [SearchService, SemanticSearchService, SearchAgentService],
+  exports: [SearchCoreModule.forRoot()],
 })
 export class SearchModule {}

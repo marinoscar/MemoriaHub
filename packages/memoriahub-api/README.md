@@ -4,9 +4,9 @@ The NestJS side of the MemoriaHub domain: the **host ports** (injection tokens a
 
 ## Purpose and scope
 
-MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media` and `face` are moved so far (media partly). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
+MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media`, `face`, `tagging` and `search` are moved so far (media partly). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
 
-The package carries the ports, the module, the testing kit and the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job) and the `face` slice (detection in photos and videos, matching, clustering, people, auto-archive). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
+The package carries the ports, the module, the testing kit and the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job), the `face` slice (detection in photos and videos, matching, clustering, people, auto-archive), the `tagging` slice (photo and video auto-tagging, the transcript, the tag vocabulary and the backfill) and the `search` slice (deterministic, semantic and agentic search). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
 
 Status: experimental. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
 
@@ -25,6 +25,10 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/dedup/testing`: `describeDedupSliceConformance` ([slice README](src/dedup/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/face`: the face slice, `FaceModule.forRoot`, `PeopleService`, `FaceMatchingService` the four face controllers and the three face job handlers ([slice README](src/face/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/face/testing`: `describeFaceSliceConformance`, the kit the face slice's guarantees are checked with ([slice README](src/face/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/tagging`: the tagging slice, `TaggingModule.forRoot`, the two server-only AI job handlers (`auto_tagging`, `video_auto_tagging`), the tag vocabulary and the backfill ([slice README](src/tagging/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/tagging/testing`: `describeTaggingSliceConformance` and the in-memory store behind it ([slice README](src/tagging/README.md#entry-point)).
+- `@marinoscar/memoriahub-api/search`: the search slice, `SearchModule.forRoot`, deterministic, semantic and agentic search and the `SEARCHABLE_FIELDS` registry ([slice README](src/search/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/search/testing`: `describeSearchSliceConformance` and the in-memory store behind it ([slice README](src/search/README.md#entry-point)).
 
 ## Install and peer dependencies
 
@@ -37,7 +41,9 @@ npm install @marinoscar/memoriahub-api@next
 | `@nestjs/common` | `^11.1.12` | `ports`, `core`, `testing` |
 | `zod` | `^4.4.3` | `ports`, `testing` |
 | `@prisma/client-runtime-utils` | `^7.8.0` (optional) | `core`, only when a slice builds raw SQL with `Prisma.sql` |
-| `@marinoscar/memoriahub-contract` | any (optional) | the domain slices of J5 to J10; none of the three slices today |
+| `@marinoscar/memoriahub-contract` | any (optional) | the domain slices: `media`, `tagging`, `search` |
+| `@marinoscar/memoriahub-compute` | any (optional) | `tagging` (image preparation, frame and audio extraction, the result schema); `search` through it |
+| `csv-parse`, `csv-stringify` | `^5.6.0`, `^6.5.1` (optional) | `tagging` (the tag vocabulary CSV import and export); `search` through it |
 
 The package has no dependency on `@marinoscar/platform-api`: a port is declared structurally, so a binding adapts the platform's types in the host. The per-slice data is `packages/memoriahub-slice-peers.json`; `node scripts/memoriahub-packages/check-slice-peers.mjs --table` prints it.
 
@@ -123,6 +129,10 @@ A key never crosses a port: the AI port resolves the credential on the host's si
 `describeMemoriahubPortsConformance(name, factory, harness, options)` from `@marinoscar/memoriahub-api/testing`: test-runner neutral, one section per port. The package runs it against its own fakes (`test/ports-conformance.spec.ts`); the web app runs it against the platform adapters (`apps/api/test/platform-memoriahub/`). A host adding a binding runs the same kit against it.
 
 `describeMediaSliceConformance(harness, { name, create })` from `@marinoscar/memoriahub-api/media/testing`: the media slice's guarantees (touch de-duplication and chunking, the fan-out registry's order and fallbacks, `upload_completed` folding for every role, PAT-only Media Sync registration and 404 for another user's device). The package runs it over the fakes with the services resolved from the real Nest module (`test/media-conformance.spec.ts`); the web app runs it with the notification port bound to the real adapter (`apps/api/test/media/media-slice-conformance.spec.ts`).
+
+`describeTaggingSliceConformance(harness, { name, create })` from `@marinoscar/memoriahub-api/tagging/testing`: the single vocabulary validator both job types share (only vocabulary labels, case normalised, a re-run never touches a manual tag, the description only for an answer that parses), both job types server-only on their permanent types, profiles and the `tagging` throttle bucket, the photo fan-out (priority 20, `pending`, behind `features.autoTagging`), the backfill (photos by default, videos opt in) and the unique vocabulary. The package runs it over the fakes with the services resolved from the real Nest module (`test/tagging-conformance.spec.ts`); the web app runs it with the jobs port bound to the real adapter (`apps/api/test/tagging/tagging-slice-conformance.spec.ts`).
+
+`describeSearchSliceConformance(harness, { name, create })` from `@marinoscar/memoriahub-api/search/testing`: not-found for a non-member and queries bound to the scope and the live rows, the unknown-key 400, AND composition of OR-emitting filters, the `near` bounding box, the semantic fallback when no embedding model is configured and the KNN ranking when one is, and the agent (a 400 before any model call without a search model, the request scope and never one the model names). The package runs it over the fakes (`test/search-conformance.spec.ts`); the web app runs it with the AI port bound to the real adapter over a scripted platform `AiService` (`apps/api/test/search/search-slice-conformance.spec.ts`).
 
 ## Upgrade notes
 

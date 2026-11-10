@@ -173,7 +173,7 @@ it matches only an item timestamped exactly `00:00:00.000`, silently dropping
 the whole final day.
 
 `whereDateRange` and `whereCreatedAtRange`
-(`apps/api/src/search/media-where.builder.ts`) therefore treat an upper bound
+(`packages/memoriahub-api/src/media/where/media-where.builder.ts`) therefore treat an upper bound
 landing exactly on UTC midnight as **exclusive next-midnight** (`lt`).
 "Exactly midnight" is a deliberate heuristic: a genuine capture at precisely
 `00:00:00.000` is vanishingly rare, and the heuristic can only ever *include*

@@ -38,7 +38,7 @@ The following problems were reported by users before this sprint:
 
 ### 2.1 Filter composition collision
 
-**Files:** `apps/api/src/search/searchable-fields.registry.ts` (`buildWhereFromFields`), `apps/api/src/search/media-where.builder.ts` (`buildMediaWhere`)
+**Files:** `packages/memoriahub-api/src/search/searchable-fields.registry.ts` (`buildWhereFromFields`), `packages/memoriahub-api/src/media/where/media-where.builder.ts` (`buildMediaWhere`)
 
 Each searchable field descriptor produces a Prisma `where` fragment. Both builder functions previously merged those fragments using `Object.assign` / object spread at the top level. When two descriptors each emitted a top-level `OR` clause (for example, the country filter and the `missingCamera: false` guard both do so), the second assignment silently overwrote the first key, destroying the first filter entirely. The resulting query matched all items that satisfied only the last-written filter, explaining the "extra results" symptom.
 
@@ -48,7 +48,7 @@ Each searchable field descriptor produces a Prisma `where` fragment. Both builde
 
 ### 2.2 Search results lacked signed thumbnail URLs
 
-**File:** `apps/api/src/search/search.service.ts` (`runSearch`)
+**File:** `packages/memoriahub-api/src/search/search.service.ts` (`runSearch`)
 
 `SearchService.runSearch()` returned raw Prisma rows. It never called the URL-signing step that `MediaService.listMedia()` applies via the storage provider. The gallery component treats a missing or unsigned `thumbnailUrl` as "not yet loaded" and renders a spinner. Because neither the deterministic search endpoint nor the agentic search agent (which calls `runSearch` internally) signed thumbnails, every search result displayed a spinner permanently.
 
@@ -68,7 +68,7 @@ This is a data gap, not a code bug in the search layer. The fix is operational: 
 
 The deterministic `people` filter accepts UUIDs only — it does not resolve names to IDs server-side. When a user typed a person's name into the old `AdvancedSearchDialog`, the string was sent as-is in the `personId` field, which never matched any UUID.
 
-The agentic search agent already handles name resolution correctly: `resolvePersonNames` / `resolvePeopleFilter` in `apps/api/src/search/agent/search-agent.service.ts` performs a case-insensitive, circle-scoped look-up and converts names to IDs before calling `runSearch`. The visible failure for typed-name queries was actually root cause 2.2 on top of this ID mismatch — even when the agent resolved names correctly, results never rendered.
+The agentic search agent already handles name resolution correctly: `resolvePersonNames` / `resolvePeopleFilter` in `packages/memoriahub-api/src/search/agent/search-agent.service.ts` performs a case-insensitive, circle-scoped look-up and converts names to IDs before calling `runSearch`. The visible failure for typed-name queries was actually root cause 2.2 on top of this ID mismatch — even when the agent resolved names correctly, results never rendered.
 
 **Fix (UI):** The new `SearchPanel` (`apps/web/src/components/search/SearchPanel.tsx`) replaces the text-based people input with a people multi-select that sends IDs directly, eliminating the name-vs-ID confusion for deterministic mode. Natural-language person queries continue to work in agentic mode as before.
 

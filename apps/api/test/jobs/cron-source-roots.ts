@@ -45,5 +45,19 @@ export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location'
  */
 export const FACE_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'face');
 
+
+/**
+ * The tagging and search slices of `@marinoscar/memoriahub-api` (RETRO-J7, #618), scanned like the media
+ * slice. Paths in the raw-SQL allowlist are relative to each root (`auto-tagging.service.ts`,
+ * `semantic-search.service.ts`).
+ */
+export const J7_SLICE_SOURCE_ROOTS: readonly string[] = ['tagging', 'search'].map((slice) => join(SLICES_ROOT, slice));
+
 /** Every root the two scans read. */
-export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT, FACE_SLICE_SOURCE_ROOT, ...J10_SLICE_SOURCE_ROOTS];
+export const CRON_SOURCE_ROOTS: readonly string[] = [
+  API_SOURCE_ROOT,
+  MEDIA_SLICE_SOURCE_ROOT,
+  FACE_SLICE_SOURCE_ROOT,
+  ...J10_SLICE_SOURCE_ROOTS,
+  ...J7_SLICE_SOURCE_ROOTS,
+];
