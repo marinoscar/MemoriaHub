@@ -30,7 +30,6 @@ model MediaItem {
   orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
   ownerGroupId String? @map("owner_group_id") @db.Uuid
   ownerUserId  String? @map("owner_user_id") @db.Uuid
-  circle          Circle        @relation(fields: [circleId], references: [id])
   addedById       String        @map("added_by_id") @db.Uuid
   addedBy         User          @relation("MediaAddedBy", fields: [addedById], references: [id])
 
@@ -231,7 +230,6 @@ model Album {
   orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
   ownerGroupId String? @map("owner_group_id") @db.Uuid
   ownerUserId  String? @map("owner_user_id") @db.Uuid
-  circle           Circle       @relation(fields: [circleId], references: [id])
   addedById        String       @map("added_by_id") @db.Uuid
   addedBy          User         @relation("AlbumAddedBy", fields: [addedById], references: [id])
   name             String
@@ -277,7 +275,6 @@ model Tag {
   orgId        String  @default(dbgenerated("mh_default_org_id()")) @map("org_id") @db.Uuid
   ownerGroupId String? @map("owner_group_id") @db.Uuid
   ownerUserId  String? @map("owner_user_id") @db.Uuid
-  circle    Circle     @relation(fields: [circleId], references: [id])
   addedById String     @map("added_by_id") @db.Uuid
   addedBy   User       @relation("TagAddedBy", fields: [addedById], references: [id])
   name      String

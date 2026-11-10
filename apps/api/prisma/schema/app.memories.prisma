@@ -90,7 +90,6 @@ model Memory {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle         Circle            @relation(fields: [circleId], references: [id], onDelete: Cascade)
   person         Person?           @relation(fields: [personId], references: [id], onDelete: Cascade)
   coverMediaItem MediaItem?        @relation("MemoryCover", fields: [coverMediaItemId], references: [id], onDelete: SetNull)
   items          MemoryItem[]

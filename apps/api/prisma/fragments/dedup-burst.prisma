@@ -34,7 +34,6 @@ model BurstGroup {
   updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle            Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
   suggestedBestItem MediaItem?      @relation("BurstGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
   resolvedBy        User?           @relation("BurstGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
   items             MediaItem[]     @relation("BurstGroupItems")
@@ -96,7 +95,6 @@ model DuplicateGroup {
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  circle            Circle          @relation(fields: [circleId], references: [id], onDelete: Cascade)
   suggestedBestItem MediaItem?      @relation("DuplicateGroupSuggestedBest", fields: [suggestedBestItemId], references: [id], onDelete: SetNull)
   resolvedBy        User?           @relation("DuplicateGroupResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
   items             MediaItem[]     @relation("DuplicateGroupItems")

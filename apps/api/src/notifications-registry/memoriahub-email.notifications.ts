@@ -12,7 +12,7 @@
 // `circles.invitation` (`circle-invitation`) is retired (RETRO-I5, #583): a
 // circle invite is a group invite, and the sharing slice sends its own
 // `groups.invitation`. The membership confirmation is sent when an invite is
-// auto-accepted at sign-in (`circles/group-member-mirror.listener.ts`) and
+// auto-accepted at sign-in (`circles/group-invite-email.listener.ts`) and
 // when a member is added through `/api/circles/:id/members`.
 //
 // Email only, default on, never mandatory. A user can now mute each one in

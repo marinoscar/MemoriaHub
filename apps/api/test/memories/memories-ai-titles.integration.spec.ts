@@ -18,6 +18,7 @@
 // NO NETWORK: the title service is a stub (test/memories/memory-title.stub.ts).
 // This suite is about persistence, not about the provider call.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -157,9 +158,7 @@ describeMaybeDb('Memories — AI titles persistence (DB_GATED: real PostgreSQL)'
     await prisma.user.create({
       data: { id: userId, email: `memories-ai-titles-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories AI Titles Circle', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories AI Titles Circle', createdById: userId });
 
     curation = new MemoryCurationService(
       prisma as unknown as PrismaService,
@@ -177,7 +176,7 @@ describeMaybeDb('Memories — AI titles persistence (DB_GATED: real PostgreSQL)'
     await prisma.storageObject
       .deleteMany({ where: { id: { in: createdStorageObjectIds } } })
       .catch(() => undefined);
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

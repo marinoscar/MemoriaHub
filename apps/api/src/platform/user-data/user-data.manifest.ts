@@ -173,9 +173,9 @@ export const MEMORIAHUB_USER_DATA_MODELS: readonly UserDataModelHint<Prisma.Mode
 
   // ---- kept ----------------------------------------------------------------------
   {
-    model: 'CircleMember',
-    keep: 'Access model: a data reset never removes the user from a circle; the circle and what they added to it are the members\'.',
-    summary: 'Your circle memberships, and what you added to circles shared with others',
+    model: 'PersonalLibrary',
+    keep: 'The id of your personal library: a data reset empties the library, it never removes the library itself.',
+    summary: 'Your personal library, and what you added to libraries shared with others',
   },
 
   // ---- not owner models: lines for the factory reset page's "Kept" list ------------

@@ -51,9 +51,11 @@ export interface MediaJobPrisma {
       select: { id: true; circleId: true };
     }): Promise<{ id: string; circleId: string } | null>;
   };
-  circle: {
-    findUnique(args: { where: { id: string }; select: { id: true } }): Promise<{ id: string } | null>;
-  };
+}
+
+/** Whether an owner scope (a group or a personal library) still exists: `OwnerScopeSweepService`. */
+export interface ScopeExistence {
+  exists(scopeId: string): Promise<boolean>;
 }
 
 /** `payload.circleId` of a job, when the facade stored one. */
@@ -98,19 +100,18 @@ export async function resolveMediaItemJob(
  * @throws Error when the job is not a circle job (a malformed row).
  */
 export async function resolveCircleJob(
-  prisma: MediaJobPrisma,
+  scopes: ScopeExistence,
   job: Job,
   logger: Pick<Logger, 'debug'>,
 ): Promise<string | null> {
   if (job.subjectType !== 'circle' || !job.subjectId) {
     throw new Error(`${job.type} job ${job.id} is not about a circle (subjectType=${String(job.subjectType)})`);
   }
-  const row = await prisma.circle.findUnique({ where: { id: job.subjectId }, select: { id: true } });
-  if (!row) {
+  if (!(await scopes.exists(job.subjectId))) {
     logger.debug(`${job.type} job ${job.id}: circle ${job.subjectId} no longer exists; settling as a no-op`);
     return null;
   }
-  return row.id;
+  return job.subjectId;
 }
 
 /** Runs `fn`, rethrowing any provider throttle signal as the platform `RateLimitError`. */

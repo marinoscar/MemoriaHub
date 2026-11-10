@@ -39,6 +39,7 @@ import {
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
 import { resolveCircleJob } from '../platform/jobs/media-item-job';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { isMemoriesEnabled } from '../settings/feature-gates';
@@ -67,6 +68,7 @@ export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
   constructor(
     private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
+    private readonly scopes: OwnerScopeSweepService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly titles: MemoryTitleService,
     private readonly memoriesNotifications: MemoriesNotificationService,
@@ -97,7 +99,7 @@ export class MemoryGenerationHandler implements JobHandler, OnModuleInit {
     // Every memory is circle-scoped: the job's subject is the circle. A job
     // about anything else throws (a malformed row); a circle deleted since the
     // job was queued is a no-op.
-    const circleId = await resolveCircleJob(this.prisma, job, this.logger);
+    const circleId = await resolveCircleJob(this.scopes, job, this.logger);
     if (!circleId) return;
 
     const payload = parseMemoryGenerationPayload(job.payload);

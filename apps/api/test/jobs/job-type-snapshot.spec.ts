@@ -105,7 +105,7 @@ describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
     platform = new JobHandlerRegistry();
     const throttle = new ProviderThrottleService(new ConfigService());
     const prisma = {} as never;
-    legacy = new EnrichmentHandlerRegistry(new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma));
+    legacy = new EnrichmentHandlerRegistry(new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma, {} as never));
     for (const HandlerClass of ALL_HANDLER_CLASSES) {
       legacy.register(new (HandlerClass as unknown as new () => EnrichmentHandler)());
     }

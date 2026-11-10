@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
-import { CircleRole } from '@prisma/client';
+import { CircleRole } from '../helpers/circle-role';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';

@@ -20,8 +20,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JobHandlerRegistry, type Job, type JobHandler } from '@marinoscar/platform-api/jobs';
 import { MemoryGenerationHandler } from './memory-generation.handler';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { circleJob, subjectPrisma } from '../../test/helpers/platform-job';
+import { circleJob, subjectPrisma, subjectScopes } from '../../test/helpers/platform-job';
 import {
   MEMORY_CURATORS,
   MemoryCurator,
@@ -67,7 +68,8 @@ describe('MemoryGenerationHandler', () => {
       providers: [
         MemoryGenerationHandler,
         { provide: JobHandlerRegistry, useValue: new JobHandlerRegistry() },
-        { provide: PrismaService, useValue: subjectPrisma({ circles: ['circle-a'] }) },
+        { provide: PrismaService, useValue: subjectPrisma() },
+        { provide: OwnerScopeSweepService, useValue: subjectScopes(['circle-a']) },
         { provide: AppSystemSettingsService, useValue: settings },
         { provide: MemoryTitleService, useValue: titles },
         { provide: MemoriesNotificationService, useValue: memoriesNotifications },

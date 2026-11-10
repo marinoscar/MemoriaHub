@@ -20,6 +20,7 @@
 // Time is pinned so "current year" and "last year" are deterministic and the
 // fixtures can be seeded on exact years relative to them.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -216,18 +217,14 @@ describeMaybeDb('Memories — people curators (DB_GATED: real PostgreSQL)', () =
     await prisma.user.create({
       data: { id: userId, email: `memories-people-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories People Circle', ownerId: userId },
-    });
-    await prisma.circle.create({
-      data: { id: emptyCircleId, name: 'Memories People Empty', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories People Circle', createdById: userId });
+    await createSharedLibrary(prisma, { id: emptyCircleId, name: 'Memories People Empty', createdById: userId });
   }, 30000);
 
   afterAll(async () => {
     if (!prisma) return;
     await clearAll().catch(() => undefined);
-    await prisma.circle.deleteMany({ where: { id: { in: [circleId, emptyCircleId] } } });
+    await dropLibraries(prisma, [circleId, emptyCircleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

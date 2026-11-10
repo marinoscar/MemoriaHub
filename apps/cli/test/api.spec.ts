@@ -194,6 +194,27 @@ describe('ApiClient listOwnerScopes (RETRO-I6, #588)', () => {
   });
 });
 
+describe('ApiClient createCircle (RETRO-K2, #588)', () => {
+  it('creates a platform group and answers the library shape', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(JSON.stringify({ data: { id: 'g1', name: 'Group A', memberCount: 1 } }), { status: 201 }),
+    ]);
+    const api = makeClient();
+    await expect(api.createCircle({ name: 'Group A' })).resolves.toEqual({ id: 'g1', name: 'Group A', isPersonal: false });
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://example.test/api/groups');
+  });
+
+  it('falls back to POST /api/circles on a server without /api/groups', async () => {
+    const fetchMock = mockFetchSequence([
+      () => new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 }),
+      () => new Response(JSON.stringify({ data: { id: 'c1', name: 'Group A', isPersonal: false } }), { status: 201 }),
+    ]);
+    const api = makeClient();
+    await expect(api.createCircle({ name: 'Group A' })).resolves.toMatchObject({ id: 'c1' });
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://example.test/api/circles');
+  });
+});
+
 describe('ApiClient createNodeCredential', () => {
   it('POSTs { name, expiresAt } and unwraps the { data } envelope', async () => {
     const fetchMock = mockFetchSequence([

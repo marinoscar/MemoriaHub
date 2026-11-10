@@ -43,7 +43,8 @@
 import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole, MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
+import { MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 import { EnhancementBatchesController } from './enhancement-batches.controller';
 import { MediaEnhancementService } from './media-enhancement.service';
 import { PrismaService } from '../prisma/prisma.service';

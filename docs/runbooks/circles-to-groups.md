@@ -168,3 +168,75 @@ Rollback: the migration is the point of no return for `circle_invites`. Before i
 | Inviting returns 409 `ALREADY_A_MEMBER` | The address belongs to a member | Change the member's role instead |
 | An invitee signed in but is not in the circle list | The circle list reads `circle_members`, mirrored from the group a moment after the claim (`GroupMemberMirrorListener`) | Reload; if it persists, check the API log for "Mirroring the membership of group ... failed" |
 | An invitee cannot sign in ("not authorized") | The allowlist upsert failed when the invite was sent (logged "Allowlisting an invited address failed") | Add the address on the Allowlist tab |
+
+## 9. Dropping the circle tables (RETRO-K2)
+
+Issues [#588](https://github.com/marinoscar/MemoriaHub/issues/588), [#583](https://github.com/marinoscar/MemoriaHub/issues/583), [#573](https://github.com/marinoscar/MemoriaHub/issues/573). One migration, `apps/api/prisma/migrations/20261110100000_k2_drop_circles`, in ONE transaction under `app.rls_bypass`. **Run it after RETRO-K1 is deployed** (no code of the release before K1 can run on the migrated database: it reads `circles`).
+
+What it does, in order:
+
+1. **Refuses before changing anything** when a user has two personal circles (the second one's content would lose its scope id), a shared circle has no group of the same id, or any of the 21 content tables holds a row whose `circle_id` is neither a group nor a personal circle. It also records, per content table, the row count and a hash of the ordered `(circle_id, org_id, owner_group_id, owner_user_id)` tuples.
+2. Creates `personal_libraries (id, user_id UNIQUE)` with **one row per personal circle and the same id**, so no content row's `circle_id` changes.
+3. Replaces the mirror trigger on the 21 content tables (`mh_owner_from_circle` -> `mh_owner_from_scope`, function `mh_content_owner_from_scope`): `owner_group_id` when `circle_id` is a group, `owner_user_id` when it is a personal library, and SQLSTATE `23503` for anything else (what the dropped foreign key guaranteed). The application still writes `circle_id`; the owner columns still follow it.
+4. Drops the mirror triggers and functions (`mh_circle_mirror_group`, `mh_circle_member_mirror`, `mh_group_mirror_guard`, `mh_circle_role_to_group_role`, `mh_content_owner_from_circle`), every foreign key that names `circles`, the tables `circle_members` and `circles`, and the enum `CircleRole`.
+5. **Proves nothing changed**: it recomputes the fingerprint of every content table and aborts the whole transaction on any difference in row count or owner columns.
+
+`circle_id` stays a plain UUID column (a group id or a personal library id) without a foreign key. Dropping the column was rejected: 20 tables, their composite uniques (`media_items_circle_content_hash_active_key`), the gallery, map and KNN indexes, job payloads, the Android phone's `targetCircleId` and every queued job name it. Replacing it by the owner columns alone would rewrite those indexes for no gain.
+
+### Procedure
+
+```bash
+# 0. Backup, completed AND verified (admin Database Backup page). Release K1 is deployed and healthy.
+# 1. Rehearse on a copy restored from it (database-restore.md): apply the migration, then the verification below.
+# 2. Maintenance mode on; stop the worker fleet; then
+cd apps/api && npm run prisma:migrate      # applies 20261110100000_k2_drop_circles
+npm run db:check:database
+# 3. Verification (read-only, safe to repeat; run it as the application owner, rows are under RLS):
+```
+
+```sql
+BEGIN; SELECT set_config('app.rls_bypass','on',true);
+SELECT to_regclass('public.circles') IS NULL AS circles_gone,
+       to_regclass('public.circle_members') IS NULL AS members_gone,
+       NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'CircleRole') AS enum_gone,
+       (SELECT count(*) FROM personal_libraries) AS personal_libraries,
+       (SELECT count(*) FROM pg_trigger WHERE tgname = 'mh_owner_from_scope') AS scope_triggers,      -- 21
+       (SELECT count(*) FROM pg_trigger WHERE tgname = 'mh_owner_from_circle') AS old_triggers;        -- 0
+-- every content row names a scope that exists (all 21 tables return 0):
+SELECT count(*) FROM media_items x
+ WHERE NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = x.circle_id)
+   AND NOT EXISTS (SELECT 1 FROM personal_libraries p WHERE p.id = x.circle_id);
+-- and every row's owner matches its scope:
+SELECT count(*) FROM media_items x
+ WHERE (x.owner_group_id IS DISTINCT FROM (SELECT g.id FROM groups g WHERE g.id = x.circle_id))
+    OR (x.owner_user_id IS DISTINCT FROM (SELECT p.user_id FROM personal_libraries p WHERE p.id = x.circle_id));
+COMMIT;
+```
+
+`personal_libraries` equals the number of personal circles before (the migration refuses otherwise). The same four queries per content table are in `apps/api/test/circles/drop-circles.db.spec.ts`, which migrates a seeded scratch database to the step before, applies the migration and compares row counts and owner columns of all 21 tables.
+
+```bash
+# 4. Smoke: sign in, open the gallery, upload one photo into a shared library and one into "My library",
+#    create a library at /settings/groups and upload into it at once, then disable maintenance mode.
+```
+
+Time: seconds plus the fingerprint pass (one scan of each content table, about the cost of the I2 backfill's read side; no row is rewritten and no index is rebuilt).
+
+### Rollback
+
+**One-way.** There is no down migration. Restore the backup taken in step 0 and run the release before K1 (it reads `circles`). Rows written after the migration are lost with the restore; to keep them, export what matters first (data export) and re-import.
+
+### Behaviour changes to tell users about
+
+- **Deleting a library with content is refused.** `DELETE /api/circles/:id` and `DELETE /api/groups/:id` answer 409 (`details.reason: LIBRARY_NOT_EMPTY` on the circle route) while the library holds media, albums, tags, people, memories, workflows or review history, because a group's content keys are `ON DELETE RESTRICT`. Before, the circle's foreign keys cascaded the rows away (the stored files stayed, orphaned). Delete or move the content first; the data-removal flow of a user purges their own libraries' content before the group goes.
+- **A factory reset keeps libraries.** It empties every library's content and removes nothing else: groups and their members stay (the platform keeps groups through a reset), personal libraries stay, the actor gets one if they have none.
+- A member row of `GET /api/circles/:id/members` has the id `<circleId>:<userId>` (the sharing slice has no member row id).
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| The migration aborts with `RETRO-K2: N user(s) have more than one personal circle` | A hand-made second personal circle | Move its content to the first (`UPDATE ... SET circle_id`) and delete it, then rerun |
+| It aborts with `N row(s) of <table> name a scope that is neither a group nor a personal circle` | A content row from before the I2 foreign keys, or a circle deleted by hand | List the ids (`SELECT DISTINCT circle_id ...`), restore the circle or delete the rows, rerun |
+| An insert fails with `scope <id> is neither a group nor a personal library` (23503) | The scope id names nothing: a deleted group, or a client sending a made-up `circleId` | Expected refusal (it was the foreign key); the API maps an unknown scope to 404 before the insert |
+| `DELETE /api/groups/:id` returns 500 | The group still owns rows in a table the 409 guard does not know (the slice's own check covers its resources only) | Same as above: empty the library first; the circle route answers 409 |

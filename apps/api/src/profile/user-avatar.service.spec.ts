@@ -50,7 +50,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole, Prisma, UserAvatarSource } from '@prisma/client';
+import { Prisma, UserAvatarSource } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';

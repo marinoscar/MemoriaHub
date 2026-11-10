@@ -93,6 +93,11 @@ const broker = { kind: 'geo.google', usable: async () => ({ ok: true }), issue: 
 
 const snapshot = () => ({ writes: [...world.writes.entries()].sort() });
 
+/** The scope directory double (`OwnerScopeSweepService.exists`) over the world's circles. */
+function fakeScopes() {
+  return { exists: async (id: string) => world.circles.has(id) };
+}
+
 function fakePrisma() {
   return {
     mediaItem: {
@@ -101,7 +106,6 @@ function fakePrisma() {
         world.writes.set(`geo:${where.id}`, { country: data['geoCountry'], source: data['geoSource'] });
       },
     },
-    circle: { findUnique: async ({ where }: { where: { id: string } }) => (world.circles.has(where.id) ? { id: where.id } : null) },
     mediaGeocodeStatus: {
       upsert: async ({ where, update }: { where: { mediaItemId: string }; update: { status: string } }) => {
         world.writes.set(`status:${where.mediaItemId}`, update.status);
@@ -231,7 +235,7 @@ function buildInference(): LocationInferenceHandler {
       world.writes.set(`sweep:${circleId}`, { force: opts.force ?? false });
     },
   };
-  return new LocationInferenceHandler(registry, fakePrisma() as never, service as never);
+  return new LocationInferenceHandler(registry, fakePrisma() as never, fakeScopes() as never, service as never);
 }
 
 describe('location_inference', () => {

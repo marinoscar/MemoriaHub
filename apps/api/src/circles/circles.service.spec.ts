@@ -10,7 +10,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PersonalLibraryStore } from '../platform/sharing/personal-library.store';
-import { GroupMemberMirrorListener } from './group-member-mirror.listener';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import {
   GroupInvitesService,
@@ -62,11 +61,10 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
   let mockMembership: jest.Mocked<OwnerAccessService>;
   let mockEmail: { sendEmail: jest.Mock; sendEmailAsync: jest.Mock };
   let mockInvites: { list: jest.Mock; create: jest.Mock; revoke: jest.Mock };
-  let groups: { create: jest.Mock; get: jest.Mock; list: jest.Mock; update: jest.Mock };
+  let groups: { create: jest.Mock; get: jest.Mock; list: jest.Mock; update: jest.Mock; delete: jest.Mock };
   let members: { list: jest.Mock; add: jest.Mock; changeRole: jest.Mock; remove: jest.Mock };
   let personal: { ownerOf: jest.Mock; idOf: jest.Mock; get: jest.Mock; page: jest.Mock };
   let scopes: { summary: jest.Mock; membersOf: jest.Mock };
-  let mirror: { ensureCircleFor: jest.Mock };
 
   const mockUser = {
     id: 'user-1',
@@ -90,6 +88,7 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
       get: jest.fn().mockResolvedValue(group()),
       list: jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100, totalPages: 1 }),
       update: jest.fn().mockResolvedValue(group({ name: 'Renamed' })),
+      delete: jest.fn().mockResolvedValue(undefined),
     };
     members = {
       list: jest.fn(),
@@ -104,7 +103,6 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
       page: jest.fn().mockResolvedValue([]),
     };
     scopes = { summary: jest.fn().mockResolvedValue({ id: 'c1', name: 'Group A', kind: 'group' }), membersOf: jest.fn().mockResolvedValue([]) };
-    mirror = { ensureCircleFor: jest.fn().mockResolvedValue(undefined) };
 
     mockEmail = {
       sendEmail: jest.fn().mockResolvedValue({ success: true, messageId: 'mock-message-id' }),
@@ -122,7 +120,6 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
         { provide: GroupMembershipService, useValue: members },
         { provide: PersonalLibraryStore, useValue: personal },
         { provide: OwnerScopeSweepService, useValue: scopes },
-        { provide: GroupMemberMirrorListener, useValue: mirror },
         { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue(ORG_ID) } },
       ],
     }).compile();
@@ -135,14 +132,13 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
   });
 
   describe('create()', () => {
-    it('creates a platform group, writes its circle row synchronously and answers the circle shape', async () => {
+    it('creates a platform group and answers the circle shape', async () => {
       const result = await service.create('user-1', { name: 'Group A' } as any);
 
       expect(groups.create).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'user-1', activeOrgId: ORG_ID }),
         { name: 'Group A', description: undefined },
       );
-      expect(mirror.ensureCircleFor).toHaveBeenCalledWith('c1', 'Group A', null, 'user-1');
       expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-1']);
       expect(result).toMatchObject({ id: 'c1', name: 'Group A', isPersonal: false, ownerId: 'user-1', memberRole: 'circle_admin', _count: { members: 2 } });
     });
@@ -210,17 +206,27 @@ describe('CirclesService (served from platform groups, RETRO-K1)', () => {
     it('refuses to delete a personal library', async () => {
       personal.ownerOf.mockResolvedValue('user-1');
       await expect(service.remove(mockUser, 'p1')).rejects.toBeInstanceOf(BadRequestException);
-      expect(mockPrisma.circle.delete).not.toHaveBeenCalled();
+      expect(groups.delete).not.toHaveBeenCalled();
     });
 
-    it('deletes a shared circle (the content cascades) and drops the members\' cached groups', async () => {
+    it('deletes an empty shared circle through the slice and drops the members\' cached groups', async () => {
       scopes.membersOf.mockResolvedValue([{ userId: 'user-1', role: 'admin' }, { userId: 'user-2', role: 'viewer' }]);
-      mockPrisma.circle.delete.mockResolvedValue({} as any);
+      mockPrisma.mediaItem.count.mockResolvedValue(0 as any);
 
       await service.remove(mockUser, 'c1');
 
-      expect(mockPrisma.circle.delete).toHaveBeenCalledWith({ where: { id: 'c1' } });
+      expect(groups.delete).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1' }), 'c1');
       expect(mockMembership.invalidateMembers).toHaveBeenCalledWith(['user-1', 'user-2']);
+    });
+
+    it('answers 409 LIBRARY_NOT_EMPTY while media remain, and when the database refuses the group delete', async () => {
+      mockPrisma.mediaItem.count.mockResolvedValue(4 as any);
+      await expect(service.remove(mockUser, 'c1')).rejects.toBeInstanceOf(ConflictException);
+      expect(groups.delete).not.toHaveBeenCalled();
+
+      mockPrisma.mediaItem.count.mockResolvedValue(0 as any);
+      groups.delete.mockRejectedValue(Object.assign(new Error('foreign key constraint'), { code: 'P2003' }));
+      await expect(service.remove(mockUser, 'c1')).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('is a 404 for an unknown circle', async () => {

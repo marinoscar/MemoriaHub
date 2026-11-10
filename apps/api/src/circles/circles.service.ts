@@ -25,7 +25,6 @@ import { DefaultOrgId } from '../common/tenancy/default-org-id';
 import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../notifications-registry/memoriahub-email.notifications';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { GROUP_ROLE_TO_CIRCLE_ROLE, type CircleRoleName } from './circle-role';
-import { GroupMemberMirrorListener } from './group-member-mirror.listener';
 import { CreateCircleDto } from './dto/create-circle.dto';
 import { UpdateCircleDto } from './dto/update-circle.dto';
 import { AddMemberDto } from './dto/add-member.dto';
@@ -75,7 +74,6 @@ export class CirclesService {
     private readonly groupMembers: GroupMembershipService,
     private readonly personal: PersonalLibraryStore,
     private readonly scopes: OwnerScopeSweepService,
-    private readonly mirror: GroupMemberMirrorListener,
   ) {}
 
   /** Base URL for building absolute links in emails. */
@@ -88,10 +86,6 @@ export class CirclesService {
   async create(userId: string, dto: CreateCircleDto) {
     const principal = await this.principalOf({ id: userId, email: '', roles: [], permissions: [] });
     const group = await this.groups.create(principal, { name: dto.name, description: dto.description });
-    // PLATFORM-ADOPTION-SHIM(RETRO-K1): until RETRO-K2 drops `circles`, every content row's `circle_id`
-    // still has a foreign key to it, so the group's circle row is written here, before the response
-    // (the group-created listener would do it asynchronously). K2 deletes this call.
-    await this.mirror.ensureCircleFor(group.id, group.name, group.description, userId);
     this.membership.invalidateMembers([userId]);
     this.logger.log(`Circle created: ${group.id} by user ${userId}`);
     return this.groupView(group, 'admin');
@@ -156,9 +150,17 @@ export class CirclesService {
     if (!summary) throw new NotFoundException(`Circle ${id} not found`);
 
     const members = await this.scopes.membersOf(id);
-    // PLATFORM-ADOPTION-SHIM(RETRO-K1): deleting the circle row cascades the content (its foreign keys)
-    // and the RETRO-I2 trigger deletes the mirrored group. RETRO-K2 deletes the group instead.
-    await this.prisma.circle.delete({ where: { id } });
+    // A group cannot be deleted while content names it (`owner_group_id` is `ON DELETE RESTRICT`):
+    // answer 409 instead of a database error. (Before RETRO-K2 the circle's foreign keys cascaded
+    // the content away; deleting a library with photos in it is now an explicit, separate step.)
+    const content = await this.prisma.mediaItem.count({ where: { circleId: id } });
+    if (content > 0) throw libraryNotEmpty(id);
+    try {
+      await this.groups.delete(await this.principalOf(user), id);
+    } catch (err) {
+      if (isForeignKeyViolation(err)) throw libraryNotEmpty(id);
+      throw notFoundAs(`Circle ${id} not found`)(err);
+    }
     this.membership.invalidateMembers(members.map((m) => m.userId));
     this.logger.log(`Circle ${id} deleted by user ${user.id}`);
   }
@@ -493,6 +495,19 @@ type UserRow = {
 };
 
 const SYSTEM_READER_ID = '00000000-0000-0000-0000-000000000000';
+
+/** 409 for a library that still holds content (its albums, tags, people or memories may remain even with no media). */
+function libraryNotEmpty(id: string): ConflictException {
+  return new ConflictException({
+    message: `Circle ${id} still holds content; delete or move it first`,
+    details: { reason: 'LIBRARY_NOT_EMPTY' },
+  });
+}
+
+function isForeignKeyViolation(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  return e?.code === 'P2003' || /foreign key constraint|violates foreign key/i.test(e?.message ?? '');
+}
 
 /** Maps the slice's "group not found" onto the circle routes' 404 body. */
 function notFoundAs(message: string): (err: unknown) => never {

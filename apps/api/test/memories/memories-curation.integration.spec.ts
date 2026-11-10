@@ -21,6 +21,7 @@
 // supplies as a fixed instant, so "today" and "tomorrow" are deterministic and
 // the fixtures can be seeded on exact past anniversaries.
 
+import { createSharedLibrary, dropLibraries } from '../helpers/library';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
@@ -168,12 +169,8 @@ describeMaybeDb('Memories — curation engine & On This Day (DB_GATED: real Post
     await prisma.user.create({
       data: { id: userId, email: `memories-curation-${userId}@example.test` },
     });
-    await prisma.circle.create({
-      data: { id: circleId, name: 'Memories Curation Circle', ownerId: userId },
-    });
-    await prisma.circle.create({
-      data: { id: emptyCircleId, name: 'Memories Empty Circle', ownerId: userId },
-    });
+    await createSharedLibrary(prisma, { id: circleId, name: 'Memories Curation Circle', createdById: userId });
+    await createSharedLibrary(prisma, { id: emptyCircleId, name: 'Memories Empty Circle', createdById: userId });
   }, 30000);
 
   afterAll(async () => {
@@ -182,7 +179,7 @@ describeMaybeDb('Memories — curation engine & On This Day (DB_GATED: real Post
     await clearMedia().catch(() => undefined);
     await prisma.burstGroup.deleteMany({ where: { circleId } }).catch(() => undefined);
     await prisma.duplicateGroup.deleteMany({ where: { circleId } }).catch(() => undefined);
-    await prisma.circle.deleteMany({ where: { id: { in: [circleId, emptyCircleId] } } });
+    await dropLibraries(prisma, [circleId, emptyCircleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     await prisma.$disconnect();
   }, 30000);

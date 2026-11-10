@@ -268,7 +268,7 @@ export class MemoriaHubUserDataService {
   /**
    * Deletes everything IN the circles but the circles themselves: photos and
    * videos with their files, albums, tags, people and faces, memories and
-   * workflows (with their run history).
+   * workflows (with their run history) and the review history.
    */
   async purgeCircleContent(circleIds: readonly string[]): Promise<Counts> {
     if (circleIds.length === 0) return {};
@@ -280,6 +280,15 @@ export class MemoriaHubUserDataService {
       ...people,
       albums: await this.deleteAlbumsWithGrants(where),
       workflows: (await this.prisma.workflow.deleteMany({ where })).count,
+      // Review and housekeeping history that is not a child of a media item. Since RETRO-K2 a group
+      // (`owner_group_id`) is `ON DELETE RESTRICT`, so no row may name a library that is deleted
+      // (before, the circle's foreign keys cascaded these away).
+      burstGroups: (await this.prisma.burstGroup.deleteMany({ where })).count,
+      duplicateGroups: (await this.prisma.duplicateGroup.deleteMany({ where })).count,
+      reviewRuns: (await this.prisma.reviewRun.deleteMany({ where })).count,
+      trashEmptyRuns: (await this.prisma.trashEmptyRun.deleteMany({ where })).count,
+      enhancementBatches: (await this.prisma.mediaEnhancementBatch.deleteMany({ where })).count,
+      locationSuggestions: (await this.prisma.locationSuggestion.deleteMany({ where })).count,
     };
   }
 
@@ -399,9 +408,14 @@ export class MemoriaHubUserDataService {
           `user ${userId}: ${counts.mediaItemsFailed} media item(s) of their own circles could not be deleted; retry`,
         );
       }
-      // PLATFORM-ADOPTION-SHIM(RETRO-K1): until RETRO-K2 drops `circles`, a scope still has a circle row
-      // (the mirror triggers delete the group with it); K2 deletes the group / personal library here instead.
-      counts.circlesDeleted = (await this.prisma.circle.deleteMany({ where: { id: { in: ownedIds } } })).count;
+      // The content is gone: the user's personal library row, and each group they created that nobody
+      // else is in (a group is deleted through the slice; the personal library row would also cascade
+      // with the user, it is removed here so the count is the same).
+      counts.circlesDeleted = await this.personalLibraries.removeFor(userId);
+      for (const group of createdGroups) {
+        await this.scopes.removeGroup(group.id);
+        counts.circlesDeleted += 1;
+      }
     }
 
     const reassigned = await this.reassignSharedContent(userId);

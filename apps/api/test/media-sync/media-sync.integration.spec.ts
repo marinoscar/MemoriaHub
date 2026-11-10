@@ -119,10 +119,15 @@ describe('Media Sync device API (integration)', () => {
     });
 
     // --- circles --------------------------------------------------------------
-    m.circle.findFirst.mockImplementation(async ({ where }: any) =>
-      circles.find((c) => c.ownerId === where.ownerId && c.isPersonal === where.isPersonal) ?? null,
-    );
-    m.circle.findUnique.mockImplementation(async ({ where }: any) => circles.find((c) => c.id === where.id) ?? null);
+    // The personal libraries (RETRO-K2): by user id -> the library id, by scope id -> its owner.
+    m.personalLibrary.findUnique.mockImplementation(async ({ where }: any) => {
+      const row =
+        where.userId !== undefined
+          ? circles.find((c) => c.ownerId === where.userId && c.isPersonal)
+          : circles.find((c) => c.id === where.id && c.isPersonal);
+      if (!row) return null;
+      return where.userId !== undefined ? { id: row.id } : { userId: row.ownerId };
+    });
     m.circleMember.findUnique.mockImplementation(
       async ({ where }: any) =>
         members.find(

@@ -17,7 +17,8 @@
 
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CircleRole, JobReason, LocationSuggestionStatus, MediaType } from '@prisma/client';
+import { JobReason, LocationSuggestionStatus, MediaType } from '@prisma/client';
+import { CircleRole } from '../../test/helpers/circle-role';
 import { LocationSuggestionService } from './location-suggestion.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';

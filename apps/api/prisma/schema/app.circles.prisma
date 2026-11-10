@@ -2,84 +2,27 @@
 // source: app:circles.prisma
 
 // =============================================================================
-// Family Circles
+// Personal libraries (RETRO-K2, #588)
+// =============================================================================
+//
+// A shared library is a platform group (`groups`, RETRO-I2) and a personal one is not a
+// group (decision 3 of docs/platform-adoption/circles-to-groups.md): its content rows are
+// owned by the user (`owner_user_id`). Either way the content tables' `circle_id` column is
+// the library's SCOPE ID: a group's id, or the `id` below. `circle_id` has no foreign key
+// any more (RETRO-K2 dropped `circles`); the trigger `mh_content_owner_from_scope` refuses a
+// row whose scope is neither a group nor a personal library, and derives the owner columns.
+// The old `circles` / `circle_members` tables and the `CircleRole` enum are gone.
 // =============================================================================
 
-enum CircleRole {
-  circle_admin
-  collaborator
-  viewer
-}
+model PersonalLibrary {
+  /// The scope id: what content rows carry in `circle_id`. Never changes.
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-model Circle {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String
-  description String?
-  ownerId     String   @map("owner_id") @db.Uuid
-  isPersonal  Boolean  @default(false) @map("is_personal")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Relations
-  owner                   User                    @relation("CircleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  members                 CircleMember[]
-  mediaItems              MediaItem[]
-  albums                  Album[]
-  tags                    Tag[]
-  // Face Recognition relations
-  people                  Person[]
-  faces                   Face[]
-  // Auto-Tagging relations
-  mediaTagStatuses      MediaTagStatus[]
-  // Video Auto-Tagging relations (epic #452, issue #454)
-  mediaTranscripts      MediaTranscript[]
-  // Metadata Re-run relations
-  mediaMetadataStatuses   MediaMetadataStatus[]
-  // Geocode Status relations
-  mediaGeocodeStatuses    MediaGeocodeStatus[]
-  // Burst Detection relations
-  bursts                  BurstGroup[]
-  // Duplicate Detection relations
-  duplicateGroups         DuplicateGroup[]
-  // Location Inference relations
-  locationSuggestions     LocationSuggestion[]
-  // AI Picture Enhancer relations
-  mediaEnhancements       MediaEnhancement[]
-  // AI Picture Enhancer — bulk batches (epic #420, issue #421)
-  mediaEnhancementBatches MediaEnhancementBatch[]
-  // Workflow Automation relations
-  workflows               Workflow[]
-  workflowRuns            WorkflowRun[]
-  // Empty Trash at Scale relations
-  trashEmptyRuns          TrashEmptyRun[]
-  // Review Runs relations (bursts / duplicates / location suggestions —
-  // supersedes the former LocationSuggestionRun-only relation, issue #190)
-  reviewRuns              ReviewRun[]
-  // Notification Center relations (epic #240, issue #244; schema-only)
-  notifications           MhLegacyNotification[]          @relation("CircleNotifications")
-  // Memories relations (epic #300, issue #301)
-  memories                Memory[]
-
-  @@index([ownerId])
-  @@map("circles")
-}
-
-model CircleMember {
-  id        String     @id @default(uuid()) @db.Uuid
-  circleId  String     @map("circle_id") @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  role      CircleRole @default(viewer)
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
-
-  // Relations
-  circle Circle @relation(fields: [circleId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([circleId, userId])
-  @@index([userId])
-  @@index([circleId])
-  @@map("circle_members")
+  @@map("personal_libraries")
 }
 
 // CircleInvite (`circle_invites`) is gone since RETRO-I5 (#583): pending circle

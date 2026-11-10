@@ -6,12 +6,16 @@ import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.se
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
+/** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
+const scopeFindMany = jest.fn();
+
 describe('FaceBackfillService', () => {
   let service: FaceBackfillService;
   let mockPrisma: MockPrismaService;
   let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
+    scopeFindMany.mockReset().mockResolvedValue([]);
     mockPrisma = createMockPrismaService();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
@@ -21,11 +25,11 @@ describe('FaceBackfillService', () => {
       providers: [
         FaceBackfillService,
         { provide: PrismaService, useValue: mockPrisma },
-        // The sweep helper (groups through the slice, personal libraries through `circles`) is
-        // stood in for by the mocked `circle.findMany`, which each case fills with the scope ids.
+        // The sweep helper (groups through the slice, personal libraries through the store) is
+        // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
           provide: OwnerScopeSweepService,
-          useValue: { allScopeIds: async () => ((await mockPrisma.circle.findMany({})) as { id: string }[]).map((c) => c.id) },
+          useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
@@ -213,7 +217,7 @@ describe('FaceBackfillService', () => {
 
   describe('backfillAllCircles', () => {
     it('processes all circles and returns total enqueued count plus circle count', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-a' },
         { id: 'circle-b' },
       ]);
@@ -235,7 +239,7 @@ describe('FaceBackfillService', () => {
       const fromStr = '2024-03-01T00:00:00.000Z';
       const toStr = '2024-09-30T23:59:59.000Z';
 
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-a' },
         { id: 'circle-b' },
       ]);
@@ -253,7 +257,7 @@ describe('FaceBackfillService', () => {
     });
 
     it('forwards force: true so neither circle findMany includes an OR status filter', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([
+      scopeFindMany.mockResolvedValue([
         { id: 'circle-a' },
         { id: 'circle-b' },
       ]);
@@ -270,7 +274,7 @@ describe('FaceBackfillService', () => {
     });
 
     it('returns { enqueued: 0, circles: 0 } and skips mediaItem.findMany when no circles exist', async () => {
-      (mockPrisma.circle.findMany as jest.Mock).mockResolvedValue([]);
+      scopeFindMany.mockResolvedValue([]);
 
       const result = await service.backfillAllCircles({});
 

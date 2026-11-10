@@ -11,6 +11,7 @@
  * Needs a database migrated to the latest schema (`npm run prisma:migrate`).
  * Skips (reported as skipped, never passed) when nothing listens on the port.
  */
+import { dropLibraries, newLibrary } from '../helpers/library';
 import { randomUUID } from 'crypto';
 import { Logger } from '@nestjs/common';
 
@@ -46,13 +47,12 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
     await prisma.$connect();
     const user = await prisma.user.create({ data: { email: `housekeeping-${Date.now()}@example.test` } });
     userId = user.id;
-    const circle = await prisma.circle.create({ data: { name: 'Circle Alpha', ownerId: userId } });
-    circleId = circle.id;
+    circleId = (await newLibrary(prisma, { ownerId: userId, name: 'Circle Alpha' })).id;
   });
 
   afterAll(async () => {
     await prisma.job.deleteMany({ where: { id: { in: jobIds } } });
-    await prisma.circle.deleteMany({ where: { id: circleId } });
+    await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     jest.restoreAllMocks();
     await prisma.$disconnect();
