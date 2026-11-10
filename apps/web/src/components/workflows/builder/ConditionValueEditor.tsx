@@ -14,10 +14,10 @@ import {
   Typography,
 } from '@mui/material';
 import { PersonMultiSelect } from '../../search/PersonMultiSelect';
-import { LocationPickerMap } from '../../media/LocationPickerMap';
-import { getExploreTags, listAlbums } from '../../../services/media';
-import type { ExploreItem } from '../../../services/media';
-import type { Album } from '../../../types/media';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
+import { getExploreTags, listAlbums } from '@marinoscar/memoriahub-web/media/headless';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import type { Album } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   WorkflowFieldDescriptor,
   WorkflowOperator,

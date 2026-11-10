@@ -7,7 +7,8 @@
       "@marinoscar/memoriahub-api",
       "@marinoscar/memoriahub-compute",
       "@marinoscar/memoriahub-contract",
-      "@marinoscar/memoriahub-db"
+      "@marinoscar/memoriahub-db",
+      "@marinoscar/memoriahub-web"
     ]
   ],
   "linked": [],

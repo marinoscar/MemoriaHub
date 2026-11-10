@@ -79,32 +79,45 @@ vi.mock('../../services/locationSuggestionRuns', () => ({
   startLocationRejectRun: vi.fn(),
 }));
 
-vi.mock('../../components/media/LocationMiniMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationMiniMap: ({ lat, lng }: { lat: number; lng: number }) => (
     <div data-testid="location-mini-map" data-lat={lat} data-lng={lng} />
   ),
+
 }));
 
-vi.mock('../../components/media/LocationPickerMap', () => ({
-  LocationPickerMap: ({
-    value,
-    onChange,
-  }: {
-    value: { lat: number; lng: number } | null;
-    onChange: (latlng: { lat: number; lng: number }) => void;
-  }) => (
-    <div
-      data-testid="location-picker-map"
-      data-lat={value?.lat}
-      data-lng={value?.lng}
-      onClick={() => onChange({ lat: 40.7128, lng: -74.006 })}
-    />
-  ),
+
+
+// `LocationPickerMap` lives inside the packaged `LocationSearchPicker`, so it cannot be stubbed
+// from here; its Leaflet layer is stood in for instead. The pin renders as the
+// `location-picker-map` element, and clicking it fires the map's click handler.
+const mapHandlers: { click?: (e: { latlng: { lat: number; lng: number } }) => void } = {};
+vi.mock('react-leaflet', () => ({
+  MapContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TileLayer: () => null,
+  Circle: () => null,
+  Marker: ({ position, opacity }: { position: [number, number]; opacity?: number }) =>
+    opacity === undefined || opacity === 1 ? (
+      <div
+        data-testid="location-picker-map"
+        data-lat={position[0]}
+        data-lng={position[1]}
+        onClick={() => mapHandlers.click?.({ latlng: { lat: 40.7128, lng: -74.006 } })}
+      />
+    ) : null,
+  useMapEvents: (handlers: typeof mapHandlers) => {
+    Object.assign(mapHandlers, handlers);
+    return {};
+  },
+  useMap: () => ({ setView: vi.fn(), getZoom: () => 13 }),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   searchPlaces: vi.fn(),
   reverseGeocode: vi.fn(),
+
 }));
 
 vi.mock('../../services/locationSuggestions', async () => {
@@ -137,7 +150,7 @@ import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
 import { startLocationAcceptRun, startLocationRejectRun } from '../../services/locationSuggestionRuns';
-import { searchPlaces, reverseGeocode } from '../../services/media';
+import { searchPlaces, reverseGeocode } from '@marinoscar/memoriahub-web/media/headless';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
 

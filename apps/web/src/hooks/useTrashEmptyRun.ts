@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import type { TrashEmptyRunDetail } from '../types/trashEmptyRuns';
-import { getTrashEmptyRun as getTrashEmptyRunApi } from '../services/trashEmptyRuns';
+import type { TrashEmptyRunDetail } from '@marinoscar/memoriahub-web/media/headless';
+import { getTrashEmptyRun as getTrashEmptyRunApi } from '@marinoscar/memoriahub-web/media/headless';
 import { useIsMounted } from './useIsMounted';
 
 interface UseTrashEmptyRunResult {

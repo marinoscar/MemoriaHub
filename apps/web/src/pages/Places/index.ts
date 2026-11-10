@@ -1,1 +1,1 @@
-export { default } from './PlacesOverviewPage';
+export { default } from '@marinoscar/memoriahub-web/media/ui';

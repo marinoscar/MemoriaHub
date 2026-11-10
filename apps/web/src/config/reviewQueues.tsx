@@ -30,7 +30,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import InsightsIcon from '@mui/icons-material/Insights';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import type { ReviewCountsResponse } from '../types/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
 
 /** Stable identifiers — also the `:queue` segment of `/review/:queue`. */
 export type ReviewQueueKey =

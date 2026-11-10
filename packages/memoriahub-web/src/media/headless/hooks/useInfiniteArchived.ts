@@ -1,0 +1,119 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { MediaItem } from '../types.js';
+import { listArchived } from '../services/media.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+
+/**
+ * Hook: Infinite Archived Result.
+ *
+ * @stability experimental
+ */
+export interface UseInfiniteArchivedResult {
+  items: MediaItem[];
+  /** The `loadMore` function. */
+  loadMore: () => void;
+  hasMore: boolean;
+  isLoading: boolean;
+  error: string | null;
+  /** The `reset` function. */
+  reset: () => void;
+}
+
+/**
+ * Hook: Infinite Archived.
+ *
+ * @stability experimental
+ */
+export function useInfiniteArchived(
+  circleId: string,
+  pageSize = 50,
+  enabled = true,
+): UseInfiniteArchivedResult {
+  const [items, setItems] = useState<MediaItem[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const circleIdRef = useRef(circleId);
+  const pageSizeRef = useRef(pageSize);
+  const inflightRef = useRef(false);
+  const genRef = useRef(0);
+  const isMounted = useIsMounted();
+
+  circleIdRef.current = circleId;
+  pageSizeRef.current = pageSize;
+
+  const fetchPage = useCallback(async (targetPage: number, gen: number) => {
+    if (inflightRef.current) return;
+    inflightRef.current = true;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await listArchived({
+        circleId: circleIdRef.current,
+        page: targetPage,
+        pageSize: pageSizeRef.current,
+      });
+      if (gen !== genRef.current) return;
+      if (!isMounted()) return;
+      setItems((prev) =>
+        targetPage === 1 ? response.items : [...prev, ...response.items],
+      );
+      setTotalPages(response.meta.totalPages);
+    } catch (err) {
+      if (gen !== genRef.current) return;
+      if (!isMounted()) return;
+      setError(err instanceof Error ? err.message : 'Failed to load archived items');
+    } finally {
+      if (gen === genRef.current) {
+        inflightRef.current = false;
+        if (isMounted()) setIsLoading(false);
+      }
+    }
+  }, [isMounted]);
+
+  useEffect(() => {
+    if (!enabled || !circleId) return;
+    genRef.current += 1;
+    inflightRef.current = false;
+    const gen = genRef.current;
+    setItems([]);
+    setPage(1);
+    setTotalPages(1);
+    setError(null);
+    setIsLoading(false);
+    void fetchPage(1, gen);
+  }, [circleId, enabled, fetchPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadMore = useCallback(() => {
+    if (inflightRef.current) return;
+    setPage((prev) => {
+      if (prev >= totalPages) return prev;
+      const next = prev + 1;
+      void fetchPage(next, genRef.current);
+      return next;
+    });
+  }, [totalPages, fetchPage]);
+
+  const reset = useCallback(() => {
+    genRef.current += 1;
+    inflightRef.current = false;
+    const gen = genRef.current;
+    setItems([]);
+    setPage(1);
+    setTotalPages(1);
+    setError(null);
+    setIsLoading(false);
+    void fetchPage(1, gen);
+  }, [fetchPage]);
+
+  return {
+    items,
+    loadMore,
+    hasMore: enabled ? page < totalPages : false,
+    isLoading,
+    error,
+    reset,
+  };
+}

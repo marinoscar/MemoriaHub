@@ -46,8 +46,10 @@ vi.mock('../../../services/enhance', () => ({
   }),
 }));
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
+
 }));
 
 // The drawer has its own suite; stub it so opening it here is observable
@@ -61,7 +63,7 @@ vi.mock('../../../components/media/MediaEnhancementDrawer', () => ({
 import { useEnhancements } from '../../../hooks/useEnhancements';
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
 import { applyEnhancement, discardEnhancement } from '../../../services/enhance';
-import { getMedia } from '../../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockUseEnhancements = vi.mocked(useEnhancements);
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);

@@ -35,7 +35,7 @@ import {
 import type { ComparisonRowDef } from '../../components/review/MemberComparison';
 import { formatBytes } from '../../utils/formatBytes';
 import type { DuplicateGroupKind, DuplicateGroupMember, DuplicateResolveAction } from '../../services/duplicates';
-import { formatCivilDateTime } from '../../utils/civilDate';
+import { formatCivilDateTime } from '@marinoscar/memoriahub-web/media/headless';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',

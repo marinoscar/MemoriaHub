@@ -38,7 +38,7 @@ vi.mock('../../hooks/useOwnerScope', () => ({
 import { SearchProvider, useSearch } from '../../contexts/SearchContext';
 import { streamAgent } from '../../services/searchAgentStream';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import type { MediaItem, MediaListMeta } from '../../types/media';
+import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockStreamAgent = vi.mocked(streamAgent);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);

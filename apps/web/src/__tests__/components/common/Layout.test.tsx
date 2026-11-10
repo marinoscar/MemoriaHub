@@ -12,7 +12,7 @@ import { screen } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { useShellMainVariant } from '@marinoscar/platform-web/shell/headless';
 import { Layout } from '../../../components/common/Layout';
-import { useMediaRefresh } from '../../../contexts/MediaRefreshContext';
+import { useMediaRefresh } from '@marinoscar/memoriahub-web/media/headless';
 import { renderShell } from '../../utils/shell-harness';
 
 vi.mock('@marinoscar/platform-web/host/ui', () => ({

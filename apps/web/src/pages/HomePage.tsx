@@ -28,7 +28,7 @@ import { Box, Alert, Link, Typography } from '@mui/material';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { Link as RouterLink } from 'react-router-dom';
 import { useOwnerScope } from '../hooks/useOwnerScope';
-import { MediaGallery } from '../components/media/MediaGallery';
+import { MediaGallery } from '@marinoscar/memoriahub-web/media/ui';
 import { MemoriesCarousel } from '../components/memories/MemoriesCarousel';
 import { HomeGroupInvites } from '../components/sharing/HomeGroupInvites';
 

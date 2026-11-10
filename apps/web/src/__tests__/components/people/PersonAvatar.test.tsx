@@ -20,15 +20,17 @@ import type { PersonAvatarPerson } from '../../../components/people/PersonAvatar
 
 vi.mock('react-easy-crop', () => ({ default: () => null }));
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
+
 }));
 
 // ---------------------------------------------------------------------------
 // Imports that depend on mocks
 // ---------------------------------------------------------------------------
 
-import { getMedia } from '../../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockGetMedia = vi.mocked(getMedia);
 

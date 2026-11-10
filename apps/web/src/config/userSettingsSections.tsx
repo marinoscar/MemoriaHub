@@ -26,7 +26,6 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 import ManageSearchIcon from '@mui/icons-material/ManageSearch';
 import AndroidIcon from '@mui/icons-material/Android';
-import PhonelinkRingIcon from '@mui/icons-material/PhonelinkRing';
 import { identityUserSettingsSections } from '@marinoscar/platform-web/identity/ui';
 // RETRO-H1 (#591): the user-data slice's Danger Zone card, in its pinned-last group.
 import { DANGER_ZONE_GROUP_LABEL } from '@marinoscar/platform-web/user-data/headless';
@@ -36,7 +35,9 @@ import { webhooksUserSettingsSections } from '@marinoscar/platform-web/webhooks/
 import { dataExportSettingsPage } from '@marinoscar/platform-web/exports/ui';
 import { groupsSettingsPage } from '@marinoscar/platform-web/sharing/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
-import { ANDROID_APP_SETTINGS_PATH, MEDIA_SYNC_SETTINGS_PATH } from '../services/androidApp';
+// RETRO-J11 (#626): the `Media sync` card is the packaged domain's, as data (`@marinoscar/memoriahub-web/shell`).
+import { memoriahubUserSettingsCards } from '@marinoscar/memoriahub-web/shell';
+import { ANDROID_APP_SETTINGS_PATH } from '../services/androidApp';
 
 /** The per-user hub itself — the one `/settings` route that owns no card. */
 export const USER_HUB_PATH = '/settings';
@@ -108,13 +109,9 @@ export const USER_SETTINGS_SECTIONS: SettingsSectionDef[] = [
         Icon: AndroidIcon,
         path: ANDROID_APP_SETTINGS_PATH,
       },
-      {
-        title: 'Media sync',
-        description: 'See and manage the phones that back up their photos and videos to this server.',
-        Icon: PhonelinkRingIcon,
-        path: MEDIA_SYNC_SETTINGS_PATH,
-        permission: 'media:read',
-      },
+      // `Media sync`, behind `media:read` (the string `media-sync.controller.ts` enforces), appended
+      // after `Android app` exactly where it was.
+      ...memoriahubUserSettingsCards.android,
     ],
   },
   {

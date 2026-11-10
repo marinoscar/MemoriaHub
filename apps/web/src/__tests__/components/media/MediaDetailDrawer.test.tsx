@@ -23,21 +23,32 @@ import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, flushPendingAsyncWork } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
-import type { MediaItem } from '../../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Mock the media service (both patchMedia and getMedia)
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   patchMedia: vi.fn(),
   getMedia: vi.fn(),
   bulkUpdateMedia: vi.fn(),
   bulkTags: vi.fn(),
   listTags: vi.fn().mockResolvedValue([]),
+
+  getMediaMetadataStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+
+  rerunThumbnail: vi.fn(),
+
 }));
 
-import { patchMedia, getMedia } from '../../../services/media';
+import { patchMedia, getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockPatchMedia = vi.mocked(patchMedia);
 const mockGetMedia = vi.mocked(getMedia);
@@ -98,14 +109,7 @@ vi.mock('../../../services/tagging', () => ({
   rerunMediaTags: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
 }));
 
-vi.mock('../../../services/metadata', () => ({
-  getMediaMetadataStatus: vi.fn().mockResolvedValue({
-    status: 'not_processed',
-    processedAt: null,
-    lastError: null,
-  }),
-  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
-}));
+
 
 // ---------------------------------------------------------------------------
 // Mock VideoPlayer — avoids @vidstack/react dependency in tests
@@ -126,7 +130,8 @@ vi.mock('../../../components/media/VideoPlayer', () => ({
 // Mock LocationMiniMap — avoids react-leaflet/leaflet dependency in tests
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../components/media/LocationMiniMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationMiniMap: ({ lat, lng, label }: any) => (
     <div
       data-testid="location-mini-map"
@@ -135,13 +140,7 @@ vi.mock('../../../components/media/LocationMiniMap', () => ({
       data-label={label}
     />
   ),
-}));
 
-// ---------------------------------------------------------------------------
-// Mock LocationPickerMap — avoids react-leaflet/leaflet dependency in tests
-// ---------------------------------------------------------------------------
-
-vi.mock('../../../components/media/LocationPickerMap', () => ({
   LocationPickerMap: ({ value, onChange }: any) => (
     <div
       data-testid="location-picker-map"
@@ -150,13 +149,7 @@ vi.mock('../../../components/media/LocationPickerMap', () => ({
       onClick={() => onChange({ lat: 10, lng: 20 })}
     />
   ),
-}));
 
-// ---------------------------------------------------------------------------
-// Mock TagAutocomplete — avoids Autocomplete complexity in tests
-// ---------------------------------------------------------------------------
-
-vi.mock('../../../components/media/TagAutocomplete', () => ({
   TagAutocomplete: ({ label, value, onChange }: any) => (
     <div data-testid={`tag-autocomplete-${label.toLowerCase().replace(/\s/g, '-')}`}>
       <input
@@ -166,7 +159,20 @@ vi.mock('../../../components/media/TagAutocomplete', () => ({
       />
     </div>
   ),
+
 }));
+
+// ---------------------------------------------------------------------------
+// Mock LocationPickerMap — avoids react-leaflet/leaflet dependency in tests
+// ---------------------------------------------------------------------------
+
+
+
+// ---------------------------------------------------------------------------
+// Mock TagAutocomplete — avoids Autocomplete complexity in tests
+// ---------------------------------------------------------------------------
+
+
 
 // ---------------------------------------------------------------------------
 // Mock useLocationSuggestions hooks (useSuggestLocation, useItemAutoAppliedSuggestion)
@@ -199,11 +205,9 @@ const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
 // Mock the thumbnail service — Retry thumbnail button
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/thumbnail', () => ({
-  rerunThumbnail: vi.fn(),
-}));
 
-import { rerunThumbnail } from '../../../services/thumbnail';
+
+import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockRerunThumbnail = vi.mocked(rerunThumbnail);
 

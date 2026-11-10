@@ -27,8 +27,8 @@ import type { WorkflowFieldDescriptor } from '../../../../types/workflows';
 // never hits real fetch — deterministic, empty lists are enough since none of
 // these tests select a tag-set/album field.
 // ---------------------------------------------------------------------------
-vi.mock('../../../../services/media', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../../services/media')>();
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>();
   return {
     ...actual,
     getExploreTags: vi.fn().mockResolvedValue([]),

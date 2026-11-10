@@ -17,7 +17,7 @@ import { server } from '../mocks/server';
 import {
   rerunMediaMetadata,
   getMediaMetadataStatus,
-} from '../../services/metadata';
+} from '@marinoscar/memoriahub-web/media/headless';
 import { api, ApiError } from '../../services/api';
 
 beforeEach(() => {

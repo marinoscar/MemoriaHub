@@ -22,9 +22,11 @@ import { render } from '../../../__tests__/utils/test-utils';
 // ---------------------------------------------------------------------------
 
 // Mock location facets and explore tags — return minimal static data
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getLocationFacets: vi.fn(),
   getExploreTags: vi.fn(),
+
 }));
 
 // Stub PersonMultiSelect so it renders a simple placeholder (no async calls)
@@ -35,7 +37,8 @@ vi.mock('../PersonMultiSelect', () => ({
 }));
 
 // Stub LocationPickerMap to render a button that simulates dropping a pin when clicked
-vi.mock('../../media/LocationPickerMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationPickerMap: vi.fn(
     ({
       onChange,
@@ -52,6 +55,7 @@ vi.mock('../../media/LocationPickerMap', () => ({
       </button>
     ),
   ),
+
 }));
 
 // ---------------------------------------------------------------------------
@@ -59,7 +63,7 @@ vi.mock('../../media/LocationPickerMap', () => ({
 // ---------------------------------------------------------------------------
 
 import { SearchPanel } from '../SearchPanel';
-import { getLocationFacets, getExploreTags } from '../../../services/media';
+import { getLocationFacets, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockGetLocationFacets = vi.mocked(getLocationFacets);
 const mockGetExploreTags = vi.mocked(getExploreTags);

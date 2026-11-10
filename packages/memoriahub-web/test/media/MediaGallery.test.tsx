@@ -1,0 +1,955 @@
+/**
+ * Component tests — MediaGallery
+ *
+ * Covers four scenarios:
+ *   (a) Controlled mode: renders provided items grouped by day, opens lightbox on tile click
+ *   (b) Selection: clicking a tile's checkbox selects it and shows the bulk toolbar
+ *   (c) Per-group "Select all": selects every item in that date group
+ *   (d) Feed mode: mocks useInfiniteMedia (via listMedia service) and asserts items +
+ *       infinite-scroll sentinel render
+ *
+ * Leaf components that make external calls are stubbed to isolate the gallery logic.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, fireEvent, waitFor, within, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { render } from '../utils/test-utils.js';
+import {
+  MediaGallery,
+  GALLERY_COLS,
+  GALLERY_GAP_PX,
+  GALLERY_FALLBACK_ROW_PX,
+  galleryPlaceholderHeight,
+} from '../../src/media/ui/components/MediaGallery.js';
+import type { MediaItem } from '../../src/media/headless/types.js';
+
+// ---------------------------------------------------------------------------
+// Module mocks — declared before any imports of the mocked modules
+// ---------------------------------------------------------------------------
+
+// Stub the lightbox so it doesn't call getMedia and doesn't render heavy DOM.
+vi.mock('../../src/media/ui/slots.js', () => ({
+  MediaLightboxSlot: vi.fn(({ index, onClose }: { index: number | null; onClose: () => void }) =>
+    index !== null ? (
+      <div data-testid="media-lightbox">
+        <button onClick={onClose}>Close lightbox</button>
+      </div>
+    ) : null,
+  ),
+  MediaDetailDrawerSlot: vi.fn(() => null),
+  MediaEnhancementDrawerSlot: vi.fn(() => null),
+  BatchEnhanceDialogSlot: vi.fn(() => null),
+}));
+
+// Stub the detail drawer.
+
+// Stub the bulk action toolbar (asserted via data-testid). Extended (issue
+// #422) to also surface the `selectedItems`/`singleSelectedItem` props the
+// gallery derives, so the derivation itself is directly observable without
+// depending on BulkActionToolbar's own render logic.
+vi.mock('../../src/media/ui/components/BulkActionToolbar.js', () => ({
+  BulkActionToolbar: vi.fn(
+    ({
+      selected,
+      selectedItems,
+      singleSelectedItem,
+    }: {
+      selected: Set<string>;
+      selectedItems?: MediaItem[];
+      singleSelectedItem?: MediaItem | null;
+    }) =>
+      selected.size > 0 ? (
+        <div data-testid="bulk-toolbar">
+          Bulk toolbar
+          <span data-testid="bulk-toolbar-ids">
+            {(selectedItems ?? []).map((i) => i.id).join(',')}
+          </span>
+          <span data-testid="bulk-toolbar-photo-count">
+            {(selectedItems ?? []).filter((i) => i.type === 'photo').length}
+          </span>
+          <span data-testid="bulk-toolbar-single-id">{singleSelectedItem?.id ?? ''}</span>
+        </div>
+      ) : null,
+  ),
+}));
+
+// Stub bulk dialogs — they are never opened in these tests.
+vi.mock('../../src/media/ui/components/BulkLocationDialog.js', () => ({
+  BulkLocationDialog: vi.fn(() => null),
+}));
+vi.mock('../../src/media/ui/components/BulkTagsDialog.js', () => ({
+  BulkTagsDialog: vi.fn(() => null),
+}));
+
+// Stub AddToAlbumDialog.
+vi.mock('../../src/media/ui/album/AddToAlbumDialog.js', () => ({
+  AddToAlbumDialog: vi.fn(() => null),
+}));
+
+// Mock patchMedia so favourite toggles don't hit the network. getThumbnails
+// is stubbed too since usePendingThumbnails (invoked internally by
+// MediaGallery) resolves from this same module — see the "instant upload
+// preview" describe block below.
+vi.mock('../../src/media/headless/services/media.js', () => ({
+  patchMedia: vi.fn().mockResolvedValue({}),
+  removeAlbumItem: vi.fn().mockResolvedValue(undefined),
+  listMedia: vi.fn(),
+  getThumbnails: vi.fn().mockResolvedValue([]),
+  // Used by the post-bulk-action in-place refresh (issue #242).
+  getMedia: vi.fn(),
+}));
+
+// Mock useIntersectionObserver so the infinite-scroll sentinel never triggers.
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useIntersectionObserver: vi.fn(),
+
+}));
+
+// Mock MediaPreviewContext so GalleryTile's instant-preview lookup is
+// controllable per test (issue #89: upload tile stuck on "Processing…").
+// Default (set in beforeEach) has no stored preview for any id.
+vi.mock('../../src/media/headless/contexts/MediaPreviewContext.js', () => ({
+  useMediaPreview: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
+// Imports after mocks
+// ---------------------------------------------------------------------------
+
+import { listMedia } from '../../src/media/headless/services/media.js';
+import { useMediaPreview } from '../../src/media/headless/contexts/MediaPreviewContext.js';
+import { useIntersectionObserver } from '../../src/core/headless/index.js';
+
+const mockListMedia = vi.mocked(listMedia);
+const mockUseMediaPreview = vi.mocked(useMediaPreview);
+const mockUseIntersectionObserver = vi.mocked(useIntersectionObserver);
+
+/** The `onIntersect` callback (2nd arg) from the most recent sentinel wiring. */
+function latestFeedLoadMore(): () => void {
+  const calls = mockUseIntersectionObserver.mock.calls;
+  const last = calls[calls.length - 1];
+  if (!last) throw new Error('useIntersectionObserver was never called');
+  return last[1] as () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Factories
+// ---------------------------------------------------------------------------
+
+function makeItem(id: string, overrides: Partial<MediaItem> = {}): MediaItem {
+  return {
+    id,
+    storageObjectId: `storage-${id}`,
+    addedById: 'user-001',
+    circleId: 'circle-1',
+    type: 'photo',
+    capturedAt: '2024-06-15T10:00:00.000Z',
+    capturedAtOffset: null,
+    importedAt: null,
+    source: 'web',
+    contentHash: null,
+    width: 1920,
+    height: 1080,
+    durationMs: null,
+    orientation: null,
+    takenLat: null,
+    takenLng: null,
+    takenAltitude: null,
+    cameraMake: null,
+    cameraModel: null,
+    originalFilename: `file-${id}.jpg`,
+    description: null,
+    favorite: false,
+    geoCountry: null,
+    geoCountryCode: null,
+    geoAdmin1: null,
+    geoAdmin2: null,
+    geoLocality: null,
+    geoPlaceName: null,
+    geoSource: null,
+    geocodedAt: null,
+    createdAt: '2024-06-15T10:00:00.000Z',
+    updatedAt: '2024-06-15T10:00:00.000Z',
+    deletedAt: null,
+    metadata: null,
+    thumbnailUrl: `https://cdn.example.com/${id}.jpg`,
+    downloadUrl: null,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('MediaGallery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default feed-mode responses: return empty list to prevent infinite loops.
+    // Keyset (not legacy offset) shape — see useInfiniteMedia.ts, which reads
+    // `r.meta.nextCursor` and never sends/expects `page`/`totalItems`.
+    mockListMedia.mockResolvedValue({
+      items: [],
+      meta: { pageSize: 50, nextCursor: null, hasMore: false },
+    });
+    // Default MediaPreviewContext: no stored preview for any id, no-op writers.
+    mockUseMediaPreview.mockReturnValue({
+      addPreview: vi.fn(),
+      getPreview: vi.fn(() => undefined),
+      removePreview: vi.fn(),
+      version: 0,
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (a) Controlled mode — item rendering and lightbox
+  // -------------------------------------------------------------------------
+  describe('controlled mode', () => {
+    it('renders items grouped by day with a sticky day header', () => {
+      const items = [
+        makeItem('a', { capturedAt: '2024-06-15T10:00:00.000Z', originalFilename: 'Photo A.jpg' }),
+        makeItem('b', { capturedAt: '2024-06-15T12:00:00.000Z', originalFilename: 'Photo B.jpg' }),
+        makeItem('c', { capturedAt: '2024-05-20T09:00:00.000Z', originalFilename: 'Photo C.jpg' }),
+      ];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // Thumbnails render as img elements
+      expect(screen.getByAltText('Photo A.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('Photo B.jpg')).toBeInTheDocument();
+      expect(screen.getByAltText('Photo C.jpg')).toBeInTheDocument();
+    });
+
+    it('opens the lightbox when a tile is clicked (no selection active)', async () => {
+      const user = userEvent.setup();
+      const items = [makeItem('x', { originalFilename: 'Click Me.jpg' })];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      const tile = screen.getByAltText('Click Me.jpg');
+      await user.click(tile);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('media-lightbox')).toBeInTheDocument();
+      });
+    });
+
+    it('renders the custom emptyState when the items array is empty', () => {
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={[]}
+          emptyState={<div>Nothing here yet</div>}
+        />,
+      );
+
+      expect(screen.getByText('Nothing here yet')).toBeInTheDocument();
+    });
+
+    it('renders default empty state when items are empty and no emptyState prop', () => {
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole={null}
+          items={[]}
+        />,
+      );
+
+      expect(screen.getByText(/no media found/i)).toBeInTheDocument();
+    });
+
+    it('shows a loading spinner in controlled mode when isLoading is true', () => {
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole={null}
+          items={[]}
+          isLoading={true}
+        />,
+      );
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (a.1) Stuck thumbnail fallback — spinner times out into a broken icon
+  // -------------------------------------------------------------------------
+  describe('stuck thumbnail fallback', () => {
+    const oldCreatedAt = '2020-01-01T00:00:00.000Z';
+    const recentCreatedAt = () => new Date().toISOString();
+
+    it('shows the processing spinner for a recently-created item without a thumbnail', () => {
+      const items = [
+        makeItem('recent', { thumbnailUrl: null, createdAt: recentCreatedAt() }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('shows the broken-image fallback instead of the spinner once past the stuck threshold', () => {
+      const items = [
+        makeItem('stuck', { thumbnailUrl: null, createdAt: oldCreatedAt }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Thumbnail unavailable')).toBeInTheDocument();
+    });
+
+    it('still shows the image when thumbnailUrl is present, regardless of age', () => {
+      const items = [
+        makeItem('old-but-ready', {
+          originalFilename: 'old-ready.jpg',
+          thumbnailUrl: 'https://cdn.example.com/old-ready.jpg',
+          createdAt: oldCreatedAt,
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.getByAltText('old-ready.jpg')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Thumbnail unavailable')).not.toBeInTheDocument();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (a.2) Instant upload preview (issue #89) — local object-URL preview
+  // renders while there is no server thumbnail, and is superseded once the
+  // real thumbnailUrl arrives.
+  // -------------------------------------------------------------------------
+  describe('instant upload preview (issue #89)', () => {
+    it('renders the local object-URL preview when there is no server thumbnailUrl yet', () => {
+      mockUseMediaPreview.mockReturnValue({
+        addPreview: vi.fn(),
+        getPreview: vi.fn((id: string) => (id === 'uploading-1' ? 'blob:mock-preview-url' : undefined)),
+        removePreview: vi.fn(),
+        version: 0,
+      });
+
+      const items = [
+        makeItem('uploading-1', {
+          thumbnailUrl: null,
+          originalFilename: 'just-uploaded.jpg',
+          createdAt: new Date().toISOString(),
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const img = screen.getByAltText('just-uploaded.jpg') as HTMLImageElement;
+      expect(img.src).toBe('blob:mock-preview-url');
+      // The "awaiting thumbnail" spinner must not render — the preview takes
+      // precedence while it is available.
+      expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    });
+
+    it('falls back to the processing spinner when there is no thumbnailUrl and no stored preview', () => {
+      // Default mock (set in beforeEach) returns undefined for every id.
+      const items = [
+        makeItem('no-preview', {
+          thumbnailUrl: null,
+          originalFilename: 'no-preview.jpg',
+          createdAt: new Date().toISOString(),
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByAltText('no-preview.jpg')).not.toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('prefers the real server thumbnailUrl over a stored local preview once it is set', () => {
+      mockUseMediaPreview.mockReturnValue({
+        addPreview: vi.fn(),
+        getPreview: vi.fn((id: string) => (id === 'resolved-1' ? 'blob:mock-stale-preview' : undefined)),
+        removePreview: vi.fn(),
+        version: 0,
+      });
+
+      const items = [
+        makeItem('resolved-1', {
+          thumbnailUrl: 'https://cdn.example.com/resolved-1.jpg',
+          originalFilename: 'resolved.jpg',
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const img = screen.getByAltText('resolved.jpg') as HTMLImageElement;
+      expect(img.src).toBe('https://cdn.example.com/resolved-1.jpg');
+      expect(img.src).not.toBe('blob:mock-stale-preview');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (b) Selection — checkbox selects an item and reveals BulkActionToolbar
+  // -------------------------------------------------------------------------
+  describe('selection', () => {
+    it('shows the bulk toolbar after selecting an item via its checkbox', async () => {
+      const user = userEvent.setup();
+      const items = [makeItem('sel-1', { originalFilename: 'selectable.jpg' })];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // The checkbox is an IconButton with aria-label "Select item"
+      const checkbox = screen.getByRole('button', { name: /select item/i });
+      await user.click(checkbox);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar')).toBeInTheDocument();
+      });
+    });
+
+    it('deselects an item when the checkbox is clicked again', async () => {
+      const user = userEvent.setup();
+      const items = [makeItem('sel-2', { originalFilename: 'toggle-select.jpg' })];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // Select
+      const checkbox = screen.getByRole('button', { name: /select item/i });
+      await user.click(checkbox);
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar')).toBeInTheDocument();
+      });
+
+      // Deselect (aria-label changes to "Deselect item" when selected)
+      const deselect = screen.getByRole('button', { name: /deselect item/i });
+      await user.click(deselect);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('bulk-toolbar')).not.toBeInTheDocument();
+      });
+    });
+
+    it('clicking a tile in selection mode toggles selection instead of opening lightbox', async () => {
+      const user = userEvent.setup();
+      const items = [makeItem('s1', { originalFilename: 'select-via-tile.jpg' })];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // First, select via checkbox to enter selection mode
+      await user.click(screen.getByRole('button', { name: /select item/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar')).toBeInTheDocument();
+      });
+
+      // Now click the tile image — should deselect (toggle), not open lightbox
+      const tile = screen.getByAltText('select-via-tile.jpg');
+      await user.click(tile);
+
+      await waitFor(() => {
+        // Bulk toolbar disappears when nothing is selected
+        expect(screen.queryByTestId('bulk-toolbar')).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // selectedItems / singleSelectedItem derivation (issue #422)
+  //
+  // BulkActionToolbar's batch-vs-drawer routing (see BulkActionToolbar.test.tsx)
+  // depends entirely on what MediaGallery resolves `selected` (an id Set) to —
+  // these tests cover that resolution itself, independent of the toolbar.
+  // -------------------------------------------------------------------------
+  describe('selectedItems derivation', () => {
+    it('resolves the full multi-item selection (photos AND videos) via per-group "Select all"', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('mix-photo', {
+          type: 'photo',
+          capturedAt: '2024-06-15T08:00:00.000Z',
+          originalFilename: 'mix-photo.jpg',
+        }),
+        makeItem('mix-video', {
+          type: 'video',
+          capturedAt: '2024-06-15T09:00:00.000Z',
+          originalFilename: 'mix-video.mp4',
+        }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /select all/i }));
+
+      await waitFor(() => {
+        const ids = screen.getByTestId('bulk-toolbar-ids').textContent;
+        expect(ids?.split(',').sort()).toEqual(['mix-photo', 'mix-video']);
+      });
+      // Only the photo counts toward the batch-enhance eligible set.
+      expect(screen.getByTestId('bulk-toolbar-photo-count')).toHaveTextContent('1');
+    });
+
+    it('sets singleSelectedItem only while exactly one item is selected, and clears it once a second joins', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('single-a', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'single-a.jpg' }),
+        makeItem('single-b', { capturedAt: '2024-06-15T09:00:00.000Z', originalFilename: 'single-b.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      // Select exactly one via its own checkbox.
+      const singleATile = screen.getByAltText('single-a.jpg').closest('li') as HTMLElement;
+      await user.click(within(singleATile).getByRole('button', { name: /select item/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-single-id')).toHaveTextContent('single-a');
+      });
+
+      // Select the group's remaining item too — now singleSelectedItem must
+      // clear, since the drawer's one-item form no longer applies.
+      await user.click(screen.getByRole('button', { name: /^select all$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-single-id')).toHaveTextContent('');
+      });
+      expect(screen.getByTestId('bulk-toolbar-ids').textContent?.split(',').sort()).toEqual([
+        'single-a',
+        'single-b',
+      ]);
+    });
+
+    it('a selection spanning a paginated append includes items loaded on a LATER page', async () => {
+      const user = userEvent.setup();
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('page1-item', { originalFilename: 'page1-item.jpg' })],
+        meta: { pageSize: 50, nextCursor: 'cursor-2', hasMore: true },
+      });
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByAltText('page1-item.jpg')).toBeInTheDocument();
+      });
+
+      // Select the first page's item before the second page ever loads.
+      await user.click(screen.getByRole('button', { name: /select item/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('bulk-toolbar-ids')).toHaveTextContent('page1-item');
+      });
+
+      // Simulate the sentinel entering the viewport — useIntersectionObserver
+      // itself is mocked, so the append is driven by invoking the captured
+      // `onIntersect` callback directly rather than a real IntersectionObserver.
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('page2-item', { originalFilename: 'page2-item.jpg' })],
+        meta: { pageSize: 50, nextCursor: null, hasMore: false },
+      });
+      await act(async () => {
+        latestFeedLoadMore()();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByAltText('page2-item.jpg')).toBeInTheDocument();
+      });
+
+      // Select the newly-appended second-page item too.
+      const secondPageCheckbox = screen.getByAltText('page2-item.jpg').closest('li');
+      await user.click(
+        within(secondPageCheckbox as HTMLElement).getByRole('button', { name: /select item/i }),
+      );
+
+      // The selection now spans both the original page and the appended one —
+      // `mergedItems` (base + feed pages, minus locally-removed ids) is what
+      // `selectedItems` is derived from, so both ids must be present.
+      await waitFor(() => {
+        const ids = screen.getByTestId('bulk-toolbar-ids').textContent;
+        expect(ids?.split(',').sort()).toEqual(['page1-item', 'page2-item']);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (c) Per-group "Select all"
+  // -------------------------------------------------------------------------
+  describe('per-group select all', () => {
+    it('clicking "Select all" in a day group selects every item in that group', async () => {
+      const user = userEvent.setup();
+      // All items on the same day so they fall in one group
+      const items = [
+        makeItem('g1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'group-a.jpg' }),
+        makeItem('g2', { capturedAt: '2024-06-15T09:00:00.000Z', originalFilename: 'group-b.jpg' }),
+        makeItem('g3', { capturedAt: '2024-06-15T10:00:00.000Z', originalFilename: 'group-c.jpg' }),
+      ];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // Click the per-group "Select all" button (first occurrence)
+      const selectAllBtn = screen.getAllByRole('button', { name: /select all/i })[0];
+      await user.click(selectAllBtn);
+
+      // All three items should be selected — all checkboxes show "Deselect item"
+      await waitFor(() => {
+        const deselectBtns = screen.getAllByRole('button', { name: /deselect item/i });
+        expect(deselectBtns).toHaveLength(3);
+      });
+
+      // Bulk toolbar should be visible
+      expect(screen.getByTestId('bulk-toolbar')).toBeInTheDocument();
+    });
+
+    it('shows a "Clear" button after selecting items in a group', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('c1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'clear-a.jpg' }),
+      ];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // Select all
+      await user.click(screen.getByRole('button', { name: /select all/i }));
+
+      // A "Clear" button appears next to "Select all" in the day header
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^clear$/i })).toBeInTheDocument();
+      });
+    });
+
+    it('clicking "Clear" in a group header deselects only that group\'s items', async () => {
+      const user = userEvent.setup();
+      // Two groups: June 15 and June 16
+      const items = [
+        makeItem('d1', { capturedAt: '2024-06-15T08:00:00.000Z', originalFilename: 'day1.jpg' }),
+        makeItem('d2', { capturedAt: '2024-06-16T08:00:00.000Z', originalFilename: 'day2.jpg' }),
+      ];
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          items={items}
+        />,
+      );
+
+      // Select all in the first group (newest day renders first)
+      const selectAllBtns = screen.getAllByRole('button', { name: /select all/i });
+      await user.click(selectAllBtns[0]); // first group's Select all
+
+      // Now clear the first group
+      const clearBtn = screen.getAllByRole('button', { name: /^clear$/i })[0];
+      await user.click(clearBtn);
+
+      await waitFor(() => {
+        // After clearing, no items selected → toolbar hidden
+        expect(screen.queryByTestId('bulk-toolbar')).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (e) Favorite badge is static — guards against reintroducing the
+  // hover-revealed favorite toggle removed by issue #243 (invisible yet
+  // fully tappable on touch devices, silently starring photos).
+  // -------------------------------------------------------------------------
+  describe('favorite badge (issue #243 regression guard)', () => {
+    it('shows a static favorite badge and no favorite toggle button for a favorited item', () => {
+      const items = [
+        makeItem('fav-1', { favorite: true, originalFilename: 'starred-photo.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      // Exact-match the accessible name — the tile's own alt text
+      // ("starred-photo.jpg") must never accidentally satisfy this query.
+      expect(screen.getByRole('img', { name: /^favorite$/i })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /add to favorites|remove from favorites/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows no favorite badge and no favorite toggle button for a non-favorited item', () => {
+      const items = [
+        makeItem('fav-2', { favorite: false, originalFilename: 'unstarred-photo.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      expect(screen.queryByRole('img', { name: /^favorite$/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /add to favorites|remove from favorites/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('clicking a non-favorited tile still opens the lightbox (click is not swallowed)', async () => {
+      const user = userEvent.setup();
+      const items = [
+        makeItem('fav-3', { favorite: false, originalFilename: 'clickable.jpg' }),
+      ];
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const tile = screen.getByAltText('clickable.jpg');
+      await user.click(tile);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('media-lightbox')).toBeInTheDocument();
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (f) content-visibility placeholder height (issue #237)
+  //
+  // The reserved height for an off-screen day group must be computed with the
+  // ACTIVE breakpoint's column count. It used to hard-code the desktop `/ 6`,
+  // so a phone (3 columns) reserved half the rows it actually rendered and the
+  // document grew by roughly a group's height as each one scrolled in.
+  // -------------------------------------------------------------------------
+  describe('placeholder height (issue #237)', () => {
+    it('assumes 4 rows for a 12-item group at xs (3 columns), not 2', () => {
+      expect(GALLERY_COLS.xs).toBe(3);
+      // 12 items / 3 columns = 4 rows — NOT the 2 rows the old `/ 6` produced.
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, null)).toBe(
+        4 * GALLERY_FALLBACK_ROW_PX,
+      );
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, null)).not.toBe(
+        2 * GALLERY_FALLBACK_ROW_PX,
+      );
+    });
+
+    it('scales rows with the column count at each breakpoint', () => {
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.sm, null)).toBe(
+        3 * GALLERY_FALLBACK_ROW_PX,
+      );
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.md, null)).toBe(
+        2 * GALLERY_FALLBACK_ROW_PX,
+      );
+    });
+
+    it('uses the measured tile size once a container width is known', () => {
+      // 360px phone viewport, 3 columns, 2px gaps → tile edge ~118.67px
+      const tile = (360 - (GALLERY_COLS.xs - 1) * GALLERY_GAP_PX) / GALLERY_COLS.xs;
+      expect(galleryPlaceholderHeight(12, GALLERY_COLS.xs, tile)).toBe(
+        Math.round(4 * (tile + GALLERY_GAP_PX)),
+      );
+    });
+
+    it('renders the xs placeholder height into the grid style for a 12-item group', () => {
+      // jsdom's matchMedia mock always reports `matches: false`, so both
+      // breakpoint.up() queries are false → the xs (3-column) branch is active.
+      // ResizeObserver is mocked and never fires → the fallback row height.
+      const items = Array.from({ length: 12 }, (_, i) =>
+        makeItem(`ph-${i}`, { capturedAt: '2024-06-15T10:00:00.000Z' }),
+      );
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((s) => s.textContent ?? '')
+        .join('');
+
+      // The placeholder must constrain the BLOCK axis only (issue #291).
+      expect(css).toMatch(
+        new RegExp(`contain-intrinsic-height:\\s*auto\\s+${4 * GALLERY_FALLBACK_ROW_PX}px`),
+      );
+    });
+
+    // -----------------------------------------------------------------------
+    // Issue #291 — the single-value shorthand sized BOTH axes
+    //
+    // `contain-intrinsic-size: auto <len>` applies <len> to width AND height.
+    // Combined with `content-visibility: auto`, a never-painted day group
+    // therefore claimed an intrinsic WIDTH of its own placeholder HEIGHT
+    // (hundreds of px), which propagated up through the shell's flex item and
+    // widened the app past the viewport — then fed back through the gallery's
+    // ResizeObserver and diverged. The emitted style must never carry an
+    // intrinsic width.
+    // -----------------------------------------------------------------------
+    it('constrains the block axis only — no intrinsic width (issue #291)', () => {
+      const items = Array.from({ length: 12 }, (_, i) =>
+        makeItem(`ph2-${i}`, { capturedAt: '2024-06-15T10:00:00.000Z' }),
+      );
+
+      render(
+        <MediaGallery circleId="circle-1" activeCircleRole="circle_admin" items={items} />,
+      );
+
+      const css = Array.from(document.querySelectorAll('style'))
+        .map((s) => s.textContent ?? '')
+        .join('');
+
+      // The two-axis shorthand must be gone entirely...
+      expect(css).not.toMatch(/contain-intrinsic-size\s*:/);
+      // ...and the inline axis must be explicitly unconstrained.
+      expect(css).toMatch(/contain-intrinsic-width:\s*none/);
+      // Nothing may claim an intrinsic width in px.
+      expect(css).not.toMatch(/contain-intrinsic-width:\s*(auto\s+)?\d/);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (d) Feed mode — infinite scroll
+  // -------------------------------------------------------------------------
+  describe('feed mode', () => {
+    it('renders items returned by listMedia in feed mode', async () => {
+      const feedItems = [
+        makeItem('f1', { capturedAt: '2024-07-01T10:00:00.000Z', originalFilename: 'feed-photo-1.jpg' }),
+        makeItem('f2', { capturedAt: '2024-07-01T11:00:00.000Z', originalFilename: 'feed-photo-2.jpg' }),
+      ];
+
+      mockListMedia.mockResolvedValueOnce({
+        items: feedItems,
+        meta: { pageSize: 50, nextCursor: null, hasMore: false },
+      });
+
+      render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByAltText('feed-photo-1.jpg')).toBeInTheDocument();
+        expect(screen.getByAltText('feed-photo-2.jpg')).toBeInTheDocument();
+      });
+    });
+
+    it('renders the infinite-scroll sentinel element in feed mode', async () => {
+      mockListMedia.mockResolvedValueOnce({
+        items: [makeItem('s1')],
+        meta: { pageSize: 50, nextCursor: 'cursor-abc', hasMore: true },
+      });
+
+      const { container } = render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole="circle_admin"
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      await waitFor(() => {
+        // MediaGallery renders alt={item.originalFilename}; makeItem() defaults
+        // originalFilename to `file-${id}.jpg`, i.e. "file-s1.jpg" here — not
+        // the literal "Photo s1" the component has never produced.
+        expect(screen.getByAltText('file-s1.jpg')).toBeInTheDocument();
+      });
+
+      // The sentinel is an empty <Box sx={{ height: 1 }}> rendered after the last group.
+      // It has height=1 CSS in sx which becomes height: 1px — a zero-height div in jsdom.
+      // We verify at least one <div> with a single-pixel height exists (MUI Box sx).
+      // A more reliable check: listMedia was called, items are visible, page has data.
+      // Issue #104 moved the default gallery to keyset pagination: useInfiniteMedia's
+      // default fetcher calls listMedia({...params, cursor, pageSize}) — the initial
+      // load passes cursor: null and never a `page` field at all.
+      expect(mockListMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: 'circle-1', cursor: null, pageSize: 50 }),
+      );
+    });
+
+    it('shows skeleton tiles on initial feed load', async () => {
+      // Never resolve so we stay in loading state
+      mockListMedia.mockReturnValue(new Promise(() => {}));
+
+      const { container } = render(
+        <MediaGallery
+          circleId="circle-1"
+          activeCircleRole={null}
+          queryParams={{ circleId: 'circle-1' }}
+        />,
+      );
+
+      // MUI Skeleton renders as a <span> with MuiSkeleton-root class
+      await waitFor(() => {
+        const skeletons = container.querySelectorAll('.MuiSkeleton-root');
+        expect(skeletons.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('does NOT render items from feed when circleId is empty (disabled)', () => {
+      render(
+        <MediaGallery
+          circleId=""
+          activeCircleRole={null}
+          queryParams={{ circleId: '' }}
+        />,
+      );
+
+      // With empty circleId, enabled=false so listMedia is never called
+      expect(mockListMedia).not.toHaveBeenCalled();
+    });
+  });
+});

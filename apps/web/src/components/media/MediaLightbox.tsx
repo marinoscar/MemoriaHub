@@ -43,21 +43,21 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTheme } from '@mui/material/styles';
-import type { MediaItem } from '../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import {
   getMedia,
   patchMedia as patchMediaApi,
   bulkArchive,
   bulkUnarchive,
   bulkDelete,
-} from '../../services/media';
+} from '@marinoscar/memoriahub-web/media/headless';
 import { rerunMediaFaces } from '../../services/face';
-import { rerunThumbnail } from '../../services/thumbnail';
+import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
 import { useMediaTags } from '../../hooks/useMediaTags';
-import { useMediaMetadata } from '../../hooks/useMediaMetadata';
+import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
 import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
-import { AddToAlbumDialog } from '../album/AddToAlbumDialog';
-import { MediaOrientationEditor } from './MediaOrientationEditor';
+import { AddToAlbumDialog } from '@marinoscar/memoriahub-web/media/ui';
+import { MediaOrientationEditor } from '@marinoscar/memoriahub-web/media/ui';
 import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
 import { VideoPlayer } from './VideoPlayer';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';

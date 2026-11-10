@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { armOwnerScopeParams, disarmOwnerScopeParams } from '../../services/ownerScopeParams';
 import { streamAgent } from '../../services/searchAgentStream';
-import { exportMedia } from '../../services/media';
+import { exportMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { API_BASE_URL } from '../../services/api';
 
 const PERSONAL = 'personal-library-1';
 const GROUP = 'group-alpha';
@@ -44,7 +45,8 @@ describe('owner scope on raw fetch requests', () => {
     fetchSpy.mockResolvedValue(new Response('{}', { status: 500 }));
     await exportMedia('json', { circleId: GROUP }).catch(() => undefined);
     const url = String(fetchSpy.mock.calls[0][0]);
-    expect(url.startsWith('/api/media/export?')).toBe(true);
+    // The packaged client sends to the host's API root (`API_BASE_URL`, `/api` by default).
+    expect(url.startsWith(`${API_BASE_URL}/media/export?`)).toBe(true);
     expect(url).toContain(`ownerGroupId=${GROUP}`);
     expect(url).not.toContain('circleId=');
   });

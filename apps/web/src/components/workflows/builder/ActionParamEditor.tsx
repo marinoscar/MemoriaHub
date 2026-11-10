@@ -14,11 +14,11 @@ import {
   Checkbox,
   FormControlLabel,
 } from '@mui/material';
-import { LocationPickerMap } from '../../media/LocationPickerMap';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
 import { usePeople } from '../../../hooks/usePeople';
 import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import type { ExploreItem } from '../../../services/media';
-import type { Album } from '../../../types/media';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import type { Album } from '@marinoscar/memoriahub-web/media/headless';
 import type { WorkflowActionInstance } from '../../../types/workflows';
 import { paramKindFor, RERUN_KINDS } from '../../../constants/workflowActionMeta';
 

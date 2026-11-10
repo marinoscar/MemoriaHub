@@ -60,9 +60,12 @@ interface UseFeatureFlagsReturn {
  * null and populates `error` — it never throws, so a flag outage can only hide
  * a gated affordance, never break the surface hosting it.
  */
-export function useFeatureFlags(): UseFeatureFlagsReturn {
+export function useFeatureFlags(options: { enabled?: boolean } = {}): UseFeatureFlagsReturn {
+  // `enabled: false` (the host binding, before sign-in) reads nothing: the
+  // endpoint needs a session, so the login page must not fire it.
+  const { enabled = true } = options;
   const [flags, setFlags] = useState<FeatureFlags | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useIsMounted();
 
@@ -85,6 +88,10 @@ export function useFeatureFlags(): UseFeatureFlagsReturn {
   }, [isMounted]);
 
   useEffect(() => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     let active = true;
     setIsLoading(true);
     setError(null);
@@ -105,7 +112,7 @@ export function useFeatureFlags(): UseFeatureFlagsReturn {
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabled]);
 
   const refresh = useCallback(() => load(true), [load]);
 
