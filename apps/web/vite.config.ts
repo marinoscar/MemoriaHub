@@ -45,6 +45,21 @@ export default defineConfig({
   // serves it in dev, replacing the old static `public/site.webmanifest`.
   plugins: [react(), VitePWA(buildServiceWorkerOptions())],
   resolve: {
+    // One copy of React, MUI, Emotion and the router for the app, the platform packages and
+    // `@marinoscar/memoriahub-web` (a workspace link whose dist imports them as peers).
+    dedupe: [
+      'react',
+      'react-dom',
+      'react-router',
+      'react-router-dom',
+      '@mui/material',
+      '@mui/system',
+      '@mui/icons-material',
+      '@emotion/react',
+      '@emotion/styled',
+      'leaflet',
+      'react-leaflet',
+    ],
     alias: [
       {
         find: 'react-transition-group/cjs/TransitionGroupContext.js',
