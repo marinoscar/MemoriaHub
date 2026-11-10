@@ -31,6 +31,7 @@
     "check:memoriahub-package-docs": "npm run docs:memoriahub-packages && node scripts/memoriahub-packages/check-package-docs.mjs",
     "check:memoriahub-pack": "node scripts/memoriahub-packages/check-package-pack.mjs",
     "check:memoriahub-lean-install": "node scripts/memoriahub-packages/check-lean-install.mjs",
+    "check:memoriahub-bare-host": "node examples/bare-host/run.mjs --from pack",
     "changeset": "changeset",
     "version-packages": "changeset version && npm install --package-lock-only",
     "lint:memoriahub-packages": "eslint --max-warnings=0 --no-error-on-unmatched-pattern \"packages/memoriahub-*/src/**/*.{ts,tsx}\""

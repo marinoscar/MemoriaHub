@@ -26,7 +26,7 @@ import {
   stripComments,
   withImplied,
 } from '../check-slice-peers.mjs';
-import { forbiddenIn, treeNames } from '../check-lean-install.mjs';
+import { exportSubpaths, forbiddenIn, treeNames } from '../check-lean-install.mjs';
 import { copyLicense } from '../copy-license.mjs';
 import { expandGuards } from '../check-single-instance.mjs';
 import { writeDistStubs } from '../write-dist-stubs.mjs';
@@ -653,4 +653,34 @@ test('lean-install: forbiddenIn flags a provider SDK too', () => {
 test('lean-install: forbiddenIn flags @marinoscar/platform-api when it is installed, nested or not', () => {
   const tree = { dependencies: { a: { version: '1.0.0', dependencies: { '@marinoscar/platform-api': { version: '0.1.0-next.5' } } } } };
   assert.deepEqual(forbiddenIn(treeNames(tree)), ['@marinoscar/platform-api']);
+});
+
+test('exportSubpaths lists every importable entry of an exports map (the root as the empty subpath)', () => {
+  assert.deepEqual(
+    exportSubpaths({ '.': {}, './image': {}, './media/testing': {}, './package.json': './package.json' }),
+    ['', 'image', 'media/testing'],
+  );
+  assert.deepEqual(exportSubpaths(undefined), []);
+});
+
+test('the release workflow cannot publish by default (manual only, dry run first, no secret defined here)', () => {
+  const text = readFileSync(join(REPO, '.github', 'workflows', 'memoriahub-release.yml'), 'utf8');
+  const code = text.replace(/^\s*#.*$/gm, '');
+  const triggers = code.slice(code.indexOf('\non:'), code.indexOf('\nconcurrency:'));
+  assert.match(triggers, /workflow_dispatch:/);
+  for (const trigger of ['push:', 'pull_request', 'schedule:', 'release:', 'workflow_run:', 'tags:']) {
+    assert.ok(!triggers.includes(trigger), `the release workflow must not trigger on ${trigger}`);
+  }
+  // The publish input defaults to false and the publish job needs it and the confirmation word.
+  assert.match(triggers, /publish:[\s\S]*?default: false/);
+  assert.match(code, /if: \$\{\{ inputs\.publish == true && inputs\.confirm == 'publish' \}\}/);
+  // No latest tag, provenance on, and the only secret is the registry token the owner configures.
+  assert.ok(!/--tag latest/.test(code));
+  assert.match(code, /npm publish[^\n]*--tag next[^\n]*--provenance/);
+  assert.deepEqual([...code.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]), ['MEMORIAHUB_REGISTRY_TOKEN']);
+  // The packages are still private, which makes npm refuse to publish them.
+  for (const dir of ['compute', 'contract', 'db', 'api', 'web']) {
+    const manifest = JSON.parse(readFileSync(join(REPO, 'packages', `memoriahub-${dir}`, 'package.json'), 'utf8'));
+    assert.equal(manifest.private, true, `memoriahub-${dir} stays private until the owner opens the publish gate`);
+  }
 });
