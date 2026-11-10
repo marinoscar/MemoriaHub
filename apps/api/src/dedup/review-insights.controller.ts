@@ -1,6 +1,6 @@
 import { Controller, Get, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ReviewInsightsService } from './review-insights.service';
+import { ReviewInsightsService } from '@marinoscar/memoriahub-api/dedup';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';

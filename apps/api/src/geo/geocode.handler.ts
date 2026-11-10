@@ -13,7 +13,7 @@ import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../en
 import { geocodeResultSchema, type GeocodeResult } from '@marinoscar/memoriahub-compute/dto';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { resolveMediaItemJob, withPlatformRateLimits, type MediaJobContext } from '../platform/jobs/media-item-job';
 import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
 

@@ -12,7 +12,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import type { MemoriahubRequestUser } from '../core/index.js';
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { JOB_REASON, MEDIA_TYPE, TAG_STATUS } from './constants.js';
 import { TaggingController } from './tagging.controller.js';
 

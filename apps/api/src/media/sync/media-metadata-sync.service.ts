@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,

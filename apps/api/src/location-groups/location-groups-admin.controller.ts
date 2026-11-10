@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { LocationGroupsService } from './location-groups.service';
+import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
 import { RebuildLocationGroupsDto } from './dto/location-group.dto';
 
 /**

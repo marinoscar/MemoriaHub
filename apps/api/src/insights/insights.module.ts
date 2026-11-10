@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { InsightsService } from './insights.service';
-import { InsightsRefreshTask } from './insights-refresh.task';
-import { InsightsController } from './insights.controller';
-import { StorageInsightsHandler } from './storage-insights.handler';
+import { InsightsController, InsightsModule as InsightsSliceModule } from '@marinoscar/memoriahub-api/insights';
 
+import { PrismaModule } from '../prisma/prisma.module';
+
+/**
+ * The web app's binding of the insights slice (RETRO-J10, #624): the slice (service, handler,
+ * refresh task) lives in `@marinoscar/memoriahub-api/insights`; the controller is the slice's class,
+ * mounted here (not registered by `forRoot()`, which would change the OpenAPI path order).
+ */
 @Module({
-  imports: [PrismaModule, EnrichmentModule],
+  imports: [PrismaModule, InsightsSliceModule.forRoot()],
   controllers: [InsightsController],
-  providers: [InsightsService, InsightsRefreshTask, StorageInsightsHandler],
-  exports: [InsightsService],
+  exports: [InsightsSliceModule],
 })
 export class InsightsModule {}

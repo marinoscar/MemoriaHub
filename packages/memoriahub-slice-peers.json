@@ -244,6 +244,37 @@
         "zod"
       ]
     },
+    "face": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
+        "zod"
+      ]
+    },
+    "insights": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@nestjs/swagger"
+      ]
+    },
+    "location": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@marinoscar/memoriahub-contract"
+      ]
+    },
+    "dedup": {
+      "peers": [
+        "@nestjs/common",
+        "@marinoscar/memoriahub-compute",
+        "onnxruntime-node"
+      ]
+    },
     "tagging": {
       "peers": [
         "@marinoscar/memoriahub-compute",

@@ -4,9 +4,9 @@ The NestJS side of the MemoriaHub domain: the **host ports** (injection tokens a
 
 ## Purpose and scope
 
-MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media` is the first, partly moved. A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
+MemoriaHub's domain (media, faces, tagging, search, memories, workflows, review runs, location, dedup, burst, social media, enhancement, insights) lives in this package, slice by slice (RETRO-J5 to J10); `media`, `face`, `tagging` and `search` are moved so far (media partly). A domain slice may not import the platform: everything outside the domain (the queue, the model runtime, object storage, notifications, settings, credentials, access policy, the database client, the event bus, audit, webhooks, metrics) is a **port**, an injection token plus an interface declared here and bound by each host. The web app binds the ports to the platform in `apps/api/src/platform-memoriahub/`; a bare host binds its own. Moving a slice therefore never moves a platform import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
 
-The package carries the ports, the module, the testing kit, the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job), the `tagging` slice (photo and video auto-tagging, the transcript, the tag vocabulary and the backfill) and the `search` slice (deterministic, semantic and agentic search). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
+The package carries the ports, the module, the testing kit and the `media` slice (the upload fan-out registry, the sidecar touch service, the `upload_completed` producer, the thumbnail signer, the Media Sync device service and the trash purge job), the `face` slice (detection in photos and videos, matching, clustering, people, auto-archive), the `tagging` slice (photo and video auto-tagging, the transcript, the tag vocabulary and the backfill) and the `search` slice (deterministic, semantic and agentic search). The web app behaves exactly as before; the port design is in [the ports spec](../../docs/specs/memoriahub-ports.md).
 
 Status: experimental. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
 
@@ -17,6 +17,14 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/testing`: an in-memory fake of every port and `describeMemoriahubPortsConformance`, the kit a binding must pass ([slice README](src/testing/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/media`: the media slice, `MediaModule.forRoot` and `UploadEnrichmentRegistry` ([slice README](src/media/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/media/testing`: `describeMediaSliceConformance`, the kit the media slice's guarantees are checked with ([slice README](src/media/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/insights`: the storage insights slice, `InsightsModule.forRoot` and `InsightsService` ([slice README](src/insights/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/location`: the location slice (location grouping so far), `LocationModule.forRoot` and `LocationGroupResolverService` ([slice README](src/location/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/location/testing`: `describeLocationSliceConformance` ([slice README](src/location/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection so far), `DedupModule.forRoot` and `DuplicateDetectionService` ([slice README](src/dedup/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/dedup/testing`: `describeDedupSliceConformance` ([slice README](src/dedup/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/face`: the face slice, `FaceModule.forRoot`, `PeopleService`, `FaceMatchingService` the four face controllers and the three face job handlers ([slice README](src/face/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/face/testing`: `describeFaceSliceConformance`, the kit the face slice's guarantees are checked with ([slice README](src/face/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/tagging`: the tagging slice, `TaggingModule.forRoot`, the two server-only AI job handlers (`auto_tagging`, `video_auto_tagging`), the tag vocabulary and the backfill ([slice README](src/tagging/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/tagging/testing`: `describeTaggingSliceConformance` and the in-memory store behind it ([slice README](src/tagging/README.md#entry-point)).
 - `@marinoscar/memoriahub-api/search`: the search slice, `SearchModule.forRoot`, deterministic, semantic and agentic search and the `SEARCHABLE_FIELDS` registry ([slice README](src/search/README.md#purpose-and-scope)).
@@ -90,10 +98,11 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
+| `FACE_CONFIG`, `FACE_PERSON_AVATARS`, `FACE_STORAGE_ORG` | token | the face slice's three host hooks: the configuration reader, the account-avatar code and the organization of a derived storage row |
 
 ## Data
 
-None of its own. The package ships no schema (the domain's Prisma fragments are `@marinoscar/memoriahub-db`). The media slice reads and writes `media_items`, `storage_objects`, `media_sync_devices`, `media_sync_runs`, `media_sync_diagnostic_reports`, `android_app_releases`, `personal_access_tokens` (the device's token state), `audit_events` and `users`, through narrow structural delegates (`MediaModels`) and never a generated client. A `BigInt` column (`bytes_uploaded`) leaves the slice as a string; `captured_at` is a civil timestamp the slice never converts.
+None of its own. The package ships no schema (the domain's Prisma fragments are `@marinoscar/memoriahub-db`). The media slice reads and writes `media_items`, `storage_objects`, `media_sync_devices`, `media_sync_runs`, `media_sync_diagnostic_reports`, `android_app_releases`, `personal_access_tokens` (the device's token state), `audit_events` and `users`, through narrow structural delegates (`MediaModels`) and never a generated client. The face slice reads and writes `faces`, `people`, `media_face_status`, `media_items`, `storage_objects` (the video face frames) and `audit_events` the same way. A `BigInt` column (`bytes_uploaded`) leaves the slice as a string; `captured_at` is a civil timestamp the slice never converts.
 
 ## Permissions and settings
 

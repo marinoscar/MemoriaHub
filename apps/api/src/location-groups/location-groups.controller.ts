@@ -15,7 +15,7 @@ import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { LocationGroupsService } from './location-groups.service';
+import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
 import {
   CreateLocationGroupDto,
   ListLocationGroupSuggestionsDto,

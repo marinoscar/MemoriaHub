@@ -35,9 +35,9 @@ import {
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
+import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { SocialMediaDetectorService } from '../../src/social-media/social-media-detector.service';
 import { mediaItemJob } from '../helpers/platform-job';
@@ -138,7 +138,7 @@ function dedupService() {
 }
 
 const buildDuplicateDetection = () =>
-  new DuplicateDetectionHandler(registry, subjectLookups() as never, dedupService() as never);
+  new DuplicateDetectionHandler(registry as never, subjectLookups() as never, dedupService() as never);
 
 describe('duplicate_detection', () => {
   staticContract('duplicate_detection', buildDuplicateDetection);
@@ -198,7 +198,7 @@ describe('duplicate_detection', () => {
 // ---------------------------------------------------------------------------
 
 const buildBatch = () =>
-  new DuplicateDetectionBatchHandler(registry, subjectLookups() as never, { exists: async (id: string) => world.circles.has(id) } as never, dedupService() as never);
+  new DuplicateDetectionBatchHandler(registry as never, { scopeExists: async (id: string) => world.circles.has(id) } as never, dedupService() as never);
 
 describe('duplicate_detection_batch', () => {
   staticContract('duplicate_detection_batch', buildBatch);
@@ -260,7 +260,7 @@ function buildConfidenceBackfill(): DuplicateConfidenceBackfillHandler {
     mediaItem: { findMany: async () => [{ id: 'm1' }, { id: 'm2' }] },
   };
   const detection = { computeGroupConfidence: async () => 0.97 };
-  return new DuplicateConfidenceBackfillHandler(registry, prisma as never, detection as never);
+  return new DuplicateConfidenceBackfillHandler(registry as never, prisma as never, detection as never);
 }
 
 describe('duplicate_confidence_backfill', () => {

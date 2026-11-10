@@ -6,7 +6,7 @@
  * NestJS testing module can compile.
  */
 import { ForbiddenException } from '@nestjs/common';
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { SearchService } from './search.service.js';
 
 const CIRCLE_ID = 'circle-search-test';

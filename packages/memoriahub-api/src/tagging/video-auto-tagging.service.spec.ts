@@ -32,7 +32,7 @@ jest.mock('@marinoscar/memoriahub-compute/video', () => ({
 }));
 
 
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { MemoriahubAiError, MemoriahubRateLimitError } from '../ports/index.js';
 import type { MediaJobContext } from './job-context.js';
 import { MEDIA_TYPE, TAG_STATUS } from './constants.js';

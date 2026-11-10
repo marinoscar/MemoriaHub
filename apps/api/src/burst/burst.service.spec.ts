@@ -22,7 +22,7 @@ import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';

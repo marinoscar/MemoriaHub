@@ -5,7 +5,7 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { VisualEmbeddingService } from '../../../dedup/visual-embedding.service';
+import { VisualEmbeddingService } from '@marinoscar/memoriahub-api/dedup';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 

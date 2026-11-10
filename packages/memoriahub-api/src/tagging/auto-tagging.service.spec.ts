@@ -26,7 +26,7 @@ jest.mock('./image-mime.util.js', () => ({
 }));
 
 import { Readable } from 'stream';
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { MemoriahubAiError, MemoriahubRateLimitError } from '../ports/index.js';
 import { AutoTaggingService } from './auto-tagging.service.js';
 import { JOB_REASON, MEDIA_TYPE, TAG_STATUS } from './constants.js';

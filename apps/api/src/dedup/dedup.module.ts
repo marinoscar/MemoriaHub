@@ -1,30 +1,30 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { DedupModule as DedupSliceModule } from '@marinoscar/memoriahub-api/dedup';
+
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
+import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
 import { AdminDuplicateController } from './admin-duplicate.controller';
-import { DuplicateDetectionService } from './duplicate-detection.service';
-import { DuplicateDetectionHandler } from './duplicate-detection.handler';
-import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
-import { DuplicateBackfillService } from './duplicate-backfill.service';
-import { DuplicateConfidenceBackfillHandler } from './duplicate-confidence-backfill.handler';
-import { VisualEmbeddingService } from './visual-embedding.service';
 import { ReviewInsightsController } from './review-insights.controller';
-import { ReviewInsightsService } from './review-insights.service';
-import { ReviewRunsModule } from '../review-runs/review-runs.module';
-import { DedupUploadEnrichment } from './dedup-upload-enrichment';
 
+/**
+ * The web app's binding of the dedup slice (RETRO-J10, #624). The detection (CLIP visual embeddings, dHash,
+ * two-tier matching and grouping), the three duplicate jobs, the admin backfill, the upload fan-out
+ * registration and the review insights live in `@marinoscar/memoriahub-api/dedup`; the review service and
+ * the controllers stay here (the review service starts review runs, which have not moved yet).
+ */
 @Module({
   imports: [
+    DedupSliceModule.forRoot(),
     EnrichmentModule,
     MediaProcessingModule,
     PrismaModule,
     OwnerAccessModule,
-    
     MediaModule,
     // Mutual: the duplicate review-run strategy wraps DuplicateService's
     // primitives while DuplicateService's threshold endpoints start review runs
@@ -32,18 +32,7 @@ import { DedupUploadEnrichment } from './dedup-upload-enrichment';
     forwardRef(() => ReviewRunsModule),
   ],
   controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
-  providers: [
-    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
-    DedupUploadEnrichment,
-    DuplicateService,
-    DuplicateDetectionService,
-    DuplicateDetectionHandler,
-    DuplicateDetectionBatchHandler,
-    DuplicateBackfillService,
-    DuplicateConfidenceBackfillHandler,
-    VisualEmbeddingService,
-    ReviewInsightsService,
-  ],
-  exports: [VisualEmbeddingService, DuplicateDetectionService, DuplicateService],
+  providers: [DuplicateService],
+  exports: [DedupSliceModule, DuplicateService],
 })
 export class DedupModule {}

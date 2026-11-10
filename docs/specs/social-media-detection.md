@@ -97,8 +97,8 @@ CLEAN    → write media_social_status (isSocialMedia:false); if previously flag
 
 Two additional gates exist so a flagged video can never accidentally re-enter face-detection compute even if the fan-out call is skipped, retried, or raced:
 
-- **`VideoFaceDetectionHandler`** (`apps/api/src/face/video-face-detection.handler.ts`) loads `mediaItem.socialMediaSource` and, if non-null, short-circuits: marks the item `no_faces` (so status reads as "processed", not stuck) without downloading the video or touching the face provider.
-- **`FaceBackfillService`** (`apps/api/src/face/face-backfill.service.ts`) filters `socialMediaSource: null` into its eligibility query, so an admin-triggered `POST /api/admin/face/backfill` never re-creates face-detection jobs for videos already flagged as social re-shares.
+- **`VideoFaceDetectionHandler`** (`packages/memoriahub-api/src/face/video-face-detection.handler.ts`) loads `mediaItem.socialMediaSource` and, if non-null, short-circuits: marks the item `no_faces` (so status reads as "processed", not stuck) without downloading the video or touching the face provider.
+- **`FaceBackfillService`** (`packages/memoriahub-api/src/face/face-backfill.service.ts`) filters `socialMediaSource: null` into its eligibility query, so an admin-triggered `POST /api/admin/face/backfill` never re-creates face-detection jobs for videos already flagged as social re-shares.
 
 Both gates are defense-in-depth on top of the gate-then-fan-out ordering, not a replacement for it — they protect against edge cases like a rerun of `social_media_detection` on an item that already has a `video_face_detection` job queued from before the feature was enabled.
 
@@ -474,7 +474,7 @@ The `system` tag source (§4.3) ensures a user's own manual tagging is never sil
 
 - No dedicated spec file yet for `SocialMediaBackfillService` (per-circle/global backfill counting, `force` semantics, `enqueueRerun`, `getStatus`'s synthetic not-processed shape).
 - No dedicated spec file yet for `SocialMediaMediaController` or `AdminSocialMediaController` (RBAC branches, the 400-when-disabled guard, request validation).
-- `apps/api/src/face/video-face-detection.handler.spec.ts` and `apps/api/src/face/face-backfill.service.spec.ts` (pre-existing files) do not yet contain a case asserting the `socialMediaSource`-non-null early-return or the backfill eligibility exclusion described in §2.2 — the production code path exists and is exercised indirectly by the handler's own spec, but there is no test pinned to the face-side files themselves.
+- `packages/memoriahub-api/src/face/video-face-detection.handler.spec.ts` and `packages/memoriahub-api/src/face/face-backfill.service.spec.ts` (pre-existing files) do not yet contain a case asserting the `socialMediaSource`-non-null early-return or the backfill eligibility exclusion described in §2.2 — the production code path exists and is exercised indirectly by the handler's own spec, but there is no test pinned to the face-side files themselves.
 
 ### Unit Tests (remaining target coverage)
 

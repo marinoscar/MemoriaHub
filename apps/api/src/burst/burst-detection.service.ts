@@ -9,7 +9,7 @@ import {
 } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { computeAndPersistVisualHash } from '../media-processing/hash-backfill.util';
-import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
+import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
 
 /**

@@ -6,7 +6,7 @@
  * knnMediaIds uses $queryRaw (pgvector) and requires a real DB with the
  * pgvector extension — those are integration tests only and are NOT run here.
  */
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { SemanticSearchService } from './semantic-search.service.js';
 
 // ---------------------------------------------------------------------------

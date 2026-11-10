@@ -15,7 +15,7 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 
 import { LocationGroupsController } from './location-groups.controller';
 import { LocationGroupsAdminController } from './location-groups-admin.controller';
-import { LocationGroupsService } from './location-groups.service';
+import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
 import { RolesGuard, PermissionsGuard, ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 

@@ -31,21 +31,33 @@ export const API_SOURCE_ROOT = join(__dirname, '..', '..', 'src');
 export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'media');
 
 /**
- * The tagging slice of `@marinoscar/memoriahub-api` (RETRO-J7, #618). Paths relative to this root
- * in the raw-SQL allowlist are the slice's own (`auto-tagging.service.ts`).
+ * The package's domain slices moved by RETRO-J10 (#624) (insights, location, dedup, burst, social,
+ * enhancement): each root is scanned like the app's own tree and its raw-SQL allowlist paths are
+ * relative to it.
  */
-export const TAGGING_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'tagging');
+const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
+export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup'].map((slice) => join(SLICES_ROOT, slice));
 
 /**
- * The search slice of `@marinoscar/memoriahub-api` (RETRO-J7, #618). Paths relative to this root
- * in the raw-SQL allowlist are the slice's own (`semantic-search.service.ts`).
+ * The face slice of `@marinoscar/memoriahub-api` (RETRO-J6, #615), scanned like the media slice. It
+ * declares no `@Cron` or `@OnEvent` today: a later one is held to the same rules. Paths in the
+ * raw-SQL allowlist are relative to this root (`face-matching.service.ts`).
  */
-export const SEARCH_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'search');
+export const FACE_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'face');
+
+
+/**
+ * The tagging and search slices of `@marinoscar/memoriahub-api` (RETRO-J7, #618), scanned like the media
+ * slice. Paths in the raw-SQL allowlist are relative to each root (`auto-tagging.service.ts`,
+ * `semantic-search.service.ts`).
+ */
+export const J7_SLICE_SOURCE_ROOTS: readonly string[] = ['tagging', 'search'].map((slice) => join(SLICES_ROOT, slice));
 
 /** Every root the two scans read. */
 export const CRON_SOURCE_ROOTS: readonly string[] = [
   API_SOURCE_ROOT,
   MEDIA_SLICE_SOURCE_ROOT,
-  TAGGING_SLICE_SOURCE_ROOT,
-  SEARCH_SLICE_SOURCE_ROOT,
+  FACE_SLICE_SOURCE_ROOT,
+  ...J10_SLICE_SOURCE_ROOTS,
+  ...J7_SLICE_SOURCE_ROOTS,
 ];

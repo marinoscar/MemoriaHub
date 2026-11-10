@@ -7,7 +7,7 @@
  * unexpected bill from a command whose behavior they thought they understood.
  */
 
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { JOB_REASON, MEDIA_TYPE, TAG_STATUS } from './constants.js';
 import { TaggingBackfillService } from './tagging-backfill.service.js';
 

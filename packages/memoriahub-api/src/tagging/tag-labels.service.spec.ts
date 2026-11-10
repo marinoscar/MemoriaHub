@@ -11,7 +11,7 @@
  */
 
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { mockDb, type MockDb } from '../../test/helpers/mock-db.js';
+import { createMockDb as mockDb, type MockDb } from '../../test/helpers/mock-db.js';
 import { TagLabelsService } from './tag-labels.service.js';
 
 // ---------------------------------------------------------------------------

@@ -208,6 +208,7 @@ export class FakeMemoriahubJobs implements MemoriahubJobsPort {
       payload: input.payload,
       attempts: 0,
       orgId: input.orgId ?? null,
+      reason: input.reason ?? null,
       status: 'pending',
       skipDedup: input.skipDedup === true,
       scheduledFor: input.scheduledFor ?? null,
@@ -230,7 +231,7 @@ export class FakeMemoriahubJobs implements MemoriahubJobsPort {
     row.status = 'running';
     row.attempts += 1;
     try {
-      await handler.process({ id: row.id, type: row.type, subjectType: row.subjectType, subjectId: row.subjectId, payload: row.payload, attempts: row.attempts, orgId: row.orgId });
+      await handler.process({ id: row.id, type: row.type, subjectType: row.subjectType, subjectId: row.subjectId, payload: row.payload, attempts: row.attempts, orgId: row.orgId, reason: row.reason });
       row.status = 'succeeded';
       this.settle(row);
     } catch (error) {

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
+import type { GeoLocationProvider, GeoLocationResult } from '@marinoscar/memoriahub-api/location';
 import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
 import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
 import { GeoLocationService } from './geo-location.service';

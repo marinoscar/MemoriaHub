@@ -30,13 +30,13 @@ import {
   MockPrismaService,
 } from '../mocks/prisma.mock';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
-import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider.interface';
+import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
-import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 import { thumbnailServiceOverMocks } from '../helpers/media-thumbnail';
 

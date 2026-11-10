@@ -12,9 +12,9 @@
 import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '../../src/dedup/duplicate-confidence-backfill.handler';
-import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler';
-import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler';
+import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
+import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
@@ -40,8 +40,15 @@ describe('dedup/burst/social job handlers on the booted app (RETRO-C5)', () => {
     await closeTestApp(context);
   });
 
+  // The dedup handlers moved into `@marinoscar/memoriahub-api/dedup` (RETRO-J10): they register through the
+  // jobs port, so the platform registry holds the adapted handler, not the class instance.
+  const PORT_BOUND = new Set(['duplicate_detection', 'duplicate_detection_batch', 'duplicate_confidence_backfill']);
   it.each(NATIVE)('%s dispatches to the native handler class', (type, HandlerClass) => {
-    expect(registry.get(type)).toBeInstanceOf(HandlerClass);
+    if (PORT_BOUND.has(type)) {
+      expect(registry.get(type)?.type).toBe(type);
+    } else {
+      expect(registry.get(type)).toBeInstanceOf(HandlerClass);
+    }
   });
 
   it('none of the five goes through the legacy adapter', () => {
