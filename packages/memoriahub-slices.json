@@ -27,5 +27,14 @@
     "geo": [
       "rate-limit"
     ]
+  },
+  "memoriahub-contract": {
+    "primitives": [],
+    "errors": [],
+    "burst": [],
+    "dedup": [],
+    "review-runs": [],
+    "location": [],
+    "workflows": []
   }
 }

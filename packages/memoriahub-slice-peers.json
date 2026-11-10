@@ -1,14 +1,17 @@
 {
   "$comment": "Peer dependencies per slice of @marinoscar/memoriahub-* (RETRO-J1 #593). Append-only: J2-J11 add slices, never rename or remove one. memoriahub-compute declares its libraries (sharp, onnxruntime-node, exifr, zod; optional tesseract.js) as exact-pinned dependencies, not peers, so that a server and a worker node run byte-identical native builds; every slice therefore lists no peer. Enforced by scripts/memoriahub-packages/check-slice-peers.mjs; the rules are in docs/PACKAGES.md#peer-dependencies-per-slice.",
   "$universal": {
-    "memoriahub-compute": "*"
+    "memoriahub-compute": "*",
+    "memoriahub-contract": "*"
   },
   "$implies": {},
   "$reserved": {
-    "memoriahub-compute": []
+    "memoriahub-compute": [],
+    "memoriahub-contract": []
   },
   "$hostOnly": {
-    "memoriahub-compute": []
+    "memoriahub-compute": [],
+    "memoriahub-contract": []
   },
   "$hostPlugins": {},
   "memoriahub-compute": {
@@ -50,6 +53,43 @@
     },
     "geo": {
       "peers": []
+    }
+  },
+  "memoriahub-contract": {
+    "primitives": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "errors": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "burst": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "dedup": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "review-runs": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "location": {
+      "peers": [
+        "zod"
+      ]
+    },
+    "workflows": {
+      "peers": [
+        "zod"
+      ]
     }
   }
 }
