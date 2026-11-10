@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { JwtAuthGuard } from '@marinoscar/platform-api/identity';
 import { ObjectProcessingModule, StorageProvidersModule } from '@marinoscar/platform-api/storage';
 import { MemoriahubPortsModule, type MemoriahubPortBindings } from '@marinoscar/memoriahub-api/core';
+import type { MemoriahubPrismaClientLike } from '@marinoscar/memoriahub-api/ports';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { aiModule } from '../platform/ai/ai.config';
@@ -66,6 +67,13 @@ import { PlatformMemoriahubWebhooksAdapter } from './webhooks/platform-memoriahu
   exports: [aiModule, CredentialsModule, JwtAuthGuard, StorageProviderResolver, StorageProvidersModule, ObjectProcessingModule, OwnerAccessModule, webhooksModule],
 })
 export class PlatformMemoriahubDepsModule {}
+
+/**
+ * Compile-time proof that `PrismaService` IS a `MemoriahubPrismaClientLike` (raw queries, both transaction
+ * forms and `runInOrg`): `MEMORIAHUB_PRISMA` is bound by `useExisting`, so no adapter class exists to fail the
+ * build if the client's shape drifts from the port.
+ */
+export const prismaServiceIsThePrismaPort = (prisma: PrismaService): MemoriahubPrismaClientLike => prisma;
 
 /** The binding of every port to its web-app adapter. */
 export const platformMemoriahubPorts: MemoriahubPortBindings = {
