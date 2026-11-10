@@ -54,7 +54,7 @@ import { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
 import { GeoSearchQueryDto } from './dto/geo-search-query.dto';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
 import { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
-import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
+import { TrashEmptyRunService } from '@marinoscar/memoriahub-api/media';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
