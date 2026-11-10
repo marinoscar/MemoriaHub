@@ -17,7 +17,7 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
-import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
+import { TrashEmptyRunService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard, PERMISSIONS_KEY, type RequestUser } from '@marinoscar/platform-api/identity';
 import type { MediaLocationsQueryDto } from './dto/media-locations-query.dto';

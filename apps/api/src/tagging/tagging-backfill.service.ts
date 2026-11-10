@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '../search/media-where.builder';
+import { whereDateRange } from '@marinoscar/memoriahub-api/media';
 
 @Injectable()
 export class TaggingBackfillService {

@@ -35,8 +35,8 @@ import {
   findJobHandlerContractViolations,
 } from '@marinoscar/platform-api/jobs/testing';
 
-import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
-import { TrashEmptyExecuteBatchHandler } from '../../src/media/trash-empty/trash-empty-execute-batch.handler';
+import { TrashEmptyEvaluateHandler } from '@marinoscar/memoriahub-api/media';
+import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunEvaluateHandler } from '../../src/review-runs/review-run-evaluate.handler';
 import { ReviewRunExecuteBatchHandler } from '../../src/review-runs/review-run-execute-batch.handler';
@@ -619,9 +619,12 @@ const trPrisma = () => ({
   },
 });
 
+/** The slice's job port, over the platform registry the suite already holds. */
+const trJobsPort = () => ({ registerHandler: (handler: unknown) => registry.register(handler as never) });
+
 function buildTrashEvaluate(): TrashEmptyEvaluateHandler {
   const runService = { enqueueExecuteBatches: async () => void (tr.enqueued += 1) };
-  return new TrashEmptyEvaluateHandler(registry, trPrisma() as never, runService as never);
+  return new TrashEmptyEvaluateHandler(trJobsPort() as never, trPrisma() as never, runService as never);
 }
 
 const trashed = (id: string, deletedAt = new Date()): Row => ({ id, circleId: CIRCLE, capturedAt: null, deletedAt });
@@ -649,7 +652,7 @@ describeJobHandlerConformance('trash_empty_evaluate', () => alias(buildTrashEval
 });
 
 function buildTrashExecute(): TrashEmptyExecuteBatchHandler {
-  return new TrashEmptyExecuteBatchHandler(registry, trPrisma() as never, mediaService as never);
+  return new TrashEmptyExecuteBatchHandler(trJobsPort() as never, trPrisma() as never, mediaService as never);
 }
 
 const trItem = (id: string, status = 'matched'): Row => ({ runId: RUN, mediaItemId: id, status });
@@ -688,7 +691,7 @@ describe('trash_empty_execute_batch finalize', () => {
 
 function buildTrashPurge(): TrashPurgeHandler {
   // The handler reaches the queue and the settings through the media slice's ports (RETRO-J5).
-  const jobsPort = { registerHandler: (handler: unknown) => registry.register(handler as never) };
+  const jobsPort = trJobsPort();
   const settings = { readSystem: async () => ({ value: { trash: { retentionDays: 30 } }, version: 1 }) };
   return new TrashPurgeHandler(jobsPort as never, trPrisma() as never, settings as never, mediaService as never);
 }

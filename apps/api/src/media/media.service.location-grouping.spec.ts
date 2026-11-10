@@ -30,7 +30,7 @@ import { MediaTouchService, UploadNotificationService } from '@marinoscar/memori
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
-import { buildMediaWhere } from '../search/media-where.builder';
+import { buildMediaWhere } from '@marinoscar/memoriahub-api/media';
 import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 
 const CIRCLE_ID = 'circle-lg';

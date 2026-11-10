@@ -7,6 +7,9 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import {
   MEDIA_ITEM_PURGER,
   MediaModule as MediaCoreModule,
+  TrashEmptyEvaluateHandler,
+  TrashEmptyExecuteBatchHandler,
+  TrashEmptyRunsController,
   TrashPurgeHandler,
   TrashPurgeTask,
 } from '@marinoscar/memoriahub-api/media';
@@ -27,10 +30,6 @@ import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
-import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
-import { TrashEmptyRunsController } from './trash-empty/trash-empty-runs.controller';
-import { TrashEmptyEvaluateHandler } from './trash-empty/trash-empty-evaluate.handler';
-import { TrashEmptyExecuteBatchHandler } from './trash-empty/trash-empty-execute-batch.handler';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
@@ -117,10 +116,9 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     MediaOrientationEditService,
     ThumbnailRegenHandler,
     ThumbnailNodePersistService,
-    TrashEmptyRunService,
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, TrashEmptyRunService, MediaCoreModule.forRoot()],
+  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaCoreModule.forRoot()],
 })
 export class MediaModule {}

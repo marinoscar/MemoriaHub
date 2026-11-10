@@ -48,6 +48,8 @@ export interface MemoriahubJob<P = unknown> {
   attempts: number;
   /** The organization the job belongs to, or `null` for a system job. */
   orgId: string | null;
+  /** The row's status (`pending`, `running`, `succeeded`, `failed`, ...), when the host tells. A `canDelete` veto reads it. */
+  status?: string;
 }
 
 /**

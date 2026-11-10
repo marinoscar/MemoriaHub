@@ -41,6 +41,8 @@ export interface MediaDelegate {
   deleteMany(args?: any): Promise<{ count: number }>;
   /** Counts rows. */
   count(args?: any): Promise<number>;
+  /** Groups and counts rows. */
+  groupBy(args: any): Promise<any[]>;
 }
 
 /**
@@ -67,6 +69,10 @@ export interface MediaModels {
   auditEvent: MediaDelegate;
   /** `users`. */
   user: MediaDelegate;
+  /** `trash_empty_runs`. */
+  trashEmptyRun: MediaDelegate;
+  /** `trash_empty_run_items`. */
+  trashEmptyRunItem: MediaDelegate;
 }
 
 /**

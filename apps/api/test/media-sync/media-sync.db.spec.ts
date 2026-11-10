@@ -17,7 +17,7 @@ import { newLibrary } from '../helpers/library';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { buildOwnerAccessService } from '../helpers/owner-access';
 import { MediaSyncService } from '@marinoscar/memoriahub-api/media';
-import { checkinSchema, registerDeviceSchema } from '../../src/media-sync/dto/media-sync.dto';
+import { checkinSchema, registerDeviceSchema } from '@marinoscar/memoriahub-api/media';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;

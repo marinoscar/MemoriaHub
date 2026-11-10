@@ -72,7 +72,8 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_AI`, `MemoriahubAiPort`, `MemoriahubAiClient` | token | the model runtime, feature-scoped, keys resolved per call |
 | `MEMORIAHUB_OBJECT_STORE`, `MemoriahubObjectStorePort`, `MemoriahubObjectStore`, `MemoriahubObjectProcessor` | token, hook | object storage and the post-upload processors |
 | `MEMORIAHUB_ACCESS`, `MemoriahubAccessPort` | token | owner-scope roles, record grants, scope sweeps |
-| `MEMORIAHUB_IDENTITY`, `MemoriahubIdentityPort` | token | the normalised request principal |
+| `MEMORIAHUB_IDENTITY`, `MemoriahubIdentityPort` | token | the normalised request principal (and the credential kind it authenticated with) |
+| `MemoriahubAuthGuard`, `MemoriahubAuth` | guard | none: a slice's controllers declare `@MemoriahubAuth({ permissions, roles, credentials })` and the guard decides over the identity port; a host proves its binding with `describeMemoriahubAuthGuardConformance` |
 | `MEMORIAHUB_NOTIFY`, `MemoriahubNotifyPort` | token | notification events, counted and state rows, email templates |
 | `MEMORIAHUB_SETTINGS`, `MemoriahubSettingsPort` | token | system and user settings namespaces |
 | `MEMORIAHUB_SECRETS`, `MemoriahubSecretsPort` | token | the encrypted credential store |

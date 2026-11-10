@@ -1,5 +1,16 @@
-import { Prisma } from '@prisma/client';
+/**
+ * A `media_items` where clause, as the builders produce it. Structural on purpose: the slice imports no
+ * generated client, and the host passes the clause to its own typed `findMany`.
+ *
+ * @stability experimental
+ */
+export type MediaItemWhere = Record<string, any>;
 
+/**
+ * Media filters.
+ *
+ * @stability experimental
+ */
 export interface MediaFilters {
   type?: string;
   capturedAtFrom?: Date;
@@ -29,11 +40,21 @@ export interface MediaFilters {
   excludeArchived?: boolean;
 }
 
-export function whereType(value: string): Prisma.MediaItemWhereInput {
+/**
+ * Where type.
+ *
+ * @stability experimental
+ */
+export function whereType(value: string): MediaItemWhere {
   return { type: value as any };
 }
 
-export function whereFavorite(value: boolean): Prisma.MediaItemWhereInput {
+/**
+ * Where favorite.
+ *
+ * @stability experimental
+ */
+export function whereFavorite(value: boolean): MediaItemWhere {
   return { favorite: value };
 }
 
@@ -67,7 +88,12 @@ function upperBound(to: Date): { lt: Date } | { lte: Date } {
   return { lt: new Date(to.getTime() + 24 * 60 * 60 * 1000) };
 }
 
-export function whereDateRange(from?: Date, to?: Date): Prisma.MediaItemWhereInput {
+/**
+ * Where date range.
+ *
+ * @stability experimental
+ */
+export function whereDateRange(from?: Date, to?: Date): MediaItemWhere {
   if (!from && !to) return {};
   return {
     capturedAt: {
@@ -77,7 +103,12 @@ export function whereDateRange(from?: Date, to?: Date): Prisma.MediaItemWhereInp
   };
 }
 
-export function whereCreatedAtRange(from?: Date, to?: Date): Prisma.MediaItemWhereInput {
+/**
+ * Where created at range.
+ *
+ * @stability experimental
+ */
+export function whereCreatedAtRange(from?: Date, to?: Date): MediaItemWhere {
   if (!from && !to) return {};
   return {
     createdAt: {
@@ -87,11 +118,21 @@ export function whereCreatedAtRange(from?: Date, to?: Date): Prisma.MediaItemWhe
   };
 }
 
-export function whereAlbum(albumId: string): Prisma.MediaItemWhereInput {
+/**
+ * Where album.
+ *
+ * @stability experimental
+ */
+export function whereAlbum(albumId: string): MediaItemWhere {
   return { albumItems: { some: { albumId } } };
 }
 
-export function whereTag(tag: string): Prisma.MediaItemWhereInput {
+/**
+ * Where tag.
+ *
+ * @stability experimental
+ */
+export function whereTag(tag: string): MediaItemWhere {
   return { mediaTags: { some: { tag: { name: { equals: tag, mode: 'insensitive' } } } } };
 }
 
@@ -113,7 +154,12 @@ export function whereTag(tag: string): Prisma.MediaItemWhereInput {
 // other. `wherePlace` is unchanged — `geo_place_name` deliberately does not
 // participate in grouping (see the Location Grouping spec's non-goals).
 
-export function whereCountry(country: string): Prisma.MediaItemWhereInput {
+/**
+ * Where country.
+ *
+ * @stability experimental
+ */
+export function whereCountry(country: string): MediaItemWhere {
   return {
     OR: [
       { geoCanonicalCountry: { contains: country, mode: 'insensitive' as const } },
@@ -123,7 +169,12 @@ export function whereCountry(country: string): Prisma.MediaItemWhereInput {
   };
 }
 
-export function whereRegion(region: string): Prisma.MediaItemWhereInput {
+/**
+ * Where region.
+ *
+ * @stability experimental
+ */
+export function whereRegion(region: string): MediaItemWhere {
   return {
     OR: [
       { geoCanonicalAdmin1: { contains: region, mode: 'insensitive' as const } },
@@ -132,7 +183,12 @@ export function whereRegion(region: string): Prisma.MediaItemWhereInput {
   };
 }
 
-export function whereLocality(locality: string): Prisma.MediaItemWhereInput {
+/**
+ * Where locality.
+ *
+ * @stability experimental
+ */
+export function whereLocality(locality: string): MediaItemWhere {
   return {
     OR: [
       { geoCanonicalLocality: { contains: locality, mode: 'insensitive' as const } },
@@ -141,11 +197,21 @@ export function whereLocality(locality: string): Prisma.MediaItemWhereInput {
   };
 }
 
-export function wherePlace(place: string): Prisma.MediaItemWhereInput {
+/**
+ * Where place.
+ *
+ * @stability experimental
+ */
+export function wherePlace(place: string): MediaItemWhere {
   return { geoPlaceName: { contains: place, mode: 'insensitive' as const } };
 }
 
-export function whereLocation(location: string): Prisma.MediaItemWhereInput {
+/**
+ * Where location.
+ *
+ * @stability experimental
+ */
+export function whereLocation(location: string): MediaItemWhere {
   return {
     OR: [
       { geoCanonicalCountry: { contains: location, mode: 'insensitive' as const } },
@@ -160,34 +226,69 @@ export function whereLocation(location: string): Prisma.MediaItemWhereInput {
   };
 }
 
-export function whereCameraMake(value: string): Prisma.MediaItemWhereInput {
+/**
+ * Where camera make.
+ *
+ * @stability experimental
+ */
+export function whereCameraMake(value: string): MediaItemWhere {
   return { cameraMake: { contains: value, mode: 'insensitive' as const } };
 }
 
-export function whereCameraModel(value: string): Prisma.MediaItemWhereInput {
+/**
+ * Where camera model.
+ *
+ * @stability experimental
+ */
+export function whereCameraModel(value: string): MediaItemWhere {
   return { cameraModel: { contains: value, mode: 'insensitive' as const } };
 }
 
-export function whereSourceDeviceId(value: string): Prisma.MediaItemWhereInput {
+/**
+ * Where source device id.
+ *
+ * @stability experimental
+ */
+export function whereSourceDeviceId(value: string): MediaItemWhere {
   return { sourceDeviceId: value };
 }
 
-export function whereSourceDeviceName(value: string): Prisma.MediaItemWhereInput {
+/**
+ * Where source device name.
+ *
+ * @stability experimental
+ */
+export function whereSourceDeviceName(value: string): MediaItemWhere {
   return { sourceDeviceName: { contains: value, mode: 'insensitive' as const } };
 }
 
-export function whereMissingGeo(value: boolean): Prisma.MediaItemWhereInput {
+/**
+ * Where missing geo.
+ *
+ * @stability experimental
+ */
+export function whereMissingGeo(value: boolean): MediaItemWhere {
   if (value === true) {
     return { takenLat: null, takenLng: null };
   }
   return { takenLat: { not: null }, takenLng: { not: null } };
 }
 
-export function whereMissingCapturedAt(value: boolean): Prisma.MediaItemWhereInput {
+/**
+ * Where missing captured at.
+ *
+ * @stability experimental
+ */
+export function whereMissingCapturedAt(value: boolean): MediaItemWhere {
   return value === true ? { capturedAt: null } : { capturedAt: { not: null } };
 }
 
-export function whereMissingCamera(value: boolean): Prisma.MediaItemWhereInput {
+/**
+ * Where missing camera.
+ *
+ * @stability experimental
+ */
+export function whereMissingCamera(value: boolean): MediaItemWhere {
   // "Missing camera info" = no make AND no model.
   // "Has camera" = at least one present.
   return value === true
@@ -195,15 +296,22 @@ export function whereMissingCamera(value: boolean): Prisma.MediaItemWhereInput {
     : { OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }] };
 }
 
-export function whereNoFaces(value: boolean): Prisma.MediaItemWhereInput {
+/**
+ * Where no faces.
+ *
+ * @stability experimental
+ */
+export function whereNoFaces(value: boolean): MediaItemWhere {
   return value === true ? { faces: { none: {} } } : {};
 }
 
 /**
  * Exclude archived media items (archivedAt IS NULL).
  * Only applies when value is explicitly true.
+ *
+ * @stability experimental
  */
-export function whereExcludeArchived(value: boolean): Prisma.MediaItemWhereInput {
+export function whereExcludeArchived(value: boolean): MediaItemWhere {
   return value === true ? { archivedAt: null } : {};
 }
 
@@ -216,8 +324,10 @@ export function whereExcludeArchived(value: boolean): Prisma.MediaItemWhereInput
  *
  * This is an intentional v1 approximation: accurate enough for typical radii and
  * well within the margin of error for photo GPS coordinates.
+ *
+ * @stability experimental
  */
-export function whereNear(lat: number, lng: number, radiusKm: number): Prisma.MediaItemWhereInput {
+export function whereNear(lat: number, lng: number, radiusKm: number): MediaItemWhere {
   const latDelta = radiusKm / 111.32;
   const cosLat = Math.cos((lat * Math.PI) / 180);
   // Guard against division-by-zero / extreme values near poles
@@ -235,8 +345,10 @@ export function whereNear(lat: number, lng: number, radiusKm: number): Prisma.Me
  * @param ids    Array of Person UUIDs to filter by.
  * @param mode   'all' = every person must appear in the same photo (AND);
  *               'any' = at least one person appears (OR).
+ *
+ * @stability experimental
  */
-export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): Prisma.MediaItemWhereInput {
+export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): MediaItemWhere {
   const validIds = ids.filter((id) => typeof id === 'string' && id.trim().length > 0);
   if (validIds.length === 0) return {};
   if (mode === 'any') {
@@ -261,13 +373,15 @@ export function wherePeople(ids: string[], mode: 'all' | 'any' = 'all'): Prisma.
  *
  * Pushing each fragment into the array instead is safe for any fragment shape,
  * including one that carries its own nested `AND`.
+ *
+ * @stability experimental
  */
 export function andWhere(
-  base: Prisma.MediaItemWhereInput,
-  ...fragments: Array<Prisma.MediaItemWhereInput | undefined>
-): Prisma.MediaItemWhereInput {
+  base: MediaItemWhere,
+  ...fragments: Array<MediaItemWhere | undefined>
+): MediaItemWhere {
   const extras = fragments.filter(
-    (f): f is Prisma.MediaItemWhereInput => !!f && Object.keys(f).length > 0,
+    (f): f is MediaItemWhere => !!f && Object.keys(f).length > 0,
   );
   if (extras.length === 0) return base;
 
@@ -277,10 +391,15 @@ export function andWhere(
   return { ...base, AND: [...existing, ...extras] };
 }
 
+/**
+ * Build media where.
+ *
+ * @stability experimental
+ */
 export function buildMediaWhere(
   circleId: string,
   filters: MediaFilters,
-): Prisma.MediaItemWhereInput {
+): MediaItemWhere {
   const {
     type,
     capturedAtFrom,
@@ -308,9 +427,9 @@ export function buildMediaWhere(
   // Collect non-empty filter fragments into an AND array so that two fragments
   // that both emit a top-level `OR` key (e.g. whereCountry + whereLocation)
   // never overwrite each other.
-  const and: Prisma.MediaItemWhereInput[] = [];
+  const and: MediaItemWhere[] = [];
 
-  const add = (frag: Prisma.MediaItemWhereInput) => {
+  const add = (frag: MediaItemWhere) => {
     if (frag && Object.keys(frag).length > 0) and.push(frag);
   };
 
@@ -337,7 +456,7 @@ export function buildMediaWhere(
   // Omitting this keeps archived items visible in search by default.
   if (excludeArchived === true) add(whereExcludeArchived(true));
 
-  const where: Prisma.MediaItemWhereInput = { circleId, deletedAt: null };
+  const where: MediaItemWhere = { circleId, deletedAt: null };
   if (and.length > 0) where.AND = and;
   return where;
 }
