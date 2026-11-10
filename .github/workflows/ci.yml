@@ -90,6 +90,8 @@ jobs:
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
       - run: npm run build --workspace=@marinoscar/memoriahub-contract
       - run: npm run build --workspace=@marinoscar/memoriahub-api
+      # apps/web imports @marinoscar/memoriahub-web by entry against its git-ignored dist/ (RETRO-J11).
+      - run: npm run build --workspace=@marinoscar/memoriahub-web
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -179,7 +181,11 @@ jobs:
       # filter must gain it or the job will fail to resolve it: it depends on
       # @marinoscar/memoriahub-contract (types only, erased by the test
       # transform, so no build step is needed here).
-      - run: npm ci --workspace=web --workspace=@marinoscar/memoriahub-contract --include-workspace-root
+      - run: npm ci --workspace=web --workspace=@marinoscar/memoriahub-contract --workspace=@marinoscar/memoriahub-web --include-workspace-root
+      # apps/web consumes @marinoscar/memoriahub-web (and its types) from the package's
+      # git-ignored dist/ (RETRO-J11); the contract is a type-only import of it.
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-web
 
       # Deliberately NO memoriahub-compute build and NO `prisma generate` here:
       # apps/web imports neither (verified — no source reference), so both would
