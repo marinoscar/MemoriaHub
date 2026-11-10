@@ -45,7 +45,7 @@ import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-s
 import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
 import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
-import { NodeBackupStaleHandler } from '../../src/nodes/node-backup-stale.handler';
+import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 
 /**
  * Every handler class the app registers, one per job type.

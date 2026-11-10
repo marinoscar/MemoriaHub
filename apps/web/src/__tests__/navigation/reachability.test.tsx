@@ -68,7 +68,7 @@ const REQUIRED_REACHABLE_PATHS = [
   '/settings', // was: drawer "User Settings" row -> now: UserMenu "Settings"
   '/admin/settings', // was: implicit via the old drawer's admin shortcuts -> now: Sidebar "Console"
   '/admin/settings/jobs', // was: drawer "Jobs" row -> now: Console > Operations > Jobs
-  '/admin/settings/nodes', // was: drawer "Worker Nodes" row -> now: Console > Operations > Worker Nodes
+  '/admin/settings/workers', // was: drawer "Worker Nodes" row -> now: Console > Operations > Worker Nodes
   '/admin/settings/storage/insights', // was: drawer "Storage Insights" row -> now: Console > Storage > Storage Insights
   '/admin/settings/sharing', // was: drawer "Public Sharing" row -> now: Console > Operations > Public Sharing
 ];

@@ -114,8 +114,8 @@ function mockQueryRawByText(prisma: MockPrismaService, handlers: Array<[string, 
  * registered) rather than throwing on the deep-mocked Prisma client's default
  * `undefined` return value. */
 function mockNoWorkerNodes(prisma: MockPrismaService): void {
-  (prisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(0);
-  (prisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue([]);
+  (prisma.workerNode.count as jest.Mock).mockResolvedValue(0);
+  (prisma.workerNode.findMany as jest.Mock).mockResolvedValue([]);
   (prisma.enrichmentJob.count as jest.Mock).mockResolvedValue(0);
 }
 
@@ -1146,7 +1146,7 @@ describe('MemoriaHub Doctor checks', () => {
       // 'ok' and doesn't interfere with this check's isolated assertions —
       // checkNodesHeartbeat and checkNodesCapabilityHealth both read from the
       // same mocked workerNode.findMany() call.
-      (mockPrisma.mhLegacyWorkerNode.count as jest.Mock).mockResolvedValue(1);
+      (mockPrisma.workerNode.count as jest.Mock).mockResolvedValue(1);
     });
 
     /** A single online node fixture with a fresh heartbeat. */
@@ -1162,7 +1162,7 @@ describe('MemoriaHub Doctor checks', () => {
     }
 
     it('is status:warning when a node reports operational:false on a capability backing one of its eligibleTypes (#148 shape)', async () => {
-      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: {
@@ -1186,7 +1186,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('does not flag operational:false for a capability that backs none of the node eligibleTypes', async () => {
-      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           // geocode has no capability requirements at all (JOB_TYPE_REQUIREMENTS.geocode === []),
           // and tesseract only backs social_media_detection — not eligible here.
@@ -1210,7 +1210,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('backward-compat: a node reporting presence-only capabilities (no operational field, pre-#148 shape) is classified exactly as before this change — not degraded', async () => {
-      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: {
@@ -1233,7 +1233,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('still recognizes the legacy flat-string status shape ({ face: "error" }) as degraded — unchanged by #148', async () => {
-      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({
           eligibleTypes: ['face_detection'],
           capabilities: { face: 'error' },
@@ -1248,7 +1248,7 @@ describe('MemoriaHub Doctor checks', () => {
     });
 
     it('is status:skipped when no online node has reported a capability summary at all', async () => {
-      (mockPrisma.mhLegacyWorkerNode.findMany as jest.Mock).mockResolvedValue(
+      (mockPrisma.workerNode.findMany as jest.Mock).mockResolvedValue(
         nodeFixture({ eligibleTypes: ['face_detection'], capabilities: undefined }),
       );
 

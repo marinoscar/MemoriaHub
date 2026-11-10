@@ -99,6 +99,7 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
+          'nodes:read',
         ]) as any,
       );
 
@@ -119,6 +120,7 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
+          'nodes:read',
           'db_backup:read',
         ]) as any,
       );
@@ -263,6 +265,7 @@ describe('SettingsHubPage', () => {
           'face_settings:read',
           'storage_config:read',
           'jobs:read',
+          'nodes:read',
         ]) as any,
       );
     });
@@ -401,6 +404,7 @@ describe('SettingsHubPage', () => {
       'geo_settings:read',
       'storage_config:read',
       'jobs:read',
+      'nodes:read',
       'db_backup:read',
       'sharing:admin',
     ];

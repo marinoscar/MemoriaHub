@@ -36,7 +36,6 @@ import InsightsIcon from '@mui/icons-material/Insights';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import PublicIcon from '@mui/icons-material/Public';
 import MovieIcon from '@mui/icons-material/Movie';
-import HubIcon from '@mui/icons-material/Hub';
 import EmailIcon from '@mui/icons-material/Email';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -286,17 +285,11 @@ export const ADMIN_SECTIONS: AdminSectionDef[] = [
   {
     label: 'Operations',
     cards: [
-      // RETRO-C1 (#575): the packaged Jobs and Job Insights cards (`jobs:read`, the string
-      // `GET /api/admin/jobs*` enforces). The nodes slice's own Worker Nodes card in the same
-      // array is NOT spread: the app keeps its `WorkersPage` until RETRO-C2.
-      ...jobsAdminSections.operations.filter((card) => card.path.startsWith('/admin/settings/jobs')),
-      {
-        title: 'Worker Nodes',
-        description: 'Distributed CLI worker nodes: fleet health, heartbeats, and per-node job stats.',
-        Icon: HubIcon,
-        path: '/admin/settings/nodes',
-        permission: 'jobs:read',
-      },
+      // RETRO-C1 (#575) and RETRO-C2 (#581): the packaged Jobs, Job Insights and Worker Nodes cards
+      // (`jobs:read`, the string `GET /api/admin/jobs*` enforces; `nodes:read`, the string
+      // `GET /api/admin/nodes` enforces). The Worker Nodes card is `/admin/settings/workers`; the old
+      // `/admin/settings/nodes` redirects there.
+      ...jobsAdminSections.operations,
       // RETRO-D4 (#580): the packaged Database Backup card, at the position the app's own card had.
       // `db_backup:read` is the string `GET /api/admin/db-backup/*` enforces.
       ...dbBackupAdminSections.operations,
@@ -417,7 +410,7 @@ export function visibleAdminSections(
  *
  * Longest-match wins (on segment boundaries) so `/admin/settings/jobs/insights`
  * resolves to "Job Queue Insights" rather than "Job Queue", and
- * `/admin/settings/nodes/:id/backup` still resolves to its parent's "Worker
+ * `/admin/settings/workers/:id/backup` still resolves to its parent's "Worker
  * Nodes". Returns `null` for a path that is not under `/admin`; any other
  * `/admin` path falls back to the hub title.
  */

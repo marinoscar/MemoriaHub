@@ -575,8 +575,9 @@ addressed by `(purpose, name)` and encrypted with AES-256-GCM under a **per-purp
 - **Blank preserves.** Saving without retyping a key keeps the stored one; removal is the delete route.
 - **Non-secret half is a setting.** `enabled` and `baseUrl` of a provider are `face.providers.*` / `geo.google` in
   the settings document (the settings registry forbids secret-named fields), so no secret ever shares a document with config.
-- **The node transient credential is unchanged.** A worker node still receives the Google key per job from
-  `POST /api/nodes/:id/jobs/:jobId/credentials`, held in memory only, until RETRO-C6 moves it to a `nodeSecretBroker`.
+- **No node receives a provider key (RETRO-C2).** The per-job credential route is deleted and `geocode` (like the two
+  AI tagging types) runs on the server until RETRO-C6 returns it to node eligibility through the platform
+  `nodeSecretBroker` (`POST /api/nodes/:id/jobs/:jobId/secret`, a handle in `job_node_secrets`, never material).
 - **Legacy cipher.** `apps/api/src/legacy/legacy-secret-cipher.ts` (the pre-platform envelope, no purpose binding)
   is read-only legacy: the migration command and the slices not yet migrated use it. RETRO-E3 removes it.
   Moving rows: [credentials-migration runbook](runbooks/credentials-migration.md).

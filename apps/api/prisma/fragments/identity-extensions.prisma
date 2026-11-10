@@ -22,8 +22,6 @@ extend model User {
   resolvedDuplicates             DuplicateGroup[]                @relation("DuplicateGroupResolvedBy")
   geoCredentialsUpdated          GeoProviderCredential[]         @relation("GeoCredentialUpdater")
   resolvedLocationSuggestions    LocationSuggestion[]            @relation("LocationSuggestionResolvedBy")
-  mhLegacyWorkerNodes            MhLegacyWorkerNode[]
-  mhLegacyNodeCredentials        MhLegacyNodeCredential[]        @relation("UserNodeCredentials")
   mediaEnhancementsCreated       MediaEnhancement[]              @relation("MediaEnhancementCreatedBy")
   mediaEnhancementBatchesCreated MediaEnhancementBatch[]         @relation("MediaEnhancementBatchCreatedBy")
   workflowsCreated               Workflow[]                      @relation("WorkflowCreatedBy")

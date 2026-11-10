@@ -13,7 +13,7 @@ import {
 } from '@marinoscar/platform-api/identity';
 
 import { PrismaModule } from '../../prisma/prisma.module';
-import { NodeCredentialService } from '../../nodes/node-credential.service';
+import { NodeCredentialService } from '@marinoscar/platform-api/nodes';
 import { IdentityJobsAdapter } from './identity-jobs.adapter';
 import { MemoriaHubIdentityNotifier } from './identity-notifier.adapter';
 import { AppProfileImages, AppUserDefaults } from './identity-user.adapters';
@@ -30,9 +30,8 @@ import { AppProfileImages, AppUserDefaults } from './identity-user.adapters';
 // `platformHostModule`. The event bus and the metrics come from the host core
 // (RETRO-B1) and are reused as they are.
 //
-//   IDENTITY_NODE_CREDENTIALS -> the app's NodeCredentialService (`nod_`).
-//       PLATFORM-ADOPTION-SHIM(RETRO-C2): RETRO-C2 switches to the platform's
-//       NodeCredentialService (`useExisting`).
+//   IDENTITY_NODE_CREDENTIALS -> the platform nodes slice's NodeCredentialService (`nod_`, from the
+//       global `NodeCredentialModule`; RETRO-C2, #581).
 //   IDENTITY_JOBS -> the platform queue (RETRO-C1): JobsService + JobHandlerRegistry, both from the
 //       global JobsModule.
 // =============================================================================

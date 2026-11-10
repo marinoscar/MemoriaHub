@@ -24,9 +24,7 @@
 // enhancer, transcription) are registered AI features called through `AiService` (RETRO-E2, #601);
 // their job types `auto_tagging`, `video_auto_tagging` and `picture_enhancement` are server-only
 // native handlers (RETRO-C4) and are neither `ai.*` types nor `/api/ai` routes, so no suite here
-// sees them (their pins: test/jobs, src/*/ specs). The worker-node credential branch for `geocode`
-// (and the dead AI branches) is PLATFORM-ADOPTION-SHIM(#1083), pinned by
-// src/nodes/nodes.service.credentials.spec.ts, until RETRO-C10.
+// sees them (their pins: test/jobs, src/*/ specs).
 // =============================================================================
 
 import { join } from 'node:path';

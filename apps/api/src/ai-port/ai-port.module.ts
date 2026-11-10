@@ -17,8 +17,8 @@ import { MemoriaHubAiFeaturesController } from './memoriahub-ai-features.control
 // (re-exported) and the admin-side services:
 //   - `AiSettingsService`: the feature selections, the model lists, the connectivity probes and
 //     a provider's key status (the Doctor's AI checks, `/api/admin/memoriahub-ai/*`);
-//   - `AiDeploymentKeySource`: a provider's key status and, for the worker-node credential
-//     broker only, the key (RETRO-C10 removes that last reader);
+//   - `AiDeploymentKeySource`: a provider's key status (the onboarding readiness fact, the
+//     enhancer status, the settings summary); no model call reads a key through it;
 //   - `MemoriaHubAiFeaturesController`: the admin feature-selection routes the MemoriaHub
 //     section of `/admin/settings/ai` edits (`/api/admin/memoriahub-ai/*`).
 // The legacy provider adapter this module used to serve (RETRO-E1's shim) is gone.

@@ -8,6 +8,8 @@
 | **Last Updated** | July 2026 |
 | **Status** | Implemented |
 
+> **RETRO-C2 (issue #581): the control plane is the platform's.** Registration, heartbeat, claim, lease renewal, signed URLs, results and failures, the `nod_` credentials, `/api/admin/nodes` and the fleet sweeps are `@marinoscar/platform-api/nodes` (design: EnterpriseAppBase `docs/specs/worker-nodes.md`, procedure: `docs/runbooks/run-worker-nodes.md`); `apps/api/src/nodes/` is deleted. Sections 5, 12 and 13 below describe the 1.3 contract this app had; [section 15](#15-the-platform-node-protocol-retro-c2) lists what changed. **Provider keys are no longer delivered to nodes** (section 2.7 is history): `auto_tagging`, `video_auto_tagging` and `geocode` run on the server until RETRO-C4 / RETRO-C6.
+
 > **Issue #113 — CompreFace-only.** This spec now describes a CompreFace-only face-detection compute path, server and node alike. The Human WASM in-process pipeline (the shared package's `/face` export, `@vladmandic/human`/`@tensorflow/tfjs*` dependencies) and AWS Rekognition were removed; `./face-compreface` is the sole face-detection subpath, embeddings are always 128-d, the node model manifest no longer lists Human model files, and `MEMORIAHUB_FACE_PROVIDER`/`--face-provider` accept only `compreface`.
 
 ---
@@ -726,3 +728,28 @@ Every running worker container is its own node — see §12.1's register-or-reat
 | 2.2 | July 2026 | AI Assistant | Issue #113: standardized on CompreFace as the sole face-detection compute path — removed the Human WASM `/face` export and its dependency pins from the shared package (§7.2, §7.3), removed the four Human model-file entries from the node model manifest (§7.3), simplified the node-result payload's `embedding`/`landmarks`/`externalFaceId` documentation to the CompreFace-only shape (§6), updated the `face_detection`/`video_face_detection` node-eligibility rows (§8.1), removed the `testHuman` doctor self-test reference (§10.1), and updated the worker image description (§15.1) |
 | 2.3 | July 2026 | AI Assistant | Issue #190: added the four new server-only job types backing the shared review-run engine to the §8.3 server-only table and the `ENRICHMENT_WORKER_MODE=system` claim list (§14.1) — `review_run_evaluate`, `review_run_execute_batch`, `review_run_history_purge`, `duplicate_confidence_backfill`; none is added to the CLI's `NODE_JOB_TYPES`. See [review-runs.md](review-runs.md) for the full feature. |
 | 2.1 | July 2026 | AI Assistant | Corrected §8.1: `video_face_detection` compute is fully implemented (not a scaffold) and is node-eligible; `thumbnail_repair` was removed from the CLI's `NODE_JOB_TYPES` (server-only, kept for interface parity only). Reconciled §2.4's original "no new node-specific credential type" claim. Documented, as new sections: register-or-reattach idempotency and offline node pruning (§12); the new durable `nod_` node-credential type (§13); the `ENRICHMENT_WORKER_MODE` all/system/off control-plane split and the now-always-on lease reaper (§14); and the containerized worker image + `docker-compose.worker.yml` fleet bundle with its CI multi-arch build and golden-vector parity gate (§15). Added the corresponding endpoints to §5.1/§5.2 |
+
+---
+
+## 15. The Platform Node Protocol (RETRO-C2)
+
+The fleet moved onto the platform nodes slice. Composition: `NodeCredentialModule` and `NodesModule.forRoot({ imports: [JobsHostModule] })` (`apps/api/src/platform/jobs/jobs.config.ts`); the two ports are bound in `jobs-host.module.ts`: `NODE_OBJECT_STORE` is the storage slice's `nodeObjectStoreBinding` (signed GET and PUT through `STORAGE_PROVIDER`) and `NODE_JOB_INPUTS` is `NodeJobInputsAdapter` (a job whose subject is a media item reads that item's `StorageObject`; any other job, or a missing item, is a `NodeJobInputError`, a 422).
+
+**Routes.** The platform serves `/api/nodes` (`register`, `job-types`, `:id`, `:id/events`, `:id/deregister`, `:id/heartbeat`, `:id/claim`, `:id/telemetry`, `:id/jobs/:jobId/{renew,download-url,upload-url,secret,result,failure}`), `/api/admin/nodes` and `/api/node-credentials`, all behind `nodes:read` / `nodes:write` (system scope, admin only). The app serves, under the same prefix: `GET /api/nodes/models/manifest` (`nodes:read`) and `/api/nodes/:id/backup/*` (`nodes:write`, [Local Media Backup](local-backup.md)). A `nod_` credential reaches exactly these and nothing else; another user's node answers 403 on a platform route and 404 on an app route.
+
+**What differs from section 5.**
+
+| 1.3 | Platform |
+|---|---|
+| `register` body `concurrency` defaults to 1; answers the node plus `reattached` | `concurrency` is required; answers `{ node, reattached, serverFeatures }`; re-attach is still by `(createdById, name)` |
+| `claim` answers `{ jobs: [{ job, inputUrl, params }] }`; `inputUrl` is presigned at claim time for the item's object | `{ jobs: [{ job, params, renewIntervalMs, claimToken }] }`; the input URL is `POST :id/jobs/:jobId/download-url`; `params` is the job payload (the per-type `params` the old claim built for `video_auto_tagging` and `video_face_detection` are gone) |
+| `result` body is the result | `{ type, result, claimToken? }`; a `type` that is not the job's is a 400; the settlement answers `{ jobId, outcome, willRetry }` |
+| `renew` body `{ leaseMs }` | the lease derives from the handler's `profile.maxRuntimeMs`; the body quotes the `claimToken` |
+| `upload-url`: the server chose the key by type (`thumbnails/<objectId>-<version>.jpg`, `video-faces/...`) | the handler's `deriveOutputKey` chooses a key under `node-outputs/`; none of MemoriaHub's handlers has one yet, so `thumbnail_regen`, `thumbnail_repair` and `video_face_detection` cannot upload node output until RETRO-C3 / RETRO-C5 |
+| `GET /api/nodes` lists the caller's nodes | no list route (`node list` needs a seam request, RETRO-C10) |
+| `POST .../credentials` issued a provider key | deleted; a per-job secret goes through the handler's `nodeSecretBroker` and `POST .../secret` (the `nodes.jobSecretBrokerEnabled` switch, off), a handle in `job_node_secrets`, never material |
+| `NodeStaleOfflineTask`, `NodeOfflinePruneTask` | the jobs `nodes.fleet.sweep` and `nodes.fleet.prune`; the windows are the `nodes` settings namespace (`staleHeartbeatSeconds`, `offlineStaleMultiplier`, `offlineRetentionDays`), defaulting to the legacy `NODE_*` variables |
+
+**Data.** `worker_nodes` and `node_credentials` are the platform's tables. Migration `20261109300000_c2_worker_nodes_to_platform` copied every legacy row with its id (so `node_backup_configs` and a CLI's stored node id still resolve), kept every credential hash (a stored `nod_` token still authenticates), set `online` / `draining` nodes `offline` (they must re-register) and dropped `mh_legacy_worker_nodes`, `mh_legacy_node_credentials` and `MhLegacyNodeStatus`. Proof: `apps/api/test/nodes/worker-nodes-migration.db.spec.ts`.
+
+**Until the CLI engine moves (RETRO-C10)** the 1.3 CLI speaks the old protocol: no MemoriaHub node can claim, and the server's worker (`JOBS_WORKER_MODE=all`) runs every job. Afterwards a fleet serves the node-eligible types; the provider-key types stay on the server.

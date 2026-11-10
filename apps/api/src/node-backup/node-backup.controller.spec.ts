@@ -99,8 +99,8 @@ describe('NodeBackupController', () => {
     expect(service.getDimensions).toHaveBeenCalledWith('user-1', NODE_ID);
   });
 
-  it('carries the class-level jobs:write permission metadata', () => {
+  it('carries the class-level nodes:write permission metadata', () => {
     const permissions = Reflect.getMetadata('permissions', NodeBackupController);
-    expect(permissions).toEqual(['jobs:write']);
+    expect(permissions).toEqual(['nodes:write']);
   });
 });

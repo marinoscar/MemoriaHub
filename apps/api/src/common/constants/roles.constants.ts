@@ -78,6 +78,11 @@ export const PERMISSIONS = {
   JOBS_READ: 'jobs:read',
   JOBS_WRITE: 'jobs:write',
 
+  // Worker-node fleet (Admin only; the platform nodes slice's, RETRO-C2). The Local Media Backup
+  // routes and the model manifest enforce them too.
+  NODES_READ: 'nodes:read',
+  NODES_WRITE: 'nodes:write',
+
   // Geo Provider Settings (Admin only)
   GEO_SETTINGS_READ: 'geo_settings:read',
   GEO_SETTINGS_WRITE: 'geo_settings:write',

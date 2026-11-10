@@ -21,8 +21,8 @@
 // legacy half. Since RETRO-E2 (#601) no model call reads a key here: they go through `AiService`,
 // which resolves keys from the platform store only, so `npm run ai:migrate-keys` MUST have run.
 //
-// KEYS. `resolve` is the only method that returns plaintext; it is for server
-// call sites (and the node credential broker, PLATFORM-ADOPTION-SHIM(#1083))
+// KEYS. `resolve` is the only method that returns plaintext; since RETRO-E2/C2 nothing in the app
+// calls it (model calls go through `AiService`, the node credential broker is gone)
 // and never reaches an HTTP response or a log line. `status` never decrypts.
 // =============================================================================
 

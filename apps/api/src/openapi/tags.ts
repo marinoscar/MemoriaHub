@@ -373,22 +373,19 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
     name: 'Worker Nodes',
     tags: [
       {
-        name: 'Nodes',
+        name: 'Worker Nodes',
         description:
-          'The worker-node data plane: register, heartbeat, claim jobs, renew leases, and submit ' +
-          'results. Media bytes move directly between the node and object storage over presigned URLs.',
+          'The worker-node fleet (the platform nodes slice): register, heartbeat, claim jobs, renew ' +
+          'leases and submit results (media bytes move directly between the node and object storage ' +
+          'over presigned URLs), the model manifest, the fleet-wide admin view and the durable `nod_` ' +
+          'bearer credentials. A `nod_` credential is accepted **only** on `/api/nodes/*`, so a leaked ' +
+          'worker credential can never reach media, settings, or admin routes.',
       },
       {
         name: 'Nodes: Backup',
         description:
           'Local media backup — the incremental change feed, acknowledgement checkpoints, and run ' +
           'lifecycle a node uses to pull-mirror a circle\'s original bytes onto its own disk.',
-      },
-      {
-        name: 'Node Credentials',
-        description:
-          'Durable `nod_` bearer credentials. Least-privilege by construction: accepted **only** on ' +
-          '`/api/nodes/*`, so a leaked worker credential can never reach media, settings, or admin routes.',
       },
     ],
   },
@@ -509,10 +506,6 @@ export const TAG_GROUPS: OpenApiTagGroup[] = [
         description:
           'PostgreSQL backup and restore: schedule, run history, signed downloads, and the scratch-' +
           'database restore with its two rollback modes. Backs up the database, not media files.',
-      },
-      {
-        name: 'Admin: Worker Nodes',
-        description: 'Fleet-wide node health, per-node job counts, and credential revocation across all owners.',
       },
       {
         name: 'Admin: Workflows',

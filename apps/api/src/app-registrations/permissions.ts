@@ -9,6 +9,8 @@
 //                 web hides them in single-org mode)
 //   - `settings`  system_settings:*, user_settings:*, org_settings:*
 //   - `jobs`      jobs:read, jobs:write
+//   - `nodes`     nodes:read, nodes:write (system, admin only; the worker-node fleet and its routes,
+//                 RETRO-C2, #581: MemoriaHub's node routes were gated on jobs:read / jobs:write)
 //   - `db-backup` db_backup:read, db_backup:write, db_backup:restore (RETRO-D4, #580; same ids and
 //                 grants as MemoriaHub's former declarations: system scope, admin only)
 //   - `ai`        ai_config:read, ai_config:write (system, admin), ai:use (org: org_admin and
@@ -30,14 +32,13 @@
 //                 sharing:write (org: contributor, org_admin), groups:admin, sharing:admin (org:
 //                 org_admin; a system `admin` holds them through the `org_admin` role the identity
 //                 slice gives it on the default organization) (RETRO-I1, #562)
-// Not listed on purpose: `nodes` is not mounted.
 
 import type { PlatformPermissionOptions } from '@marinoscar/platform-api/manifest';
 
 import { MEMORIAHUB_PERMISSIONS } from './memoriahub-permissions';
 
 export const PLATFORM_PERMISSION_OPTIONS: PlatformPermissionOptions = {
-  slices: ['identity', 'settings', 'jobs', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing', 'storage'],
+  slices: ['identity', 'settings', 'jobs', 'nodes', 'db-backup', 'ai', 'telemetry', 'notifications', 'alerts', 'user-data', 'webhooks', 'sharing', 'storage'],
   app: {
     roles: [],
     permissions: [MEMORIAHUB_PERMISSIONS],

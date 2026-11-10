@@ -1,5 +1,5 @@
 /**
- * Admin → Worker Nodes → Node Backup (`/admin/settings/nodes/:id/backup`).
+ * Admin → Worker Nodes → Node Backup (`/admin/settings/workers/:id/backup`; `/admin/settings/nodes/:id/backup` is the old address).
  *
  * Issue #319 (epic #308): per-node backup status + config editor + run history
  * over the #312 node backup control plane:
@@ -230,7 +230,7 @@ function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
         {/* Back link */}
         <Link
           component={RouterLink}
-          to="/admin/settings/nodes"
+          to="/admin/settings/workers"
           underline="hover"
           variant="body2"
           sx={{ display: 'inline-block', mb: 2 }}
@@ -493,7 +493,7 @@ export default function NodeBackupPage() {
     return <Navigate to="/" replace />;
   }
   if (!id) {
-    return <Navigate to="/admin/settings/nodes" replace />;
+    return <Navigate to="/admin/settings/workers" replace />;
   }
 
   return <NodeBackupPageContent nodeId={id} />;

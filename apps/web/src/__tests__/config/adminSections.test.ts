@@ -177,12 +177,14 @@ describe('adminSections', () => {
 
   describe('visibleAdminSections', () => {
     it('drops individual cards the permission gate rejects', () => {
-      const sections = visibleAdminSections(allowOnly('jobs:read'));
+      const sections = visibleAdminSections(allowOnly('jobs:read', 'nodes:read'));
       const titles = sections.flatMap((s) => s.cards.map((c) => c.title));
 
       expect(titles).toContain('Jobs');
       expect(titles).toContain('Job Insights');
+      // The Worker Nodes card is the nodes slice's and needs nodes:read (RETRO-C2), not jobs:read.
       expect(titles).toContain('Worker Nodes');
+      expect(visibleAdminSections(allowOnly('jobs:read')).flatMap((s) => s.cards.map((c) => c.title))).not.toContain('Worker Nodes');
       expect(titles).not.toContain('System');
       expect(titles).not.toContain('AI');
       expect(titles).not.toContain('Database Backup');
@@ -369,7 +371,7 @@ describe('adminSections', () => {
     });
 
     it('resolves a deeply-nested detail route to its parent card (Worker Nodes)', () => {
-      expect(adminPageTitle('/admin/settings/nodes/abc/backup')).toBe('Worker Nodes');
+      expect(adminPageTitle('/admin/settings/workers/abc/backup')).toBe('Worker Nodes');
     });
 
     it('falls back to the hub title for an unknown /admin/* path', () => {

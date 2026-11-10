@@ -86,7 +86,7 @@ Media bytes themselves never transit the API process — the `/changes` response
 
 ### 2.2 Why the Control Plane Lives at `/api/nodes/:id/backup/*`
 
-Every backup route is mounted under the existing node namespace and gated by the same `jobs:write` permission + owner-scoping as the compute-node control plane (`NodesService.assertOwnership` — 404 for an unknown node, 403 for a node owned by someone else). This is not incidental: `JwtAuthGuard#isNodeRoute` (`apps/api/src/auth/guards/jwt-auth.guard.ts`) accepts a `nod_`-prefixed durable node credential **only** on paths matching `/api/nodes` or `/api/nodes/*` — nowhere else in the API. Mounting backup anywhere else (e.g. a standalone `/api/backup/*` namespace) would have meant either widening the node-credential route allowlist (weakening its least-privilege guarantee for every other node use of that credential) or forcing backup nodes onto a full PAT, which the whole `nod_` credential type exists to avoid for an unattended, long-running process. Since a `nod_` credential is scoped by construction to media/settings/admin-inaccessible node routes, putting backup there for free gets it the same guarantee compute jobs already have: even a leaked backup-node credential can never read circle membership, settings, or any endpoint outside the node data/control plane.
+Every backup route is mounted under the existing node namespace and gated by `nodes:write` (the platform nodes slice's permission, RETRO-C2; it was `jobs:write`) + owner-scoping (`NodeBackupOwnershipService.assertOwnership`: 404 for an unknown node and for another user's node, never 403 (it was 403 for a foreign node before RETRO-C2); formerly `NodesService.assertOwnership` — 404 for an unknown node, 403 for a node owned by someone else). This is not incidental: `JwtAuthGuard#isNodeRoute` (`apps/api/src/auth/guards/jwt-auth.guard.ts`) accepts a `nod_`-prefixed durable node credential **only** on paths matching `/api/nodes` or `/api/nodes/*` — nowhere else in the API. Mounting backup anywhere else (e.g. a standalone `/api/backup/*` namespace) would have meant either widening the node-credential route allowlist (weakening its least-privilege guarantee for every other node use of that credential) or forcing backup nodes onto a full PAT, which the whole `nod_` credential type exists to avoid for an unattended, long-running process. Since a `nod_` credential is scoped by construction to media/settings/admin-inaccessible node routes, putting backup there for free gets it the same guarantee compute jobs already have: even a leaked backup-node credential can never read circle membership, settings, or any endpoint outside the node data/control plane.
 
 ### 2.3 `BackupEngine` Hosted Beside `NodeEngine`
 
@@ -106,9 +106,9 @@ A backup-configured machine that never runs `node start --daemon` still works fo
 
 | Layer | File(s) | Responsibility |
 |---|---|---|
-| Server control plane | `apps/api/src/nodes/node-backup.controller.ts`, `node-backup.service.ts` | HTTP surface, run lifecycle (start/ack/finish), config CRUD |
-| Server query layer | `apps/api/src/nodes/node-backup-query.service.ts` | Pure `media_items` reads: change feed, sidecar composition, manifest, pending-lag, dimensions |
-| Server staleness sweep | `apps/api/src/nodes/node-backup-stale.task.ts` | Releases abandoned `running` runs every 10 minutes |
+| Server control plane | `apps/api/src/node-backup/node-backup.controller.ts`, `node-backup.service.ts` | HTTP surface, run lifecycle (start/ack/finish), config CRUD |
+| Server query layer | `apps/api/src/node-backup/node-backup-query.service.ts` | Pure `media_items` reads: change feed, sidecar composition, manifest, pending-lag, dimensions |
+| Server staleness sweep | `apps/api/src/node-backup/node-backup-stale.task.ts` (enqueue-only) and `node-backup-stale.handler.ts` (`node_backup.stale_sweep`) | Releases abandoned `running` runs every 10 minutes |
 | Change-feed propagation | `apps/api/src/media/media-touch.service.ts` | Bumps `MediaItem.updatedAt` for related-table mutations the feed would otherwise miss (§3) |
 | CLI layout | `apps/cli/src/backup/layout.ts` | Folder-tree planning, filename sanitization, sidecar I/O, archive/unarchive moves |
 | CLI catalog | `apps/cli/src/backup/catalog-db.ts`, `catalog-repo.ts` | Per-root SQLite schema + typed data access (§7) |
@@ -533,7 +533,7 @@ Two backup nodes independently backing up the same (overlapping or identical) ci
 
 ## 12. API Endpoints Reference
 
-All routes below are mounted at `/api/nodes/:id/backup/*`, require `jobs:write`, and are owner-scoped via `NodesService.assertOwnership` (404 for an unknown node id, 403 for a node the caller does not own). `nod_` durable node credentials authenticate here exactly as they do on every other `/api/nodes/*` route (§2.2).
+All routes below are mounted at `/api/nodes/:id/backup/*`, require `nodes:write`, and are owner-scoped via `NodeBackupOwnershipService.assertOwnership` (404 for an unknown node id AND for a node the caller does not own). `nod_` durable node credentials authenticate here exactly as they do on every other `/api/nodes/*` route (§2.2).
 
 ### `GET /nodes/:id/backup/config`
 
@@ -586,10 +586,10 @@ No active run required — a config-less node reads the owner's full circle scop
 
 ## 13. RBAC
 
-**No new permission was added.** Every route reuses the owner's existing `jobs:write` (the same permission that already gates registering/managing a caller's own worker nodes and minting/revoking that owner's `nod_` credentials — see [Distributed Nodes](distributed-nodes.md#node-data-plane-distributed-workers--admin-worker-nodes) in CLAUDE.md). Two enforcement layers:
+**No new permission was added.** Every route reuses the owner's `nodes:write` (RETRO-C2: it was `jobs:write`) (the same permission that already gates registering/managing a caller's own worker nodes and minting/revoking that owner's `nod_` credentials — see [Distributed Nodes](distributed-nodes.md#node-data-plane-distributed-workers--admin-worker-nodes) in CLAUDE.md). Two enforcement layers:
 
 - **Authentication**: `nod_` or PAT, both accepted only on `/api/nodes/*` (§2.2).
-- **Authorization**: `NodesService.assertOwnership(userId, nodeId)` on every call — 404 for a node id that doesn't exist, 403 for one that exists but belongs to a different owner. Circle scoping is enforced independently, inside `updateConfig`: every requested `circleIds` entry must be a circle the **node's owner** (not necessarily the caller, though in practice they are the same account) is a member of.
+- **Authorization**: `NodeBackupOwnershipService.assertOwnership(userId, nodeId)` on every call — 404 for a node id that doesn't exist and for one that belongs to a different owner (RETRO-C2: it was 403 for the latter). Circle scoping is enforced independently, inside `updateConfig`: every requested `circleIds` entry must be a circle the **node's owner** (not necessarily the caller, though in practice they are the same account) is a member of.
 
 **Admin fleet visibility** is read-only and separate: `NodesService.listNodes`/`getNode` (the existing `GET /api/nodes` / `GET /api/nodes/:id`, and the Admin-only `GET /api/admin/nodes`) now include a `backup: { enabled, lastCompletedRunAt, checkpointUpdatedAt, activeRun } | null` summary per node (`summarizeBackup`), joined from `NodeBackupConfig` with a deliberately narrow `select` that excludes the BigInt counters (`itemsAcked`/`bytesAcked`) — keeping them out of the list-response serialization path entirely, rather than relying on per-field `.toString()` discipline at every call site. No lag/pending computation is included in the list view (that stays exclusive to `GET /nodes/:id/backup/config`, which is the only place it's cheap to compute per-request).
 

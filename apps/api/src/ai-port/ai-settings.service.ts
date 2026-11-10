@@ -395,17 +395,6 @@ export class AiSettingsService {
     }
   }
 
-  /**
-   * Resolve decrypted credentials for a provider: the platform deployment key first, then the
-   * legacy row (`AiDeploymentKeySource`). PLATFORM-ADOPTION-SHIM(RETRO-C10): ONLY the worker-node
-   * credential broker (`NodesService.getJobCredentials`) still reads a key this way; no model call
-   * does, they all go through `AiService`. RETRO-C10 removes the node AI executors and this method.
-   * Never returns a key to HTTP callers.
-   */
-  async resolveCredentials(providerKey: string) {
-    return this.keys.resolve(providerKey);
-  }
-
   /** Presentation-safe key status for one provider (no key material). */
   async credentialStatus(providerKey: string) {
     return this.keys.status(providerKey);
