@@ -32,8 +32,8 @@ vi.mock('../../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 // A realistic minimal SearchRequest fixture used by the stubbed SearchPanel's
@@ -84,10 +84,10 @@ vi.mock('@mui/material', async (importOriginal) => {
 
 import { TopbarSearch } from '../TopbarSearch';
 import { useSearch } from '../../../contexts/SearchContext';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 
 const mockUseSearch = vi.mocked(useSearch);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -127,7 +127,7 @@ describe('TopbarSearch', () => {
     vi.clearAllMocks();
     simulatePhone = false; // default: desktop layout
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
   });
 
   // -------------------------------------------------------------------------
@@ -293,7 +293,7 @@ describe('TopbarSearch', () => {
   // -------------------------------------------------------------------------
   describe('no active circle', () => {
     it('disables the search input when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -306,7 +306,7 @@ describe('TopbarSearch', () => {
     });
 
     it('does not open the AdvancedSearchDialog when no circle is active', async () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,

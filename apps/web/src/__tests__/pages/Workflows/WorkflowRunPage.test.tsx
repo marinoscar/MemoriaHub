@@ -41,8 +41,8 @@ vi.mock('../../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../hooks/useWorkflowRun', () => ({
@@ -73,14 +73,14 @@ vi.mock('react-router-dom', async () => {
 
 import WorkflowRunPage from '../../../pages/Workflows/WorkflowRunPage';
 import { usePermissions } from '../../../hooks/usePermissions';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useWorkflowRun } from '../../../hooks/useWorkflowRun';
 import { useWorkflowRunItems } from '../../../hooks/useWorkflowRunItems';
 import { useWorkflowMutations } from '../../../hooks/useWorkflowMutations';
 import type { WorkflowRunDetail, WorkflowRunItem } from '../../../types/workflows';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseWorkflowRun = vi.mocked(useWorkflowRun);
 const mockUseWorkflowRunItems = vi.mocked(useWorkflowRunItems);
 const mockUseWorkflowMutations = vi.mocked(useWorkflowMutations);
@@ -89,7 +89,7 @@ const mockUseWorkflowMutations = vi.mocked(useWorkflowMutations);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}) {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}) {
   return {
     activeCircle: { id: 'circle-1', name: 'Test Circle', description: null, ownerId: 'user-1', isPersonal: false, createdAt: '', updatedAt: '' },
     activeCircleId: 'circle-1',
@@ -99,7 +99,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makePermissions(perms: string[] = ['media:write', 'media:delete']) {
@@ -213,7 +213,7 @@ describe('WorkflowRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContainerWidth(1400); // desktop layout unless a test says otherwise
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions());
     mockUseWorkflowRunItems.mockReturnValue(makeItemsHook());
     mockUseWorkflowMutations.mockReturnValue(makeMutationsHook());

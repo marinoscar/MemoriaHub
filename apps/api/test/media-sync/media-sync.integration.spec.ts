@@ -413,6 +413,65 @@ describe('Media Sync device API (integration)', () => {
     await request(server).patch(url).set(authHeader(user.accessToken)).send({ paused: true }).expect(400);
   });
 
+  describe('targetOwner alias (RETRO-I6 #588): the phone keeps sending targetCircleId', () => {
+    const PHONE_CONFIG_KEYS = [
+      'folders',
+      'includePhotos',
+      'includeVideos',
+      'network',
+      'paused',
+      'requireCharging',
+      'retryFailedGeneration',
+      'syncNowGeneration',
+      'targetCircleId',
+      'uploadExisting',
+    ];
+
+    it("the phone's targetCircleId PATCH and the config it pulls are unchanged", async () => {
+      const user = await userWithCircle();
+      const phone = await mintPat(user.id);
+      const device = (await register(phone).expect(201)).body.data;
+
+      const res = await request(server)
+        .patch(`/api/media-sync/devices/${device.id}/config`)
+        .set(authHeader(phone))
+        .send({ targetCircleId: user.circleId })
+        .expect(200);
+      expect(Object.keys(res.body.data.config).sort()).toEqual(PHONE_CONFIG_KEYS);
+
+      const next = await checkin(phone, device.id).expect(200);
+      expect(Object.keys(next.body.data.config).sort()).toEqual(PHONE_CONFIG_KEYS);
+      expect(next.body.data.config.targetCircleId).toBe(user.circleId);
+    });
+
+    it('a web targetOwner is stored as the targetCircleId the phone reads', async () => {
+      const user = await userWithCircle();
+      const phone = await mintPat(user.id);
+      const device = (await register(phone).expect(201)).body.data;
+      const url = `/api/media-sync/devices/${device.id}/config`;
+
+      const ok = await request(server)
+        .patch(url)
+        .set(authHeader(user.accessToken))
+        .send({ targetOwner: { kind: 'group', groupId: user.circleId } })
+        .expect(200);
+      expect(ok.body.data.config.targetCircleId).toBe(user.circleId);
+      expect(Object.keys(ok.body.data.config).sort()).toEqual(PHONE_CONFIG_KEYS);
+
+      const next = await checkin(phone, device.id).expect(200);
+      expect(next.body.data.config.targetCircleId).toBe(user.circleId);
+
+      const foreign = randomUUID();
+      circles.push({ id: foreign, ownerId: randomUUID(), isPersonal: false });
+      const forbidden = await request(server)
+        .patch(url)
+        .set(authHeader(user.accessToken))
+        .send({ targetOwner: { kind: 'group', groupId: foreign } })
+        .expect(403);
+      expect(forbidden.body.details).toEqual({ reason: 'TARGET_OWNER_FORBIDDEN', circleId: foreign });
+    });
+  });
+
   it('unpair revokes the device and its PAT; the PAT stops authenticating', async () => {
     const user = await userWithCircle();
     const phone = await mintPat(user.id);

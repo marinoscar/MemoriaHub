@@ -179,6 +179,12 @@ export function describeWorkflowAction(action: WorkflowActionInstance): string {
       return action.favorite === false ? 'Unmark favorite' : 'Mark favorite';
     case 'hard_delete':
       return 'Permanently delete';
+    case 'move_to_owner': {
+      const t = action.target as { kind?: string; groupId?: string; name?: string } | undefined;
+      if (t?.kind === 'me') return 'Move to My library';
+      const target = paramString(action.targetName) ?? paramString(t?.groupId);
+      return target ? `Move to library '${target}'` : 'Move to library';
+    }
     case 'move_to_circle': {
       const target = paramString(action.targetCircleName) ?? paramString(action.targetCircleId);
       return target ? `Move to circle '${target}'` : 'Move to circle';

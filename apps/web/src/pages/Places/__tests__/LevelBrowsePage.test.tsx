@@ -19,8 +19,8 @@ import { render } from '../../../__tests__/utils/test-utils';
 // Module mocks (must precede the imports that use them)
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -41,10 +41,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import LevelBrowsePage from '../LevelBrowsePage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { getExploreLocationLevel } from '../../../services/media';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetExploreLocationLevel = vi.mocked(getExploreLocationLevel);
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ describe('LevelBrowsePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockGetExploreLocationLevel.mockResolvedValue([]);
   });
 
@@ -132,7 +132,7 @@ describe('LevelBrowsePage', () => {
     });
 
     it('shows the countries-specific no-circle guard', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -221,7 +221,7 @@ describe('LevelBrowsePage', () => {
     });
 
     it('shows the cities-specific no-circle guard', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -297,7 +297,7 @@ describe('LevelBrowsePage', () => {
   // -------------------------------------------------------------------------
   describe('No active circle', () => {
     it('does not call getExploreLocationLevel when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,

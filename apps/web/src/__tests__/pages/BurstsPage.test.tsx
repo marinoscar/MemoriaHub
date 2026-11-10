@@ -48,8 +48,8 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/useSystemSettings', () => ({
@@ -90,7 +90,7 @@ vi.mock('react-router-dom', async () => {
 import BurstsPage from '../../pages/Bursts/BurstsPage';
 import BurstGroupPage from '../../pages/Bursts/BurstGroupPage';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useBurstGroups, useBurstGroupDetail } from '../../hooks/useBursts';
@@ -98,7 +98,7 @@ import { ApiError } from '../../services/api';
 import type { BurstGroupSummary, BurstGroupDetail } from '../../services/bursts';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseBurstGroups = vi.mocked(useBurstGroups);
@@ -135,7 +135,7 @@ function makePermissions(isAdmin = false, role: string | null = 'collaborator') 
   };
 }
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}): ReturnType<typeof useCircle> {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}): ReturnType<typeof useOwnerScope> {
   return {
     activeCircle: makeCircle(),
     activeCircleId: CIRCLE_ID,
@@ -145,7 +145,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makeBurstGroupsHook(overrides: Partial<ReturnType<typeof useBurstGroups>> = {}): ReturnType<typeof useBurstGroups> {
@@ -291,7 +291,7 @@ describe('BurstsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(makePermissions(false));
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
     mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
     mockUseBurstGroups.mockReturnValue(makeBurstGroupsHook());
@@ -299,7 +299,7 @@ describe('BurstsPage', () => {
 
   describe('when no active circle', () => {
     it('shows select-a-circle alert', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
 
       render(<BurstsPage />);
 
@@ -930,7 +930,7 @@ describe('BurstGroupPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(makePermissions(false));
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseBurstGroupDetail.mockReturnValue(makeBurstGroupDetailHook());
   });
 

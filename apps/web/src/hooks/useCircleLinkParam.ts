@@ -15,14 +15,14 @@
 
 import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useCircle } from './useCircle';
+import { useOwnerScope } from './useOwnerScope';
 
 /** The query parameter a notification link carries its circle in. */
 export const NOTIFICATION_CIRCLE_PARAM = 'c';
 
 export function useCircleLinkParam(): void {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { circles, activeCircleId, setActiveCircle } = useCircle();
+  const { circles, activeCircleId, setActiveCircle } = useOwnerScope();
   const circleId = searchParams.get(NOTIFICATION_CIRCLE_PARAM);
 
   useEffect(() => {

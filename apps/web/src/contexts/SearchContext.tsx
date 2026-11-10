@@ -8,7 +8,7 @@ import {
   ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useCircle } from '../hooks/useCircle';
+import { useOwnerScope } from '../hooks/useOwnerScope';
 import { streamAgent } from '../services/searchAgentStream';
 import type { ChatMsg } from '../services/searchAgentStream';
 import type { SearchRequest } from '../services/search';
@@ -52,7 +52,7 @@ interface SearchProviderProps {
 export function SearchProvider({ children }: SearchProviderProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [results, setResults] = useState<SearchResults | null>(null);

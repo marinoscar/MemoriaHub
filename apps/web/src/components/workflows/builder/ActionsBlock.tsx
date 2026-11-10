@@ -34,7 +34,7 @@ export function ActionsBlock({
 
   // First non-destructive action makes a sensible default for a new row.
   const firstType =
-    actionCatalog.find((a) => !a.destructive)?.type ?? actionCatalog[0]?.type ?? 'move_to_trash';
+    actionCatalog.find((a) => !a.destructive && !a.deprecated)?.type ?? actionCatalog[0]?.type ?? 'move_to_trash';
 
   return (
     <BuilderBlock

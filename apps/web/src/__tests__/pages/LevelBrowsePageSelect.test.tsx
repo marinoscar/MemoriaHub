@@ -26,8 +26,8 @@ import type { MockUser } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../services/media', () => ({
@@ -56,12 +56,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import LevelBrowsePage from '../../pages/Places/LevelBrowsePage';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { getExploreLocationLevel } from '../../services/media';
 import { listLocationGroups, mergeLocationGroups } from '../../services/locationGroups';
 import type { MergeLocationGroupsResult } from '../../services/locationGroups';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetLevel = vi.mocked(getExploreLocationLevel);
 const mockListGroups = vi.mocked(listLocationGroups);
 const mockMerge = vi.mocked(mergeLocationGroups);
@@ -127,7 +127,7 @@ describe('LevelBrowsePage — select mode (#407)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockGetLevel.mockResolvedValue([]);
     mockListGroups.mockResolvedValue({ items: [], meta: { total: 0, page: 1, pageSize: 200 } });
     mockMerge.mockResolvedValue(makeMergeResult());

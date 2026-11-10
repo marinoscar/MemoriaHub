@@ -13,7 +13,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useReviewRun } from '../../hooks/useReviewRun';
 import { useReviewRunItems } from '../../hooks/useReviewRunItems';
 import { useRunPolling } from '../../hooks/useRunPolling';
@@ -209,7 +209,7 @@ function itemLabel(item: ReviewRunItem): string {
 export default function ReviewRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
 
   const { run, isLoading, error, fetchRun } = useReviewRun();
   const {

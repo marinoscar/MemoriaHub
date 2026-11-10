@@ -7,7 +7,7 @@
  *   - Shows MediaGallery when results !== null or isSearching.
  *   - Shows Explore (Places / Tags / People) carousels otherwise.
  *
- * Strategy: mock useSearch() and useCircle(); verify the two branches and
+ * Strategy: mock useSearch() and useOwnerScope(); verify the two branches and
  * the Explore row behaviour.
  */
 
@@ -25,8 +25,8 @@ vi.mock('../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/usePeople', () => ({
@@ -63,11 +63,11 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 import SearchPage from '../../pages/SearchPage';
 import { useSearch } from '../../contexts/SearchContext';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePeople } from '../../hooks/usePeople';
 
 const mockUseSearch = vi.mocked(useSearch);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUsePeople = vi.mocked(usePeople);
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ describe('SearchPage', () => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
     mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
   });
@@ -130,7 +130,7 @@ describe('SearchPage', () => {
   // -------------------------------------------------------------------------
   describe('No active circle', () => {
     it('renders an alert when activeCircle is null', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -537,7 +537,7 @@ describe('SearchPage', () => {
     });
 
     it('branch: no active circle — a search input and advanced-search trigger are present (disabled)', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,

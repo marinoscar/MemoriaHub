@@ -38,7 +38,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useSearchParams } from 'react-router-dom';
 import { useMedia } from '../../hooks/useMedia';
 import { useAlbums } from '../../hooks/useAlbums';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { listTags, exportMedia } from '../../services/media';
 import type { ExportFilters } from '../../services/media';
 import { MediaGallery } from '../../components/media/MediaGallery';
@@ -84,7 +84,7 @@ function deriveGeoFacets(items: MediaItem[]) {
 // ---------------------------------------------------------------------------
 
 export default function MediaLibraryPage() {
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
 
   const [searchParams, setSearchParams] = useSearchParams();
 

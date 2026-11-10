@@ -17,7 +17,7 @@
  *   - loading / empty / error states,
  *   - the rendering contract (shared DataTable, no raw TableContainer).
  *
- * `useCircle` and the platform's `useNotifications` are mocked directly so each scenario can be driven with exact,
+ * `useOwnerScope` and the platform's `useNotifications` are mocked directly so each scenario can be driven with exact,
  * deterministic circle/store fixtures. `useNotificationList` is NOT mocked —
  * its only network dependency, `listNotifications`, is — so the page's own
  * fetch-on-param-change wiring is exercised for real.
@@ -38,8 +38,8 @@ import type { NotificationItem, NotificationListResponse } from '../../../types/
 // Module-level mocks — declared before any imports of mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('@marinoscar/platform-web/notifications/headless', () => ({
@@ -64,12 +64,12 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import NotificationsPage, { BULK_CONFIRM_THRESHOLD } from '../../../pages/Notifications/NotificationsPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useNotifications } from '@marinoscar/platform-web/notifications/headless';
 import { listNotifications } from '../../../services/notifications';
 import { api } from '../../../services/api';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseNotifications = vi.mocked(useNotifications);
 const mockListNotifications = vi.mocked(listNotifications);
 
@@ -150,7 +150,7 @@ function setCircleState(activeCircleId: string | null, circles: Circle[]): void 
   setActiveCircle = vi.fn().mockImplementation(async (id: string) => {
     callOrder.push(`setActiveCircle:${id}`);
   });
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles,
     activeCircle: circles.find((c) => c.id === activeCircleId) ?? null,
     activeCircleId,

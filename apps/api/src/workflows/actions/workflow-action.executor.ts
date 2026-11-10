@@ -14,6 +14,7 @@ import { DuplicateService } from '../../dedup/duplicate.service';
 import { LocationSuggestionService } from '../../location-inference/location-suggestion.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
+import { resolveMoveTargetScope } from './move-target';
 import { BulkDeleteDto } from '../../media/dto/bulk-delete.dto';
 import { BulkArchiveDto } from '../../media/dto/bulk-archive.dto';
 import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
@@ -112,7 +113,8 @@ export class WorkflowActionExecutor {
           return await this.setLocation(action, item, ctx);
         case 'clear_location':
           return await this.clearLocation(item, ctx);
-        case 'move_to_circle':
+        case 'move_to_owner':
+        case 'move_to_circle': // deprecated alias, same path (RETRO-I6 #588)
           return await this.moveToCircle(action, item, ctx);
         case 'rerun_enrichment':
           return await this.rerunEnrichment(action, item, ctx);
@@ -378,7 +380,10 @@ export class WorkflowActionExecutor {
   }
 
   /**
-   * move_to_circle — the ONE action with cross-circle cascade semantics.
+   * move_to_owner (and its deprecated alias move_to_circle) — the ONE action
+   * with cross-circle cascade semantics. The target scope comes from
+   * `resolveMoveTargetScope` (`target: me | group`, or the legacy
+   * `targetCircleId`).
    *
    * Re-verifies collaborator access on BOTH the source (ctx.circleId) and the
    * target circle at execute time (requireOwnerRole honors the super-admin
@@ -393,7 +398,7 @@ export class WorkflowActionExecutor {
     item: WorkflowActionItem,
     ctx: WorkflowActionContext,
   ): Promise<ActionOutcome> {
-    const targetCircleId = action.params['targetCircleId'] as string;
+    const targetCircleId = await resolveMoveTargetScope(action.params, ctx.actorUserId, this.membership);
     if (targetCircleId === ctx.circleId) return { status: 'skipped', reason: 'same_circle' };
 
     // Both-circle collaborator + super-admin bypass re-check at execute time.

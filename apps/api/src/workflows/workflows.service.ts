@@ -330,6 +330,7 @@ export class WorkflowsService {
           type: a.type,
           label: a.label,
           ...(a.destructive ? { destructive: true } : {}),
+          ...(a.deprecated ? { deprecated: true } : {}),
         })),
       })),
     };

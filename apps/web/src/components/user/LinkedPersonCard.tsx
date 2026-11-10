@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { Link as RouterLink } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { usePermissions } from '../../hooks/usePermissions';
 import { PersonAvatar } from '../people/PersonAvatar';
@@ -73,7 +73,7 @@ export function LinkedPersonCard({
   onLinkChange,
   disabled = false,
 }: LinkedPersonCardProps) {
-  const { circles, activeCircleId } = useCircle();
+  const { circles, activeCircleId } = useOwnerScope();
   const { features, isLoading: flagsLoading } = useFeatureFlags();
   const { isAdmin } = usePermissions();
 

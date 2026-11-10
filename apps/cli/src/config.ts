@@ -3,9 +3,25 @@ import * as path from 'path';
 import { ui } from './ui.js';
 import { configDir } from './paths.js';
 
+import { parseActiveOwnerScope, type ActiveOwnerScope } from './owner-scope.js';
+
+export { ownerScopeFields, parseActiveOwnerScope, type ActiveOwnerScope } from './owner-scope.js';
+
 export interface CliConfig {
   serverUrl: string;
   pat: string;
+  /**
+   * The library uploads go to (RETRO-I6, #588), the CLI's counterpart of the web's
+   * `user_settings.activeOwnerScope`. Written by `groups use` together with
+   * {@link activeCircleId}.
+   */
+  activeOwnerScope?: ActiveOwnerScope;
+  /**
+   * The resolved scope id the commands send (a group id, or the personal library's id).
+   * @deprecated RETRO-I6 (#588): read the choice from {@link activeOwnerScope}. Still
+   * written alongside it, so a CLI older than 1.5.3 sharing this file keeps uploading to
+   * the same library, and still read when `activeOwnerScope` is absent (a pre-1.5.3 file).
+   */
   activeCircleId?: string;
   /**
    * ISO 8601 expiry timestamp of the stored PAT.  Written by `memoriahub login`
@@ -195,8 +211,16 @@ export function readRawConfigFile(): Record<string, unknown> | null {
 
 /** File shape (platform names, legacy names tolerated) to the in-memory CliConfig. */
 export function fromFileShape(raw: Record<string, unknown>): CliConfig {
-  const { token, expiresAt, pat, patExpiresAt, ...rest } = raw;
+  const { token, expiresAt, pat, patExpiresAt, activeOwnerScope, ...rest } = raw;
   const cfg = { ...rest } as unknown as CliConfig;
+  // RETRO-I6 (#588): `activeOwnerScope` wins; a group names its scope id directly. `me`
+  // keeps the resolved personal-library id stored beside it in `activeCircleId`. A file
+  // without `activeOwnerScope` (older CLI) is read exactly as before.
+  const scope = parseActiveOwnerScope(activeOwnerScope);
+  if (scope) {
+    cfg.activeOwnerScope = scope;
+    if (scope.kind === 'group') cfg.activeCircleId = scope.groupId;
+  }
   const credential = typeof token === 'string' && token ? token : pat;
   if (typeof credential === 'string') cfg.pat = credential;
   const expiry = typeof expiresAt === 'string' && expiresAt ? expiresAt : patExpiresAt;

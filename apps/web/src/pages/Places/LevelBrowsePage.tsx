@@ -30,7 +30,7 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlaceIcon from '@mui/icons-material/Place';
 import UncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { getExploreLocationLevel } from '../../services/media';
 import type { ExploreLocationItem } from '../../services/media';
@@ -106,7 +106,7 @@ const LEVEL_CONFIG: Record<Level, LevelConfig> = {
 
 export default function LevelBrowsePage({ level }: { level: Level }) {
   const navigate = useNavigate();
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
   const { hasPermission } = usePermissions();
 
   const config = LEVEL_CONFIG[level];

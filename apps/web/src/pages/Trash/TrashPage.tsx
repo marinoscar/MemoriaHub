@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import TrashIcon from '@mui/icons-material/DeleteOutlined';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { MediaGallery } from '../../components/media/MediaGallery';
 import { listTrash } from '../../services/media';
 import { createTrashEmptyRun } from '../../services/trashEmptyRuns';
@@ -22,7 +22,7 @@ import { ApiError } from '../../services/api';
 const RETENTION_DAYS = 30;
 
 export default function TrashPage() {
-  const { activeCircleId, activeCircleRole } = useCircle();
+  const { activeCircleId, activeCircleRole } = useOwnerScope();
   const navigate = useNavigate();
 
   // Stable query key; the empty-trash action now navigates to a run page rather

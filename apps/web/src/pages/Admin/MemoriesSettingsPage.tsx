@@ -27,9 +27,8 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { getEmailSettings } from '../../services/email';
-import { listCircles } from '../../services/circles';
-import { runMemoriesBackfill } from '../../services/adminMemories';
-import type { MemoriesBackfillResult } from '../../services/adminMemories';
+import { listMemoriesBackfillLibraries, runMemoriesBackfill } from '../../services/adminMemories';
+import type { MemoriesBackfillLibrary, MemoriesBackfillResult } from '../../services/adminMemories';
 import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
 
 type DigestFrequency = 'off' | 'daily' | 'weekly' | 'monthly';
@@ -125,7 +124,7 @@ function MemoriesSettingsContent() {
 
   // --- backfill -------------------------------------------------------------
   const [backfillCircleId, setBackfillCircleId] = useState('');
-  const [circles, setCircles] = useState<Array<{ id: string; name: string }>>([]);
+  const [libraries, setLibraries] = useState<MemoriesBackfillLibrary[]>([]);
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<MemoriesBackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
@@ -222,12 +221,14 @@ function MemoriesSettingsContent() {
       .finally(() => setEmailChecked(true));
   }, []);
 
-  // Circle list for the backfill selector. `all=true` needs circles:manage_any,
-  // which an Admin has; anything else degrades to "All circles" only.
+  // Library list for the backfill selector (RETRO-I6, #588): every group and
+  // every personal library, from the admin-only `GET /api/admin/memories/libraries`
+  // (it replaced `GET /api/circles?all=true`). A failure degrades to
+  // "All libraries" only.
   useEffect(() => {
-    listCircles(true)
-      .then((res) => setCircles(res.items.map((c) => ({ id: c.id, name: c.name }))))
-      .catch(() => setCircles([]));
+    listMemoriesBackfillLibraries()
+      .then(setLibraries)
+      .catch(() => setLibraries([]));
   }, []);
 
   /**
@@ -961,17 +962,17 @@ function MemoriesSettingsContent() {
 
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
             <FormControl size="small" sx={{ flex: 1, maxWidth: 360 }} disabled={!canManage}>
-              <InputLabel id="memories-backfill-circle-label">Circle</InputLabel>
+              <InputLabel id="memories-backfill-circle-label">Library</InputLabel>
               <Select
                 labelId="memories-backfill-circle-label"
-                label="Circle"
+                label="Library"
                 value={backfillCircleId}
                 onChange={(e) => setBackfillCircleId(e.target.value)}
               >
-                <MenuItem value="">All circles</MenuItem>
-                {circles.map((circle) => (
-                  <MenuItem key={circle.id} value={circle.id}>
-                    {circle.name}
+                <MenuItem value="">All libraries</MenuItem>
+                {libraries.map((library) => (
+                  <MenuItem key={library.id} value={library.id}>
+                    {library.kind === 'personal' ? `${library.name} (personal library)` : library.name}
                   </MenuItem>
                 ))}
               </Select>

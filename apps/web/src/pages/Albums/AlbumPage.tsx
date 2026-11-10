@@ -40,7 +40,7 @@ import ImageIcon from '@mui/icons-material/Image';
 import CloseIcon from '@mui/icons-material/Close';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { getAlbum, updateAlbum, deleteAlbum } from '../../services/media';
 import type { MediaItem } from '../../types/media';
@@ -55,7 +55,7 @@ import { SelectAlbumCoverDialog } from '../../components/album/SelectAlbumCoverD
 export default function AlbumPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const navigate = useNavigate();
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
 
   const canManage = activeCircleRole !== 'viewer';
 

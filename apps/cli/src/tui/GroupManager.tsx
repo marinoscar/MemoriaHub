@@ -13,6 +13,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from './ink.js';
 import { ApiClient, type Circle } from '../api.js';
 import { saveConfig, type CliConfig } from '../config.js';
+import { ownerScopeFields } from '../owner-scope.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,7 +87,7 @@ export function GroupManager({ config, onConfigChange, onBack }: GroupManagerPro
     if (key.return && circles.length > 0) {
       const circle = circles[selected];
       if (!circle) return;
-      const newConfig = { ...config, activeCircleId: circle.id };
+      const newConfig = { ...config, ...ownerScopeFields(circle) };
       saveConfig(newConfig);
       setActiveCircleId(circle.id);
       // Propagate to the parent so the in-memory session config matches what we

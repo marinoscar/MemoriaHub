@@ -23,8 +23,8 @@ import { ApiError } from '../../../services/api';
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/trashEmptyRuns', () => ({
@@ -55,13 +55,13 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import TrashPage from '../../../pages/Trash/TrashPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { createTrashEmptyRun } from '../../../services/trashEmptyRuns';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockCreateTrashEmptyRun = vi.mocked(createTrashEmptyRun);
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}) {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}) {
   return {
     activeCircle: {
       id: 'circle-1',
@@ -79,13 +79,13 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 describe('TrashPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
   });
 
   it('shows the Empty Trash button for a circle_admin', () => {
@@ -94,7 +94,7 @@ describe('TrashPage', () => {
   });
 
   it('hides the Empty Trash button for a non-circle_admin', () => {
-    mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
+    mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'collaborator' }));
     render(<TrashPage />);
     expect(screen.queryByRole('button', { name: /empty trash/i })).not.toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe('TrashPage', () => {
   });
 
   it('shows a prompt to select a circle when no circle is active', () => {
-    mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleId: null }));
+    mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleId: null }));
     render(<TrashPage />);
     expect(screen.getByText(/select a circle to view the trash/i)).toBeInTheDocument();
   });

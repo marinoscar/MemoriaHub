@@ -22,11 +22,11 @@ import { Box, Button, Divider, ListItemText, Menu, MenuItem } from '@mui/materia
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 
 export function OwnerScopeChip() {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const { circles, activeCircle, setActiveCircle } = useCircle();
+  const { circles, activeCircle, setActiveCircle } = useOwnerScope();
   const navigate = useNavigate();
 
   const open = Boolean(anchorEl);

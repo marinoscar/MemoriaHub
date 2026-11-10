@@ -18,7 +18,7 @@ import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useCircleRole } from '../../hooks/useCircleRole';
 import { useIntersectionObserver } from '../../hooks/useIntersectionObserver';
 import { useLongPress } from '../../hooks/useLongPress';
@@ -94,7 +94,7 @@ interface MenuTarget {
  */
 export default function MemoriesPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { isCollaborator } = useCircleRole();
   const { isAdmin } = usePermissions();
   const enabled = useMemoriesEnabled();

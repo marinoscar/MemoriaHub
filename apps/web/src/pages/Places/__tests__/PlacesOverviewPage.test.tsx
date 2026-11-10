@@ -22,8 +22,8 @@ import { render } from '../../../__tests__/utils/test-utils';
 // Module mocks (must precede the imports that use them)
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -44,10 +44,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import PlacesOverviewPage from '../PlacesOverviewPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { getExploreLocations } from '../../../services/media';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetExploreLocations = vi.mocked(getExploreLocations);
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ describe('PlacesOverviewPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockGetExploreLocations.mockResolvedValue(emptyLocations());
   });
 
@@ -85,7 +85,7 @@ describe('PlacesOverviewPage', () => {
   // -------------------------------------------------------------------------
   describe('No active circle', () => {
     it('shows an info alert when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -99,7 +99,7 @@ describe('PlacesOverviewPage', () => {
     });
 
     it('does not call getExploreLocations when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -356,7 +356,7 @@ describe('PlacesOverviewPage', () => {
 
       await waitFor(() => expect(mockGetExploreLocations).toHaveBeenCalledTimes(1));
 
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: { id: 'circle-2', name: 'Other Circle' },
         activeCircleId: 'circle-2',

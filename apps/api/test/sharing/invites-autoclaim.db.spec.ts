@@ -187,7 +187,7 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
     const membership = new GroupMembershipService(data, options, new MemberLookupThrottle(), effects);
     invites = new GroupInvitesService(data, options, membership, effects, SINGLE_TENANCY);
     autoAccept = new InviteAutoAcceptListener(invites, options);
-    mirror = new GroupMemberMirrorListener(prisma as never, { notifyAddress: jest.fn() } as never);
+    mirror = new GroupMemberMirrorListener(prisma as never, { notifyAddress: jest.fn() } as never, { get: jest.fn() } as never);
   }, 300_000);
 
   afterAll(async () => {

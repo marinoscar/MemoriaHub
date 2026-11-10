@@ -4,6 +4,7 @@ import { CircleRole } from '@prisma/client';
 import { CircleIdentityListeners } from '../../src/circles/identity-listeners';
 import { GroupMemberMirrorListener } from '../../src/circles/group-member-mirror.listener';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { GroupsService } from '@marinoscar/platform-api/sharing';
 import { IDENTITY_EVENTS } from '@marinoscar/platform-api/identity';
 
 import { notificationsForwardingTo } from '../mocks/email-notifications.adapter';
@@ -113,6 +114,7 @@ describe('GroupMemberMirrorListener', () => {
         GroupMemberMirrorListener,
         { provide: PrismaService, useValue: prisma },
         { provide: NotificationsService, useValue: notificationsForwardingTo(email) },
+        { provide: GroupsService, useValue: { get: jest.fn() } },
       ],
     }).compile();
     listener = module.get(GroupMemberMirrorListener);

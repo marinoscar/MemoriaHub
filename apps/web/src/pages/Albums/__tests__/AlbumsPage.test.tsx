@@ -2,7 +2,7 @@
  * Component tests — AlbumsPage (/albums)
  *
  * Mocking strategy (mirrors AlbumPage.test.tsx):
- *   - useCircle is mocked to supply an active circle and per-circle role.
+ *   - useOwnerScope is mocked to supply an active circle and per-circle role.
  *   - listAlbums / createAlbum / updateAlbum / deleteAlbum service functions
  *     are mocked so no real HTTP calls are made (useAlbums calls listAlbums
  *     internally).
@@ -33,8 +33,8 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -55,10 +55,10 @@ vi.mock('../../../components/album/CreateAlbumDialog', () => ({
 // ---------------------------------------------------------------------------
 
 import AlbumsPage from '../AlbumsPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { listAlbums } from '../../../services/media';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockListAlbums = vi.mocked(listAlbums);
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ const albumFixtures = [
 ];
 
 function setupDefaults(overrides: { role?: string } = {}) {
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [defaultActiveCircle],
     activeCircle: defaultActiveCircle,
     activeCircleId: 'circle-1',
@@ -170,7 +170,7 @@ describe('AlbumsPage', () => {
 
   describe('No active circle', () => {
     it('shows an info Alert and does not call listAlbums when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         circles: [],
         activeCircle: null,
         activeCircleId: null,

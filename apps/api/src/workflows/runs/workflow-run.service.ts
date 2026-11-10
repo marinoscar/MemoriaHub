@@ -27,6 +27,7 @@ import { WorkflowDefinition } from '../definition/workflow-definition.schema';
 import { getActionDescriptor } from '../registry/subject-registry';
 import { WorkflowActionDescriptor } from '../registry/field-descriptor.interface';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { resolveMoveTargetScope } from '../actions/move-target';
 
 /** The resolved settings object returned by AppSystemSettingsService.getSettings(). */
 type ResolvedSettings = Awaited<ReturnType<AppSystemSettingsService['getSettings']>>;
@@ -752,12 +753,10 @@ export class WorkflowRunService {
         this.assertHasPerms(user, [perm.extraPermForTrashVariant]);
       }
 
-      // move_to_circle: collaborator + systemPerms on BOTH source and target.
+      // move_to_owner / move_to_circle: editor + systemPerms on BOTH the
+      // source and the target library (the alias resolves identically).
       if (perm.bothCircles) {
-        const targetCircleId = action['targetCircleId'];
-        if (typeof targetCircleId !== 'string' || !targetCircleId) {
-          throw new BadRequestException('move_to_circle requires a targetCircleId');
-        }
+        const targetCircleId = await resolveMoveTargetScope(action, user.id, this.circleMembership);
         await this.circleMembership.requireOwnerRole(
           user.id,
           circleId,

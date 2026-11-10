@@ -33,7 +33,7 @@ import {
 } from '@mui/material';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
 import { usePermissions } from '../hooks/usePermissions';
-import { useCircle } from '../hooks/useCircle';
+import { useOwnerScope } from '../hooks/useOwnerScope';
 import { MEDIA_SYNC_POLL_MS, useLatestRelease, useMediaSyncDevices } from '../hooks/useMediaSync';
 import { ANDROID_APP_SETTINGS_PATH } from '../services/androidApp';
 import type { MediaSyncDevice } from '../services/mediaSync';
@@ -56,7 +56,7 @@ export default function MediaSyncPage() {
   const [inTwa] = useState(() => isRunningInTwa());
   const { devices, isLoading, error, refresh, reload } = useMediaSyncDevices({ pollMs: MEDIA_SYNC_POLL_MS });
   const { release } = useLatestRelease();
-  const { circles } = useCircle();
+  const { circles } = useOwnerScope();
   const [unpairing, setUnpairing] = useState<MediaSyncDevice | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 

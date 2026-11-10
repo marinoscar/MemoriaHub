@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   HttpException,
@@ -29,6 +30,7 @@ import {
   type ReportView,
   type RunView,
   statsSchema,
+  type TargetOwner,
   type UpdateConfigInput,
   type UploadDiagnosticsInput,
 } from './dto/media-sync.dto';
@@ -42,6 +44,7 @@ import {
   LAST_ERROR_MAX,
   MEDIA_SYNC_REASONS,
   type MediaSyncCommand,
+  type MediaSyncReason,
   REPORTS_KEPT_PER_DEVICE,
   RUNS_KEPT_PER_DEVICE,
 } from './media-sync.constants';
@@ -323,11 +326,21 @@ export class MediaSyncService {
       );
     }
 
-    if (input.targetCircleId !== undefined) {
+    // RETRO-I6 (#588): `targetOwner` is an additive alias, resolved to the scope id the
+    // stored config keeps in `targetCircleId` (the phone reads and sends only that).
+    const { targetOwner, ...rest } = input;
+    const patch: UpdateConfigInput = { ...rest };
+    if (targetOwner !== undefined) {
+      const scopeId = await this.resolveTargetOwner(caller, targetOwner);
+      if (input.targetCircleId !== undefined && input.targetCircleId !== scopeId) {
+        throw new BadRequestException('targetOwner and targetCircleId name different libraries');
+      }
+      await this.assertCanTargetCircle(caller, scopeId, MEDIA_SYNC_REASONS.TARGET_OWNER_FORBIDDEN);
+      patch.targetCircleId = scopeId;
+    } else if (input.targetCircleId !== undefined) {
       await this.assertCanTargetCircle(caller, input.targetCircleId);
     }
 
-    const patch: UpdateConfigInput = { ...input };
     if (input.folders !== undefined && input.folders.length > 0) {
       const inventory = input.inventory ?? readInventory(device.inventory) ?? [];
       const names = new Map(inventory.map((folder) => [folder.bucketId, folder.name]));
@@ -623,15 +636,38 @@ export class MediaSyncService {
   }
 
   /**
+   * The scope id of a `targetOwner` (RETRO-I6, #588): a group names it; `me` is the
+   * caller's personal library. A caller with no personal library gets the same 403
+   * `TARGET_OWNER_FORBIDDEN` as any other refusal.
+   */
+  private async resolveTargetOwner(caller: MediaSyncCaller, target: TargetOwner): Promise<string> {
+    if (target.kind === 'group') return target.groupId;
+    const personal = await this.circleMembership.personalLibraryOf(caller.id);
+    if (!personal) {
+      throw mediaSyncRefusal(
+        HttpStatus.FORBIDDEN,
+        MEDIA_SYNC_REASONS.TARGET_OWNER_FORBIDDEN,
+        'You have no personal library',
+        { targetOwner: target },
+      );
+    }
+    return personal;
+  }
+
+  /**
    * `collaborator` on the target circle, or the super-admin bypass (the circle
    * must still exist). Every refusal, including an unknown circle, is the
    * same 403 `TARGET_CIRCLE_FORBIDDEN`, so circle ids cannot be probed.
    */
-  private async assertCanTargetCircle(caller: MediaSyncCaller, circleId: string): Promise<void> {
+  private async assertCanTargetCircle(
+    caller: MediaSyncCaller,
+    circleId: string,
+    reason: MediaSyncReason = MEDIA_SYNC_REASONS.TARGET_CIRCLE_FORBIDDEN,
+  ): Promise<void> {
     const forbidden = () =>
       mediaSyncRefusal(
         HttpStatus.FORBIDDEN,
-        MEDIA_SYNC_REASONS.TARGET_CIRCLE_FORBIDDEN,
+        reason,
         'You need the collaborator role in the target circle',
         { circleId },
       );

@@ -17,8 +17,8 @@ import { render } from '../../../__tests__/utils/test-utils';
 // Module mocks (must precede the imports that use them)
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../services/media', () => ({
@@ -39,10 +39,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import TagsBrowsePage from '../TagsBrowsePage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { getExploreTags } from '../../../services/media';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetExploreTags = vi.mocked(getExploreTags);
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ describe('TagsBrowsePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    mockUseCircle.mockReturnValue(defaultCircleMock() as any);
+    mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     // Default: resolve with an empty list so tests that need data can override
     mockGetExploreTags.mockResolvedValue([]);
   });
@@ -77,7 +77,7 @@ describe('TagsBrowsePage', () => {
   // -------------------------------------------------------------------------
   describe('No active circle', () => {
     it('shows an info alert when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -91,7 +91,7 @@ describe('TagsBrowsePage', () => {
     });
 
     it('does not call getExploreTags when no circle is active', () => {
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: null,
         activeCircleId: null,
@@ -237,7 +237,7 @@ describe('TagsBrowsePage', () => {
       await waitFor(() => expect(mockGetExploreTags).toHaveBeenCalledTimes(1));
 
       // Simulate switching to a different circle
-      mockUseCircle.mockReturnValue({
+      mockUseOwnerScope.mockReturnValue({
         ...defaultCircleMock(),
         activeCircle: { id: 'circle-2', name: 'Other Circle' },
         activeCircleId: 'circle-2',

@@ -2,7 +2,7 @@
  * Unit tests for LocationSuggestionsPage.
  *
  * Mocking strategy:
- *   - useCircle, usePermissions, useSystemSettings, and useLocationSuggestions
+ *   - useOwnerScope, usePermissions, useSystemSettings, and useLocationSuggestions
  *     are module-mocked directly (mirrors BurstsPage.test.tsx / DuplicatesPage.test.tsx
  *     — reaching one level above the service layer rather than mocking
  *     services/locationSuggestions here).
@@ -54,8 +54,8 @@ import { render } from '../utils/test-utils';
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/usePermissions', () => ({
@@ -131,7 +131,7 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import LocationSuggestionsPage from '../../pages/LocationSuggestions/LocationSuggestionsPage';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
@@ -141,7 +141,7 @@ import { searchPlaces, reverseGeocode } from '../../services/media';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
@@ -170,7 +170,7 @@ function makeCircle(id = CIRCLE_ID) {
   };
 }
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}): ReturnType<typeof useCircle> {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}): ReturnType<typeof useOwnerScope> {
   return {
     activeCircle: makeCircle(),
     activeCircleId: CIRCLE_ID,
@@ -180,7 +180,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makePermissions(isAdmin = false) {
@@ -285,7 +285,7 @@ function makeSuggestion(overrides: Partial<LocationSuggestionSummary> = {}): Loc
 describe('LocationSuggestionsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions(false));
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
     mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
@@ -320,7 +320,7 @@ describe('LocationSuggestionsPage', () => {
 
   describe('no active circle', () => {
     it('shows a select-a-circle alert', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
 
       render(<LocationSuggestionsPage />);
 

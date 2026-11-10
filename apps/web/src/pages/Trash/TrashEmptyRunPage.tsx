@@ -13,7 +13,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';
 import { useTrashEmptyRunItems } from '../../hooks/useTrashEmptyRunItems';
 import { useRunPolling } from '../../hooks/useRunPolling';
@@ -93,7 +93,7 @@ function terminalSummary(run: TrashEmptyRunDetail): RunTerminalSummary {
 export default function TrashEmptyRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
 
   const { run, isLoading, error, fetchRun } = useTrashEmptyRun();
   const {

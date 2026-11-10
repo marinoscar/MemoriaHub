@@ -8,9 +8,9 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
-vi.mock('../../hooks/useCircle', () => ({ useCircle: vi.fn() }));
+vi.mock('../../hooks/useOwnerScope', () => ({ useOwnerScope: vi.fn() }));
 
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useCircleLinkParam } from '../../hooks/useCircleLinkParam';
 
 const setActiveCircle = vi.fn().mockResolvedValue(undefined);
@@ -20,7 +20,7 @@ function circles(...ids: string[]) {
 }
 
 function setCircles(list: { id: string; name: string }[], activeCircleId: string | null) {
-  vi.mocked(useCircle).mockReturnValue({ circles: list, activeCircleId, setActiveCircle } as never);
+  vi.mocked(useOwnerScope).mockReturnValue({ circles: list, activeCircleId, setActiveCircle } as never);
 }
 
 function run(url: string) {

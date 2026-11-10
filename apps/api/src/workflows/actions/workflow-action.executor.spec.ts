@@ -62,7 +62,7 @@ describe('WorkflowActionExecutor', () => {
   let duplicate: jest.Mocked<Pick<DuplicateService, 'resolveDuplicateGroup' | 'dismissDuplicateGroup'>>;
   let locationSuggestions: jest.Mocked<Pick<LocationSuggestionService, 'acceptSuggestion' | 'rejectSuggestion'>>;
   let enrichmentJobs: jest.Mocked<Pick<EnrichmentJobService, 'enqueue'>>;
-  let membership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole'>>;
+  let membership: jest.Mocked<Pick<OwnerAccessService, 'requireOwnerRole' | 'personalLibraryOf'>>;
   let ctx: WorkflowActionContext;
 
   beforeEach(() => {
@@ -107,6 +107,7 @@ describe('WorkflowActionExecutor', () => {
     enrichmentJobs = { enqueue: jest.fn().mockResolvedValue({ id: randomUUID() }) };
     membership = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'editor' as const, isSuperAdmin: false }),
+      personalLibraryOf: jest.fn().mockResolvedValue(null),
     };
 
     executor = new WorkflowActionExecutor(
@@ -562,6 +563,51 @@ describe('WorkflowActionExecutor', () => {
   // ---------------------------------------------------------------------------
   // move_to_circle
   // ---------------------------------------------------------------------------
+
+  describe('move_to_owner (RETRO-I6 #588)', () => {
+    beforeEach(() => {
+      prisma.mediaItem.findUnique.mockResolvedValue({
+        id: ITEM_ID,
+        type: MediaType.photo,
+        contentHash: null,
+        deletedAt: null,
+      } as any);
+      prisma.mediaItem.findFirst.mockResolvedValue(null);
+    });
+
+    it('moves into a group target exactly like move_to_circle does', async () => {
+      const outcome = await executor.execute(
+        action('move_to_owner', { target: { kind: 'group', groupId: OTHER_CIRCLE_ID } }),
+        { id: ITEM_ID },
+        ctx,
+      );
+      expect(outcome).toEqual({ status: 'applied' });
+      expect(membership.requireOwnerRole).toHaveBeenCalledWith(ACTOR_ID, OTHER_CIRCLE_ID, ctx.actorPermissions, 'editor');
+    });
+
+    it("resolves { kind: 'me' } to the ACTOR's personal library", async () => {
+      membership.personalLibraryOf.mockResolvedValue(OTHER_CIRCLE_ID);
+      const outcome = await executor.execute(
+        action('move_to_owner', { target: { kind: 'me' } }),
+        { id: ITEM_ID },
+        ctx,
+      );
+      expect(membership.personalLibraryOf).toHaveBeenCalledWith(ACTOR_ID);
+      expect(outcome).toEqual({ status: 'applied' });
+      expect(membership.requireOwnerRole).toHaveBeenCalledWith(ACTOR_ID, OTHER_CIRCLE_ID, ctx.actorPermissions, 'editor');
+    });
+
+    it("skips as same_circle when 'me' is the source library", async () => {
+      membership.personalLibraryOf.mockResolvedValue(CIRCLE_ID);
+      const outcome = await executor.execute(action('move_to_owner', { target: { kind: 'me' } }), { id: ITEM_ID }, ctx);
+      expect(outcome).toEqual({ status: 'skipped', reason: 'same_circle' });
+    });
+
+    it("fails when 'me' has no personal library", async () => {
+      const outcome = await executor.execute(action('move_to_owner', { target: { kind: 'me' } }), { id: ITEM_ID }, ctx);
+      expect(outcome).toMatchObject({ status: 'failed' });
+    });
+  });
 
   describe('move_to_circle', () => {
     it('skips with reason same_circle when the target equals the source circle', async () => {

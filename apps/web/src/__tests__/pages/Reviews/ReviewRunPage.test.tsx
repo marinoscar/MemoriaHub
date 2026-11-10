@@ -42,8 +42,8 @@ import { api } from '../../../services/api';
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../../hooks/useReviewRun', () => ({
@@ -73,12 +73,12 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 
 import ReviewRunPage from '../../../pages/Reviews/ReviewRunPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useReviewRun } from '../../../hooks/useReviewRun';
 import { useReviewRunItems } from '../../../hooks/useReviewRunItems';
 import type { ReviewRunDetail } from '../../../types/reviewRuns';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseReviewRun = vi.mocked(useReviewRun);
 const mockUseReviewRunItems = vi.mocked(useReviewRunItems);
 
@@ -86,7 +86,7 @@ const mockUseReviewRunItems = vi.mocked(useReviewRunItems);
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}) {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}) {
   return {
     activeCircle: {
       id: 'circle-1',
@@ -104,7 +104,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makeRun(overrides: Partial<ReviewRunDetail> = {}): ReviewRunDetail {
@@ -164,7 +164,7 @@ describe('ReviewRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContainerWidth(1400); // desktop layout unless a test says otherwise
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseReviewRunItems.mockReturnValue(makeItemsHook());
     // The table's layout-persistence hook reads/writes `/user-settings` (§15).
     vi.spyOn(api, 'get').mockResolvedValue({} as never);
@@ -362,7 +362,7 @@ describe('ReviewRunPage', () => {
     });
 
     it('also shows the Cancel run button for circle_admin (collaborator OR circle_admin)', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'circle_admin' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'circle_admin' }));
       mockUseReviewRun.mockReturnValue(
         makeRunHook({
           run: makeRun({ status: 'running', matchedCount: 10, processedCount: 1 }),
@@ -375,7 +375,7 @@ describe('ReviewRunPage', () => {
     });
 
     it('hides the Cancel run button for a plain viewer', () => {
-      mockUseCircle.mockReturnValue(makeCircleContext({ activeCircleRole: 'viewer' }));
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircleRole: 'viewer' }));
       mockUseReviewRun.mockReturnValue(
         makeRunHook({
           run: makeRun({ status: 'running', matchedCount: 10, processedCount: 1 }),

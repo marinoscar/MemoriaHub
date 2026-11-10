@@ -94,7 +94,26 @@ function MockCircleProvider({
   activeCircle = defaultMockCircle,
   activeCircleRole = 'circle_admin',
 }: MockCircleProviderProps) {
+  // The owner-scope fields (RETRO-I6 #588) derived from the legacy circle, so
+  // components on `useOwnerScope()` render under the same helper.
+  const ownerRole = activeCircleRole === 'circle_admin' ? 'admin' : activeCircleRole === 'collaborator' ? 'editor' : activeCircleRole;
+  const scope = activeCircle
+    ? {
+        id: activeCircle.id,
+        kind: activeCircle.isPersonal ? ('me' as const) : ('group' as const),
+        name: activeCircle.name,
+        description: activeCircle.description ?? null,
+        role: ownerRole ?? null,
+      }
+    : null;
   const contextValue = {
+    scopes: scope ? [scope] : [],
+    activeScope: scope?.kind === 'group' ? { kind: 'group' as const, groupId: scope.id } : { kind: 'me' as const },
+    activeOption: scope,
+    activeRole: scope?.role ?? null,
+    personalLibraryId: scope?.kind === 'me' ? scope.id : null,
+    setActiveScope: vi.fn().mockResolvedValue(undefined),
+    refreshScopes: vi.fn().mockResolvedValue(undefined),
     circles: activeCircle ? [activeCircle] : [],
     activeCircle,
     activeCircleId: activeCircle?.id ?? null,

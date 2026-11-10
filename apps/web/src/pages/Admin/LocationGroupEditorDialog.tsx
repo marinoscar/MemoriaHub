@@ -41,7 +41,7 @@ import {
   Typography,
 } from '@mui/material';
 import { LocationPickerMap } from '../../components/media/LocationPickerMap';
-import { useCircleContext } from '../../contexts/CircleContext';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { listMedia } from '../../services/media';
 import type { MediaItem } from '../../types/media';
 import {
@@ -92,7 +92,7 @@ export default function LocationGroupEditorDialog({
   onSaved,
 }: LocationGroupEditorDialogProps) {
   const isEdit = groupId !== null;
-  const { activeCircleId } = useCircleContext();
+  const { activeCircleId } = useOwnerScope();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);

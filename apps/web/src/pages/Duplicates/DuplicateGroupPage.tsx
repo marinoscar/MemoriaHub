@@ -26,7 +26,7 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useDuplicateGroupDetail } from '../../hooks/useDuplicates';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import {
   MemberComparison,
@@ -262,7 +262,7 @@ const COMPARISON_ROW_DEFS: ComparisonRowDef<DuplicateGroupMember>[] = [
 export default function DuplicateGroupPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
   const { isAdmin, hasPermission } = usePermissions();
 
   const groupId = id ?? '';

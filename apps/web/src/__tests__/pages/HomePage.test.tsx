@@ -28,8 +28,8 @@ import { render, mockUser } from '../utils/test-utils';
 // Module mocks — declared before any imports of mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 // Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
@@ -51,10 +51,10 @@ vi.mock('../../components/memories/MemoriesCarousel', () => ({
 // ---------------------------------------------------------------------------
 
 import HomePage from '../../pages/HomePage';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { MemoriesCarousel } from '../../components/memories/MemoriesCarousel';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockMemoriesCarousel = vi.mocked(MemoriesCarousel);
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ const defaultActiveCircle = {
 };
 
 function setupActiveCircle() {
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [defaultActiveCircle],
     activeCircle: defaultActiveCircle,
     activeCircleId: 'circle-1',
@@ -84,7 +84,7 @@ function setupActiveCircle() {
 }
 
 function setupNoCircle() {
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [],
     activeCircle: null,
     activeCircleId: null,
@@ -96,7 +96,7 @@ function setupNoCircle() {
 }
 
 function setupCircleLoading() {
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [],
     activeCircle: null,
     activeCircleId: null,

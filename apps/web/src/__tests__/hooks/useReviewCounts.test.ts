@@ -15,17 +15,17 @@ vi.mock('../../services/media', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock useCircle so we can control activeCircleId without CircleProvider
+// Mock useOwnerScope so we can control activeCircleId without CircleProvider
 // ---------------------------------------------------------------------------
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 import { getReviewCounts } from '../../services/media';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 
 const mockGetReviewCounts = vi.mocked(getReviewCounts);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 
 // ---------------------------------------------------------------------------
 // Mock data
@@ -41,7 +41,7 @@ const mockCounts: ReviewCountsResponse = {
 // Helpers
 // ---------------------------------------------------------------------------
 function setCircle(id: string | null) {
-  mockUseCircle.mockReturnValue({
+  mockUseOwnerScope.mockReturnValue({
     circles: [],
     activeCircle: id
       ? {

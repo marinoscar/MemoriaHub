@@ -39,7 +39,7 @@ import {
   getLocationExtent,
 } from '../../services/media';
 import { AggregateClusterLayer } from '../../components/map/AggregateClusterLayer';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSearch } from '../../contexts/SearchContext';
 import { MediaDetailDrawer } from '../../components/media/MediaDetailDrawer';
@@ -236,7 +236,7 @@ export default function MediaMapPage() {
   // shell is not remounted on the way in or out (RETRO-F1, #571).
   useShellMainVariant('full-bleed');
   const theme = useTheme();
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
   const { isLoading: authIsLoading } = useAuth();
   const { runDeterministicSearch } = useSearch();
 

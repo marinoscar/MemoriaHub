@@ -27,7 +27,7 @@ import EditLocationAltIcon from '@mui/icons-material/EditLocationAlt';
 import CloseIcon from '@mui/icons-material/Close';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
@@ -243,7 +243,7 @@ function SuggestionRow({ suggestion, acting, onAccept, onReject, onAdjust }: Sug
 
 export default function LocationSuggestionsPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
   // See `DuplicatesPage` for the inversion rule: a LOADED flag record that does

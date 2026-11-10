@@ -91,6 +91,37 @@ describe('ActionsBlock', () => {
     });
   });
 
+  describe('move to library (RETRO-I6 #588)', () => {
+    const MOVE_CATALOG: WorkflowActionDescriptor[] = [
+      { type: 'move_to_trash', label: 'Move to Trash' },
+      { type: 'move_to_owner', label: 'Move to library' },
+      { type: 'move_to_circle', label: 'Move to circle', deprecated: true },
+    ];
+
+    it('never offers the deprecated move_to_circle alias for a new action', async () => {
+      const user = userEvent.setup();
+      render(<ActionsHarness actionCatalog={MOVE_CATALOG} />);
+
+      await user.click(screen.getByRole('button', { name: 'Add action' }));
+      await user.click(screen.getAllByRole('combobox')[0]);
+
+      const listbox = await screen.findByRole('listbox');
+      const labels = within(listbox).getAllByRole('option').map((o) => o.textContent);
+      expect(labels).toEqual(['Move to Trash', 'Move to library']);
+    });
+
+    it('defaults move_to_owner to My library and shows the destination picker', async () => {
+      const user = userEvent.setup();
+      render(<ActionsHarness actionCatalog={MOVE_CATALOG} />);
+
+      await user.click(screen.getByRole('button', { name: 'Add action' }));
+      await user.click(screen.getAllByRole('combobox')[0]);
+      await user.click(await screen.findByRole('option', { name: 'Move to library' }));
+
+      expect((await screen.findAllByText('Destination library')).length).toBeGreaterThan(0);
+    });
+  });
+
   describe('action rows', () => {
     it('shows an empty-state hint and no rows before any action is added', async () => {
       render(<ActionsHarness />);

@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-vi.mock('../../../hooks/useCircle', () => ({ useCircle: vi.fn() }));
+vi.mock('../../../hooks/useOwnerScope', () => ({ useOwnerScope: vi.fn() }));
 vi.mock('../../../hooks/usePermissions', () => ({ usePermissions: vi.fn() }));
 vi.mock('../../../hooks/useWorkflowSubjects', () => ({ useWorkflowSubjects: vi.fn() }));
 vi.mock('../../../hooks/useWorkflow', () => ({ useWorkflow: vi.fn() }));
@@ -36,7 +36,7 @@ vi.mock('../../../services/media', async (importOriginal) => {
 });
 
 import WorkflowBuilderPage from '../../../pages/Workflows/WorkflowBuilderPage';
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useWorkflowSubjects } from '../../../hooks/useWorkflowSubjects';
 import { useWorkflow } from '../../../hooks/useWorkflow';
@@ -45,7 +45,7 @@ import { useWorkflowPreview } from '../../../hooks/useWorkflowPreview';
 import { WORKFLOW_TEMPLATES } from '../../../constants/workflowTemplates';
 import type { SubjectRegistryEntry } from '../../../types/workflows';
 
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseWorkflowSubjects = vi.mocked(useWorkflowSubjects);
 const mockUseWorkflow = vi.mocked(useWorkflow);
@@ -82,15 +82,11 @@ function renderBuilder(initialEntries: Parameters<typeof MemoryRouter>[0]['initi
 describe('WorkflowBuilderPage — template hydration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseCircle.mockReturnValue({
-      activeCircle: { id: 'circle-1', name: 'Test Circle', description: null, ownerId: 'user-1', isPersonal: false, createdAt: '', updatedAt: '' },
-      activeCircleId: 'circle-1',
-      activeCircleRole: 'collaborator',
-      circles: [],
-      loading: false,
-      setActiveCircle: vi.fn().mockResolvedValue(undefined),
-      refreshCircles: vi.fn().mockResolvedValue(undefined),
-    } as unknown as ReturnType<typeof useCircle>);
+    mockUseOwnerScope.mockReturnValue({
+      scopes: [],
+      activeOption: { id: 'circle-1', kind: 'group', name: 'Test Circle', description: null, role: 'editor' },
+      activeRole: 'editor',
+    } as unknown as ReturnType<typeof useOwnerScope>);
     mockUsePermissions.mockReturnValue({
       permissions: new Set(['media:write']),
       roles: new Set<string>(),

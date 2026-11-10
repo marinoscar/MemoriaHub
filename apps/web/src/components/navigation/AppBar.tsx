@@ -32,7 +32,7 @@ import { Alert, Box, Button, IconButton, Snackbar, Typography, useMediaQuery, us
 import UploadIcon from '@mui/icons-material/CloudUpload';
 import { ShellAppBar } from '@marinoscar/platform-web/shell/ui';
 import { APP_NAVIGATION } from '../../config/shell';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
 import { UserMenu } from './UserMenu';
 import { OwnerScopeChip } from './OwnerScopeChip';
@@ -74,7 +74,7 @@ function Brand() {
 
 export function AppBar() {
   const theme = useTheme();
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
   const { triggerRefresh } = useMediaRefresh();
   // The documented non-gate (see the file header).
   const isTabletUp = useMediaQuery(theme.breakpoints.up('sm'));

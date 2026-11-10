@@ -47,7 +47,7 @@ import BackupIcon from '@mui/icons-material/SettingsBackupRestore';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useNodeBackup } from '../../hooks/useNodeBackup';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import type { NodeBackupRunDto } from '../../services/nodeBackup';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import {
@@ -119,7 +119,7 @@ function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
   const { config, configLoaded, runs, loading, saving, error, refresh, saveConfig } =
     useNodeBackup(nodeId, { autoRefresh: true });
   // RETRO-I6 (#588): the node owner's libraries are the owner scopes ("My library" + their groups).
-  const { circles } = useCircle();
+  const { circles } = useOwnerScope();
 
   // --- Form state ------------------------------------------------------------
   const browserTz = useMemo(

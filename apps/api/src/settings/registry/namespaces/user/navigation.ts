@@ -12,6 +12,7 @@ export const NAVIGATION_PINNABLE_KEYS = [
   'favorites',
   'archive',
   'trash',
+  'shared',
   'bursts',
   'duplicates',
   'locations',

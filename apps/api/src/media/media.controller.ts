@@ -33,6 +33,7 @@ import { AttachTagsDto } from './dto/attach-tags.dto';
 import { CreateAlbumDto } from './dto/create-album.dto';
 import { UpdateAlbumDto } from './dto/update-album.dto';
 import { AlbumQueryDto } from './dto/album-query.dto';
+import { SharedWithMeQueryDto } from './dto/shared-with-me-query.dto';
 import { AddAlbumItemsDto } from './dto/add-album-items.dto';
 import { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
 import { ExportQueryDto } from './dto/export-query.dto';
@@ -296,6 +297,40 @@ export class MediaController {
     @CurrentUser() user: RequestUser,
   ) {
     return this.mediaService.listTags(circleId, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/shared-with-me (RETRO-I6, #588)
+   * The media items shared with the caller through grants, across libraries.
+   */
+  @Get('shared-with-me')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List media items shared with the caller through grants (paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated media items shared with the caller' })
+  async listSharedMedia(
+    @Query() query: SharedWithMeQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listSharedMedia(query, user.id, user.permissions);
+  }
+
+  /**
+   * GET /api/media/albums/shared-with-me (RETRO-I6, #588)
+   * Declared before @Get('albums/:id') so it is never shadowed.
+   */
+  @Get('albums/shared-with-me')
+  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @ApiOperation({ summary: 'List albums shared with the caller through grants (paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Paginated albums shared with the caller' })
+  async listSharedAlbums(
+    @Query() query: SharedWithMeQueryDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.mediaService.listSharedAlbums(query, user.id, user.permissions);
   }
 
   /**

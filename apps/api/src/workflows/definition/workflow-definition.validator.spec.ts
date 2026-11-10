@@ -187,6 +187,7 @@ describe('WorkflowDefinitionValidator', () => {
       set_favorite: { value: true },
       set_captured_at: { mode: 'set', value: '2026-01-01T00:00:00.000Z' },
       move_to_circle: { targetCircleId: '22222222-2222-4222-8222-222222222222' },
+      move_to_owner: { target: { kind: 'group', groupId: '22222222-2222-4222-8222-222222222222' } },
       assign_person: { personId: '33333333-3333-4333-8333-333333333333' },
       remove_person: { personId: '33333333-3333-4333-8333-333333333333' },
       set_location: { lat: 9.93, lng: -84.08 },

@@ -32,8 +32,8 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../hooks/useCircle', () => ({
-  useCircle: vi.fn(),
+vi.mock('../../hooks/useOwnerScope', () => ({
+  useOwnerScope: vi.fn(),
 }));
 
 vi.mock('../../hooks/useDuplicates', () => ({
@@ -56,12 +56,12 @@ vi.mock('react-router-dom', async () => {
 
 import DuplicateGroupPage from '../../pages/Duplicates/DuplicateGroupPage';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useDuplicateGroupDetail } from '../../hooks/useDuplicates';
 import type { DuplicateGroupDetail, DuplicateGroupMember } from '../../services/duplicates';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseCircle = vi.mocked(useCircle);
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseDuplicateGroupDetail = vi.mocked(useDuplicateGroupDetail);
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ function makeCircle(id = CIRCLE_ID) {
   };
 }
 
-function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}): ReturnType<typeof useCircle> {
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}): ReturnType<typeof useOwnerScope> {
   return {
     activeCircle: makeCircle(),
     activeCircleId: CIRCLE_ID,
@@ -92,7 +92,7 @@ function makeCircleContext(overrides: Partial<ReturnType<typeof useCircle>> = {}
     setActiveCircle: vi.fn().mockResolvedValue(undefined),
     refreshCircles: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as ReturnType<typeof useCircle>;
+  } as unknown as ReturnType<typeof useOwnerScope>;
 }
 
 function makePermissions(
@@ -174,7 +174,7 @@ describe('DuplicateGroupPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUsePermissions.mockReturnValue(makePermissions());
-    mockUseCircle.mockReturnValue(makeCircleContext());
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseDuplicateGroupDetail.mockReturnValue(makeDetailHook());
   });
 

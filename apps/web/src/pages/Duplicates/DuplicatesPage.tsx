@@ -27,7 +27,7 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
 import BlockIcon from '@mui/icons-material/Block';
 import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
@@ -186,7 +186,7 @@ function DuplicateGroupCard({ group, selected, onToggle }: DuplicateGroupCardPro
 
 export default function DuplicatesPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleId } = useCircle();
+  const { activeCircle, activeCircleId } = useOwnerScope();
   const { hasPermission, isAdmin } = usePermissions();
   const { settings } = useSystemSettings();
   // The `=== true` flag convention, inverted with care. Two states must NOT

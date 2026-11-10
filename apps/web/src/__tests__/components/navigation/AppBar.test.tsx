@@ -38,9 +38,9 @@ vi.mock('../../../components/media/MediaUploadDialog', () => ({
 vi.mock('../../../components/notifications/NotificationBell', () => ({
   NotificationBell: () => <button type="button" aria-label="Notifications" />,
 }));
-vi.mock('../../../hooks/useCircle', () => ({ useCircle: vi.fn() }));
+vi.mock('../../../hooks/useOwnerScope', () => ({ useOwnerScope: vi.fn() }));
 
-import { useCircle } from '../../../hooks/useCircle';
+import { useOwnerScope } from '../../../hooks/useOwnerScope';
 
 const circle: Circle = {
   id: 'circle-1',
@@ -72,7 +72,7 @@ function renderBar(route: string, width: number) {
 describe('AppBar (packaged ShellAppBar binding)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useCircle).mockReturnValue({
+    vi.mocked(useOwnerScope).mockReturnValue({
       circles: [circle],
       activeCircle: circle,
       activeCircleId: circle.id,
@@ -80,7 +80,7 @@ describe('AppBar (packaged ShellAppBar binding)', () => {
       loading: false,
       setActiveCircle: vi.fn(),
       refreshCircles: vi.fn(),
-    } as unknown as ReturnType<typeof useCircle>);
+    } as unknown as ReturnType<typeof useOwnerScope>);
   });
 
   it('carries the logo, the circle chip, the bell and Upload at desktop width', () => {

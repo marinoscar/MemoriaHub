@@ -15,7 +15,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import RateReviewIcon from '@mui/icons-material/RateReview';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useEnhancementBatch } from '../../hooks/useEnhancementBatch';
 import { useRunPolling } from '../../hooks/useRunPolling';
 import {
@@ -160,7 +160,7 @@ function describeSkipped(batch: EnhancementBatch): string | null {
 export default function EnhancementBatchPage() {
   const { id: batchId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
 
   const { batch, isLoading, error, fetchBatch } = useEnhancementBatch();
 

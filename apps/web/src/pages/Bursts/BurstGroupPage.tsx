@@ -23,7 +23,7 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useBurstGroupDetail } from '../../hooks/useBursts';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import type { BurstGroupMember, GroupResolveAction } from '../../services/bursts';
 import { formatCivilDateTime } from '../../utils/civilDate';
@@ -154,7 +154,7 @@ function MemberCard({ member, selected, onToggle }: MemberCardProps) {
 export default function BurstGroupPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
   const { isAdmin, hasPermission } = usePermissions();
 
   const groupId = id ?? '';

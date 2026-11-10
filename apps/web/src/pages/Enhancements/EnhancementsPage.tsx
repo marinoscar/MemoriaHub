@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { PendingEnhancementsTab } from './PendingEnhancementsTab';
 import { scrollableTabsProps } from '../../components/common/tabs';
 
@@ -29,7 +29,7 @@ function parseTab(raw: string | null): EnhancementsTab {
  * so the shell's tab contract (and its `?tab=` URL keys) is settled up front.
  */
 export default function EnhancementsPage() {
-  const { activeCircle } = useCircle();
+  const { activeCircle } = useOwnerScope();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<EnhancementsTab>(() =>
     parseTab(searchParams.get('tab')),

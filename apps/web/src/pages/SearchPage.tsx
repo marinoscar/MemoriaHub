@@ -31,7 +31,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import PlaceIcon from '@mui/icons-material/Place';
 import PublicIcon from '@mui/icons-material/Public';
 import TagIcon from '@mui/icons-material/LocalOffer';
-import { useCircle } from '../hooks/useCircle';
+import { useOwnerScope } from '../hooks/useOwnerScope';
 import { usePeople } from '../hooks/usePeople';
 import { performSearch } from '../services/search';
 import { getExploreLocations, getExploreTags } from '../services/media';
@@ -171,7 +171,7 @@ function renderTagTile(
 
 export default function SearchPage() {
   const navigate = useNavigate();
-  const { activeCircle, activeCircleRole } = useCircle();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
   const { data: peopleData, loading: peopleLoading } = usePeople(activeCircle?.id ?? null);
   const { results, searchRequest, isSearching, error, clearSearch } = useSearch();
 

@@ -114,7 +114,11 @@ export function ActionRow({
               value={action.type}
               onChange={(e) => onChange(defaultActionInstance(e.target.value))}
             >
-              {actionCatalog.map((a) => (
+              {actionCatalog
+                // A deprecated alias (`move_to_circle`) is never offered, but an
+                // existing action of that type keeps rendering (RETRO-I6 #588).
+                .filter((a) => !a.deprecated || a.type === action.type)
+                .map((a) => (
                 <MenuItem
                   key={a.type}
                   value={a.type}
@@ -163,7 +167,7 @@ export function ActionRow({
             sx={{ mt: 1.5 }}
           >
             High-impact action — moving items re-runs enrichment in the
-            destination circle and requires media:write on both circles.
+            destination library and requires media:write on both libraries.
           </Alert>
         )}
       </Box>

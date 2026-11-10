@@ -43,12 +43,9 @@ vi.mock('../../services/email', () => ({
   getEmailSettings: vi.fn(),
 }));
 
-vi.mock('../../services/circles', () => ({
-  listCircles: vi.fn(),
-}));
-
 vi.mock('../../services/adminMemories', () => ({
   runMemoriesBackfill: vi.fn(),
+  listMemoriesBackfillLibraries: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -60,14 +57,13 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useAiSettings } from '../../hooks/useAiSettings';
 import { getEmailSettings } from '../../services/email';
-import { listCircles } from '../../services/circles';
-import { runMemoriesBackfill } from '../../services/adminMemories';
+import { listMemoriesBackfillLibraries, runMemoriesBackfill } from '../../services/adminMemories';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
 const mockUseAiSettings = vi.mocked(useAiSettings);
 const mockGetEmailSettings = vi.mocked(getEmailSettings);
-const mockListCircles = vi.mocked(listCircles);
+const mockListLibraries = vi.mocked(listMemoriesBackfillLibraries);
 const mockRunBackfill = vi.mocked(runMemoriesBackfill);
 
 // ---------------------------------------------------------------------------
@@ -198,13 +194,10 @@ describe('MemoriesSettingsPage', () => {
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as never);
     mockUseAiSettings.mockReturnValue(makeAiSettingsMock() as never);
     mockGetEmailSettings.mockResolvedValue({ provider: 'smtp', enabled: true });
-    mockListCircles.mockResolvedValue({
-      items: [{ id: 'circle-1', name: 'Marin Family' }] as never,
-      total: 1,
-      page: 1,
-      pageSize: 1,
-      totalPages: 1,
-    });
+    mockListLibraries.mockResolvedValue([
+      { id: 'circle-1', kind: 'group', name: 'Group Alpha' },
+      { id: 'personal-1', kind: 'personal', name: 'Person A' },
+    ]);
     mockRunBackfill.mockResolvedValue({ enqueued: 18, circles: 1, skipped: 0 });
   });
 
@@ -514,7 +507,7 @@ describe('MemoriesSettingsPage', () => {
       await waitFor(() => expect(mockRunBackfill).toHaveBeenCalledWith({}));
     });
 
-    it('passes the selected circle', async () => {
+    it('passes the selected library (RETRO-I6: groups and personal libraries, not /circles?all=true)', async () => {
       mockUseSystemSettings.mockReturnValue(
         makeSystemSettingsMock({ memoriesEnabled: true }) as never,
       );
@@ -522,9 +515,10 @@ describe('MemoriesSettingsPage', () => {
       const user = userEvent.setup();
       render(<MemoriesSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
 
-      await waitFor(() => expect(mockListCircles).toHaveBeenCalledWith(true));
-      await user.click(screen.getByLabelText(/^circle$/i));
-      await user.click(await screen.findByRole('option', { name: 'Marin Family' }));
+      await waitFor(() => expect(mockListLibraries).toHaveBeenCalled());
+      await user.click(screen.getByLabelText(/^library$/i));
+      expect(await screen.findByRole('option', { name: 'Person A (personal library)' })).toBeInTheDocument();
+      await user.click(await screen.findByRole('option', { name: 'Group Alpha' }));
       await user.click(
         screen.getByRole('button', { name: /generate memories from existing library/i }),
       );

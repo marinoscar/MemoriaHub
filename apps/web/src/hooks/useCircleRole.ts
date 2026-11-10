@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { useCircle } from './useCircle';
+import { useOwnerScope } from './useOwnerScope';
 import { usePermissions } from './usePermissions';
 
 export function useCircleRole() {
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
   const { isAdmin } = usePermissions();
 
   const isCircleAdmin = useMemo(

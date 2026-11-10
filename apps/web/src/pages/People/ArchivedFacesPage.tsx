@@ -20,14 +20,14 @@ import RestoreIcon from '@mui/icons-material/Restore';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
 import { FaceThumbGrid } from '../../components/people/FaceThumbGrid';
 import { PurgeFacesDialog } from '../../components/people/PurgeFacesDialog';
 
 export default function ArchivedFacesPage() {
   const navigate = useNavigate();
-  const { activeCircleId, activeCircleRole } = useCircle();
+  const { activeCircleId, activeCircleRole } = useOwnerScope();
 
   const {
     faces,

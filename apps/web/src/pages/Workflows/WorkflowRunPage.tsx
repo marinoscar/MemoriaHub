@@ -39,7 +39,7 @@ import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useCircle } from '../../hooks/useCircle';
+import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import { useWorkflowRunItems } from '../../hooks/useWorkflowRunItems';
@@ -190,7 +190,7 @@ function terminalSummary(run: WorkflowRunDetail): RunTerminalSummary {
 export default function WorkflowRunPage() {
   const { id: workflowId, runId } = useParams<{ id: string; runId: string }>();
   const navigate = useNavigate();
-  const { activeCircleRole } = useCircle();
+  const { activeCircleRole } = useOwnerScope();
   const { hasPermission } = usePermissions();
 
   const { run, isLoading, error, fetchRun } = useWorkflowRun();
