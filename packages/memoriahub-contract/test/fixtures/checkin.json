@@ -1,0 +1,21 @@
+{
+  "appliedConfigVersion": 3,
+  "stats": { "eligible": 120, "uploaded": 100, "deduplicated": 5, "pending": 10, "uploading": 2, "failed": 2, "blocked": 1, "bytesPending": 52428800, "bytesUploaded": 1073741824 },
+  "permission": "full",
+  "networkState": "wifi",
+  "batteryOptimized": false,
+  "appVersion": "1.4.0",
+  "appVersionCode": 140,
+  "run": {
+    "trigger": "periodic",
+    "status": "partial",
+    "startedAt": "2026-01-15T10:00:00.000Z",
+    "finishedAt": "2026-01-15T10:05:00.000Z",
+    "filesUploaded": 10,
+    "bytesUploaded": 4096,
+    "filesFailed": 1,
+    "filesDeduplicated": 2,
+    "failedSample": [{ "name": "IMG_0001.jpg", "relativePath": "DCIM/Camera", "sizeBytes": 2048, "attempts": 3, "lastError": "timeout" }],
+    "perFolder": [{ "bucketId": "bucket-1", "uploaded": 10, "failed": 1, "deduplicated": 2 }]
+  }
+}

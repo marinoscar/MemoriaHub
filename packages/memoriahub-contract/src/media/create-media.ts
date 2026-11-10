@@ -56,3 +56,10 @@ export const createMediaSchema = z.object({
  * @stability experimental
  */
 export type CreateMedia = z.infer<typeof createMediaSchema>;
+
+/**
+ * The request body of `POST /api/media` as a client sends it (dates as ISO strings).
+ *
+ * @stability experimental
+ */
+export type CreateMediaInput = z.input<typeof createMediaSchema>;

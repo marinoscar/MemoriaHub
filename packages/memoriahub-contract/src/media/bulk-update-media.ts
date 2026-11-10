@@ -32,3 +32,10 @@ export const bulkUpdateMediaSchema = z.object({
  * @stability experimental
  */
 export type BulkUpdateMedia = z.infer<typeof bulkUpdateMediaSchema>;
+
+/**
+ * The request body of `PATCH /api/media/bulk` as a client sends it (dates as ISO strings).
+ *
+ * @stability experimental
+ */
+export type BulkUpdateMediaInput = z.input<typeof bulkUpdateMediaSchema>;
