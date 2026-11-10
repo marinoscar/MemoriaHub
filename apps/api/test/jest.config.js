@@ -26,7 +26,7 @@ module.exports = {
   // back to 11.1.1 (see #220/#224).
   transformIgnorePatterns: [
     '/node_modules/(?!(cookie|@fastify/cookie)/)',
-    '/packages/enrichment-compute/dist/',
+    '/packages/memoriahub-compute/dist/',
   ],
   collectCoverageFrom: [
     'src/**/*.ts',
@@ -40,23 +40,14 @@ module.exports = {
   roots: ['<rootDir>/src/', '<rootDir>/test/'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
-    // packages/enrichment-compute exact-pins 'openai' (see its package.json),
-    // which diverges from this app's caret range and forces npm to nest a
-    // second, undeduped copy under packages/enrichment-compute/node_modules.
-    // Without this mapping, jest.mock('openai') in a spec file only mocks
-    // the hoisted copy apps/api resolves — the shared package's delegated
-    // calls (e.g. callOpenAiVision) would resolve their own nested copy and
-    // make a real network call. Force every 'openai' import to the single
-    // copy this app resolves so one mock covers both call sites.
-    '^openai$': require.resolve('openai'),
-    // Same nesting problem, same fix, different package: the root
+    // The root
     // package.json pins `overrides.sharp` (exact, for server/worker compute
-    // parity) while apps/api, apps/cli and packages/enrichment-compute each
+    // parity) while apps/api, apps/cli and packages/memoriahub-compute each
     // declare their own sharp spec. npm resolves that by giving each
     // workspace its OWN nested copy instead of one hoisted one, so
     // jest.mock('sharp') in a spec only mocked the copy apps/api resolves —
     // the shared package's dhash compute (`await import('sharp')` inside
-    // packages/enrichment-compute) picked up its own nested copy, ran REAL
+    // packages/memoriahub-compute) picked up its own nested copy, ran REAL
     // sharp against a fake test buffer, threw "unsupported image format",
     // and computeVisualHash swallowed it into null. Pin every 'sharp'
     // specifier to one copy so a single mock covers both call sites.

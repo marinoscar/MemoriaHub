@@ -23,7 +23,7 @@ import {
   type JobExecutionProfile,
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
-import { videoFaceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { videoFaceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
 import { PrismaService } from '../prisma/prisma.service';

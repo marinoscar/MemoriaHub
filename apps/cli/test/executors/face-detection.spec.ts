@@ -4,7 +4,7 @@
  * Unit tests for src/executors/compute/face-detection.ts (RETRO-C10: the CompreFace URL is MEMORIAHUB_COMPREFACE_URL).
  *
  * NOTE (issue #113): the Human WASM face provider (and AWS Rekognition) were
- * removed entirely. `@memoriahub/enrichment-compute/face` no longer exists as
+ * removed entirely. `@marinoscar/memoriahub-compute/face` no longer exists as
  * a package export, and computeFaceDetection no longer branches on
  * `node.faceProvider` — it unconditionally calls the shared package's
  * `detectComprefaceFaces` against `cfg?.node?.comprefaceUrl ??
@@ -12,7 +12,7 @@
  * falls back to the default CompreFace URL, since CompreFace is the only
  * supported provider and there is no other provider to disambiguate against.
  *
- * `@memoriahub/enrichment-compute/*` subpaths and `../../src/config.js`'s
+ * `@marinoscar/memoriahub-compute/*` subpaths and `../../src/config.js`'s
  * `loadConfig` are mocked via jest.unstable_mockModule (mirrors
  * self-test.spec.ts's convention) so no heavy optionalDependencies or real
  * config file are touched. The input file is a real temp file on disk (the
@@ -30,12 +30,12 @@ import * as path from 'path';
 // ---------------------------------------------------------------------------
 
 const mockPrepareImageForProcessing = jest.fn();
-jest.unstable_mockModule('@memoriahub/enrichment-compute/image', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/image', () => ({
   prepareImageForProcessing: mockPrepareImageForProcessing,
 }));
 
 const mockDetectComprefaceFaces = jest.fn();
-jest.unstable_mockModule('@memoriahub/enrichment-compute/face-compreface', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/face-compreface', () => ({
   detectComprefaceFaces: mockDetectComprefaceFaces,
   COMPREFACE_MODEL_VERSION: 'compreface-arcface-mobilefacenet-128',
   COMPREFACE_PROVIDER_KEY: 'compreface',

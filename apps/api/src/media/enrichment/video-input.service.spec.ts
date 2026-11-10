@@ -9,7 +9,7 @@
  * slow one.
  */
 
-jest.mock('@memoriahub/enrichment-compute/video', () => ({
+jest.mock('@marinoscar/memoriahub-compute/video', () => ({
   probeRangeSeekSuitability: jest.fn(),
 }));
 
@@ -20,7 +20,7 @@ jest.mock('../../media-processing/processors/stream-utils', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { VideoInputResolver } from './video-input.service';
 import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
-import { probeRangeSeekSuitability } from '@memoriahub/enrichment-compute/video';
+import { probeRangeSeekSuitability } from '@marinoscar/memoriahub-compute/video';
 import { downloadToTempFile } from '../../media-processing/processors/stream-utils';
 
 const mockProbe = probeRangeSeekSuitability as jest.Mock;

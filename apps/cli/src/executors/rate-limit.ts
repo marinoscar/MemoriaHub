@@ -1,7 +1,7 @@
 /**
  * executors/rate-limit.ts - provider throttles as the platform engine wants them (RETRO-C10, #616).
  *
- * The compute modules throw `@memoriahub/enrichment-compute/rate-limit`'s `ProviderRateLimitError`
+ * The compute modules throw `@marinoscar/memoriahub-compute/rate-limit`'s `ProviderRateLimitError`
  * (the API's `geo` and `ai` code share it). The node engine reports `{ rateLimited, retryAfterMs }`,
  * which makes the server defer the job without consuming an attempt, only for an `instanceof` the
  * PLATFORM's own class. `withPlatformRateLimit` converts one into the other.
@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { ProviderRateLimitError as ComputeRateLimitError } from '@memoriahub/enrichment-compute/rate-limit';
+import { ProviderRateLimitError as ComputeRateLimitError } from '@marinoscar/memoriahub-compute/rate-limit';
 
 type PlatformCtor = new (message: string, options: { retryAfterMs: number; provider?: string; cause?: unknown }) => Error;
 

@@ -1,8 +1,8 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { BurstGroupStatus, DuplicateGroupStatus, MediaType, Prisma } from '@prisma/client';
-import { computeVisualHash, hammingDistance } from '@memoriahub/enrichment-compute/dhash';
-import { VISUAL_EMBEDDING_MODEL_TAG } from '@memoriahub/enrichment-compute/clip';
+import { computeVisualHash, hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
+import { VISUAL_EMBEDDING_MODEL_TAG } from '@marinoscar/memoriahub-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { streamToBuffer } from '../media-processing/processors/stream-utils';
@@ -19,7 +19,7 @@ const DEFAULT_DEDUP_CONFIG = {
 /**
  * Output of the pure COMPUTE half of duplicate detection. This is a superset
  * of the node result contract (`duplicateDetectionResult` in
- * `@memoriahub/enrichment-compute/dto` — model/embedding/dHash): the
+ * `@marinoscar/memoriahub-compute/dto` — model/embedding/dHash): the
  * sharpness score falls out of the same dHash pipeline pass and is persisted
  * onto the MediaItem alongside the hash, so it rides along here rather than
  * being recomputed in a second decode.

@@ -14,7 +14,7 @@
 //
 //   - computeVideoFaces: extracts frames, detects faces per frame, clusters
 //     detections across frames (cross-frame dedup) via the shared
-//     @memoriahub/enrichment-compute/face-video package, and builds a
+//     @marinoscar/memoriahub-compute/face-video package, and builds a
 //     face-centered crop thumbnail per cluster. Returns an in-memory array —
 //     thumbnail bytes are still buffers, not yet uploaded (that upload step
 //     needs storage credentials the server has but a node does not, so it
@@ -40,12 +40,12 @@ import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { promises as fs } from 'fs';
-import type { VideoFaceDetectionResult } from '@memoriahub/enrichment-compute/dto';
+import type { VideoFaceDetectionResult } from '@marinoscar/memoriahub-compute/dto';
 import {
   clusterFaceDetections,
   buildFaceCropThumbnail,
   type ClusterableDetection,
-} from '@memoriahub/enrichment-compute/face-video';
+} from '@marinoscar/memoriahub-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { downloadToTempFile } from '../media-processing/processors/stream-utils';

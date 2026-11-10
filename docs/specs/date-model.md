@@ -55,7 +55,7 @@ offset. `exifr` parses it using the *process's* local timezone, so the same
 file would produce a different `getTime()` on a server in Costa Rica than on
 one in UTC. Ingest therefore rebuilds the value from the wall-clock components
 and stamps it `Z`
-(`packages/enrichment-compute/src/metadata/index.ts`, `wallClockToCivilTimestamp`):
+(`packages/memoriahub-compute/src/metadata/index.ts`, `wallClockToCivilTimestamp`):
 
 ```ts
 new Date(Date.UTC(year, month - 1, day, hour, minute, second, ms)).toISOString();
@@ -201,7 +201,7 @@ bucket on the neighbouring calendar day, and **a re-run cannot fix it** —
 the information was never in the file.
 
 The wall-clock re-encode is one shared helper in
-`packages/enrichment-compute/src/metadata`, used by both ingest paths, so they
+`packages/memoriahub-compute/src/metadata`, used by both ingest paths, so they
 cannot drift and both executors (the API and a worker node) produce identical
 values.
 

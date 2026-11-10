@@ -1,6 +1,6 @@
 /**
  * Each executor returns what the server handler's `nodeResultSchema` (the shared DTO of
- * @memoriahub/enrichment-compute/dto) parses, over the real compute libraries where they are
+ * @marinoscar/memoriahub-compute/dto) parses, over the real compute libraries where they are
  * installed and a local presigned-PUT stub (RETRO-C10, #616).
  */
 import { jest } from '@jest/globals';
@@ -11,7 +11,7 @@ import {
   metadataExtractionResultSchema,
   thumbnailResultSchema,
   workflowExecuteBatchResultSchema,
-} from '@memoriahub/enrichment-compute/dto';
+} from '@marinoscar/memoriahub-compute/dto';
 import sharp from 'sharp';
 
 import { thumbnailRegenExecutor } from '../../src/executors/thumbnail.executor.js';

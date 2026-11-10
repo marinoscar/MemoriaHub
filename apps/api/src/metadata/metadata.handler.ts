@@ -6,7 +6,7 @@ import {
   type JobExecutionProfile,
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
-import { metadataExtractionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { metadataExtractionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { jobWriteScope, resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { MetadataExtractionService } from './metadata.service';

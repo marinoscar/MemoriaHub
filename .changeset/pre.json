@@ -1,0 +1,12 @@
+{
+  "mode": "pre",
+  "tag": "next",
+  "initialVersions": {
+    "api": "1.0.0",
+    "@memoriahub/cli": "1.6.1",
+    "web": "1.0.0",
+    "@marinoscar/memoriahub-compute": "0.0.0",
+    "@app/shared": "0.0.1"
+  },
+  "changesets": []
+}

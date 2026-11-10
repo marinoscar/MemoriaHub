@@ -19,9 +19,9 @@ import type { MediaJobContext } from '../platform/jobs/media-item-job';
  * duplicate detection, and distributed worker nodes all share one popcount.
  * Re-exported here under the historical name/signature for existing callers.
  */
-import { hammingDistanceBigInt as hammingDistance } from '@memoriahub/enrichment-compute/dhash';
+import { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
 
-export { hammingDistanceBigInt as hammingDistance } from '@memoriahub/enrichment-compute/dhash';
+export { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
 
 /**
  * Normalizes an array of numbers to [0, 1] within the group.

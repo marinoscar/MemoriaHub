@@ -26,7 +26,7 @@ jest.mock('sharp', () => {
 
 // The shared compute package shells out to ffmpeg — stub the two entry points
 // this service uses so no binary is required.
-jest.mock('@memoriahub/enrichment-compute/video', () => ({
+jest.mock('@marinoscar/memoriahub-compute/video', () => ({
   extractFrames: jest.fn(),
   extractAudioLead: jest.fn(),
 }));
@@ -43,7 +43,7 @@ import {
 import { VideoAutoTaggingService } from './video-auto-tagging.service';
 // The prompt builder now lives in the shared parity package (issue #460), so
 // a distributed worker node composes the SAME prompt the server would.
-import { buildVideoTaggingPrompt } from '@memoriahub/enrichment-compute/ai';
+import { buildVideoTaggingPrompt } from './video-tagging-prompt';
 import { AutoTaggingService } from './auto-tagging.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiError, AiService } from '@marinoscar/platform-api/ai';
@@ -52,7 +52,7 @@ import { MemoriaHubAiSettings } from '../ai-port/memoriahub-ai-settings';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { extractFrames, extractAudioLead } from '@memoriahub/enrichment-compute/video';
+import { extractFrames, extractAudioLead } from '@marinoscar/memoriahub-compute/video';
 
 const mockExtractFrames = extractFrames as jest.Mock;
 const mockExtractAudioLead = extractAudioLead as jest.Mock;

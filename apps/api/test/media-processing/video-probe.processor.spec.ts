@@ -12,7 +12,7 @@
  *
  * NOTE on mock strategy:
  *   Since issue #219 removed the deprecated `fluent-ffmpeg` dependency, the
- *   processor reaches ffprobe through `@memoriahub/enrichment-compute/ffmpeg`'s
+ *   processor reaches ffprobe through `@marinoscar/memoriahub-compute/ffmpeg`'s
  *   `runFfprobe` — a thin `spawn()` wrapper. Only that function is replaced.
  *   The subpath specifier resolves to the very same module file that
  *   `dist/cjs/metadata/index.js` requires as `../ffmpeg/index.js`, so one
@@ -29,7 +29,7 @@
 import { Readable } from 'stream';
 import { VideoProbeProcessor } from '../../src/media-processing/processors/video-probe.processor';
 import { bufferToStream } from '../fixtures/media/image-fixtures';
-import type { FfprobeDataLike } from '@memoriahub/enrichment-compute/metadata';
+import type { FfprobeDataLike } from '@marinoscar/memoriahub-compute/metadata';
 
 // ---------------------------------------------------------------------------
 // Module-level mock — must be at the top level so Jest hoists it
@@ -37,8 +37,8 @@ import type { FfprobeDataLike } from '@memoriahub/enrichment-compute/metadata';
 
 const mockFfprobeFn = jest.fn();
 
-jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
-  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+jest.mock('@marinoscar/memoriahub-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@marinoscar/memoriahub-compute/ffmpeg');
   return {
     ...actual,
     runFfprobe: (...args: any[]) => mockFfprobeFn(...args),

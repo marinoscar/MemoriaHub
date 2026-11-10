@@ -242,7 +242,7 @@ runPlatformConformance({
     //   - ai-no-sdk-leak: no provider SDK is imported anywhere in the app trees (`providerDirs: []`,
     //     MemoriaHub registers no provider of its own) and no app manifest declares one; the SDKs
     //     are declared only by the two platform packages that own them. NOT scanned:
-    //     `packages/enrichment-compute`, the worker-node compute package that still imports the
+    //     `packages/memoriahub-compute`, the worker-node compute package that still imports the
     //     `openai` and `@anthropic-ai/sdk` SDKs for the node-side `auto_tagging` /
     //     `video_auto_tagging` calls under a brokered per-job key (PLATFORM-ADOPTION-SHIM(#1083):
     //     the platform's node credential delivery, EnterpriseAppBase #1083, is unreleased; the node

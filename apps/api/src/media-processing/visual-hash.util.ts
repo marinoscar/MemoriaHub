@@ -7,7 +7,7 @@
  * rotated by EXIF are compared right-side-up.
  *
  * The computation itself lives in the shared parity package
- * @memoriahub/enrichment-compute (dhash subpath) so distributed worker nodes
+ * @marinoscar/memoriahub-compute (dhash subpath) so distributed worker nodes
  * produce bit-identical hashes to the server. This module keeps the
  * historical bigint-typed signature for existing callers (burst detection,
  * the visual-hash processor); the package's canonical form is the unsigned
@@ -17,7 +17,7 @@
  * Callers handle null. This function never throws.
  */
 
-import { computeVisualHash as computeVisualHashShared } from '@memoriahub/enrichment-compute/dhash';
+import { computeVisualHash as computeVisualHashShared } from '@marinoscar/memoriahub-compute/dhash';
 // Importing the re-export module (not the package directly) guarantees the
 // package logger is wired to NestJS before any hash computation runs.
 import './image-orientation.util';

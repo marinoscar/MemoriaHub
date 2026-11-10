@@ -1,12 +1,12 @@
 import { jest } from '@jest/globals';
-import { geocodeResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { geocodeResultSchema } from '@marinoscar/memoriahub-compute/dto';
 
-import { ProviderRateLimitError as ComputeRateLimit } from '@memoriahub/enrichment-compute/rate-limit';
+import { ProviderRateLimitError as ComputeRateLimit } from '@marinoscar/memoriahub-compute/rate-limit';
 import { makeContext } from './helpers.js';
 
 const fetchGoogleReverse = jest.fn<(...a: unknown[]) => Promise<unknown>>();
 const fetchNominatim = jest.fn<(...a: unknown[]) => Promise<unknown>>();
-jest.unstable_mockModule('@memoriahub/enrichment-compute/geo', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/geo', () => ({
   fetchGoogleReverse,
   fetchNominatim,
   mapGoogleResponse: (raw: { country?: string }) => ({ country: raw.country ?? null, countryCode: 'CR', admin1: 'A', admin2: null, locality: 'L', placeName: 'P' }),

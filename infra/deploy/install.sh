@@ -332,7 +332,7 @@ services:
   api:
     container_name: memoriahub-api
     build:
-      # Repo-root context: apps/api depends on the @memoriahub/enrichment-compute
+      # Repo-root context: apps/api depends on the @marinoscar/memoriahub-compute
       # npm workspace, so the build needs the root manifests + the workspace
       # member visible (matches infra/compose and deploy.yml). An apps/api-scoped
       # context breaks the install.

@@ -5,7 +5,7 @@
 // Tier-2 OCR pass for social-media video detection.
 //
 // Extracts a handful of targeted frames from a video and runs them through the
-// shared OCR engine in @memoriahub/enrichment-compute/ocr, which owns the pure
+// shared OCR engine in @marinoscar/memoriahub-compute/ocr, which owns the pure
 // tesseract mechanics: worker creation with a pinned language/model dir, the
 // serialized recognize queue, frame preprocessing (downscale → grayscale →
 // normalize via sharp), and per-word confidence filtering. The collected
@@ -27,7 +27,7 @@
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
-import { createOcrEngine, OcrEngine } from '@memoriahub/enrichment-compute/ocr';
+import { createOcrEngine, OcrEngine } from '@marinoscar/memoriahub-compute/ocr';
 import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 

@@ -2,7 +2,7 @@
  * node/compute/duplicate-detection.ts — Near-duplicate compute.
  *
  * Runs the full duplicate-detection compute locally via the shared
- * `@memoriahub/enrichment-compute` parity package so node-computed vectors are
+ * `@marinoscar/memoriahub-compute` parity package so node-computed vectors are
  * numerically identical to server-computed ones (distributed-nodes spec §7):
  *
  *   1. dHash (64-bit perceptual hash, decimal string) via sharp
@@ -21,8 +21,8 @@ import {
   releaseClipSession,
   DEFAULT_CLIP_RECYCLE_AFTER,
   VISUAL_EMBEDDING_MODEL_TAG,
-} from '@memoriahub/enrichment-compute/clip';
-import { computeDHash } from '@memoriahub/enrichment-compute/dhash';
+} from '@marinoscar/memoriahub-compute/clip';
+import { computeDHash } from '@marinoscar/memoriahub-compute/dhash';
 
 import { clipStats } from './clip-state.js';
 import { CapabilityUnavailableError, runPhase, type ComputeFn } from '../support.js';

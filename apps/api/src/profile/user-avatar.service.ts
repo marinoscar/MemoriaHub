@@ -13,7 +13,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Readable } from 'stream';
 
-import { buildFaceCropThumbnail } from '@memoriahub/enrichment-compute/face-video';
+import { buildFaceCropThumbnail } from '@marinoscar/memoriahub-compute/face-video';
 import { OWNER_NAME_SELECT, libraryName } from '../platform/sharing/owner-name';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';

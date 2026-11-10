@@ -2,7 +2,7 @@
  * node/compute/face-detection.ts — Photo face-detection compute.
  *
  * Runs the full face-detection compute locally via the shared
- * `@memoriahub/enrichment-compute` parity package so node-computed faces are
+ * `@marinoscar/memoriahub-compute` parity package so node-computed faces are
  * numerically identical to server-computed ones (distributed-nodes spec §7):
  *
  *   1. EXIF-orient + downscale via prepareImageForProcessing (same maxDim the
@@ -24,12 +24,12 @@
 
 import fs from 'node:fs';
 
-import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 import {
   detectComprefaceFaces,
   COMPREFACE_MODEL_VERSION,
   COMPREFACE_PROVIDER_KEY,
-} from '@memoriahub/enrichment-compute/face-compreface';
+} from '@marinoscar/memoriahub-compute/face-compreface';
 
 import { comprefaceUrl as resolveComprefaceUrl, intAttribute, runPhase, type ComputeFn } from '../support.js';
 import { timedCompreface } from './telemetry-state.js';

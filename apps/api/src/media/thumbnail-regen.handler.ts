@@ -6,7 +6,7 @@ import {
   type JobExecutionProfile,
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
-import { thumbnailResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { thumbnailResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { jobWriteScope, resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildThumbnailKey, thumbnailVersionForJob } from '../media-processing/thumbnail-key.util';

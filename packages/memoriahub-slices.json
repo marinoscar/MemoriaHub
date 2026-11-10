@@ -1,0 +1,31 @@
+{
+  "$comment": "Slice dependency graph for @marinoscar/memoriahub-* (RETRO-J1 #593, ADR docs/decisions/0001-packages-first.md). A slice is a folder directly under packages/memoriahub-<pkg>/src/; it may import only the slices listed for it, and only through their index.ts. Append-only: J2-J11 add packages and slices, never rename or remove one. Read by eslint.config.mjs and scripts/memoriahub-packages/check-slice-peers.mjs.",
+  "memoriahub-compute": {
+    "ffmpeg": [],
+    "rate-limit": [],
+    "dto": [],
+    "social": [],
+    "face-compreface": [],
+    "face-video": [],
+    "ocr": [],
+    "image": [
+      "ffmpeg"
+    ],
+    "video": [
+      "ffmpeg"
+    ],
+    "dhash": [
+      "image"
+    ],
+    "clip": [
+      "image"
+    ],
+    "metadata": [
+      "ffmpeg",
+      "image"
+    ],
+    "geo": [
+      "rate-limit"
+    ]
+  }
+}

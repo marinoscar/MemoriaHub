@@ -2,7 +2,7 @@
  * node/compute/video-face-detection.ts — Video face-detection compute.
  *
  * Runs the full video face-detection compute locally via the shared
- * `@memoriahub/enrichment-compute` parity package so a node's cross-frame
+ * `@marinoscar/memoriahub-compute` parity package so a node's cross-frame
  * face clusters are numerically identical to the server's for the same
  * input video (distributed-nodes spec §7). Mirrors the server-side
  * `VideoFaceDetectionService.computeVideoFaces` pipeline:
@@ -36,7 +36,7 @@
  *
  * The result payload matches the server's zod DTO for
  * `POST /api/nodes/:id/jobs/:jobId/result` with `type: 'video_face_detection'`
- * (`videoFaceDetectionResultSchema`, `packages/enrichment-compute/src/dto`):
+ * (`videoFaceDetectionResultSchema`, `packages/memoriahub-compute/src/dto`):
  * `{ modelVersion, providerKey, clusters: [{ boundingBox px (relative to that
  * cluster's own imageWidth/imageHeight), imageWidth, imageHeight, confidence?,
  * embedding, landmarks?, videoTimestampMs, videoTimestamps, frameThumbnailKey? }] }`.
@@ -54,20 +54,20 @@
 
 import path from 'node:path';
 
-import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 import {
   detectComprefaceFaces,
   COMPREFACE_MODEL_VERSION,
   COMPREFACE_PROVIDER_KEY,
-} from '@memoriahub/enrichment-compute/face-compreface';
-import { probeVideo, extractContainerMetadata } from '@memoriahub/enrichment-compute/metadata';
-import { extractFrames } from '@memoriahub/enrichment-compute/video';
+} from '@marinoscar/memoriahub-compute/face-compreface';
+import { probeVideo, extractContainerMetadata } from '@marinoscar/memoriahub-compute/metadata';
+import { extractFrames } from '@marinoscar/memoriahub-compute/video';
 import {
   clusterFaceDetections,
   buildFaceCropThumbnail,
   DEFAULT_FACE_CLUSTER_THRESHOLD,
   type ClusterableDetection,
-} from '@memoriahub/enrichment-compute/face-video';
+} from '@marinoscar/memoriahub-compute/face-video';
 
 import {
   comprefaceUrl as resolveComprefaceUrl,

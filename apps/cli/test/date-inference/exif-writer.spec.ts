@@ -11,7 +11,7 @@
  * the `exiftool-vendored` mock via jest.unstable_mockModule beforehand (the
  * same dynamic-import mocking approach used by
  * test/node/compute/auto-tagging.spec.ts for its dynamically-imported
- * `@memoriahub/enrichment-compute/*` packages).
+ * `@marinoscar/memoriahub-compute/*` packages).
  */
 
 import { jest } from '@jest/globals';

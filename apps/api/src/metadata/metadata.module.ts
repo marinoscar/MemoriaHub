@@ -22,7 +22,7 @@ import { AdminMetadataController } from './admin-metadata.controller';
   ],
   controllers: [MetadataController, AdminMetadataController],
   providers: [
-    // Compute now runs via the shared @memoriahub/enrichment-compute/metadata
+    // Compute now runs via the shared @marinoscar/memoriahub-compute/metadata
     // package (compute/persist split — see metadata.service.ts). The
     // ObjectProcessor classes are no longer instantiated here; geocoding runs
     // server-side in the persist half via GeoLocationService.

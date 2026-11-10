@@ -82,18 +82,18 @@ jobs:
 
       - run: npm ci
 
-      # apps/api and apps/cli both import @memoriahub/enrichment-compute by
+      # apps/api and apps/cli both import @marinoscar/memoriahub-compute by
       # subpath (e.g. .../clip, .../dto) resolved against its built dist/ —
       # that output is git-ignored, so it must be built on every fresh checkout
       # before anything importing it can typecheck. (apps/web imports neither
       # this package nor Prisma — see the web-test job.)
-      - run: npm run build --workspace=@memoriahub/enrichment-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
 
       - run: npx prisma generate
         working-directory: apps/api
 
       # `--ignore-scripts` skips api's `pretypecheck` hook, which would otherwise
-      # re-run `setup:deps` — rebuilding enrichment-compute and regenerating the
+      # re-run `setup:deps` — rebuilding memoriahub-compute and regenerating the
       # Prisma client the two steps above just produced. The hook exists so a
       # fresh local checkout self-provisions on `npm run typecheck`; in CI the
       # provisioning is explicit, so the hook is pure duplicated work.
@@ -126,7 +126,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run build --workspace=@memoriahub/enrichment-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -175,7 +175,7 @@ jobs:
       # filter must gain it or the job will fail to resolve it.
       - run: npm ci --workspace=web --include-workspace-root
 
-      # Deliberately NO enrichment-compute build and NO `prisma generate` here:
+      # Deliberately NO memoriahub-compute build and NO `prisma generate` here:
       # apps/web imports neither (verified — no @memoriahub/* dependency and no
       # source reference), so both would be dead weight on all eight shards. If
       # web ever gains such an import, add the build step back.
@@ -205,8 +205,8 @@ jobs:
       - run: npm ci
 
       # Same rationale as the build job: apps/api imports
-      # @memoriahub/enrichment-compute by subpath against its git-ignored dist/.
-      - run: npm run build --workspace=@memoriahub/enrichment-compute
+      # @marinoscar/memoriahub-compute by subpath against its git-ignored dist/.
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -243,7 +243,7 @@ jobs:
             exit 0
           }
           ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/base/node_modules
-          cp -r packages/enrichment-compute/dist /tmp/base/packages/enrichment-compute/dist
+          cp -r packages/memoriahub-compute/dist /tmp/base/packages/memoriahub-compute/dist
 
           if ! (cd /tmp/base && npm run openapi:dump >/tmp/base-dump.log 2>&1); then
             {
@@ -299,8 +299,8 @@ jobs:
       - run: npm ci
 
       # Same rationale as the typecheck job: apps/cli imports
-      # @memoriahub/enrichment-compute by subpath against its git-ignored dist/.
-      - run: npm run build --workspace=@memoriahub/enrichment-compute
+      # @marinoscar/memoriahub-compute by subpath against its git-ignored dist/.
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
 
       # apps/cli/src/infra-conformance.spec.ts runs `nginx -t` over infra/nginx
       # (issue #566); without a binary that case is registered as skipped.

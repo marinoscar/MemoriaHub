@@ -7,7 +7,7 @@
 // afterward.
 //
 // All frame-sampling math and ffmpeg invocation now live in the shared parity
-// package @memoriahub/enrichment-compute/video (see
+// package @marinoscar/memoriahub-compute/video (see
 // docs/specs/distributed-nodes.md §7) so a distributed worker node samples
 // frames identically to the server — one implementation, two hosts. This
 // class is a thin NestJS-injectable wrapper that forwards to the package's
@@ -23,7 +23,7 @@ import {
   extractFramesAt as computeExtractFramesAt,
   type ExtractedFrame,
   type FrameExtractionOpts,
-} from '@memoriahub/enrichment-compute/video';
+} from '@marinoscar/memoriahub-compute/video';
 
 export type { ExtractedFrame, FrameExtractionOpts };
 
@@ -32,7 +32,7 @@ export class VideoFrameExtractionService {
   /**
    * Extract JPEG frames at computed, evenly-spaced timestamps from the video
    * already on disk at `videoPath`. See
-   * @memoriahub/enrichment-compute/video's extractFrames for the full
+   * @marinoscar/memoriahub-compute/video's extractFrames for the full
    * sampling-strategy docs.
    */
   async extractFrames(videoPath: string, opts: FrameExtractionOpts): Promise<ExtractedFrame[]> {
@@ -41,7 +41,7 @@ export class VideoFrameExtractionService {
 
   /**
    * Extract JPEG frames at an EXPLICIT list of timestamps (in milliseconds).
-   * See @memoriahub/enrichment-compute/video's extractFramesAt for full docs.
+   * See @marinoscar/memoriahub-compute/video's extractFramesAt for full docs.
    */
   async extractFramesAt(
     videoPath: string,

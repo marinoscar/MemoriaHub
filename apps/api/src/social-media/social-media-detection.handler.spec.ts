@@ -92,7 +92,7 @@ import {
 import {
   socialMediaDetectionResultSchema,
   type SocialMediaDetectionResult,
-} from '@memoriahub/enrichment-compute/dto';
+} from '@marinoscar/memoriahub-compute/dto';
 import { SocialMediaDetectionHandler, type SocialMediaJobContext } from './social-media-detection.handler';
 import { SocialMediaDetectorService, type VideoDetectionInput } from './social-media-detector.service';
 import { SocialMediaOcrService } from './social-media-ocr.service';

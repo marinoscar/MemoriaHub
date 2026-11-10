@@ -96,7 +96,7 @@ export function registerInstallSteps(): void {
       return fs.existsSync(path.join(dir, 'eng.traineddata.gz')) || fs.existsSync(path.join(dir, 'eng.traineddata'));
     },
     install: async (context) => {
-      const { createOcrEngine } = await import('@memoriahub/enrichment-compute/ocr');
+      const { createOcrEngine } = await import('@marinoscar/memoriahub-compute/ocr');
       const engine = await createOcrEngine({ langDir: path.join(resolveModelsDirectory(), 'tesseract'), languages: ['eng'] });
       await engine.terminate();
       context.log('Tesseract language data downloaded.');

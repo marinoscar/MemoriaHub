@@ -20,7 +20,7 @@
   "dependencies": {
     "@marinoscar/platform-cli": "0.1.0-next.29",
     "@marinoscar/platform-infra": "0.1.0-next.29",
-    "@memoriahub/enrichment-compute": "0.1.0",
+    "@marinoscar/memoriahub-compute": "*",
     "better-sqlite3": "^12.10.0",
     "boxen": "^5.1.2",
     "chalk": "^5.3.0",
