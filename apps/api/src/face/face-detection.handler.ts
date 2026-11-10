@@ -6,7 +6,7 @@ import {
   type JobExecutionProfile,
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
-import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { faceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceDetectionService } from './face-detection.service';
@@ -16,7 +16,7 @@ import { FaceDetectionService } from './face-detection.service';
  *
  * NODE-ELIGIBLE (derived from the pair `nodeResultSchema` + `persistNodeResult`):
  * a node computes with the keyless CompreFace sidecar beside it and submits the
- * shared DTO from `@memoriahub/enrichment-compute/dto`; `persistNodeResult` only
+ * shared DTO from `@marinoscar/memoriahub-compute/dto`; `persistNodeResult` only
  * writes Face rows, matches people and marks the status row: no download, no
  * second CompreFace call. See FaceDetectionService.warnOnProviderMismatch for the
  * cross-provider embedding-space caveat.

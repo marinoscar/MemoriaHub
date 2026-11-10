@@ -2,7 +2,7 @@
  * node/compute/metadata.ts — Metadata-extraction compute.
  *
  * Runs the same EXIF / dimensions / video-probe extraction the server runs,
- * via the shared `@memoriahub/enrichment-compute` parity package, so a node's
+ * via the shared `@marinoscar/memoriahub-compute` parity package, so a node's
  * result is numerically/structurally identical to the server's own compute
  * (distributed-nodes spec §7). This mirrors
  * apps/api/src/metadata/metadata.service.ts's `computeMetadata` — the pure
@@ -34,7 +34,7 @@ import {
   extractDimensions,
   probeVideo,
   extractContainerMetadata,
-} from '@memoriahub/enrichment-compute/metadata';
+} from '@marinoscar/memoriahub-compute/metadata';
 import {
   CapabilityUnavailableError,
   type ComputeJobContext,

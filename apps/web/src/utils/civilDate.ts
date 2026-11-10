@@ -7,7 +7,7 @@
  * in the type distinguishing them.
  *
  * - A **civil timestamp** is the wall clock *at the place and moment of
- *   capture*, re-encoded as UTC (`packages/enrichment-compute/src/metadata`
+ *   capture*, re-encoded as UTC (`packages/memoriahub-compute/src/metadata`
  *   builds it with `Date.UTC(...)` from the tz-naive EXIF fields). The `Z` is
  *   a storage costume, not a real offset. `capturedAt`, `originalCreatedAt`,
  *   a burst/duplicate group's `capturedAt`, and a memory's

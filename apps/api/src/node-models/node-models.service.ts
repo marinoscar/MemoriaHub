@@ -27,7 +27,7 @@ export class NodeModelsService {
    * NOTE on the `clip-vit-b32-vision-quantized.onnx` entry's `sha256`
    * specifically: Hugging Face may rebuild/re-quantize that file over time
    * (same caveat documented above `looksLikeOnnxModel()` in
-   * `packages/enrichment-compute/src/clip/index.ts`), so this hash is a
+   * `packages/memoriahub-compute/src/clip/index.ts`), so this hash is a
    * point-in-time snapshot, not an eternal guarantee — a stale pinned hash
    * would break air-gapped/offline deployments if never refreshed. If a
    * node's download of this entry ever fails hash verification

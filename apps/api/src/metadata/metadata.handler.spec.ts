@@ -9,7 +9,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { JobHandlerRegistry, JobScope } from '@marinoscar/platform-api/jobs';
-import { metadataExtractionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { metadataExtractionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { MetadataExtractionHandler } from './metadata.handler';
 import { MetadataExtractionService } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';

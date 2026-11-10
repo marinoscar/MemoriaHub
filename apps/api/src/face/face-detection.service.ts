@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MediaFaceStatusType } from '@prisma/client';
 import type { MediaJobContext } from '../platform/jobs/media-item-job';
 import { Readable } from 'stream';
-import type { FaceDetectionResult } from '@memoriahub/enrichment-compute/dto';
+import type { FaceDetectionResult } from '@marinoscar/memoriahub-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
@@ -156,7 +156,7 @@ export class FaceDetectionService {
       imageHeight: uprightHeight,
       faces: detectedFaces.map((face) => ({
         // PIXEL coords relative to imageWidth/imageHeight above — see the DTO
-        // docstring in @memoriahub/enrichment-compute/dto.
+        // docstring in @marinoscar/memoriahub-compute/dto.
         boundingBox: {
           x: face.boundingBox.x,
           y: face.boundingBox.y,

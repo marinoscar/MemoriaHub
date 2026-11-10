@@ -1185,9 +1185,8 @@ describe('AutoTaggingService', () => {
   // -------------------------------------------------------------------------
   // persistAutoTagging — direct / node-result path.
   //
-  // A distributed worker node computes the raw vision-model text locally
-  // (via @memoriahub/enrichment-compute/ai's callAnthropicVision with a
-  // transiently-fetched API key) and submits ONLY { rawText } via
+  // Historically a distributed worker node computed the raw vision-model text
+  // and submitted ONLY { rawText } via
   // POST /nodes/:id/jobs/:jobId/result. AutoTaggingHandler.persistNodeResult
   // calls service.persistAutoTagging(job, parsed) directly — bypassing
   // processMediaItem entirely (no image download, no provider call). These

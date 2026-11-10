@@ -18,7 +18,7 @@ import {
   fetchGoogleReverse,
   mapNominatimResponse,
   mapGoogleResponse,
-} from '@memoriahub/enrichment-compute/geo';
+} from '@marinoscar/memoriahub-compute/geo';
 import { CapabilityUnavailableError, runPhase, type ComputeFn } from '../support.js';
 
 interface GeocodeComputeResult {

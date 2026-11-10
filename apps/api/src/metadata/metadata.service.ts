@@ -13,7 +13,7 @@ import {
   probeVideo,
   extractContainerMetadata,
   FfprobeDataLike,
-} from '@memoriahub/enrichment-compute/metadata';
+} from '@marinoscar/memoriahub-compute/metadata';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
 import { streamToBuffer, streamToTempFile } from '../media-processing/processors/stream-utils';
@@ -27,7 +27,7 @@ import { GeoLocationService } from '../media/geo/geo-location.service';
 // `computeMetadata` is the PURE half — EXIF + oriented dimensions for images,
 // ffprobe container metadata for videos — exactly what a distributed worker
 // node runs against downloaded bytes via the shared
-// @memoriahub/enrichment-compute/metadata package. Its result matches the
+// @marinoscar/memoriahub-compute/metadata package. Its result matches the
 // `metadataExtractionResultSchema` node DTO: `{ exif, probe }`, where the
 // image-side `dimensions` output (width/height) is FOLDED INTO the `exif`
 // record (extractExif never emits width/height, so the fold is lossless and

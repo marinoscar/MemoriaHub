@@ -461,8 +461,8 @@ describe('GeocodeHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('nodeResultSchema', () => {
-    it('is the shared geocodeResultSchema from @memoriahub/enrichment-compute/dto', async () => {
-      const { geocodeResultSchema } = await import('@memoriahub/enrichment-compute/dto');
+    it('is the shared geocodeResultSchema from @marinoscar/memoriahub-compute/dto', async () => {
+      const { geocodeResultSchema } = await import('@marinoscar/memoriahub-compute/dto');
       expect(handler.nodeResultSchema).toBe(geocodeResultSchema);
     });
   });
@@ -472,7 +472,7 @@ describe('GeocodeHandler', () => {
   //
   // A distributed worker node obtains the Google key through the per-job secret
   // (POST /nodes/:id/jobs/:jobId/secret), calls the provider's HTTP API
-  // directly using @memoriahub/enrichment-compute/geo's fetch*/map* helpers,
+  // directly using @marinoscar/memoriahub-compute/geo's fetch*/map* helpers,
   // and submits the resulting GeocodeResult via
   // POST /nodes/:id/jobs/:jobId/result. The platform calls
   // GeocodeHandler.persistNodeResult -> this.persistGeocode(ctx, parsed) with

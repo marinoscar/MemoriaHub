@@ -57,7 +57,7 @@ import {
   DEFAULT_FACE_CLUSTER_THRESHOLD,
   DEFAULT_FACE_ARCHIVE_MATCH_THRESHOLD,
   bestMatchAgainstSet,
-} from '@memoriahub/enrichment-compute/face-video';
+} from '@marinoscar/memoriahub-compute/face-video';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Recognition threshold (match incoming face → existing Person centroid). */
@@ -68,7 +68,7 @@ export const DEFAULT_FACE_MATCH_THRESHOLD = 0.38;
  * Stricter than FACE_MATCH_THRESHOLD to reduce false merges when grouping
  * faces that have not yet been identified.
  *
- * Canonical definition now lives in @memoriahub/enrichment-compute/face-video
+ * Canonical definition now lives in @marinoscar/memoriahub-compute/face-video
  * (imported above and re-exported here) so the shared clustering algorithm
  * and this server-side threshold can never drift apart; re-exported under
  * its original name so existing importers (e.g. video-face-dedup.spec.ts)
@@ -80,7 +80,7 @@ export { DEFAULT_FACE_CLUSTER_THRESHOLD };
  * Recognition threshold for matching a face against the archived
  * (hidden, unassigned) face pool.
  *
- * Canonical definition lives in @memoriahub/enrichment-compute/face-video
+ * Canonical definition lives in @marinoscar/memoriahub-compute/face-video
  * (imported above and re-exported here) so the shared archive-matching helper
  * and this server-side threshold can never drift apart; re-exported under its
  * original name so importers can reference it without reaching into the

@@ -26,7 +26,7 @@
 
 import { WorkflowRunItemStatus, WorkflowRunStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { workflowExecuteBatchResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { WorkflowExecuteBatchHandler } from './workflow-execute-batch.handler';
 import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
 import { PrismaService } from '../../prisma/prisma.service';

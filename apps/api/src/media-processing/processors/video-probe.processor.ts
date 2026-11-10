@@ -8,7 +8,7 @@ import { promises as fs } from 'fs';
 import type { ObjectProcessor, ObjectProcessorResult } from '@marinoscar/platform-api/storage';
 import { streamToTempFile } from './stream-utils';
 import { probeVideoFileWithTimeout, extractContainerMetadata } from './ffprobe.util';
-import { parseVideoCaptureTimestamp } from '@memoriahub/enrichment-compute/metadata';
+import { parseVideoCaptureTimestamp } from '@marinoscar/memoriahub-compute/metadata';
 
 /**
  * VideoProbeProcessor — extracts duration, dimensions, codec, and container

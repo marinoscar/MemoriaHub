@@ -60,7 +60,7 @@ import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } from '@memoriahub/enrichment-compute/dto';
+import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } from '@marinoscar/memoriahub-compute/dto';
 import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
 import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
 import { PrismaService } from '../prisma/prisma.service';
@@ -128,7 +128,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
   /**
    * Node-eligibility (distributed workers): the payload a node submits via
    * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
-   * contract from @memoriahub/enrichment-compute/dto. The pre-flight caps
+   * contract from @marinoscar/memoriahub-compute/dto. The pre-flight caps
    * (§4b), orientation gate (§4c), and tag/status persistence (§7) remain
    * server-authoritative — see persistSocialMedia below; a node only ever
    * computes the Tier-1/Tier-2 classification verdict (computeSocialMedia).

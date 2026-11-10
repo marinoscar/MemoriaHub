@@ -5,7 +5,7 @@ import {
   type JobExecutionProfile,
   type JobHandler,
 } from '@marinoscar/platform-api/jobs';
-import { duplicateDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { duplicateDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
 import { PrismaService } from '../prisma/prisma.service';
 import { DuplicateDetectionService } from './duplicate-detection.service';
@@ -16,7 +16,7 @@ import { DuplicateDetectionService } from './duplicate-detection.service';
  * NODE-ELIGIBLE (derived from the pair `nodeResultSchema` + `persistNodeResult`):
  * a node downloads the original through a presigned GET, computes the CLIP
  * ViT-B/32 embedding (512-d) and the dHash with the shared
- * `@memoriahub/enrichment-compute` code, and submits
+ * `@marinoscar/memoriahub-compute` code, and submits
  * `{ model, embedding, dHash }`. `persistNodeResult` writes the embedding row
  * and the hash, then runs the pgvector KNN, the hash scan and the union-find
  * grouping. It never recomputes the embedding and never downloads a byte.

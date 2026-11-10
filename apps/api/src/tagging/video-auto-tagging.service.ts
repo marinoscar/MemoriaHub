@@ -47,18 +47,18 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { MediaTagStatusType, MediaType } from '@prisma/client';
 import { extname } from 'path';
-import type { VideoAutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
+import type { VideoAutoTaggingResult } from '@marinoscar/memoriahub-compute/dto';
 import {
   extractAudioLead,
   extractFrames,
-} from '@memoriahub/enrichment-compute/video';
-// Prompt construction lives in the shared parity package so the server and a
-// distributed worker node send BYTE-IDENTICAL vision requests (issue #460).
+} from '@marinoscar/memoriahub-compute/video';
+// Prompt construction (SDK-free). It lived in the compute package while a worker
+// node composed the same request; AI jobs are server-only now (RETRO-J1, #593).
 import {
   VIDEO_AUTO_TAGGING_SYSTEM_PROMPT,
   VIDEO_TAGGING_MAX_TOKENS,
   buildVideoTaggingPrompt,
-} from '@memoriahub/enrichment-compute/ai';
+} from './video-tagging-prompt';
 import { PrismaService } from '../prisma/prisma.service';
 import { VideoInputResolver } from '../media/enrichment/video-input.service';
 import { AiService, type AiContentPart } from '@marinoscar/platform-api/ai';

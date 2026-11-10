@@ -16,7 +16,7 @@
  */
 
 import type { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { duplicateDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { duplicateDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { DuplicateDetectionHandler } from './duplicate-detection.handler';
 import { DuplicateDetectionService } from './duplicate-detection.service';
 import { PrismaService } from '../prisma/prisma.service';

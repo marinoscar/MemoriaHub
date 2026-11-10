@@ -4,7 +4,7 @@
  * Mock strategy:
  *   `probeVideoFileWithTimeout` delegates to the shared parity package's
  *   `probeVideo`, which since issue #219 spawns ffprobe through the package's
- *   own thin wrapper (`@memoriahub/enrichment-compute/ffmpeg`) instead of the
+ *   own thin wrapper (`@marinoscar/memoriahub-compute/ffmpeg`) instead of the
  *   deprecated `fluent-ffmpeg`. Only `runFfprobe` is replaced here; the
  *   subpath specifier resolves to the very same module file that
  *   `dist/cjs/metadata/index.js` requires as `../ffmpeg/index.js`, so one
@@ -24,7 +24,7 @@
  * replaced below by assertions on what the caller actually sees. The wrapper's
  * own guarantees — no dangling timer, and the SIGKILL of the hung child — are
  * unit-tested in
- * packages/enrichment-compute/test/ffmpeg.test.mjs ('runFfprobe KILLS the hung
+ * packages/memoriahub-compute/test/ffmpeg.test.mjs ('runFfprobe KILLS the hung
  * ffprobe child on timeout'), which is where the real spawn seam lives.
  */
 
@@ -32,8 +32,8 @@ import { probeVideoFileWithTimeout } from './ffprobe.util';
 
 const mockRunFfprobe = jest.fn();
 
-jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
-  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+jest.mock('@marinoscar/memoriahub-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@marinoscar/memoriahub-compute/ffmpeg');
   return {
     ...actual,
     runFfprobe: (...args: any[]) => mockRunFfprobe(...args),

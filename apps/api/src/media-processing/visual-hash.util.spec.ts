@@ -20,7 +20,7 @@
 // prepareImageForProcessing from there internally). setComputeLogger must be
 // present because the API's image-orientation.util re-export module calls it
 // at import time.
-jest.mock('@memoriahub/enrichment-compute/image', () => ({
+jest.mock('@marinoscar/memoriahub-compute/image', () => ({
   setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
@@ -54,7 +54,7 @@ jest.mock('sharp', () => {
 // ---------------------------------------------------------------------------
 
 import { computeVisualHash } from './visual-hash.util';
-import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 
 // ---------------------------------------------------------------------------
 // Helpers

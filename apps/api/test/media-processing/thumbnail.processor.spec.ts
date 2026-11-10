@@ -16,7 +16,7 @@
  *   The video path calls:
  *     - fs.writeFile / fs.readFile / fs.unlink  (temp file management)
  *     - the shared parity package's `extractPosterFrame`, which shells out via
- *       `@memoriahub/enrichment-compute/ffmpeg`'s `runFfmpeg` — a thin
+ *       `@marinoscar/memoriahub-compute/ffmpeg`'s `runFfmpeg` — a thin
  *       `spawn()` wrapper that replaced the deprecated `fluent-ffmpeg`
  *       dependency in issue #219.
  *   Both are module-level mocks (jest.mock hoisting) so the processor module
@@ -26,7 +26,7 @@
  *   ladder's per-attempt seek/filter facts asserted below are read back out of
  *   the genuine argv rather than out of a hand-rolled fluent chain. That makes
  *   this spec a corroborating parity check on top of the authoritative argv
- *   pins in packages/enrichment-compute/test/ffmpeg.test.mjs.
+ *   pins in packages/memoriahub-compute/test/ffmpeg.test.mjs.
  *
  *   mockFfmpegInvokeEnd() / mockFfmpegInvokeError() control the outcome of a
  *   single, non-scripted call (legacy single-mode path used by the original
@@ -112,11 +112,11 @@ function resetFfmpegMock() {
   ffmpegMockState.runArgs = [];
 }
 
-jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
+jest.mock('@marinoscar/memoriahub-compute/ffmpeg', () => {
   // ffmpegMockState is in the enclosing module scope and is safely accessible
   // here because this factory is called at import time (after module scope
   // initialisation), not when jest.mock() is hoisted.
-  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+  const actual = jest.requireActual('@marinoscar/memoriahub-compute/ffmpeg');
   return {
     ...actual,
     runFfmpeg: jest.fn(async (args: string[]) => {

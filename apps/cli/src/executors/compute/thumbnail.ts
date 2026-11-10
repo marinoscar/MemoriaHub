@@ -11,7 +11,7 @@
  * cheaply tell "photo vs video" ahead of time. It always attempts the sharp
  * resize first; sharp only decodes image formats, so a video input surfaces
  * as a decode failure. On that failure, this module falls back to
- * `@memoriahub/enrichment-compute/video`'s `extractPosterFrame()` — the same
+ * `@marinoscar/memoriahub-compute/video`'s `extractPosterFrame()` — the same
  * three-attempt ffmpeg fallback ladder (seek 1s → seek 0s → `thumbnail`
  * filter) the server's `ThumbnailProcessor.processVideo` uses — to pull a
  * poster frame from the video, then runs that frame through the same sharp
@@ -24,7 +24,7 @@
  * StorageProcessingRecoveryService.reprocessObjectNow path.
  *
  * Geometry/quality PARITY: The resize pipeline intentionally does NOT reuse
- * `@memoriahub/enrichment-compute/image`'s `prepareImageForProcessing` —
+ * `@marinoscar/memoriahub-compute/image`'s `prepareImageForProcessing` —
  * that helper hardcodes JPEG quality 90, which would silently diverge from
  * the server's thumbnail bytes. Instead this mirrors
  * apps/api/src/storage/processing/processors/thumbnail.processor.ts's
@@ -49,7 +49,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
+import { extractPosterFrame } from '@marinoscar/memoriahub-compute/video';
 import { CapabilityUnavailableError, intAttribute, putToPresignedUrl, runPhase, type ComputeFn } from '../support.js';
 
 /** Mirrors ThumbnailProcessor's THUMBNAIL_MAX_DIM default (env-configurable server-side). */

@@ -10,7 +10,7 @@ import {
 } from '@marinoscar/platform-api/jobs';
 import { MediaMetadataStatusType } from '@prisma/client';
 import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
-import { geocodeResultSchema, type GeocodeResult } from '@memoriahub/enrichment-compute/dto';
+import { geocodeResultSchema, type GeocodeResult } from '@marinoscar/memoriahub-compute/dto';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
@@ -23,7 +23,7 @@ import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
  * NODE-ELIGIBLE, with the Google key delivered only through the platform's per-job secret
  * (`nodeSecretBroker`, `POST /api/nodes/:id/jobs/:jobId/secret`): held in node memory for the one job,
  * never persisted (`job_node_secrets` stores a handle). A node computes the reverse lookup itself and
- * submits the shared DTO (`@memoriahub/enrichment-compute/dto`); `persistNodeResult` only writes the
+ * submits the shared DTO (`@marinoscar/memoriahub-compute/dto`); `persistNodeResult` only writes the
  * geo columns (canonicalised by the location-group resolver) and the status row, and calls no provider.
  * The broker is `usable()` only while the active provider is `google` with a stored key and the
  * `nodes` broker switch (off by default) is on; otherwise the platform withholds `geocode` from nodes
@@ -39,7 +39,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
   /** One coordinate lookup: a minute covers a slow provider; the throttle gate spaces the calls. */
   readonly profile: JobExecutionProfile = { maxRuntimeMs: 60_000, maxAttempts: 3 };
 
-  /** The payload a node submits: the shared contract from `@memoriahub/enrichment-compute/dto`. */
+  /** The payload a node submits: the shared contract from `@marinoscar/memoriahub-compute/dto`. */
   readonly nodeResultSchema = geocodeResultSchema;
 
   /** The one secret a node may ask for this job: the Google key (see `GoogleGeocodeKeyBroker`). */
@@ -102,7 +102,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
 
       // COMPUTE half — same seam a distributed worker node uses locally
       // (with the per-job Google key from the secret broker) via
-      // @memoriahub/enrichment-compute/geo's fetch*/map* helpers.
+      // @marinoscar/memoriahub-compute/geo's fetch*/map* helpers.
       // Number.isFinite above guarantees non-null finite numbers at runtime, but
       // it does not narrow the `number | null` types, so the cast is safe here.
       const computed = await this.computeGeocode(mediaItem.takenLat as number, mediaItem.takenLng as number);
@@ -142,7 +142,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
   // Delegates to GeoLocationService.reverseGeocode (which resolves the active
   // provider from system settings) and flattens its return into the
   // node-result DTO shape. A distributed worker node runs the equivalent
-  // lookup locally via @memoriahub/enrichment-compute/geo's
+  // lookup locally via @marinoscar/memoriahub-compute/geo's
   // fetchNominatim/fetchGoogleReverse + mapNominatimResponse/mapGoogleResponse
   // against the per-job Google key (see GoogleGeocodeKeyBroker), and submits
   // the resulting DTO directly — bypassing this method.

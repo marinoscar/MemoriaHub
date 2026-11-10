@@ -7,7 +7,7 @@
 //
 // This is now a THIN ADAPTER: the actual HTTP protocol (find_faces multipart
 // request, response parsing, L2-normalize, /status probe) lives in the shared
-// @memoriahub/enrichment-compute/face-compreface package, imported identically
+// @marinoscar/memoriahub-compute/face-compreface package, imported identically
 // by this provider (server, DI-wired) and by a distributed worker node opting
 // into CompreFace as its face-detection provider (apps/cli), so both sides
 // send byte-identical requests and parse responses identically. This class
@@ -22,7 +22,7 @@ import {
   detectComprefaceFaces,
   testComprefaceStatus,
   COMPREFACE_MODEL_VERSION,
-} from '@memoriahub/enrichment-compute/face-compreface';
+} from '@marinoscar/memoriahub-compute/face-compreface';
 import type {
   FaceProvider,
   FaceCapabilities,

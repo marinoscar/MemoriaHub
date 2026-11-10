@@ -11,7 +11,7 @@
  * ffmpeg never actually runs.
  *
  * We mock:
- *  - @memoriahub/enrichment-compute/ffmpeg — only `runFfmpeg`, the shared
+ *  - @marinoscar/memoriahub-compute/ffmpeg — only `runFfmpeg`, the shared
  *    package's thin `spawn()` wrapper that replaced the deprecated
  *    fluent-ffmpeg dependency (issue #219). `buildFrameExtractionArgs` is
  *    deliberately left REAL (jest.requireActual) so this spec still exercises
@@ -45,8 +45,8 @@ const ffmpegRunArgs: string[][] = [];
 
 // Stub the shared package's ffmpeg runner before importing the service so Jest
 // intercepts it. Only `runFfmpeg` is replaced — the argv builder stays real.
-jest.mock('@memoriahub/enrichment-compute/ffmpeg', () => {
-  const actual = jest.requireActual('@memoriahub/enrichment-compute/ffmpeg');
+jest.mock('@marinoscar/memoriahub-compute/ffmpeg', () => {
+  const actual = jest.requireActual('@marinoscar/memoriahub-compute/ffmpeg');
   return {
     ...actual,
     runFfmpeg: jest.fn(async (args: string[]) => {
@@ -286,7 +286,7 @@ describe('VideoFrameExtractionService — timestamp computation', () => {
   //     `-i`). Moving it after `-i` switches ffmpeg to exact output seek and
   //     lands on a different frame, which would break server/worker-node
   //     parity (docs/specs/distributed-nodes.md §7). The authoritative pin
-  //     lives in packages/enrichment-compute/test/ffmpeg.test.mjs; this is
+  //     lives in packages/memoriahub-compute/test/ffmpeg.test.mjs; this is
   //     the corroborating check at the API call site.
   // -----------------------------------------------------------------------
   describe('ffmpeg invocation shape', () => {
