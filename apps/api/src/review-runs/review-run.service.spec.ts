@@ -49,7 +49,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';

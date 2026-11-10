@@ -34,7 +34,7 @@ import { StorageRecoveryHandler } from '../../src/media-processing/recovery/stor
 import { StorageReprocessHandler } from '../../src/media-processing/recovery/storage-reprocess.handler';
 import { TrashEmptyEvaluateHandler } from '../../src/media/trash-empty/trash-empty-evaluate.handler';
 import { TrashEmptyExecuteBatchHandler } from '../../src/media/trash-empty/trash-empty-execute-batch.handler';
-import { TrashPurgeHandler } from '../../src/media/trash-purge.handler';
+import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
 import { VideoAutoTaggingHandler } from '../../src/tagging/video-auto-tagging.handler';
 import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
 import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';

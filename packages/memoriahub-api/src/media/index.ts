@@ -11,3 +11,7 @@ export { mediaSyncRefusal } from './media-sync/media-sync-refusal.js';
 export { MEDIA_SYNC_REASONS, AUDIT_COMMAND, AUDIT_CONFIG_UPDATED, AUDIT_TARGET_TYPE } from './media-sync/media-sync.constants.js';
 export type { MediaSyncReason, MediaSyncCommand } from './media-sync/media-sync.constants.js';
 export { assertMediaSyncSourceDevice } from './media-sync/media-sync-source.js';
+export * from './thumbnails/media-thumbnail.service.js';
+export * from './archive-trash/media-item-purger.js';
+export * from './archive-trash/trash-purge.handler.js';
+export * from './archive-trash/trash-purge.task.js';

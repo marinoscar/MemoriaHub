@@ -23,7 +23,7 @@ import { randomUUID } from 'crypto';
 import { WorkflowsService } from './workflows.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { WorkflowDefinitionValidator } from './definition/workflow-definition.validator';
 import { WorkflowConditionCompiler } from './compiler/workflow-condition.compiler';
 import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';

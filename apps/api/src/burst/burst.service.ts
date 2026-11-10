@@ -18,7 +18,7 @@ import {
   StorageProvider,
 } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { FEATURE_KEYS } from '../settings/feature-gates';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';

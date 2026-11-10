@@ -27,7 +27,7 @@ import { OwnerScopeSweepService } from '../../platform/sharing/owner-scope-sweep
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailSettingsService } from '@marinoscar/platform-api/email';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------

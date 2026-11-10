@@ -3,6 +3,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { UploadEnrichmentRegistry } from './enrichment-fanout/upload-enrichment.registry.js';
 import { UploadEnrichmentService } from './enrichment-fanout/upload-enrichment.service.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
+import { MediaThumbnailService } from './thumbnails/media-thumbnail.service.js';
 import { UploadNotificationService } from './producers/upload-notification.service.js';
 import { MediaTouchModule } from './touch/media-touch.module.js';
 
@@ -44,13 +45,20 @@ export class MediaModule {
     MediaModule.root ??= {
       module: MediaModule,
       imports: [MediaTouchModule],
-      providers: [UploadEnrichmentRegistry, UploadEnrichmentService, UploadNotificationService, MediaSyncService],
+      providers: [
+        UploadEnrichmentRegistry,
+        UploadEnrichmentService,
+        UploadNotificationService,
+        MediaSyncService,
+        MediaThumbnailService,
+      ],
       exports: [
         MediaTouchModule,
         UploadEnrichmentRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
         MediaSyncService,
+        MediaThumbnailService,
       ],
     };
     return MediaModule.root;

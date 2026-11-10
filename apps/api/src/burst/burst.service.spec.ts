@@ -23,7 +23,7 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { DuplicateDetectionService } from '../dedup/duplicate-detection.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunService } from '../review-runs/review-run.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';

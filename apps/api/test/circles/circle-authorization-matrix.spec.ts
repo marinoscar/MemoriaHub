@@ -12,8 +12,7 @@ import { GEO_LOCATION_PROVIDER } from '../../src/media/geo/geo-location-provider
 import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
 import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
-import { MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
-import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
 import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';

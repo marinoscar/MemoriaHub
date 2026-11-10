@@ -27,7 +27,7 @@ import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { GEO_LOCATION_PROVIDER } from '../media/geo/geo-location-provider.interface';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';

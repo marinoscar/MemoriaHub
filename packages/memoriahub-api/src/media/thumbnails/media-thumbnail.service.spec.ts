@@ -11,44 +11,34 @@
  *      independently; `clearUrlCache()` forces a fresh signing round-trip.
  *   3. `extractThumbKey` / `attachThumbnailUrls` convenience helpers.
  */
-import { Test, TestingModule } from '@nestjs/testing';
-import { MediaThumbnailService } from './media-thumbnail.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
+import { MediaThumbnailService } from './media-thumbnail.service.js';
+
+/** The slice of the database client the service reads. */
+interface MockPrisma {
+  storageObject: { findMany: jest.Mock; findUnique: jest.Mock };
+}
 
 describe('MediaThumbnailService', () => {
   let service: MediaThumbnailService;
-  let mockPrisma: MockPrismaService;
+  let mockPrisma: MockPrisma;
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  /** The object-store port: `forLocation` is the recorded provider, `active` the one for new bytes. */
+  let mockResolver: { forLocation: jest.Mock; active: jest.Mock };
 
-  beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+  beforeEach(() => {
+    mockPrisma = { storageObject: { findMany: jest.fn(), findUnique: jest.fn() } };
     mockStorageProvider = {
       getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/static-signed'),
       getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
     mockResolver = {
-      getProviderFor: jest.fn().mockResolvedValue({
+      active: jest.fn().mockResolvedValue({ id: 's3', store: mockStorageProvider }),
+      forLocation: jest.fn().mockResolvedValue({
         getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/resolved-signed'),
       }),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MediaThumbnailService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-      ],
-    }).compile();
-
-    service = module.get<MediaThumbnailService>(MediaThumbnailService);
+    service = new MediaThumbnailService(mockPrisma as never, mockResolver as never);
   });
 
   afterEach(() => {
@@ -88,9 +78,9 @@ describe('MediaThumbnailService', () => {
 
       await service.signThumbsBatched(keys);
 
-      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(2);
-      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-a');
-      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'bucket-b');
+      expect(mockResolver.forLocation).toHaveBeenCalledTimes(2);
+      expect(mockResolver.forLocation).toHaveBeenCalledWith('s3', 'bucket-a');
+      expect(mockResolver.forLocation).toHaveBeenCalledWith('r2', 'bucket-b');
     });
 
     it('falls back to the static provider for keys with no matching StorageObject row', async () => {
@@ -102,7 +92,7 @@ describe('MediaThumbnailService', () => {
 
       const result = await service.signThumbsBatched(keys);
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockStorageProvider.getSignedDownloadUrl).toHaveBeenCalledWith(
         'thumbs/orphan.jpg',
         { expiresIn: 86400 },
@@ -120,7 +110,7 @@ describe('MediaThumbnailService', () => {
         .fn()
         .mockRejectedValueOnce(new Error('S3 error'))
         .mockResolvedValueOnce('https://cdn.example.com/ok-signed');
-      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+      mockResolver.forLocation.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
 
       const result = await service.signThumbsBatched(keys);
 
@@ -144,7 +134,7 @@ describe('MediaThumbnailService', () => {
     it('signing the same key twice returns the same URL and calls the provider only once', async () => {
       const key = 'thumbs/cached.jpg';
       const signedUrl = jest.fn().mockResolvedValue('https://cdn.example.com/cached-signed');
-      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+      mockResolver.forLocation.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
       (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
         { storageKey: key, storageProvider: 's3', bucket: 'bucket-a' },
       ]);
@@ -161,8 +151,8 @@ describe('MediaThumbnailService', () => {
       const keyB = 'thumbs/y.jpg';
       const signA = jest.fn().mockResolvedValue('https://cdn.example.com/x-signed');
       const signB = jest.fn().mockResolvedValue('https://cdn.example.com/y-signed');
-      mockResolver.getProviderFor.mockImplementation(async () => ({
-        getSignedDownloadUrl: mockResolver.getProviderFor.mock.calls.length === 1 ? signA : signB,
+      mockResolver.forLocation.mockImplementation(async () => ({
+        getSignedDownloadUrl: mockResolver.forLocation.mock.calls.length === 1 ? signA : signB,
       }));
       (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
         { storageKey: keyA, storageProvider: 's3', bucket: 'bucket-a' },
@@ -180,7 +170,7 @@ describe('MediaThumbnailService', () => {
     it('re-signs after clearUrlCache() is called', async () => {
       const key = 'thumbs/cached.jpg';
       const signedUrl = jest.fn().mockResolvedValue('https://cdn.example.com/cached-signed');
-      mockResolver.getProviderFor.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
+      mockResolver.forLocation.mockResolvedValue({ getSignedDownloadUrl: signedUrl });
       (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([
         { storageKey: key, storageProvider: 's3', bucket: 'bucket-a' },
       ]);

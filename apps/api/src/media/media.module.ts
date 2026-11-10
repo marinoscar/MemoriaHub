@@ -4,7 +4,12 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
+import {
+  MEDIA_ITEM_PURGER,
+  MediaModule as MediaCoreModule,
+  TrashPurgeHandler,
+  TrashPurgeTask,
+} from '@marinoscar/memoriahub-api/media';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -16,13 +21,10 @@ import { MediaOrientationEditController } from './media-orientation-edit.control
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
-import { TrashPurgeHandler } from './trash-purge.handler';
-import { TrashPurgeTask } from './trash-purge.task';
 import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
 import { ThumbnailRepairTask } from './thumbnail-repair.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
-import { MediaThumbnailService } from './media-thumbnail.service';
 import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service';
@@ -103,13 +105,15 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     ForwardGeocodeService,
     ThumbnailProcessor,
     ImageDimensionsProcessor,
+    // The trash purge job and its hourly cron are the media slice's; the batched hard delete they
+    // call is this module's MediaService until the gallery service moves into the package.
     TrashPurgeHandler,
     TrashPurgeTask,
+    { provide: MEDIA_ITEM_PURGER, useExisting: MediaService },
     ThumbnailRepairHandler,
     ThumbnailRepairTask,
     MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
-    MediaThumbnailService,
     MediaOrientationEditService,
     ThumbnailRegenHandler,
     ThumbnailNodePersistService,
@@ -117,6 +121,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaCoreModule.forRoot()],
+  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, TrashEmptyRunService, MediaCoreModule.forRoot()],
 })
 export class MediaModule {}

@@ -47,7 +47,7 @@ import { groupRoleAtLeast } from '@marinoscar/platform-api/sharing';
 import { OwnerAccessService, hasOwnerBypass, type OwnerRole } from '../../platform/sharing/owner-scope';
 import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { MediaService } from '../../media/media.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {

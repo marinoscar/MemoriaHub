@@ -43,7 +43,7 @@ import {
 } from '../helpers/auth-mock.helper';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { MediaThumbnailService } from '../../src/media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 
 const CIRCLE_ID = '5c1c1e00-0000-4000-8000-000000000001';
 const OTHER_CIRCLE_ID = '5c1c1e00-0000-4000-8000-000000000002';

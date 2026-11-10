@@ -14,7 +14,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { PublicMemoryDigestController } from './public-memory-digest.controller';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';

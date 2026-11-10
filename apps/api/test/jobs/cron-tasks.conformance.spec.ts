@@ -20,13 +20,13 @@
 // =============================================================================
 
 import { Logger } from '@nestjs/common';
-import { JobHandlerRegistry, type JobHandler } from '@marinoscar/platform-api/jobs';
+import { JobHandlerRegistry, enqueueHousekeepingJob, type JobHandler } from '@marinoscar/platform-api/jobs';
 import { describeJobHandlerConformance } from '@marinoscar/platform-api/jobs/testing';
 import { WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 
 import { PictureEnhancementPurgeTask } from '../../src/enhancement/picture-enhancement-purge.task';
 import { ThumbnailRepairTask } from '../../src/media/thumbnail-repair.task';
-import { TrashPurgeTask } from '../../src/media/trash-purge.task';
+import { TrashPurgeTask } from '@marinoscar/memoriahub-api/media';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 import { NodeBackupStaleTask } from '../../src/node-backup/node-backup-stale.task';
 import { NotificationReconcileTask } from '../../src/notification-producers/notification-reconcile.task';
@@ -78,7 +78,15 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
   {
     name: 'TrashPurgeTask',
     type: 'trash_purge',
-    tick: (w) => new TrashPurgeTask(w.jobs as never, w.prisma as never).handleScheduledPurge(),
+    // The media slice's cron asks the jobs port for the housekeeping job (RETRO-J5): the port over the
+    // same platform helper the other crons call.
+    tick: (w) =>
+      new TrashPurgeTask({
+        enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+          const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('TrashPurgeTask'), type, what });
+          return job ? { id: job.id } : null;
+        },
+      } as never).handleScheduledPurge(),
   },
   {
     name: 'ThumbnailRepairTask',

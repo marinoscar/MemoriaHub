@@ -1,11 +1,12 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+
 import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubObjectStore,
+  type MemoriahubObjectStorePort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
 
 /**
  * TTL (seconds) requested when signing a thumbnail download URL. Longer than the
@@ -41,8 +42,15 @@ const THUMB_URL_CACHE_MAX_ENTRIES = 50_000;
  *   2. Look up the StorageObject row to find the provider + bucket that holds
  *      the thumbnail (the active provider may have changed since upload).
  *   3. Obtain a signed download URL from that provider.
- *   4. Fall back to the legacy static STORAGE_PROVIDER token when no row exists
+ *   4. Fall back to the active store when no row exists
  *      (thumbnail is still in-flight or was created before multi-provider support).
+ */
+/**
+ * Signs download URLs of thumbnails, batched and cached. Extracted so that
+ * non-media slices (search, memories, workflows) attach signed thumbnail URLs
+ * without importing the whole media service.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class MediaThumbnailService {
@@ -61,9 +69,8 @@ export class MediaThumbnailService {
   >();
 
   constructor(
-    private readonly prisma: PrismaService,
-    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objects: MemoriahubObjectStorePort,
   ) {}
 
   /**
@@ -126,7 +133,7 @@ export class MediaThumbnailService {
    * per-item `signThumb` and the batched `signThumbsBatched` paths, and by
    * consuming services that need keys to feed `signThumbsBatched` directly.
    */
-  extractThumbKey(metadata: Prisma.JsonValue | null): string | null {
+  extractThumbKey(metadata: unknown): string | null {
     if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
       return null;
     }
@@ -138,7 +145,7 @@ export class MediaThumbnailService {
    * Sign a download URL for a thumbnail, or return null if the item has no
    * thumbnail yet (processor has not run / image not yet uploaded).
    */
-  async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
+  async signThumb(metadata: unknown): Promise<string | null> {
     const key = this.extractThumbKey(metadata);
     if (!key) {
       return null;
@@ -158,7 +165,7 @@ export class MediaThumbnailService {
         if (cached) {
           return cached;
         }
-        const provider = await this.resolver.getProviderFor(
+        const provider = await this.objects.forLocation(
           thumbObject.storageProvider,
           thumbObject.bucket,
         );
@@ -171,12 +178,13 @@ export class MediaThumbnailService {
 
       // Row not yet created (thumbnail still in-flight) — fall back to the
       // legacy static provider to preserve existing behaviour.
-      const fallbackCacheKey = `__static__|${this.storageProvider.getBucket()}|${key}`;
+      const fallbackStore = (await this.objects.active()).store;
+      const fallbackCacheKey = `__static__|${fallbackStore.getBucket()}|${key}`;
       const fallbackCached = this.getCachedUrl(fallbackCacheKey);
       if (fallbackCached) {
         return fallbackCached;
       }
-      const fallbackUrl = await this.storageProvider.getSignedDownloadUrl(key, {
+      const fallbackUrl = await fallbackStore.getSignedDownloadUrl(key, {
         expiresIn: THUMB_URL_TTL_SECONDS,
       });
       this.storeCachedUrl(fallbackCacheKey, fallbackUrl);
@@ -229,10 +237,7 @@ export class MediaThumbnailService {
     }
 
     // Cache resolved providers by (provider|bucket) so we resolve each once.
-    const providerCache = new Map<
-      string,
-      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
-    >();
+    const providerCache = new Map<string, MemoriahubObjectStore>();
 
     // Sign each distinct key once, reusing signThumb's resolution + fallback.
     for (const key of distinctKeys) {
@@ -248,7 +253,7 @@ export class MediaThumbnailService {
           const providerCacheKey = `${obj.storageProvider}|${obj.bucket ?? ''}`;
           let provider = providerCache.get(providerCacheKey);
           if (!provider) {
-            provider = await this.resolver.getProviderFor(
+            provider = await this.objects.forLocation(
               obj.storageProvider,
               obj.bucket,
             );
@@ -261,13 +266,14 @@ export class MediaThumbnailService {
           keyToUrl.set(key, url);
         } else {
           // Row not yet created — fall back to the legacy static provider.
-          const fallbackCacheKey = `__static__|${this.storageProvider.getBucket()}|${key}`;
+          const fallbackStore = (await this.objects.active()).store;
+          const fallbackCacheKey = `__static__|${fallbackStore.getBucket()}|${key}`;
           const fallbackCached = this.getCachedUrl(fallbackCacheKey);
           if (fallbackCached) {
             keyToUrl.set(key, fallbackCached);
             continue;
           }
-          const fallbackUrl = await this.storageProvider.getSignedDownloadUrl(
+          const fallbackUrl = await fallbackStore.getSignedDownloadUrl(
             key,
             { expiresIn: THUMB_URL_TTL_SECONDS },
           );
@@ -300,7 +306,7 @@ export class MediaThumbnailService {
    * `metadata` field) with a signed `thumbnailUrl` field. Signing is batched
    * into a single StorageObject query via `signThumbsBatched`.
    */
-  async attachThumbnailUrls<T extends { metadata: Prisma.JsonValue | null }>(
+  async attachThumbnailUrls<T extends { metadata: unknown }>(
     items: T[],
   ): Promise<(T & { thumbnailUrl: string | null })[]> {
     const itemKeys = items.map((item) => this.extractThumbKey(item.metadata));

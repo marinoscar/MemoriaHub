@@ -11,7 +11,7 @@ import { SearchService } from './search.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';
 import { SemanticSearchService } from './semantic-search.service';
-import { MediaThumbnailService } from '../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = 'circle-search-test';

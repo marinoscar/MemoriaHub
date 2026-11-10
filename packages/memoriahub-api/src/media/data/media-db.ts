@@ -51,6 +51,8 @@ export interface MediaDelegate {
 export interface MediaModels {
   /** `media_items`. */
   mediaItem: MediaDelegate;
+  /** `storage_objects`. */
+  storageObject: MediaDelegate;
   /** `media_sync_devices`. */
   mediaSyncDevice: MediaDelegate;
   /** `media_sync_runs`. */

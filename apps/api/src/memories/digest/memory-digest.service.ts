@@ -61,7 +61,7 @@ import { EmailSettingsService } from '@marinoscar/platform-api/email';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { MEMORIAHUB_EMAIL_EVENT_KEYS } from '../../notifications-registry/memoriahub-email.notifications';
-import { MediaThumbnailService } from '../../media/media-thumbnail.service';
+import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MemoriesPreferencesValue } from '../../settings/registry/namespaces/user/memories';
 import { MemoriesSettingsValue } from '../../settings/registry/namespaces/system/memories';
