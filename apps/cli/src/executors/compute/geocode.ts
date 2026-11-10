@@ -19,7 +19,7 @@ import {
   mapNominatimResponse,
   mapGoogleResponse,
 } from '@memoriahub/enrichment-compute/geo';
-import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
+import { CapabilityUnavailableError, runPhase, type ComputeFn } from '../support.js';
 
 interface GeocodeComputeResult {
   country: string | null;
@@ -48,11 +48,10 @@ const computeGeocode: ComputeFn = async (_inputPath, params, ctx): Promise<Geoco
   }
 
   if (params['provider'] === 'nominatim') {
-    const raw = await fetchNominatim(
-      typeof params['baseUrl'] === 'string' ? params['baseUrl'] : NOMINATIM_DEFAULT_BASE_URL,
-      lat,
-      lng,
-    );
+    const baseUrl = typeof params['baseUrl'] === 'string' ? params['baseUrl'] : NOMINATIM_DEFAULT_BASE_URL;
+    const raw = await runPhase(ctx, 'job.app.geocode', () => fetchNominatim(baseUrl, lat, lng), {
+      geoProvider: 'nominatim',
+    });
     return shape(mapNominatimResponse(raw), 'nominatim');
   }
 
@@ -62,12 +61,24 @@ const computeGeocode: ComputeFn = async (_inputPath, params, ctx): Promise<Geoco
   if (typeof apiKey !== 'string' || apiKey === '') {
     throw new Error(`the ${secret.kind} secret carries no apiKey`);
   }
-  const raw = await fetchGoogleReverse(apiKey, lat, lng);
+  const raw = await runPhase(ctx, 'job.app.geocode', () => fetchGoogleReverse(apiKey, lat, lng), {
+    geoProvider: 'google',
+  });
   return shape(mapGoogleResponse(raw), 'google');
 };
 
 function shape(
-  mapped: { country?: string | null; countryCode?: string | null; admin1?: string | null; admin2?: string | null; locality?: string | null; placeName?: string | null } | null | undefined,
+  mapped:
+    | {
+        country?: string | null;
+        countryCode?: string | null;
+        admin1?: string | null;
+        admin2?: string | null;
+        locality?: string | null;
+        placeName?: string | null;
+      }
+    | null
+    | undefined,
   source: string,
 ): GeocodeComputeResult {
   return {

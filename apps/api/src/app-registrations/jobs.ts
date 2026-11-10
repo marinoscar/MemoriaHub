@@ -115,13 +115,32 @@ export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
 ];
 
 /**
- * The attributes a MemoriaHub node executor relays on its spans (RETRO-C2, #581): how many frames a
- * video job sampled and how many faces a detection found. Integers only; the platform drops an
+ * The attributes a MemoriaHub node executor relays on its spans (RETRO-C2, #581; RETRO-T4, #629),
+ * keyed to the `job.app.<phase>` spans the executors in `apps/cli/src/executors/compute/` record:
+ *
+ *   frames          int     `frames_extract` (video face, social OCR), `compreface_detect` (video)
+ *   faces           int     `compreface_detect`, `dedup`
+ *   width, height   int     `decode`, `render`
+ *   ocrFrames       int     `ocr`
+ *   embeddingDims   int     `clip_embed`
+ *   actions         int     `workflow_intent`
+ *   codec           token   `probe`
+ *   geoProvider     token   `geocode` (`nominatim` or `google`)
+ *
+ * Keys match the platform's `^[a-z][A-Za-z0-9]{1,31}$` (camelCase, no underscore). Counts, sizes and
+ * short tokens only: never a file name, URL, place name or coordinate. The platform drops an
  * unregistered key, or a value of the wrong type, from the span.
  */
 export const APP_NODE_SPAN_ATTRIBUTES = [
   { key: 'frames', type: 'int' },
   { key: 'faces', type: 'int' },
+  { key: 'width', type: 'int' },
+  { key: 'height', type: 'int' },
+  { key: 'ocrFrames', type: 'int' },
+  { key: 'embeddingDims', type: 'int' },
+  { key: 'actions', type: 'int' },
+  { key: 'codec', type: 'string', maxLength: 32 },
+  { key: 'geoProvider', type: 'string', maxLength: 32 },
 ] as const;
 
 let registered = false;

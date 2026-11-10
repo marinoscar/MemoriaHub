@@ -11,7 +11,13 @@
 
 import { createRequire } from 'node:module';
 
-import type { ClaimToken, ExecutorNodeApi, JobExecutionContext } from '@marinoscar/platform-cli/node';
+import type {
+  ClaimToken,
+  ExecutorNodeApi,
+  JobExecutionContext,
+  NodeSpanAttributes,
+  NodeSpanName,
+} from '@marinoscar/platform-cli/node';
 
 import { appWorkerEnv } from '../worker-env.js';
 
@@ -49,6 +55,44 @@ export interface ComputeJobContext {
   signal: AbortSignal;
   /** Structured, redacting log. */
   log(message: string, fields?: Record<string, unknown>): void;
+  /**
+   * Times `work` as the relayed span `name` (`job.app.<name>`). Absent on a bare test context;
+   * call it through {@link runPhase}, which just runs `work` then.
+   */
+  phase?<T>(
+    name: NodeSpanName,
+    work: () => Promise<T>,
+    attributes?: NodeSpanAttributes | ((result: T) => NodeSpanAttributes | undefined),
+  ): Promise<T>;
+}
+
+/**
+ * Runs `work` as the relayed phase `name` when the context can time phases, else just runs it.
+ * Attributes are bounded-cardinality only (integers, token strings; see {@link tokenAttribute}):
+ * never an id, URL, file name, key, place or provider text. Behaviour and result are unchanged.
+ */
+export function runPhase<T>(
+  ctx: ComputeJobContext | undefined,
+  name: NodeSpanName,
+  work: () => Promise<T>,
+  attributes?: NodeSpanAttributes | ((result: T) => NodeSpanAttributes | undefined),
+): Promise<T> {
+  return ctx?.phase !== undefined ? ctx.phase(name, work, attributes) : work();
+}
+
+/**
+ * A span attribute token: letters, digits and `_ . + -`, at most 128 characters, anything else
+ * replaced by `_`. `undefined` for a non-string or an empty value, so the attribute is omitted.
+ */
+export function tokenAttribute(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const token = value.replace(/[^A-Za-z0-9_.+-]/g, '_').slice(0, 128);
+  return token === '' ? undefined : token;
+}
+
+/** A non-negative integer span attribute, or `undefined` (omitted) for anything else. */
+export function intAttribute(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
 /**
@@ -72,6 +116,15 @@ export function computeContextOf(context: JobExecutionContext): ComputeJobContex
     mimeType: context.input?.mimeType,
     signal: context.signal,
     log: context.log,
+    ...(context.phase !== undefined
+      ? {
+          phase: <T>(
+            name: NodeSpanName,
+            work: () => Promise<T>,
+            attributes?: NodeSpanAttributes | ((result: T) => NodeSpanAttributes | undefined),
+          ): Promise<T> => context.phase!(name, work, attributes),
+        }
+      : {}),
   };
 }
 

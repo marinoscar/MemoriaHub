@@ -69,7 +69,14 @@ import {
   type ClusterableDetection,
 } from '@memoriahub/enrichment-compute/face-video';
 
-import { comprefaceUrl as resolveComprefaceUrl, putToPresignedUrl, type ComputeFn } from '../support.js';
+import {
+  comprefaceUrl as resolveComprefaceUrl,
+  putToPresignedUrl,
+  runPhase,
+  tokenAttribute,
+  type ComputeFn,
+} from '../support.js';
+import { timedCompreface } from './telemetry-state.js';
 
 /**
  * Downscale ceiling before detection — MUST match the photo path's
@@ -119,88 +126,111 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
 
   const p = params as Record<string, unknown>;
   const sampleIntervalSeconds =
-    typeof p['sampleIntervalSeconds'] === 'number'
-      ? p['sampleIntervalSeconds']
-      : DEFAULT_SAMPLE_INTERVAL_SECONDS;
-  const maxFrames =
-    typeof p['maxFramesPerVideo'] === 'number' ? p['maxFramesPerVideo'] : DEFAULT_MAX_FRAMES_PER_VIDEO;
+    typeof p['sampleIntervalSeconds'] === 'number' ? p['sampleIntervalSeconds'] : DEFAULT_SAMPLE_INTERVAL_SECONDS;
+  const maxFrames = typeof p['maxFramesPerVideo'] === 'number' ? p['maxFramesPerVideo'] : DEFAULT_MAX_FRAMES_PER_VIDEO;
 
   // --- 1. Probe the video's own duration (the node has the file locally, so
   //         it probes its own duration rather than relying on server-side
   //         MediaItem metadata) ---
-  const probeData = await probeVideo(inputPath);
-  const container = extractContainerMetadata(probeData);
+  const container = await runPhase(
+    ctx,
+    'job.app.probe',
+    async () => extractContainerMetadata(await probeVideo(inputPath)),
+    (result) => ({ codec: tokenAttribute(result.codec) }),
+  );
   const durationMs = container.durationMs ?? null;
 
   // --- 2. Sample frames via ffmpeg ---
-  const frames = await extractFrames(inputPath, {
-    durationMs,
-    sampleIntervalSeconds,
-    maxFrames,
-    fileExtension: path.extname(inputPath) || '.mp4',
-  });
+  const frames = await runPhase(
+    ctx,
+    'job.app.frames_extract',
+    () =>
+      extractFrames(inputPath, {
+        durationMs,
+        sampleIntervalSeconds,
+        maxFrames,
+        fileExtension: path.extname(inputPath) || '.mp4',
+      }),
+    (result) => ({ frames: result.length }),
+  );
 
   // --- 3. Detect faces per frame, building the clustering input list ---
   const allDetections: ClusterableDetection<DetectionPayload>[] = [];
 
-  for (const frame of frames) {
-    const prepared = await prepareImageForProcessing(frame.buffer, { maxDim: FACE_MAX_IMAGE_DIM });
-    const frameBuffer = prepared.width > 0 && prepared.height > 0 ? prepared.buffer : frame.buffer;
+  // One span for the whole per-frame loop (decode + detect): a per-frame span would flood the
+  // relay (up to 60 frames per job).
+  await runPhase(
+    ctx,
+    'job.app.compreface_detect',
+    async () => {
+      for (const frame of frames) {
+        const prepared = await prepareImageForProcessing(frame.buffer, {
+          maxDim: FACE_MAX_IMAGE_DIM,
+        });
+        const frameBuffer = prepared.width > 0 && prepared.height > 0 ? prepared.buffer : frame.buffer;
 
-    // No catch-and-fallback here: an unreachable sidecar must surface as a
-    // normal compute error, routed through the engine's existing /failure +
-    // retry/backoff path — never a silent degrade to another provider
-    // (same hard-fail philosophy as ./face-detection.ts).
-    const faces = await detectComprefaceFaces(comprefaceUrl, frameBuffer);
+        // No catch-and-fallback here: an unreachable sidecar must surface as a
+        // normal compute error, routed through the engine's existing /failure +
+        // retry/backoff path — never a silent degrade to another provider
+        // (same hard-fail philosophy as ./face-detection.ts).
+        const faces = await timedCompreface(() => detectComprefaceFaces(comprefaceUrl, frameBuffer));
 
-    let frameWidth = prepared.width;
-    let frameHeight = prepared.height;
-    if (frameWidth === 0 || frameHeight === 0) {
-      try {
-        const sharp = (await import('sharp')).default;
-        const meta = await sharp(frameBuffer).metadata();
-        frameWidth = meta.width ?? 0;
-        frameHeight = meta.height ?? 0;
-      } catch {
-        // leave at 0 — this frame's detections are skipped below.
+        let frameWidth = prepared.width;
+        let frameHeight = prepared.height;
+        if (frameWidth === 0 || frameHeight === 0) {
+          try {
+            const sharp = (await import('sharp')).default;
+            const meta = await sharp(frameBuffer).metadata();
+            frameWidth = meta.width ?? 0;
+            frameHeight = meta.height ?? 0;
+          } catch {
+            // leave at 0 — this frame's detections are skipped below.
+          }
+        }
+        // Dimensions are required to normalize boxes for clustering; a frame
+        // whose dimensions can't be determined contributes no detections
+        // rather than corrupting the clustering input with divide-by-zero
+        // normalized boxes.
+        if (frameWidth === 0 || frameHeight === 0) continue;
+
+        for (const face of faces) {
+          allDetections.push({
+            embedding: face.embedding ?? [],
+            confidence: face.confidence,
+            boundingBox: {
+              x: face.boundingBox.x / frameWidth,
+              y: face.boundingBox.y / frameHeight,
+              w: face.boundingBox.w / frameWidth,
+              h: face.boundingBox.h / frameHeight,
+            },
+            timestampMs: frame.timestampMs,
+            payload: {
+              frameBuffer,
+              frameWidth,
+              frameHeight,
+              pixelBoundingBox: {
+                x: face.boundingBox.x,
+                y: face.boundingBox.y,
+                width: face.boundingBox.w,
+                height: face.boundingBox.h,
+              },
+              landmarks: face.landmarks,
+            },
+          });
+        }
       }
-    }
-    // Dimensions are required to normalize boxes for clustering; a frame
-    // whose dimensions can't be determined contributes no detections
-    // rather than corrupting the clustering input with divide-by-zero
-    // normalized boxes.
-    if (frameWidth === 0 || frameHeight === 0) continue;
-
-    for (const face of faces) {
-      allDetections.push({
-        embedding: face.embedding ?? [],
-        confidence: face.confidence,
-        boundingBox: {
-          x: face.boundingBox.x / frameWidth,
-          y: face.boundingBox.y / frameHeight,
-          w: face.boundingBox.w / frameWidth,
-          h: face.boundingBox.h / frameHeight,
-        },
-        timestampMs: frame.timestampMs,
-        payload: {
-          frameBuffer,
-          frameWidth,
-          frameHeight,
-          pixelBoundingBox: {
-            x: face.boundingBox.x,
-            y: face.boundingBox.y,
-            width: face.boundingBox.w,
-            height: face.boundingBox.h,
-          },
-          landmarks: face.landmarks,
-        },
-      });
-    }
-  }
+    },
+    () => ({ frames: frames.length, faces: allDetections.length }),
+  );
 
   // --- 4. Cluster across frames (isDelegated=false — CompreFace is
   //         keyless/embedding-based; a node never runs a delegated provider) ---
-  const clusters = clusterFaceDetections(allDetections, DEFAULT_FACE_CLUSTER_THRESHOLD, false);
+  const clusters = await runPhase(
+    ctx,
+    'job.app.dedup',
+    async () => clusterFaceDetections(allDetections, DEFAULT_FACE_CLUSTER_THRESHOLD, false),
+    (result) => ({ faces: result.length }),
+  );
 
   // --- 5. Per cluster: best-effort thumbnail crop + upload, then assemble ---
   const resultClusters: Array<{

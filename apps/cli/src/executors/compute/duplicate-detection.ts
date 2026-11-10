@@ -25,7 +25,7 @@ import {
 import { computeDHash } from '@memoriahub/enrichment-compute/dhash';
 
 import { clipStats } from './clip-state.js';
-import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
+import { CapabilityUnavailableError, runPhase, type ComputeFn } from '../support.js';
 import { clipModelPath } from '../models.js';
 import { appWorkerEnv } from '../../worker-env.js';
 
@@ -70,10 +70,7 @@ function getHolder(): Promise<SessionHolder> {
   if (!holderLoadPromise) {
     const modelPath = clipModelPath();
     if (!fs.existsSync(modelPath)) {
-      throw new CapabilityUnavailableError(
-        'CLIP model not present — run `memoriahub node models pull`',
-        'onnxruntime',
-      );
+      throw new CapabilityUnavailableError('CLIP model not present — run `memoriahub node models pull`', 'onnxruntime');
     }
     holderLoadPromise = createClipSession(modelPath)
       .then((session): SessionHolder => {
@@ -131,10 +128,10 @@ async function embedWithRecycling(buffer: Buffer): Promise<number[] | null> {
   }
 }
 
-const computeDuplicateDetection: ComputeFn = async (inputPath, _params) => {
+const computeDuplicateDetection: ComputeFn = async (inputPath, _params, ctx) => {
   const buffer = fs.readFileSync(inputPath);
 
-  const dHash = await computeDHash(buffer);
+  const dHash = await runPhase(ctx, 'job.app.dhash', () => computeDHash(buffer));
   // The server DTO requires BOTH fields — node-side degraded (dHash-only) mode
   // is a later enhancement. An undecodable image is a regular Error so the
   // engine routes it to /failure and the server retries (or runs it itself).
@@ -142,7 +139,14 @@ const computeDuplicateDetection: ComputeFn = async (inputPath, _params) => {
     throw new Error('duplicate_detection: image could not be decoded for dHash');
   }
 
-  const embedding = await embedWithRecycling(buffer);
+  const embedding = await runPhase(
+    ctx,
+    'job.app.clip_embed',
+    () => embedWithRecycling(buffer),
+    (result) => ({
+      embeddingDims: result === null ? undefined : result.length,
+    }),
+  );
   if (embedding === null) {
     throw new Error('duplicate_detection: CLIP embedding failed (image not embeddable)');
   }

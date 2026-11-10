@@ -50,7 +50,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
-import { CapabilityUnavailableError, putToPresignedUrl, type ComputeFn } from '../support.js';
+import { CapabilityUnavailableError, intAttribute, putToPresignedUrl, runPhase, type ComputeFn } from '../support.js';
 
 /** Mirrors ThumbnailProcessor's THUMBNAIL_MAX_DIM default (env-configurable server-side). */
 const THUMBNAIL_MAX_DIM = 800;
@@ -100,40 +100,40 @@ const computeThumbnail: ComputeFn = async (inputPath, _params, ctx): Promise<Thu
   //     Falls back to ffmpeg poster-frame extraction (mirrors
   //     ThumbnailProcessor.processVideo) when sharp cannot decode the input —
   //     the primary way that happens is the input being a video.
-  let jpegBuffer: Buffer;
-  let width: number;
-  let height: number;
-  try {
-    const resized = await resizeToThumbnail(buffer);
-    jpegBuffer = resized.jpegBuffer;
-    width = resized.width;
-    height = resized.height;
-  } catch (sharpErr) {
+  const render = async (): Promise<ResizedThumbnail> => {
     try {
-      const frameBuffer = await extractPosterFrame(inputPath);
-      const resized = await resizeToThumbnail(frameBuffer);
-      jpegBuffer = resized.jpegBuffer;
-      width = resized.width;
-      height = resized.height;
-    } catch (ffmpegErr) {
-      // Both sharp direct decode AND ffmpeg poster-frame extraction failed —
-      // this node genuinely cannot produce a thumbnail for this input (e.g.
-      // ffmpeg missing on PATH, or a corrupt/unparseable file), unlike the
-      // earlier photo-only implementation where any video input hit this path.
-      throw new CapabilityUnavailableError(
-        'node cannot generate a thumbnail for this input: sharp decode failed and ffmpeg ' +
-          'poster-frame extraction also failed',
-        'thumbnail',
-        `sharp: ${sharpErr instanceof Error ? sharpErr.message : String(sharpErr)}; ffmpeg: ${
-          ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr)
-        }`,
-      );
+      return await resizeToThumbnail(buffer);
+    } catch (sharpErr) {
+      try {
+        const frameBuffer = await extractPosterFrame(inputPath);
+        return await resizeToThumbnail(frameBuffer);
+      } catch (ffmpegErr) {
+        // Both sharp direct decode AND ffmpeg poster-frame extraction failed —
+        // this node genuinely cannot produce a thumbnail for this input (e.g.
+        // ffmpeg missing on PATH, or a corrupt/unparseable file), unlike the
+        // earlier photo-only implementation where any video input hit this path.
+        throw new CapabilityUnavailableError(
+          'node cannot generate a thumbnail for this input: sharp decode failed and ffmpeg ' +
+            'poster-frame extraction also failed',
+          'thumbnail',
+          `sharp: ${sharpErr instanceof Error ? sharpErr.message : String(sharpErr)}; ffmpeg: ${
+            ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr)
+          }`,
+        );
+      }
     }
-  }
+  };
+  const rendered = await runPhase(ctx, 'job.app.render', render, (result) => ({
+    width: intAttribute(result.width),
+    height: intAttribute(result.height),
+  }));
+  const { jpegBuffer, width, height } = rendered;
 
   // --- 2. Ask the server where to PUT the bytes (it chooses the key), then upload directly ---
   const target = await ctx.api.uploadUrl(ctx.nodeId, ctx.jobId, 'image/jpeg', ctx.claimToken);
-  await putToPresignedUrl(target.url, jpegBuffer, 'image/jpeg');
+  await runPhase(ctx, 'job.app.thumbnail_put', () => putToPresignedUrl(target.url, jpegBuffer, 'image/jpeg'), {
+    bytes: jpegBuffer.length,
+  });
 
   return { storageKey: target.key, width, height, bytes: jpegBuffer.length };
 };

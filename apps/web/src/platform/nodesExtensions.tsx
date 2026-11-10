@@ -16,6 +16,10 @@ import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import { Link as RouterLink } from 'react-router-dom';
 import type { WorkerNode } from '@marinoscar/platform-web/nodes/headless';
 import type { WorkersPageSlots } from '@marinoscar/platform-web/nodes/ui';
+import { registerMemoriahubNodeVitals } from '../platform-extensions/nodes/memoriahubNodeVitals';
+
+// The executors' vitals (CLIP session, CompreFace latency, OCR, libvips threads), RETRO-T4 (#629).
+registerMemoriahubNodeVitals();
 
 /** The path of a node's Local Media Backup page. */
 export function nodeBackupPath(nodeId: string): string {

@@ -22,13 +22,13 @@
  * `{ runId: string, items: [{ mediaItemId, actionResults?: [{ type, status }] }] }`.
  */
 
-import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
+import { CapabilityUnavailableError, runPhase, type ComputeFn } from '../support.js';
 
 interface FrozenAction {
   type?: unknown;
 }
 
-const computeWorkflowExecuteBatch: ComputeFn = async (_inputPath, params) => {
+const computeWorkflowExecuteBatch: ComputeFn = async (_inputPath, params, ctx) => {
   const runId = params['runId'];
   if (typeof runId !== 'string' || runId.length === 0) {
     throw new CapabilityUnavailableError(
@@ -51,11 +51,17 @@ const computeWorkflowExecuteBatch: ComputeFn = async (_inputPath, params) => {
         .filter((t): t is string => t !== null)
     : [];
 
-  const items = itemIds.map((mediaItemId) => ({
-    mediaItemId,
-    // Declared intent only — the server recomputes the true per-action status.
-    actionResults: actionTypes.map((type) => ({ type, status: 'pending' as const })),
-  }));
+  const items = await runPhase(
+    ctx,
+    'job.app.workflow_intent',
+    async () =>
+      itemIds.map((mediaItemId) => ({
+        mediaItemId,
+        // Declared intent only — the server recomputes the true per-action status.
+        actionResults: actionTypes.map((type) => ({ type, status: 'pending' as const })),
+      })),
+    { actions: actionTypes.length },
+  );
 
   return { runId, items };
 };
