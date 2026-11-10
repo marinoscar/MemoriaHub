@@ -25,6 +25,14 @@ export class TrashPurgeTask {
   /** The hourly tick. */
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledPurge(): Promise<void> {
+    await this.enqueueHousekeepingJob();
+  }
+
+  /**
+   * Asks the jobs port for the global housekeeping job: the host checks that no `trash_purge` is
+   * already pending or running, queues a system job at the housekeeping priority and never throws.
+   */
+  private async enqueueHousekeepingJob(): Promise<void> {
     await this.jobs.enqueueHousekeeping({ type: 'trash_purge', what: 'trash purge' });
   }
 }
