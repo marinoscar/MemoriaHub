@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { DEFAULT_SYSTEM_SETTINGS } from '../settings/registry/default-system-settings';
 import type { AppSystemSettingsDocument as SystemSettingsValue } from '../settings/app-settings.types';
-import { haversineKm } from '../common/geo/haversine.util';
+import { haversineKm } from '@marinoscar/memoriahub-api/location';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 export type LocationInferenceConfig = NonNullable<SystemSettingsValue['locationInference']>;
@@ -44,7 +44,7 @@ export interface ComputedLocationSuggestion {
  * this module's existing importers and its golden-value spec keep working, and
  * so there is exactly one earth-radius constant in the codebase.
  */
-export { haversineKm } from '../common/geo/haversine.util';
+export { haversineKm } from '@marinoscar/memoriahub-api/location';
 
 /**
  * Antimeridian-safe time-weighted longitude interpolation.

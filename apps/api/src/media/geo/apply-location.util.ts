@@ -1,6 +1,6 @@
 import type { GeoLocationProvider } from './geo-location-provider.interface';
 import { geoResultToMediaColumns } from './geo-result.mapper';
-import type { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
+import type { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 
 /**
  * Data patch produced by applyLocation — write coords + coordSource

@@ -47,6 +47,14 @@
       "types": "./dist/insights/testing/index.d.ts",
       "default": "./dist/insights/testing/index.js"
     },
+    "./location": {
+      "types": "./dist/location/index.d.ts",
+      "default": "./dist/location/index.js"
+    },
+    "./location/testing": {
+      "types": "./dist/location/testing/index.d.ts",
+      "default": "./dist/location/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -56,6 +64,7 @@
     "testing",
     "media",
     "insights",
+    "location",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

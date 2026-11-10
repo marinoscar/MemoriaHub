@@ -15,7 +15,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'face/face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id.' },
   { file: 'insights.service.ts', why: 'Storage insight aggregates over the whole deployment. In the insights slice package (packages/memoriahub-api/src/insights).' },
   { file: 'legacy/media-shares-import.ts', why: 'Data migration only (RETRO-I4): reads the dropped-from-Prisma media_shares table, finds already-imported link grants by token hash, and re-keys share_expiring stamps; no request input, run by the operator script.' },
-  { file: 'location-groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },
+  { file: 'groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },
   { file: 'media/media.service.ts', why: 'Gallery, map-cluster and aggregate queries Prisma cannot express, scoped by circle id.' },
   { file: 'media/thumbnail-repair.handler.ts', why: 'Candidate scan for missing thumbnails.' },
   { file: 'media-sync/media-sync.service.ts', why: 'Run-retention trim keyed by device id (owner-checked first). In the media slice package (packages/memoriahub-api/src/media).' },

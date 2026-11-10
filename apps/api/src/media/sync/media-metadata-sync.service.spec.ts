@@ -8,7 +8,7 @@ import {
   MockPrismaService,
 } from '../../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
-import { LocationGroupResolverService } from '../../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../../../test/mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------

@@ -63,9 +63,17 @@ export class InsightsRefreshTask {
         return;
       }
 
-      await this.jobs.enqueueHousekeeping({ type: 'storage_insights', what: 'storage insights refresh' });
+      await this.enqueueHousekeepingJob();
     } catch (err) {
       this.logger.error('Storage insights schedule check failed', err as Error);
     }
+  }
+
+  /**
+   * Asks the jobs port for the global housekeeping job: the host checks that no `storage_insights` is
+   * already pending or running, queues a system job at the housekeeping priority and never throws.
+   */
+  private async enqueueHousekeepingJob(): Promise<void> {
+    await this.jobs.enqueueHousekeeping({ type: 'storage_insights', what: 'storage insights refresh' });
   }
 }

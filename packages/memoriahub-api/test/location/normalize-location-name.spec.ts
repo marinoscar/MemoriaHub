@@ -1,4 +1,4 @@
-import { fold, stripNoise, suggestionKey } from './normalize-location-name';
+import { fold, stripNoise, suggestionKey } from '../../src/location/groups/normalize-location-name.js';
 
 describe('fold — alias identity', () => {
   it('strips diacritics and lowercases', () => {

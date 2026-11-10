@@ -31,7 +31,7 @@ import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 // NOTE (backend-dev): the synchronous `bulkAcceptSuggestions` method and its DTO

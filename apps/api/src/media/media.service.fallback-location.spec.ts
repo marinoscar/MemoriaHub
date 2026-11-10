@@ -30,7 +30,7 @@ import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
-import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
 

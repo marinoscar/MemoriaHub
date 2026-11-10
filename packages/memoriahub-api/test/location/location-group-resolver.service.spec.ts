@@ -1,4 +1,5 @@
-import { LocationGroupResolverService } from './location-group-resolver.service';
+import { LocationGroupResolverService } from '../../src/location/groups/location-group-resolver.service.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
 
 /** Shape of one row as returned by the resolver's snapshot query. */
 interface GroupRow {
@@ -15,15 +16,15 @@ function makeService(groups: GroupRow[], settingsOverride: Record<string, unknow
   const findMany = jest.fn().mockResolvedValue(groups);
   const prisma = { locationGroup: { findMany } } as never;
 
-  const getSettings = jest.fn().mockResolvedValue({
+  const systemSettings = settingsPortFrom({
     features: { locationGrouping: true },
     locationGrouping: { radiusCaptureEnabled: true, maxRadiusKm: 50, suggestionMinItems: 1 },
     ...settingsOverride,
   });
-  const systemSettings = { getSettings } as never;
+  const getSettings = systemSettings.readSystem;
 
   return {
-    service: new LocationGroupResolverService(prisma, systemSettings),
+    service: new LocationGroupResolverService(prisma, systemSettings as never),
     findMany,
     getSettings,
   };

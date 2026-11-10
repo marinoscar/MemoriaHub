@@ -1,16 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { LocationGroupLevel } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { isLocationGroupingEnabled } from '../settings/feature-gates';
-import { haversineKm } from '../common/geo/haversine.util';
-import { fold } from './normalize-location-name';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { LocationGroupLevelValue } from '@marinoscar/memoriahub-contract/location';
+
+import { isFeatureEnabled } from '../../core/index.js';
+import { MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { haversineKm } from '../geometry/haversine.js';
+import { fold } from './normalize-location-name.js';
+
+type LocationGroupLevel = LocationGroupLevelValue;
+const LocationGroupLevel = { country: 'country', region: 'region', locality: 'locality' } as const;
 
 /** TTL for the in-memory group/alias snapshot, milliseconds. */
 const SNAPSHOT_TTL_MS = 30_000;
 
 /**
  * Raw geocoder columns as stored on a MediaItem — the resolver's input.
+ *
+ * @stability experimental
  */
 export interface RawGeoTiers {
   geoCountry: string | null;
@@ -19,14 +25,20 @@ export interface RawGeoTiers {
   geoLocality: string | null;
 }
 
-/** The three canonical columns the resolver produces. */
+/** The three canonical columns the resolver produces.
+ *
+ * @stability experimental
+ */
 export interface CanonicalGeoTiers {
   geoCanonicalCountry: string | null;
   geoCanonicalAdmin1: string | null;
   geoCanonicalLocality: string | null;
 }
 
-/** A group that can claim an item by geographic containment. */
+/** A group that can claim an item by geographic containment.
+ *
+ * @stability experimental
+ */
 export interface ResolverArea {
   level: LocationGroupLevel;
   countryCode: string;
@@ -36,13 +48,21 @@ export interface ResolverArea {
   radiusKm: number;
 }
 
+/**
+ * The enabled groups as the resolver caches them: alias lookups and the capture areas.
+ *
+ * @stability experimental
+ */
 export interface ResolverSnapshot {
   /** `${level}|${countryCode}|${normalizedValue}` → canonicalName */
   aliases: Map<string, string>;
   areas: ResolverArea[];
 }
 
-/** Build the composite alias-map key. */
+/** Build the composite alias-map key.
+ *
+ * @stability experimental
+ */
 export function aliasKey(
   level: LocationGroupLevel,
   countryCode: string,
@@ -85,6 +105,8 @@ export function aliasKey(
  * Caching mirrors AppSystemSettingsService's two-layer shape (TTL + explicit
  * invalidate): the dataset is small (hundreds of rows), so the whole enabled
  * group/alias set is loaded in one pass rather than queried per key.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class LocationGroupResolverService {
@@ -96,8 +118,8 @@ export class LocationGroupResolverService {
   private inFlight: Promise<ResolverSnapshot> | null = null;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
   ) {}
 
   /**
@@ -197,11 +219,9 @@ export class LocationGroupResolverService {
     raw: RawGeoTiers,
     coords: { lat: number; lng: number } | null,
   ): Promise<CanonicalGeoTiers> {
-    const settings = await this.systemSettings.getSettings();
-
     // Feature off ⇒ IDENTITY. Canonical columns are still written (verbatim),
     // preserving the raw-non-null ⇒ canonical-non-null invariant.
-    if (!isLocationGroupingEnabled(settings)) {
+    if (!(await isFeatureEnabled(this.settings, 'locationGrouping', 'LOCATION_GROUPING_ENABLED'))) {
       return {
         geoCanonicalCountry: raw.geoCountry,
         geoCanonicalAdmin1: raw.geoAdmin1,
@@ -211,8 +231,11 @@ export class LocationGroupResolverService {
 
     const snapshot = await this.getSnapshot();
 
-    const radiusCaptureEnabled = settings.locationGrouping?.radiusCaptureEnabled ?? true;
-    const maxRadiusKm = settings.locationGrouping?.maxRadiusKm ?? 50;
+    const { value: grouping } = await this.settings.readSystem<
+      { radiusCaptureEnabled?: boolean; maxRadiusKm?: number } | undefined
+    >('locationGrouping');
+    const radiusCaptureEnabled = grouping?.radiusCaptureEnabled ?? true;
+    const maxRadiusKm = grouping?.maxRadiusKm ?? 50;
     const effectiveCoords = radiusCaptureEnabled ? coords : null;
 
     const countryScope = raw.geoCountryCode ?? '';

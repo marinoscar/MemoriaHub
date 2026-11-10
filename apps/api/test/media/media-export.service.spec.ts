@@ -36,7 +36,7 @@ import { StorageProviderResolver } from '../../src/platform/storage/storage-prov
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
-import { LocationGroupResolverService } from '../../src/location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 import { thumbnailServiceOverMocks } from '../helpers/media-thumbnail';
 

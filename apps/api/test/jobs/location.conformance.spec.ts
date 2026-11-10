@@ -29,9 +29,8 @@ import {
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
-import { LocationGroupRebuildHandler } from '../../src/location-groups/location-group-rebuild.handler';
+import { LocationGroupRebuildHandler, LOCATION_GROUP_REBUILD_TYPE } from '@marinoscar/memoriahub-api/location';
 import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
-import { LOCATION_GROUP_REBUILD_TYPE } from '../../src/location-groups/location-group-rebuild.service';
 import { circleJob, mediaItemJob } from '../helpers/platform-job';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c601';
@@ -303,9 +302,9 @@ function buildRebuild(): LocationGroupRebuildHandler {
     locationGroup: { findMany: async () => [] },
     mediaItem: { findMany: async () => [], updateMany: async () => ({ count: 0 }), groupBy: async () => [] },
   };
-  const settings = { getSettings: async () => ({ locationGrouping: { radiusCaptureEnabled: true, maxRadiusKm: 50 } }) };
+  const settings = { readSystem: async () => ({ value: { radiusCaptureEnabled: true, maxRadiusKm: 50 }, version: 1 }) };
   const scopes = { allScopeIds: async () => [CIRCLE_ID] };
-  return new LocationGroupRebuildHandler(registry, prisma as never, settings as never, scopes as never);
+  return new LocationGroupRebuildHandler(registry as never, prisma as never, settings as never, scopes as never);
 }
 
 describe('location_group_rebuild', () => {

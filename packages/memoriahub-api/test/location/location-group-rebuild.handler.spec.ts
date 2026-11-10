@@ -1,5 +1,6 @@
-import type { Job, JobHandler } from '@marinoscar/platform-api/jobs';
-import { LocationGroupRebuildHandler } from './location-group-rebuild.handler';
+import type { MemoriahubJob as Job, MemoriahubJobHandler as JobHandler } from '../../src/ports/index.js';
+import { LocationGroupRebuildHandler } from '../../src/location/groups/location-group-rebuild.handler.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
 
 /** One recorded write, so pass ORDER can be asserted. */
 interface RecordedWrite {
@@ -60,15 +61,13 @@ function makeHandler(opts: {
     },
   } as never;
 
-  const systemSettings = {
-    getSettings: jest.fn().mockResolvedValue({
-      features: { locationGrouping: true },
-      locationGrouping: { radiusCaptureEnabled: true, maxRadiusKm: 50, suggestionMinItems: 1 },
-      ...opts.settings,
-    }),
-  } as never;
+  const systemSettings = settingsPortFrom({
+    features: { locationGrouping: true },
+    locationGrouping: { radiusCaptureEnabled: true, maxRadiusKm: 50, suggestionMinItems: 1 },
+    ...opts.settings,
+  }) as never;
 
-  const registry = { register: jest.fn() } as never;
+  const registry = { registerHandler: jest.fn() } as never;
 
   return {
     handler: new LocationGroupRebuildHandler(registry, prisma, systemSettings, {
@@ -81,17 +80,17 @@ function makeHandler(opts: {
       circle: { findMany: jest.Mock };
     },
     writes,
-    registry: registry as unknown as { register: jest.Mock },
+    registry: registry as unknown as { registerHandler: jest.Mock },
   };
 }
 
 const job = { id: 'job-1', payload: null } as unknown as Job;
 
 describe('LocationGroupRebuildHandler', () => {
-  it('registers itself with the platform registry on module init', () => {
+  it('registers itself with the jobs port on module init', () => {
     const { handler, registry } = makeHandler({});
     handler.onModuleInit();
-    expect(registry.register).toHaveBeenCalledWith(handler);
+    expect(registry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('is SERVER-ONLY by omission: no node-result pair', () => {

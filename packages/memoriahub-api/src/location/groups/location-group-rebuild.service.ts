@@ -1,8 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { EnrichmentJob, JobReason } from '@prisma/client';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
-/** Payload for a `location_group_rebuild` job. Both fields optional. */
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, type MemoriahubJobsPort } from '../../ports/index.js';
+import { enqueueEnrichmentJob } from '../../media/index.js';
+import type { LocationDb } from '../data/location-db.js';
+
+/**
+ * Payload for a `location_group_rebuild` job. Both fields optional.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupRebuildPayload {
   /** Restrict the rebuild to one circle; absent ⇒ the whole library. */
   circleId?: string;
@@ -14,6 +20,11 @@ export interface LocationGroupRebuildPayload {
   groupIds?: string[];
 }
 
+/**
+ * The job type. Permanent.
+ *
+ * @stability experimental
+ */
 export const LOCATION_GROUP_REBUILD_TYPE = 'location_group_rebuild';
 
 /**
@@ -22,14 +33,25 @@ export const LOCATION_GROUP_REBUILD_TYPE = 'location_group_rebuild';
  * Issue #374's group/alias mutation endpoints call this after every write, so
  * an admin edit propagates to `media_items.geo_canonical_*` without a manual
  * backfill step.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class LocationGroupRebuildService {
   private readonly logger = new Logger(LocationGroupRebuildService.name);
 
-  constructor(private readonly enrichmentJobService: EnrichmentJobService) {}
+  constructor(
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+  ) {}
 
-  async enqueueRebuild(payload: LocationGroupRebuildPayload = {}): Promise<EnrichmentJob> {
+  /**
+   * Queues a full or scoped rebuild and answers the job id and its status (`pending`, or `running`
+   * when a rebuild was already in flight and this request folded into it).
+   *
+   * @param payload - an optional circle and group restriction.
+   */
+  async enqueueRebuild(payload: LocationGroupRebuildPayload = {}): Promise<{ id: string; status: string }> {
     // ⚠️ DELIBERATELY NO `skipDedup` — do NOT copy it in from
     // LocationInferenceBackfillService, which passes `skipDedup: true` for the
     // OPPOSITE requirement.
@@ -44,14 +66,14 @@ export class LocationGroupRebuildService {
     // Location inference needs `skipDedup: true` because it enqueues one global
     // job PER CIRCLE — without it the first circle's job would swallow every
     // other circle's. Same mechanism, opposite requirement.
-    const job = await this.enrichmentJobService.enqueue({
+    const { id } = await enqueueEnrichmentJob(this.jobs, {
       type: LOCATION_GROUP_REBUILD_TYPE,
-      mediaItemId: null,
-      circleId: null,
-      reason: JobReason.backfill,
+      reason: 'backfill',
       priority: 100,
       payload: { ...payload },
     });
+    const row = await this.prisma.job.findUnique({ where: { id }, select: { status: true } });
+    const job = { id, status: (row?.status as string | undefined) ?? 'pending' };
 
     this.logger.log(
       `location_group_rebuild enqueued (job ${job.id}, status=${job.status}, circleId=${

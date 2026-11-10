@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { whereNear as whereNearBox } from '@marinoscar/memoriahub-api/location';
 
 export interface MediaFilters {
   type?: string;
@@ -208,26 +209,10 @@ export function whereExcludeArchived(value: boolean): Prisma.MediaItemWhereInput
 }
 
 /**
- * Bounding-box geographic radius filter.
- *
- * Approximates a circle using a lat/lng bounding box:
- *   latDelta  = radiusKm / 111.32
- *   lngDelta  = radiusKm / (111.32 * cos(lat))   — clamped to 180 near poles
- *
- * This is an intentional v1 approximation: accurate enough for typical radii and
- * well within the margin of error for photo GPS coordinates.
+ * Bounding-box geographic radius filter. The one implementation lives in the location slice
+ * (`@marinoscar/memoriahub-api/location`), shared with the location-group rebuild.
  */
-export function whereNear(lat: number, lng: number, radiusKm: number): Prisma.MediaItemWhereInput {
-  const latDelta = radiusKm / 111.32;
-  const cosLat = Math.cos((lat * Math.PI) / 180);
-  // Guard against division-by-zero / extreme values near poles
-  const lngDelta = cosLat > 0.0001 ? Math.min(radiusKm / (111.32 * cosLat), 180) : 180;
-
-  return {
-    takenLat: { gte: lat - latDelta, lte: lat + latDelta },
-    takenLng: { gte: lng - lngDelta, lte: lng + lngDelta },
-  };
-}
+export const whereNear: (lat: number, lng: number, radiusKm: number) => Prisma.MediaItemWhereInput = whereNearBox;
 
 /**
  * Filter media items by people who appear in them (via face recognition).

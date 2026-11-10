@@ -106,6 +106,12 @@
       "ports",
       "core",
       "media"
+    ],
+    "location": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   }
 }

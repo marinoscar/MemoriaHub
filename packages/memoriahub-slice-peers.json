@@ -201,6 +201,13 @@
         "@nestjs/common",
         "@nestjs/schedule"
       ]
+    },
+    "location": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@marinoscar/memoriahub-contract"
+      ]
     }
   }
 }

@@ -28,7 +28,7 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
 import { buildMediaWhere } from '../search/media-where.builder';
 import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';

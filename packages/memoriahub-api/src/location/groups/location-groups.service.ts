@@ -1,33 +1,39 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { LocationGroupLevel, Prisma } from '@prisma/client';
-
-import { PrismaService } from '../prisma/prisma.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { LocationGroupResolverService } from './location-group-resolver.service';
-import { LocationGroupRebuildService } from './location-group-rebuild.service';
-import { fold, stripNoise, suggestionKey } from './normalize-location-name';
 import type {
-  CreateLocationGroupDto,
-  ListLocationGroupSuggestionsDto,
-  ListLocationGroupsDto,
-  ListLocationValuesDto,
-  MergeLocationGroupsDto,
-  UpdateLocationGroupDto,
-} from './dto/location-group.dto';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+  CreateLocationGroup as CreateLocationGroupDto,
+  ListLocationGroupSuggestions as ListLocationGroupSuggestionsDto,
+  ListLocationGroups as ListLocationGroupsDto,
+  ListLocationValues as ListLocationValuesDto,
+  LocationGroupLevelValue,
+  MergeLocationGroups as MergeLocationGroupsDto,
+  UpdateLocationGroup as UpdateLocationGroupDto,
+} from '@marinoscar/memoriahub-contract/location';
+
+import { MediaThumbnailService } from '../../media/index.js';
+import { MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../../ports/index.js';
+import type { LocationDb, LocationTx } from '../data/location-db.js';
+import { LocationGroupResolverService } from './location-group-resolver.service.js';
+import { LocationGroupRebuildService } from './location-group-rebuild.service.js';
+import { fold, stripNoise, suggestionKey } from './normalize-location-name.js';
+
+type LocationGroupLevel = LocationGroupLevelValue;
+type JsonValue = unknown;
 
 /**
  * Per-level column mapping, identical to the rebuild handler's — `raw` is the
  * geocoder-owned column, `canonical` the derived one this feature maintains.
+ *
+ * @stability experimental
  */
 export const LEVEL_COLUMNS: Record<
-  LocationGroupLevel,
+  LocationGroupLevelValue,
   {
     raw: 'geoCountry' | 'geoAdmin1' | 'geoLocality';
     canonical: 'geoCanonicalCountry' | 'geoCanonicalAdmin1' | 'geoCanonicalLocality';
@@ -50,6 +56,8 @@ const DEFAULT_VALUES_PAGE_SIZE = 50;
 /**
  * Title-case a folded, noise-stripped name for a proposed canonical name.
  * "heredia" → "Heredia", "san jose" → "San Jose".
+ *
+ * @stability experimental
  */
 export function titleCase(s: string): string {
   return s
@@ -93,14 +101,16 @@ interface GroupItemCountKey {
  * Item counts are ALWAYS derived from a `groupBy` over a canonical column —
  * one per level involved, never one query per group or per alias. A page of 50
  * groups therefore costs at most three aggregate queries, not 50.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class LocationGroupsService {
   private readonly logger = new Logger(LocationGroupsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly resolver: LocationGroupResolverService,
     private readonly rebuild: LocationGroupRebuildService,
     private readonly thumbnails: MediaThumbnailService,
@@ -116,7 +126,7 @@ export class LocationGroupsService {
   async list(query: ListLocationGroupsDto) {
     const { level, enabled, q, page, pageSize } = query;
 
-    const where: Prisma.LocationGroupWhereInput = {
+    const where: Record<string, any> = {
       ...(level ? { level: level as LocationGroupLevel } : {}),
       ...(enabled !== undefined ? { enabled } : {}),
       ...(q ? { canonicalName: { contains: q, mode: 'insensitive' as const } } : {}),
@@ -179,7 +189,7 @@ export class LocationGroupsService {
     });
     if (!group) throw new NotFoundException(`Location group ${id} not found`);
 
-    const cols = LEVEL_COLUMNS[group.level];
+    const cols = LEVEL_COLUMNS[group.level as LocationGroupLevel];
 
     const rawRows = await this.prisma.mediaItem.groupBy({
       by: [cols.raw, 'geoCountryCode'],
@@ -222,7 +232,7 @@ export class LocationGroupsService {
       notes: group.notes,
       createdAt: group.createdAt,
       updatedAt: group.updatedAt,
-      aliases: group.aliases.map((alias) => ({
+      aliases: group.aliases.map((alias: any) => ({
         id: alias.id,
         rawValue: alias.rawValue,
         normalizedValue: alias.normalizedValue,
@@ -246,7 +256,7 @@ export class LocationGroupsService {
    * present in the query:
    *
    *   - **Paginated mode** (`page` and/or `pageSize` supplied) — `page`
-   *     defaults to 1, `pageSize` to {@link DEFAULT_VALUES_PAGE_SIZE}, and
+   *     defaults to 1, `pageSize` to `DEFAULT_VALUES_PAGE_SIZE`, and
    *     `limit` is IGNORED entirely. This is the mode the select-many-and-merge
    *     checkbox list uses: a cap it cannot page past would make "showing 50 of
    *     812" a lie it can never resolve.
@@ -328,8 +338,10 @@ export class LocationGroupsService {
     const level = query.level as LocationGroupLevel;
     const cols = LEVEL_COLUMNS[level];
 
-    const settings = await this.systemSettings.getSettings();
-    const minItems = settings.locationGrouping?.suggestionMinItems ?? 1;
+    const { value: grouping } = await this.settings.readSystem<{ suggestionMinItems?: number } | undefined>(
+      'locationGrouping',
+    );
+    const minItems = grouping?.suggestionMinItems ?? 1;
 
     const rows = await this.prisma.mediaItem.groupBy({
       by: [cols.raw, 'geoCountryCode'],
@@ -443,7 +455,7 @@ export class LocationGroupsService {
     const group = await this.prisma.locationGroup.findUnique({ where: { id } });
     if (!group) throw new NotFoundException(`Location group ${id} not found`);
 
-    const data: Prisma.LocationGroupUpdateInput = {};
+    const data: Record<string, any> = {};
 
     if (dto.canonicalName !== undefined) {
       const canonicalName = dto.canonicalName.trim();
@@ -580,7 +592,7 @@ export class LocationGroupsService {
       throw new BadRequestException('values must contain at least one non-blank value');
     }
 
-    const outcome = await this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx: LocationTx) => {
       if (targetGroupId !== null) {
         const group = await tx.locationGroup.findUnique({ where: { id: targetGroupId } });
         if (!group) throw new NotFoundException(`Location group ${targetGroupId} not found`);
@@ -708,7 +720,7 @@ export class LocationGroupsService {
       geo: { centerLat: number | null; centerLng: number | null; radiusKm: number | null };
       createdById: string | null;
     },
-    client: Prisma.TransactionClient | PrismaService,
+    client: LocationTx | LocationDb,
   ) {
     const { level, countryCode, canonicalName, geo } = params;
     const normalizedName = fold(canonicalName);
@@ -766,7 +778,7 @@ export class LocationGroupsService {
   private async attachMembers(
     group: { id: string; level: LocationGroupLevel; countryCode: string },
     values: string[],
-    client: Prisma.TransactionClient | PrismaService,
+    client: LocationTx | LocationDb,
   ): Promise<number> {
     await this.assertMembersUnclaimed(group.level, group.countryCode, values, group.id, client);
 
@@ -918,7 +930,7 @@ export class LocationGroupsService {
     countryCode: string,
     values: string[],
     selfGroupId: string | null,
-    client: Prisma.TransactionClient | PrismaService = this.prisma,
+    client: LocationTx | LocationDb = this.prisma,
   ): Promise<void> {
     if (values.length === 0) return;
 
@@ -999,8 +1011,8 @@ export class LocationGroupsService {
       return { centerLat: null, centerLng: null, radiusKm: null };
     }
 
-    const settings = await this.systemSettings.getSettings();
-    const maxRadiusKm = settings.locationGrouping?.maxRadiusKm ?? 50;
+    const { value: grouping } = await this.settings.readSystem<{ maxRadiusKm?: number } | undefined>('locationGrouping');
+    const maxRadiusKm = grouping?.maxRadiusKm ?? 50;
     if (radiusKm > maxRadiusKm) {
       throw new BadRequestException(
         `radiusKm ${radiusKm} exceeds locationGrouping.maxRadiusKm (${maxRadiusKm})`,
@@ -1028,7 +1040,7 @@ export class LocationGroupsService {
     });
     if (!group) throw new NotFoundException(`Location group ${groupId} not found`);
 
-    const cols = LEVEL_COLUMNS[group.level];
+    const cols = LEVEL_COLUMNS[group.level as LocationGroupLevel];
 
     const item = await this.prisma.mediaItem.findFirst({
       where: { id: mediaItemId, deletedAt: null },
@@ -1053,7 +1065,7 @@ export class LocationGroupsService {
       );
     }
 
-    const owned = new Set(group.aliases.map((a) => a.normalizedValue));
+    const owned = new Set(group.aliases.map((a: any) => a.normalizedValue));
     owned.add(group.normalizedName);
 
     const candidates = [record[cols.canonical], record[cols.raw]]
@@ -1084,7 +1096,7 @@ export class LocationGroupsService {
 
   /** Batch-sign group cover thumbnails through the shared helper. */
   private async signCovers(
-    metadatas: Array<Prisma.JsonValue | null>,
+    metadatas: Array<JsonValue | null>,
   ): Promise<Array<string | null>> {
     if (metadatas.length === 0) return [];
     const withUrls = await this.thumbnails.attachThumbnailUrls(

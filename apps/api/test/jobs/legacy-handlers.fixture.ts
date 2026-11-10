@@ -13,7 +13,7 @@ import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sw
 import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
-import { LocationGroupRebuildHandler } from '../../src/location-groups/location-group-rebuild.handler';
+import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
 import { LocationInferenceHandler } from '../../src/location-inference/location-inference.handler';
 import { LocationSuggestionRunEvaluateHandler } from '../../src/location-inference/runs/location-suggestion-run-evaluate.handler';
 import { LocationSuggestionRunExecuteBatchHandler } from '../../src/location-inference/runs/location-suggestion-run-execute-batch.handler';

@@ -9,7 +9,9 @@
     "./src/media/index.ts",
     "./src/media/testing/index.ts",
     "./src/insights/index.ts",
-    "./src/insights/testing/index.ts"
+    "./src/insights/testing/index.ts",
+    "./src/location/index.ts",
+    "./src/location/testing/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-api",

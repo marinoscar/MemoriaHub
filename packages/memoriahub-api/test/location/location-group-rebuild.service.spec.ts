@@ -1,13 +1,12 @@
-import { JobReason } from '@prisma/client';
-import { LocationGroupRebuildService } from './location-group-rebuild.service';
+import { LocationGroupRebuildService } from '../../src/location/groups/location-group-rebuild.service.js';
 
 describe('LocationGroupRebuildService', () => {
   let enqueue: jest.Mock;
   let service: LocationGroupRebuildService;
 
   beforeEach(() => {
-    enqueue = jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' });
-    service = new LocationGroupRebuildService({ enqueue } as never);
+    enqueue = jest.fn().mockResolvedValue({ id: 'job-1', deduplicated: false });
+    service = new LocationGroupRebuildService({ enqueue } as never, { job: { findUnique: jest.fn().mockResolvedValue({ status: 'pending' }) } } as never);
   });
 
   it('enqueues a global location_group_rebuild job at background priority', async () => {
@@ -17,10 +16,10 @@ describe('LocationGroupRebuildService', () => {
     const arg = enqueue.mock.calls[0][0];
 
     expect(arg.type).toBe('location_group_rebuild');
-    expect(arg.mediaItemId).toBeNull();
-    expect(arg.circleId).toBeNull();
+    expect(arg.subjectType).toBeUndefined();
+    expect(arg.subjectId).toBeUndefined();
     expect(arg.priority).toBe(100);
-    expect(arg.reason).toBe(JobReason.backfill);
+    expect(arg.reason).toBe('backfill');
   });
 
   // ---------------------------------------------------------------------------

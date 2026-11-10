@@ -8,7 +8,7 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '../media/geo/geo-location-provider.interface';
 import { applyLocation } from '../media/geo/apply-location.util';
-import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { GEO_CLEAR_COLUMNS } from '../media/geo/geo-result.mapper';
 import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
 import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';

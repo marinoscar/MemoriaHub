@@ -1,22 +1,23 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import type { LocationGroupLevelValue as LocationGroupLevel } from '@marinoscar/memoriahub-contract/location';
+
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { LocationGroupLevel, Prisma } from '@prisma/client';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { PrismaService } from '../prisma/prisma.service';
-import { whereNear } from '../search/media-where.builder';
-import { haversineKm } from '../common/geo/haversine.util';
-import { fold } from './normalize-location-name';
-import {
-  LOCATION_GROUP_REBUILD_TYPE,
-  LocationGroupRebuildPayload,
-} from './location-group-rebuild.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAccessPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { haversineKm } from '../geometry/haversine.js';
+import { whereNear } from '../geometry/where-near.js';
+import { fold } from './normalize-location-name.js';
+import { LOCATION_GROUP_REBUILD_TYPE, type LocationGroupRebuildPayload } from './location-group-rebuild.service.js';
 
 /** Keyset page size for the circle sweep and the bbox-candidate scan. */
 const PAGE_SIZE = 1000;
@@ -68,36 +69,46 @@ const LEVEL_COLUMNS: Record<
  * With `features.locationGrouping` off, the resolver is the identity function
  * and this handler's RESET pass alone restores every canonical column to its
  * raw value — which is precisely how disabling the feature takes effect.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class LocationGroupRebuildHandler implements JobHandler, OnModuleInit {
+export class LocationGroupRebuildHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = LOCATION_GROUP_REBUILD_TYPE;
+
+  /** The label in the admin job list. */
   readonly label = 'Location Group Rebuild';
+
   /** Set-based passes over the whole library: 30 minutes, and a second attempt only once. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(LocationGroupRebuildHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one attempt: RESET, then RADIUS, then ALIAS. */
+  async process(job: MemoriahubJob): Promise<void> {
     const payload = (job.payload as unknown as LocationGroupRebuildPayload | null) ?? {};
     const circleId = typeof payload.circleId === 'string' ? payload.circleId : null;
     const groupIds =
       Array.isArray(payload.groupIds) && payload.groupIds.length > 0 ? payload.groupIds : null;
 
-    const settings = await this.systemSettings.getSettings();
-    const radiusCaptureEnabled = settings.locationGrouping?.radiusCaptureEnabled ?? true;
-    const maxRadiusKm = settings.locationGrouping?.maxRadiusKm ?? 50;
+    const { value: grouping } = await this.settings.readSystem<
+      { radiusCaptureEnabled?: boolean; maxRadiusKm?: number } | undefined
+    >('locationGrouping');
+    const radiusCaptureEnabled = grouping?.radiusCaptureEnabled ?? true;
+    const maxRadiusKm = grouping?.maxRadiusKm ?? 50;
 
     let scanned = 0;
     let updated = 0;
@@ -203,7 +214,7 @@ export class LocationGroupRebuildHandler implements JobHandler, OnModuleInit {
     }
 
     // Every shared library (a platform group) plus every personal library (RETRO-N29).
-    for (const id of await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)) {
+    for (const id of await this.access.allScopeIds()) {
       scanned += await this.resetCircle(id);
     }
 
@@ -258,7 +269,7 @@ export class LocationGroupRebuildHandler implements JobHandler, OnModuleInit {
     const cols = LEVEL_COLUMNS[area.level];
     const bbox = whereNear(area.centerLat, area.centerLng, area.radiusKm);
 
-    const baseWhere: Prisma.MediaItemWhereInput = {
+    const baseWhere: Record<string, unknown> = {
       ...bbox,
       deletedAt: null,
       [cols.raw]: { not: null },
@@ -331,7 +342,7 @@ export class LocationGroupRebuildHandler implements JobHandler, OnModuleInit {
     const normalizedByAlias = new Set(group.aliases.map((a) => a.normalizedValue));
     normalizedByAlias.add(fold(group.canonicalName));
 
-    const scopeWhere: Prisma.MediaItemWhereInput = {
+    const scopeWhere: Record<string, unknown> = {
       deletedAt: null,
       ...(circleId ? { circleId } : {}),
       ...(group.countryCode ? { geoCountryCode: group.countryCode } : {}),

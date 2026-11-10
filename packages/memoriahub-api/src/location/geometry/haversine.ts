@@ -14,7 +14,11 @@
 // existing importers (and its golden-value spec) are unaffected.
 // =============================================================================
 
-/** Mean Earth radius, kilometers — the spherical approximation's one constant. */
+/**
+ * Mean Earth radius in kilometres.
+ *
+ * @stability experimental
+ */
 export const EARTH_RADIUS_KM = 6371;
 
 /**
@@ -23,6 +27,8 @@ export const EARTH_RADIUS_KM = 6371;
  * Spherical (haversine), not ellipsoidal: the ~0.5% worst-case error against
  * WGS-84 is far below the resolution any caller here cares about — a 50 km trip
  * threshold and a multi-kilometer anchor-agreement radius.
+ *
+ * @stability experimental
  */
 export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

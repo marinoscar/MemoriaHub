@@ -12,20 +12,19 @@
  *   - the geometry and cover-item validations reject rather than silently
  *     storing something that can never match.
  */
-import { ArgumentsHost, BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { LocationGroupsService, titleCase } from './location-groups.service';
-import { LocationGroupResolverService } from './location-group-resolver.service';
-import { LocationGroupRebuildService } from './location-group-rebuild.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { MediaThumbnailService } from '../../src/media/index.js';
+import { MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '../../src/ports/index.js';
+import { LocationGroupsService, titleCase } from '../../src/location/groups/location-groups.service.js';
+import { LocationGroupResolverService } from '../../src/location/groups/location-group-resolver.service.js';
+import { LocationGroupRebuildService } from '../../src/location/groups/location-group-rebuild.service.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
 
 /**
- * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
+ * Run a thrown exception through the app-wide `HttpExceptionFilter` contract and
  * return the body the client would actually receive.
  *
  * ⚠️ This is the load-bearing assertion for the `409` contract. The filter does
@@ -37,19 +36,15 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * `common/filters/http-exception.filter.spec.ts`.
  */
 function sendThroughFilter(exception: unknown): any {
-  const response = {
-    code: jest.fn().mockReturnThis(),
-    send: jest.fn().mockReturnThis(),
-  };
-  const host = {
-    switchToHttp: () => ({
-      getResponse: () => response,
-      getRequest: () => ({ url: '/api/location-groups', method: 'POST' }),
-    }),
-  } as unknown as ArgumentsHost;
-
-  new HttpExceptionFilter().catch(exception, host);
-  return response.send.mock.calls[0][0];
+  // The package is host-neutral and cannot import the platform's filter, so this mirrors its
+  // contract: the body is rebuilt from a fixed allowlist, never spread. The real filter is run over
+  // the same 409 by `apps/api/test/location/location-groups-wire.spec.ts`.
+  const allowed = ['message', 'code', 'details', 'error', 'error_description', 'startedAt'];
+  const http = exception as HttpException;
+  const payload = (http.getResponse() ?? {}) as Record<string, unknown>;
+  const body: Record<string, unknown> = { statusCode: http.getStatus() };
+  for (const key of allowed) if (payload[key] !== undefined) body[key] = payload[key];
+  return body;
 }
 
 const SETTINGS = {
@@ -91,7 +86,7 @@ describe('LocationGroupsService', () => {
   let rebuild: { enqueueRebuild: jest.Mock };
 
   beforeEach(async () => {
-    prisma = createMockPrismaService();
+    prisma = createMockDb();
     resolver = { invalidate: jest.fn() };
     rebuild = {
       enqueueRebuild: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }),
@@ -100,11 +95,8 @@ describe('LocationGroupsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LocationGroupsService,
-        { provide: PrismaService, useValue: prisma },
-        {
-          provide: AppSystemSettingsService,
-          useValue: { getSettings: jest.fn().mockResolvedValue(SETTINGS) },
-        },
+        { provide: MEMORIAHUB_PRISMA, useValue: prisma },
+        { provide: MEMORIAHUB_SETTINGS, useValue: settingsPortFrom(SETTINGS) },
         { provide: LocationGroupResolverService, useValue: resolver },
         { provide: LocationGroupRebuildService, useValue: rebuild },
         {
@@ -1228,7 +1220,7 @@ describe('LocationGroupsService', () => {
 
     it('excludes values below locationGrouping.suggestionMinItems', async () => {
       const settings = module_getSettingsWithMin(3);
-      (service as any).systemSettings = { getSettings: jest.fn().mockResolvedValue(settings) };
+      (service as any).settings = settingsPortFrom(settings as Record<string, unknown>);
       (prisma.mediaItem.groupBy as jest.Mock).mockResolvedValue([
         { geoAdmin1: 'Heredia', geoCountryCode: 'CR', _count: { _all: 12 } },
         { geoAdmin1: 'Heredia Province', geoCountryCode: 'CR', _count: { _all: 1 } },

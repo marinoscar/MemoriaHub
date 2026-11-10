@@ -21,7 +21,7 @@
 //
 // =============================================================================
 
-import type { LocationGroupLevel } from '@prisma/client';
+import type { LocationGroupLevelValue as LocationGroupLevel } from '@marinoscar/memoriahub-contract/location';
 
 /**
  * Alias identity: strip diacritics, lowercase, drop punctuation, collapse
@@ -32,6 +32,8 @@ import type { LocationGroupLevel } from '@prisma/client';
  *   "St. Louis" → "st louis"
  *
  * Nothing semantic is removed — "San Jose" and "San Juan" stay distinct.
+ *
+ * @stability experimental
  */
 export function fold(s: string): string {
   return s
@@ -101,6 +103,8 @@ const byLengthDesc = (a: string, b: string): number => b.length - a.length;
  *
  * Exported for the suggestions endpoint's tests; production callers should use
  * `suggestionKey`, which folds first.
+ *
+ * @stability experimental
  */
 export function stripNoise(level: LocationGroupLevel, folded: string): string {
   const noise = NOISE[level];
@@ -132,6 +136,8 @@ export function stripNoise(level: LocationGroupLevel, folded: string): string {
  * distinct administrative units can share a key; that is acceptable when
  * PROPOSING a group to an admin for review, and unacceptable when silently
  * rewriting a media item's canonical location.
+ *
+ * @stability experimental
  */
 export function suggestionKey(level: LocationGroupLevel, s: string): string {
   return stripNoise(level, fold(s));

@@ -19,6 +19,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/media/testing`: `describeMediaSliceConformance`, the kit the media slice's guarantees are checked with ([slice README](src/media/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/insights`: the storage insights slice, `InsightsModule.forRoot` and `InsightsService` ([slice README](src/insights/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/location`: the location slice (location grouping so far), `LocationModule.forRoot` and `LocationGroupResolverService` ([slice README](src/location/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/location/testing`: `describeLocationSliceConformance` ([slice README](src/location/README.md#extension-point-catalog)).
 
 ## Install and peer dependencies
 
