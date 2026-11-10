@@ -19,7 +19,7 @@ All domain behaviour lives in `@marinoscar/memoriahub-*` packages. A host contai
 - packaging (Dockerfiles, compose files, workflows);
 - host-specific glue (settings namespaces, onboarding, branding).
 
-The hosts are the web edition (`apps/api` and `apps/web`), the CLI and worker node (`apps/cli`, on `@marinoscar/platform-cli`) and, from RETRO-J12, a bare host that installs the packed tarballs outside the repository. Rules:
+The hosts are the web edition (`apps/api` and `apps/web`), the CLI and worker node (`apps/cli`, on `@marinoscar/platform-cli`) and a bare host (`examples/bare-host`, RETRO-J12) that installs the packed tarballs outside the repository. Rules:
 
 1. A feature needed by more than one host is implemented in a package first, then mounted by each host.
 2. A host never copies or forks slice code, prompts, schemas or parsers.
@@ -39,7 +39,7 @@ Decisions made with the first package:
 - A host feature waits for the package release that carries it (until the gate opens, for the workspace version of the package).
 - Each feature costs more upfront work: a package API, tests, a changeset.
 - In return there is one implementation of each domain behaviour, one fix reaches every host, and the packages are proven installable by the checks below rather than by trust.
-- While the gate is closed, a consumer outside this repository cannot install the packages. The bare host (J12) therefore installs packed tarballs, which do not need a registry.
+- While the gate is closed, a consumer outside this repository cannot install the packages. The bare host (`examples/bare-host`) therefore installs packed tarballs, which do not need a registry. The release workflow (`memoriahub-release.yml`) is manual-only and a dry run by default.
 
 ## Alternatives considered
 

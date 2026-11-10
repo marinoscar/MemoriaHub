@@ -143,7 +143,7 @@ When `@marinoscar/memoriahub-contract` exists (J2), `-api` and `-web` list it as
 
 ## The host-neutral rule
 
-**No file under `packages/memoriahub-compute/src/**` or `packages/memoriahub-contract/src/**` imports `@marinoscar/platform-*`.** The same rule is declared for `memoriahub-api` and `memoriahub-web` with an empty allow-list; the issue that creates each of them states the exact platform specifiers it may import (`HOST_NEUTRAL_ALLOWED` and `HOST_NEUTRAL_SLICE_ALLOWED` in `check-slice-peers.mjs`) with the reason. A worker node installs the compute package with no platform package, and a bare host (J12) installs the packed tarballs with none either. What to do instead: depend on a port the package declares and bind the platform in one place in the app (`apps/api/src/platform`). The rule is executable: `npm run check:memoriahub-slice-peers` fails with `[host-neutral]` naming the file and the specifier, and the fixtures in `scripts/memoriahub-packages/test/fixtures/` pin both outcomes. `npm run check:memoriahub-lean-install` proves the install: it packs the compute package, installs it alone and asserts that no platform package and no provider SDK (`openai`, `@anthropic-ai/sdk`) is in the tree.
+**No file under `packages/memoriahub-compute/src/**` or `packages/memoriahub-contract/src/**` imports `@marinoscar/platform-*`.** The same rule is declared for `memoriahub-api` and `memoriahub-web` with an empty allow-list; the issue that creates each of them states the exact platform specifiers it may import (`HOST_NEUTRAL_ALLOWED` and `HOST_NEUTRAL_SLICE_ALLOWED` in `check-slice-peers.mjs`) with the reason. A worker node installs the compute package with no platform package, and the bare host (`examples/bare-host`) installs the packed tarballs with none either. What to do instead: depend on a port the package declares and bind the platform in one place in the app (`apps/api/src/platform`). The rule is executable: `npm run check:memoriahub-slice-peers` fails with `[host-neutral]` naming the file and the specifier, and the fixtures in `scripts/memoriahub-packages/test/fixtures/` pin both outcomes. `npm run check:memoriahub-lean-install` and `npm run check:memoriahub-bare-host` prove the install: the first packs the compute and contract packages, installs each alone and asserts that no platform package and no provider SDK (`openai`, `@anthropic-ai/sdk`) is in the tree; the second does the same for a host that mounts slices of the api package.
 
 ## Checks and commands
 
@@ -157,7 +157,8 @@ When `@marinoscar/memoriahub-contract` exists (J2), `-api` and `-web` list it as
 | `npm run check:memoriahub-slice-peers` | The eight rules above, for the packages and then for `apps/api` and `apps/cli`. |
 | `npm run check:memoriahub-package-docs` | `docs:memoriahub-packages`, then the README, TSDoc and TypeDoc standard. |
 | `npm run check:memoriahub-pack` | `npm pack --dry-run` of each package against its manifest. Run after the build. |
-| `npm run check:memoriahub-lean-install` | The lean-install smoke above. Needs the build and the registry (for the native dependencies). |
+| `npm run check:memoriahub-lean-install` | Packs compute and contract, installs each ALONE in an empty project, asserts no platform package, no provider SDK and no other MemoriaHub package in the tree, and loads every `exports` entry through `require` and `import`. Needs the build and the registry for third-party dependencies only; sets `ONNXRUNTIME_NODE_INSTALL=skip` and installs with `--ignore-scripts`, so no onnxruntime binary is downloaded. |
+| `npm run check:memoriahub-bare-host` | `node examples/bare-host/run.mjs --from pack`: see [The bare host](#the-bare-host). Needs the build of compute, contract and api. |
 | `npm run check:single-instance` | One copy of every singleton library, of every `@marinoscar/platform-*` package and of every `@marinoscar/memoriahub-*` package. |
 | `npx changeset status --since=origin/main` | Fails when a package source changed without a changeset. |
 | `npm run version-packages` | `changeset version` and a lockfile refresh. A maintainer step. |
@@ -170,11 +171,31 @@ The scripts live in `scripts/memoriahub-packages/` and are modelled on the Enter
 
 - **build**: install, build, typecheck, the slice-peers check, the script tests, the package tests, the pack check and a smoke import of every entry point from both module systems.
 - **package-docs**: TypeDoc and the docs check.
+- **lean-install**: `check:memoriahub-lean-install` in its own job (the onnxruntime download is skipped).
+- **bare-host**: `examples/bare-host/run.mjs --from pack`.
+- **db-apply**: the domain schema against PostgreSQL 16 with pgvector.
 - **single-instance**: the single-instance check over the platform and MemoriaHub packages.
 - **changeset-status**: fails a pull request that changes package sources without a changeset.
 
-No job in this workflow publishes. The bare-host job arrives with RETRO-J12. The application images keep their own `deploy.yml` flow, which builds the compute package inside each image and runs the golden-vector and HEIC gates.
+No job in this workflow publishes. `.github/workflows/memoriahub-release.yml` is a separate, manual-only workflow that defaults to a dry run (see [Versioning](#versioning) and the [runbook](runbooks/release-memoriahub-packages.md)). The application images keep their own `deploy.yml` flow, which builds the compute package inside each image and runs the golden-vector and HEIC gates.
+
+## The bare host
+
+`examples/bare-host/` is a minimal NestJS host that is **not** a workspace of the root `package.json`. `node examples/bare-host/run.mjs --from pack` copies it to a temporary folder outside the repository, packs `@marinoscar/memoriahub-compute`, `-contract` and `-api` with `npm pack`, installs the tarballs with the host's Nest and zod peers, and then:
+
+- asserts no `@marinoscar/platform-*` package, no `@marinoscar/memoriahub-web` and no provider SDK is in `node_modules`;
+- typechecks the host with `skipLibCheck: false`, so the packages' `.d.ts` files are checked from the tarballs;
+- builds it and runs its tests (boots the media, face, insights and location slices on in-memory ports; the photo upload fan-out, the job runner, an object-store round trip, the location resolver);
+- runs `check-slice-peers.mjs --app <temporary project>` (the host lists every peer of the slices it imports) and `check-single-instance.mjs` over the temporary project.
+
+`--from workspace` installs copies of the package folders instead of tarballs. What it does not cover: the database. The host installs neither `@marinoscar/memoriahub-db` (its `prisma` peer and the platform schema it needs are not a headless host's business) nor PostgreSQL; `db-apply` covers the schema, and a database-backed bare host is a follow-up (a PGlite run needs `vector` and the HNSW partial indexes verified first and was not attempted). The slices that exist today are mounted; `tagging`, `search` and `memories` are not in the api package yet and join when they land. The `dedup` slice is left out on purpose because it needs `onnxruntime-node`. See [the host README](../examples/bare-host/README.md).
 
 ## Versioning
 
-Changesets runs in **pre mode** on the `next` tag (`.changeset/pre.json`), so releases are `0.1.0-next.N` on the `next` dist-tag. Add a changeset with `npx changeset` in every pull request that changes a package; `npx changeset --empty` records that a change has no release impact. Do not edit `pre.json` by hand. The versions only move; nothing is published until the owner opens the gate ([runbook](runbooks/release-memoriahub-packages.md)).
+Changesets runs in **pre mode** on the `next` tag (`.changeset/pre.json`), so releases are `0.1.0-next.N` on the `next` dist-tag. Add a changeset with `npx changeset` in every pull request that changes a package; `npx changeset --empty` records that a change has no release impact. Do not edit `pre.json` by hand. The versions only move; nothing is published until the owner opens the gate ([runbook](runbooks/release-memoriahub-packages.md)). The version step is a maintainer's `npm run version-packages` in a pull request; no workflow opens it.
+
+### Release workflow and the open registry decision
+
+`.github/workflows/memoriahub-release.yml` has one trigger, `workflow_dispatch`. Its default run is a dry run (build, `check:memoriahub-pack`, `check:memoriahub-lean-install`, `npm pack` of the five packages, tarballs uploaded as an artifact). Its `publish` job runs only when the dispatch sets `publish` to `true` and `confirm` to `publish`, and it needs a repository secret named `MEMORIAHUB_REGISTRY_TOKEN` that the repository does not define. Even then, `npm publish` refuses a package with `"private": true`, which every `@marinoscar/memoriahub-*` package keeps. It never uses the `latest` dist-tag. A script test (`test:memoriahub-scripts`) fails if the workflow gains another trigger, another secret or a `latest` tag.
+
+**Open decision (owner):** where the domain packages are published (public npm, a private registry or GitHub Packages) and under which license. No package name is claimed anywhere, and the packages stay `"private": true`, `UNLICENSED`, until it is made. The runbook lists the steps that follow the decision.
