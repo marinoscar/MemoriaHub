@@ -53,7 +53,7 @@
     "test:db": "jest -c jest.config.js --selectProjects db --runInBand --passWithNoTests"
   },
   "peerDependencies": {
-    "@marinoscar/memoriahub-contract": "*",
+    "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@nestjs/common": "^11.1.12",
     "@prisma/client-runtime-utils": "^7.8.0",
     "zod": "^4.4.3"
