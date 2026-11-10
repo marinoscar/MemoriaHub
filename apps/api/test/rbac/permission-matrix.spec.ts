@@ -102,6 +102,9 @@ const NEW_PLATFORM_PERMISSIONS = [
   'groups:admin',
   'groups:read',
   'groups:write',
+  // The nodes slice (RETRO-C2, #581): system scope, admin only (MemoriaHub's node routes were jobs:read|write).
+  'nodes:read',
+  'nodes:write',
   'org_ai_config:read',
   'org_ai_config:write',
   // RETRO-D3 (#576): the notifications slice's per-organization broadcasts.

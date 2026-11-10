@@ -16,63 +16,27 @@
  * Skips (reported as skipped, never passed) when nothing listens on the port.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { NODE_TOKEN_PREFIX, NodeCredentialService } from '@marinoscar/platform-api/nodes';
-import { Client } from 'pg';
 
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { MIGRATIONS_DIR, applyMigration, connectionUrl, createScratchDatabase, type Row, type ScratchDatabase } from './scratch-db';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
-const MIGRATIONS = join(__dirname, '..', '..', 'prisma', 'migrations');
 const C2 = '20261109300000_c2_worker_nodes_to_platform';
-
-type Row = Record<string, any>;
-
-function connection(database: string) {
-  return {
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-    user: process.env.POSTGRES_USER || 'postgres',
-    password: process.env.POSTGRES_PASSWORD || 'postgres',
-    database,
-  };
-}
-
-function url(database: string): string {
-  const c = connection(database);
-  return `postgresql://${encodeURIComponent(c.user)}:${encodeURIComponent(c.password)}@${c.host}:${c.port}/${database}`;
-}
-
-/** Applies one migration file the way `prisma migrate deploy` would. */
-async function applyMigration(client: Client, sql: string): Promise<void> {
-  if (sql.includes('$$') || /^\s*BEGIN\s*;/im.test(sql)) {
-    await client.query(sql);
-    return;
-  }
-  const statements = sql
-    .split('\n')
-    .filter((line) => !line.trim().startsWith('--'))
-    .join('\n')
-    .split(/;\s*(?:\n|$)/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  for (const statement of statements) await client.query(statement);
-}
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
 describeMaybeDb('RETRO-C2 worker nodes and nod_ credentials move to the platform tables (DB_GATED: real PostgreSQL)', () => {
-  const database = `c2_nodes_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
-  let admin: Client;
-  let db: Client;
+  let scratch: ScratchDatabase;
   let prisma: PrismaClient;
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await scratch.db.query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
 
   const owner = randomUUID();
@@ -84,20 +48,7 @@ describeMaybeDb('RETRO-C2 worker nodes and nod_ credentials move to the platform
   const backupRunId = randomUUID();
 
   beforeAll(async () => {
-    admin = new Client(connection(process.env.POSTGRES_DB || 'appdb'));
-    await admin.connect();
-    await admin.query(`CREATE DATABASE ${database}`);
-    db = new Client(connection(database));
-    await db.connect();
-
-    const dirs = readdirSync(MIGRATIONS, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-    for (const dir of dirs) {
-      if (dir === C2) break;
-      await applyMigration(db, readFileSync(join(MIGRATIONS, dir, 'migration.sql'), 'utf8'));
-    }
+    scratch = await createScratchDatabase(`c2_nodes_${randomUUID().replace(/-/g, '').slice(0, 12)}`, C2);
 
     await q(`INSERT INTO users (id, email, is_active, updated_at) VALUES ($1, $2, true, now())`, [
       owner,
@@ -133,17 +84,13 @@ describeMaybeDb('RETRO-C2 worker nodes and nod_ credentials move to the platform
       [backupRunId, ids.online],
     );
 
-    await applyMigration(db, readFileSync(join(MIGRATIONS, C2, 'migration.sql'), 'utf8'));
-    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url(database), max: 2 }) });
+    await applyMigration(scratch.db, readFileSync(join(MIGRATIONS_DIR, C2, 'migration.sql'), 'utf8'));
+    prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: connectionUrl(scratch.name), max: 2 }) });
   }, 300_000);
 
   afterAll(async () => {
     await prisma?.$disconnect();
-    await db?.end();
-    if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
-      await admin.end();
-    }
+    await scratch?.drop();
   });
 
   it('copies every node with its id, and an online or draining node comes back offline', async () => {

@@ -12,6 +12,8 @@
 //   * retention policies beyond the platform's four: `workflowRuns` and
 //     `reviewRuns` (RETRO-C7), whose purges keep the permanent type strings
 //     `workflow_history_purge` and `review_run_history_purge`;
+//   * the span attributes a node executor relays (`registerNodeSpanAttribute`, RETRO-C2, #581):
+//     `frames` and `faces` (int), emitted as `job.app.<key>`;
 //   * the labels of RETIRED job types, so an old row still renders with a name in
 //     the admin Jobs list after its handler is gone.
 //
@@ -22,6 +24,7 @@
 // twice with the same text is harmless.
 // =============================================================================
 
+import { registerNodeSpanAttribute } from '@marinoscar/platform-api/nodes';
 import {
   registerJobReason,
   registerJobTypeLabel,
@@ -105,10 +108,21 @@ export const APP_RETENTION_POLICIES: readonly RetentionPolicyDefinition[] = [
   // purge the platform inbox and delivery log.
 ];
 
+/**
+ * The attributes a MemoriaHub node executor relays on its spans (RETRO-C2, #581): how many frames a
+ * video job sampled and how many faces a detection found. Integers only; the platform drops an
+ * unregistered key, or a value of the wrong type, from the span.
+ */
+export const APP_NODE_SPAN_ATTRIBUTES = [
+  { key: 'frames', type: 'int' },
+  { key: 'faces', type: 'int' },
+] as const;
+
 let registered = false;
 
 if (!registered) {
   registered = true;
+  APP_NODE_SPAN_ATTRIBUTES.forEach((attribute) => registerNodeSpanAttribute({ ...attribute }));
   APP_JOB_REASONS.forEach(registerJobReason);
   APP_RETENTION_POLICIES.forEach(registerRetentionPolicy);
   for (const [type, label] of Object.entries({ ...APP_JOB_TYPE_LABELS, ...RETIRED_JOB_TYPE_LABELS })) {

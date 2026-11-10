@@ -152,7 +152,15 @@ async function verify(beforeFile) {
       refresh_tokens: (await c.query('SELECT token_hash, user_id, revoked_at FROM refresh_tokens ORDER BY token_hash')).rows,
       device_codes: (await c.query('SELECT device_code, user_code, status, client_info FROM device_codes ORDER BY device_code')).rows,
       allowed_emails: (await c.query('SELECT email, claimed_by_id FROM allowed_emails ORDER BY email')).rows,
-      node_credentials: (await c.query('SELECT id, token_hash, user_id FROM mh_legacy_node_credentials ORDER BY id')).rows,
+      // RETRO-C2 (#581) copies the legacy table into the platform's `node_credentials` and drops it;
+      // the ids, hashes and owners are the same, so either one proves the credentials survived.
+      node_credentials: (
+        await c.query(
+          `SELECT id, token_hash, user_id FROM ${
+            (await c.query(`SELECT to_regclass('mh_legacy_node_credentials') AS t`)).rows[0].t ? 'mh_legacy_node_credentials' : 'node_credentials'
+          } ORDER BY id`,
+        )
+      ).rows,
       media_sync_devices: (await c.query('SELECT id, pat_id FROM media_sync_devices ORDER BY id')).rows,
     }));
     const norm = (rows) => JSON.parse(JSON.stringify(rows));

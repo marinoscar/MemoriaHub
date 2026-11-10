@@ -31,7 +31,8 @@ import { emailModule } from './platform/email/email.config';
 import { PublicLinksModule } from './public-links/public-links.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { EnhancementModule } from './enhancement/enhancement.module';
-import { NodesModule } from './nodes/nodes.module';
+import { NodeBackupModule } from './node-backup/node-backup.module';
+import { NodeModelsModule } from './node-models/node-models.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { BroadcastsModule, notificationsModule } from './platform/notifications/notifications.config';
 import { NotificationReconcileModule } from './notification-producers/notification-reconcile.module';
@@ -46,7 +47,8 @@ import { platformHostModule } from './platform/platform-host.module';
 import { identityModule } from './platform/identity/identity.config';
 import { ProfileModule } from './profile/profile.module';
 // The jobs slice registers the `jobs` and `retention` namespaces; it must be composed before the settings.
-import { jobsModule } from './platform/jobs/jobs.config';
+import { jobsModule, nodesModule } from './platform/jobs/jobs.config';
+import { NodeCredentialModule } from '@marinoscar/platform-api/nodes';
 import { settingsModule } from './platform/settings/settings.config';
 import { credentialsModules } from './platform/credentials/credentials.config';
 import { hostCoreModule } from './platform/host-core.config';
@@ -168,7 +170,14 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     PublicLinksModule,
     SocialMediaModule,
     EnhancementModule,
-    NodesModule,
+    // Worker nodes (RETRO-C2, #581): `NodeCredentialModule` (the global `nod_` token family the
+    // identity guard validates), the platform fleet (`/api/nodes`, `/api/admin/nodes`,
+    // `/api/node-credentials`, the fleet sweep and prune jobs) and, beside it, the app's two routes
+    // under `/api/nodes`: Local Media Backup and the model manifest.
+    NodeCredentialModule,
+    nodesModule,
+    NodeBackupModule,
+    NodeModelsModule,
     WorkflowsModule,
     // The platform notifications slice (RETRO-D3, #576): the inbox, the SSE
     // stream, Web Push, the policy and preferences, broadcasts and the delivery

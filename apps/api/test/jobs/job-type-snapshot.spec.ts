@@ -30,7 +30,10 @@ import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platfor
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import type { EnrichmentHandler } from '../../src/enrichment/enrichment-handler.interface';
-import { LegacyEnrichmentHandlerAdapter } from '../../src/platform/jobs/legacy-handlers.adapter';
+import {
+  LegacyEnrichmentHandlerAdapter,
+  PROVIDER_KEY_SERVER_ONLY_TYPES,
+} from '../../src/platform/jobs/legacy-handlers.adapter';
 import {
   RETIRED_NOTIFICATION_JOB_TYPES,
   RetiredNotificationJobTypes,
@@ -115,15 +118,33 @@ describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
     expect(platform.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 
-  it('keeps node eligibility: the platform derives the same server-only set', () => {
-    const expected = EXPECTED_JOB_TYPES.filter((type) => !EXPECTED_NODE_ELIGIBLE_TYPES.includes(type)).sort();
+  // RETRO-C2 (#581): no provider key is delivered to a node. The three types whose legacy class still
+  // carries the node pair are server-only on the platform until their native handlers land
+  // (RETRO-C4: the AI tagging types; RETRO-C6: geocode, back to nodes through the secret broker).
+  const PLATFORM_NODE_ELIGIBLE_TYPES = EXPECTED_NODE_ELIGIBLE_TYPES.filter(
+    (type) => !PROVIDER_KEY_SERVER_ONLY_TYPES.has(type),
+  );
+
+  it('pins the provider-key types that are server-only for now', () => {
+    expect([...PROVIDER_KEY_SERVER_ONLY_TYPES].sort()).toEqual(['auto_tagging', 'geocode', 'video_auto_tagging']);
+    const serverOnly = platform.serverOnlyTypes();
+    for (const type of PROVIDER_KEY_SERVER_ONLY_TYPES) {
+      expect(serverOnly).toContain(type);
+      const handler = platform.get(type)!;
+      expect(handler.nodeResultSchema).toBeUndefined();
+      expect(handler.persistNodeResult).toBeUndefined();
+    }
+  });
+
+  it('keeps node eligibility: the platform derives the complement of the node-eligible set', () => {
+    const expected = EXPECTED_JOB_TYPES.filter((type) => !PLATFORM_NODE_ELIGIBLE_TYPES.includes(type)).sort();
     expect(platform.serverOnlyTypes().sort()).toEqual(expected);
   });
 
   it('forwards the node pair only for the node-eligible types', () => {
     for (const type of EXPECTED_JOB_TYPES) {
       const handler = platform.get(type)!;
-      const eligible = EXPECTED_NODE_ELIGIBLE_TYPES.includes(type);
+      const eligible = PLATFORM_NODE_ELIGIBLE_TYPES.includes(type);
       expect({ type, schema: handler.nodeResultSchema !== undefined }).toEqual({ type, schema: eligible });
       expect({ type, persist: typeof handler.persistNodeResult === 'function' }).toEqual({ type, persist: eligible });
     }

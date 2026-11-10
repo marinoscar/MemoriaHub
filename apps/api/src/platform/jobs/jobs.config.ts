@@ -30,6 +30,7 @@
 import '../../app-registrations/jobs';
 
 import { JobsModule } from '@marinoscar/platform-api/jobs';
+import { NodesModule } from '@marinoscar/platform-api/nodes';
 
 import { JobsHostModule } from './jobs-host.module';
 
@@ -40,3 +41,23 @@ export const jobsModule = JobsModule.forRoot({
   appName: JOBS_APP_NAME,
   imports: [JobsHostModule],
 });
+
+// =============================================================================
+// The nodes slice (RETRO-C2, #581)
+// =============================================================================
+//
+// `NodesModule.forRoot` is the worker-node fleet: the control plane (`/api/nodes`: register,
+// heartbeat, claim, renew, result, failure, telemetry), the data plane (signed URLs through
+// `NODE_OBJECT_STORE`, input objects through `NODE_JOB_INPUTS`: both bound in
+// `jobs-host.module.ts`), the brokered job secret, `/api/admin/nodes`, and the fleet jobs
+// `nodes.fleet.sweep` / `nodes.fleet.prune` with their crons. It replaces `src/nodes/` (the
+// controllers, `NodesService`, `NodeCredentialService`, the two fleet crons).
+//
+// The `nodes` system-settings namespace is registered by the settings manifest, so this module can
+// be composed after `SettingsModule.forRoot()`. Environment: `NODE_STALE_OFFLINE_ENABLED` and
+// `NODE_OFFLINE_PRUNE_ENABLED` (on unless `false`) switch the two crons off.
+//
+// `NodeCredentialModule` (the `nod_` token family, global) is imported by `app.module.ts`.
+// =============================================================================
+
+export const nodesModule = NodesModule.forRoot({ imports: [JobsHostModule] });

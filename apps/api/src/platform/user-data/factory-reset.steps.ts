@@ -25,9 +25,8 @@ import type { MemoriaHubUserDataService } from './memoriahub-user-data.service';
 //      object through the provider recorded on its row.
 //   3. Staged AI-enhancement results have no storage-object row; they are deleted
 //      through their recorded provider before their rows go.
-//   4. The legacy worker nodes (`mh_legacy_worker_nodes`, RETRO-C2 replaces them)
-//      cascade from their creator: the platform reassigns its own nodes to the
-//      administrator, so the legacy ones are reassigned the same way first.
+//   4. Worker nodes cascade from their creator: the platform's factory reset step reassigns
+//      them (and their credentials) to the administrator before the users go (RETRO-C2).
 //
 // Steps, in the handler's order (each runs in its own bypass transaction and
 // returns counts; all are retry-safe, deletes by predicate):
@@ -42,8 +41,6 @@ import type { MemoriaHubUserDataService } from './memoriahub-user-data.service';
 //                                           devices, node backup configs, the legacy
 //                                           storage-migration history and the
 //                                           insights snapshot
-//   memoriahub.legacy-nodes   before-users  legacy worker nodes and their
-//                                           credentials move to the administrator
 //   memoriahub.leftovers      deployment    legacy notifications, deliveries and
 //                                           broadcasts, the frozen pre-platform job
 //                                           archive, and a fresh personal circle for
@@ -111,44 +108,6 @@ export const MEMORIAHUB_CONTENT_STEP: FactoryResetStepDef = {
   },
 };
 
-export const MEMORIAHUB_LEGACY_NODES_STEP: FactoryResetStepDef = {
-  id: 'memoriahub.legacy-nodes',
-  phase: 'before-users',
-  description:
-    'Legacy worker nodes and their credentials move to the administrator (a node whose name the administrator already uses is removed).',
-  async run(tx: any, ctx): Promise<Record<string, number>> {
-    const taken = new Set<string>(
-      (
-        await tx.mhLegacyWorkerNode.findMany({ where: { createdById: ctx.actorUserId }, select: { name: true } })
-      ).map((row: { name: string }) => row.name),
-    );
-    const others: { id: string; name: string }[] = await tx.mhLegacyWorkerNode.findMany({
-      where: { createdById: { not: ctx.actorUserId } },
-      select: { id: true, name: true },
-      orderBy: { id: 'asc' },
-    });
-    let reassigned = 0;
-    const clashing: string[] = [];
-    for (const node of others) {
-      if (taken.has(node.name)) {
-        clashing.push(node.id);
-        continue;
-      }
-      taken.add(node.name);
-      reassigned += (await tx.mhLegacyWorkerNode.updateMany({ where: { id: node.id }, data: { createdById: ctx.actorUserId } }))
-        .count;
-    }
-    const removed = clashing.length > 0 ? await wipe(tx, 'mhLegacyWorkerNode', { id: { in: clashing } }) : 0;
-    const credentials = (
-      await tx.mhLegacyNodeCredential.updateMany({
-        where: { userId: { not: ctx.actorUserId } },
-        data: { userId: ctx.actorUserId },
-      })
-    ).count;
-    return { legacyNodesReassigned: reassigned, legacyNodesRemoved: removed, legacyNodeCredentialsReassigned: credentials };
-  },
-};
-
 export const MEMORIAHUB_LEFTOVERS_STEP: FactoryResetStepDef = {
   id: 'memoriahub.leftovers',
   phase: 'deployment',
@@ -199,7 +158,6 @@ export const MEMORIAHUB_STORAGE_STEP: FactoryResetStepDef = {
 /** The steps, in registration order. */
 export const MEMORIAHUB_FACTORY_RESET_STEPS: readonly FactoryResetStepDef[] = [
   MEMORIAHUB_CONTENT_STEP,
-  MEMORIAHUB_LEGACY_NODES_STEP,
   MEMORIAHUB_LEFTOVERS_STEP,
   MEMORIAHUB_STORAGE_STEP,
 ];

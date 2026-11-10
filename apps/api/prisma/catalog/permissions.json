@@ -94,6 +94,16 @@
       "scope": "system"
     },
     {
+      "name": "nodes:read",
+      "description": "View worker nodes and their health",
+      "scope": "system"
+    },
+    {
+      "name": "nodes:write",
+      "description": "Register, drain and remove worker nodes",
+      "scope": "system"
+    },
+    {
       "name": "db_backup:read",
       "description": "View backup schedule, history and status",
       "scope": "system"
@@ -391,6 +401,8 @@
       "storage:delete_any",
       "jobs:read",
       "jobs:write",
+      "nodes:read",
+      "nodes:write",
       "db_backup:read",
       "db_backup:write",
       "db_backup:restore",

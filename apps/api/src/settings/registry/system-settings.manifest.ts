@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Which `system_settings` namespaces this deployment has, and in what order (append, never
-// insert). The platform's own: `maintenance`, `jobs`, `retention`, `databaseBackup`, `notifications` and `storage`, registered here before the host core's
+// insert). The platform's own: `maintenance`, `jobs`, `retention`, `nodes`, `databaseBackup`, `notifications` and `storage`, registered here before the host core's
 // `ensureSystemSettingsNamespaces` would register it, so the order is this one. MemoriaHub's:
 // `app-registrations/settings.ts`.
 // =============================================================================
@@ -19,6 +19,7 @@ import { STORAGE_SYSTEM_SETTINGS } from '@marinoscar/platform-api/storage';
 // driver registry): MemoriaHub's `local` driver (RETRO-D1).
 import '../../app-registrations/storage';
 import { JOBS_SYSTEM_SETTINGS, RETENTION_SYSTEM_SETTINGS } from '@marinoscar/platform-api/jobs';
+import { NODES_SYSTEM_SETTINGS } from '@marinoscar/platform-api/nodes';
 import { NOTIFICATIONS_SYSTEM_SETTINGS } from '@marinoscar/platform-api/notifications';
 import {
   assembleSystemSettingsNamespaces,
@@ -37,6 +38,10 @@ export const PLATFORM_SYSTEM_SETTINGS_NAMESPACES: readonly SystemSettingsNamespa
   MAINTENANCE_SYSTEM_SETTINGS as SystemSettingsNamespace, // PlatformHostCoreModule
   JOBS_SYSTEM_SETTINGS as SystemSettingsNamespace, // JobsModule (RETRO-C1): same stored shape as the old `jobs`
   RETENTION_SYSTEM_SETTINGS as SystemSettingsNamespace, // JobsModule (RETRO-C1): the nightly retention windows
+  // NodesModule (RETRO-C2, #581): the fleet policy (stale window, offline multiplier, offline retention,
+  // the job-secret broker switch). Registered here, before the settings module composes the request
+  // bodies; defaults seeded from the legacy NODE_* variables (app-registrations/settings.ts).
+  NODES_SYSTEM_SETTINGS as unknown as SystemSettingsNamespace,
   // DbBackupModule (RETRO-D4, #580). Same key as MemoriaHub's old namespace; a stored value in the old
   // shape (`storageProvider: null`, `restoreRollbackMode: 'pre_restore_dump'`) is rewritten by
   // `scripts/migrate-db-backup-settings.ts`; until then the platform reads it field by field.

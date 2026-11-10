@@ -9,8 +9,8 @@
 //
 // Layering: this service owns HTTP-facing orchestration + state transitions;
 // all feed/sidecar/lag QUERIES delegate to NodeBackupQueryService (#310).
-// Ownership (404 unknown node / 403 foreign node) funnels through
-// NodesService.assertOwnership, exactly like every other /api/nodes/* route.
+// Ownership (404 for an unknown node AND for another user's node, never 403) funnels
+// through NodeBackupOwnershipService (RETRO-C2, #581).
 //
 // Serialization rule: every BigInt (bytesAcked, bytesDownloaded, pending
 // bytes, object sizes) leaves this service as a STRING — never let a raw
@@ -31,11 +31,11 @@ import {
   NodeBackupRunKind,
   NodeBackupRunStatus,
   Prisma,
-  MhLegacyWorkerNode,
 } from '@prisma/client';
 import { isSupportedTimeZone } from '../common/time/zone.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { NodesService } from './nodes.service';
+import type { WorkerNode } from '@marinoscar/platform-api/jobs';
+import { NodeBackupOwnershipService } from './node-backup-ownership.service';
 import {
   BackupFeedCursor,
   NodeBackupQueryService,
@@ -77,7 +77,7 @@ export class NodeBackupService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly nodesService: NodesService,
+    private readonly nodeOwnership: NodeBackupOwnershipService,
     private readonly queryService: NodeBackupQueryService,
     private readonly storageResolver: StorageProviderResolver,
     private readonly systemSettings: AppSystemSettingsService,
@@ -177,7 +177,7 @@ export class NodeBackupService {
   // Config serialization
   // ---------------------------------------------------------------------------
 
-  private async serializeConfig(node: MhLegacyWorkerNode, config: NodeBackupConfig) {
+  private async serializeConfig(node: Pick<WorkerNode, 'id' | 'createdById'>, config: NodeBackupConfig) {
     const { runStaleMinutes } = await this.getBackupSettings();
 
     const scope = await this.queryService.resolveScope(
@@ -217,7 +217,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async getConfig(userId: string, nodeId: string) {
-    const node = await this.nodesService.assertOwnership(userId, nodeId);
+    const node = await this.nodeOwnership.assertOwnership(userId, nodeId);
     const config = await this.prisma.nodeBackupConfig.findUnique({
       where: { nodeId },
     });
@@ -232,7 +232,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async updateConfig(userId: string, nodeId: string, dto: UpdateBackupConfigDto) {
-    const node = await this.nodesService.assertOwnership(userId, nodeId);
+    const node = await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     if (typeof dto.scheduleCron === 'string' && !isValidCron(dto.scheduleCron)) {
       throw new BadRequestException(
@@ -315,7 +315,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async startRun(userId: string, nodeId: string, dto: StartBackupRunDto) {
-    await this.nodesService.assertOwnership(userId, nodeId);
+    await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const config = await this.prisma.nodeBackupConfig.findUnique({
       where: { nodeId },
@@ -402,7 +402,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async getChanges(userId: string, nodeId: string, q: BackupChangesQueryDto) {
-    const node = await this.nodesService.assertOwnership(userId, nodeId);
+    const node = await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const config = await this.prisma.nodeBackupConfig.findUnique({
       where: { nodeId },
@@ -522,7 +522,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async ack(userId: string, nodeId: string, dto: BackupAckDto) {
-    await this.nodesService.assertOwnership(userId, nodeId);
+    await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const config = await this.prisma.nodeBackupConfig.findUnique({
       where: { nodeId },
@@ -599,7 +599,7 @@ export class NodeBackupService {
     runId: string,
     dto: FinishBackupRunDto,
   ) {
-    await this.nodesService.assertOwnership(userId, nodeId);
+    await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const run = await this.prisma.nodeBackupRun.findUnique({
       where: { id: runId },
@@ -657,7 +657,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async listRuns(userId: string, nodeId: string, limit?: number) {
-    await this.nodesService.assertOwnership(userId, nodeId);
+    await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const take = Math.max(1, Math.min(limit ?? 20, 100));
     const runs = await this.prisma.nodeBackupRun.findMany({
@@ -692,7 +692,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async getManifest(userId: string, nodeId: string, q: BackupManifestQueryDto) {
-    const node = await this.nodesService.assertOwnership(userId, nodeId);
+    const node = await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     const config = await this.prisma.nodeBackupConfig.findUnique({
       where: { nodeId },
@@ -738,7 +738,7 @@ export class NodeBackupService {
   // ---------------------------------------------------------------------------
 
   async getDimensions(userId: string, nodeId: string) {
-    const node = await this.nodesService.assertOwnership(userId, nodeId);
+    const node = await this.nodeOwnership.assertOwnership(userId, nodeId);
 
     // No run (and no config) required — an unconfigured node reads the
     // owner's full circle scope (empty circleIds = ALL owner circles).

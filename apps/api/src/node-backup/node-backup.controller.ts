@@ -3,10 +3,12 @@
 // =============================================================================
 //
 // HTTP surface for the node backup control plane, mounted at
-// /api/nodes/:id/backup. Auth mirrors nodes.controller.ts exactly: every
-// route requires jobs:write, `nod_` node credentials pass the guard on
-// /api/nodes* paths, and owner-scoping (404 unknown node / 403 foreign node)
-// is enforced in the service via NodesService.assertOwnership.
+// /api/nodes/:id/backup (an app route under the platform's /api/nodes prefix,
+// RETRO-C2, #581). Every route requires nodes:write; a `nod_` node credential (or
+// a PAT or session of the owner) passes the guard on /api/nodes* paths, and the
+// service resolves the node by id AND the caller (404 for an unknown node and
+// for another user's node, never 403) before it touches a row. Not a
+// `@NodeRoute()`: that guard answers 403 for another user's node.
 // =============================================================================
 
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
@@ -27,7 +29,7 @@ import { PERMISSIONS } from '../common/constants/roles.constants';
 
 @ApiTags('Nodes: Backup')
 @Controller('nodes/:id/backup')
-@Auth({ permissions: [PERMISSIONS.JOBS_WRITE] })
+@Auth({ permissions: [PERMISSIONS.NODES_WRITE] })
 export class NodeBackupController {
   constructor(private readonly backupService: NodeBackupService) {}
 
@@ -46,8 +48,7 @@ export class NodeBackupController {
   })
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 200, description: '{ config: null | {...} }' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   async getConfig(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.backupService.getConfig(user.id, id);
   }
@@ -70,8 +71,7 @@ export class NodeBackupController {
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 200, description: 'Updated config (GET shape)' })
   @ApiResponse({ status: 400, description: 'Invalid cron, timezone, or circleIds' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   async updateConfig(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -97,8 +97,7 @@ export class NodeBackupController {
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 201, description: '{ run: { id, kind, startedAt, cursorStart } }' })
   @ApiResponse({ status: 400, description: 'Backup not configured or disabled' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   @ApiResponse({ status: 409, description: 'A run is already active — { message, activeRunId }' })
   async startRun(
     @CurrentUser() user: RequestUser,
@@ -130,8 +129,7 @@ export class NodeBackupController {
     description: '{ items[], nextCursor|null, hasMore, safetyHorizon }',
   })
   @ApiResponse({ status: 400, description: 'Backup unconfigured or one-sided cursor' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   @ApiResponse({ status: 409, description: 'runId is not the active running run' })
   async getChanges(
     @CurrentUser() user: RequestUser,
@@ -159,8 +157,7 @@ export class NodeBackupController {
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 201, description: '{ ok: true, checkpoint: { updatedAt, id } }' })
   @ApiResponse({ status: 400, description: 'Backup not configured for this node' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   @ApiResponse({
     status: 409,
     description: 'runId is not the active running run, or the cursor regressed',
@@ -190,7 +187,6 @@ export class NodeBackupController {
   @ApiParam({ name: 'runId', description: 'Backup run UUID' })
   @ApiResponse({ status: 201, description: '{ ok: true }' })
   @ApiResponse({ status: 400, description: 'Run already terminal' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
   @ApiResponse({ status: 404, description: 'Node or run not found' })
   async finishRun(
     @CurrentUser() user: RequestUser,
@@ -214,8 +210,7 @@ export class NodeBackupController {
   })
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 200, description: '{ runs: [...] }' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   async listRuns(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -240,8 +235,7 @@ export class NodeBackupController {
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 200, description: '{ items[], nextAfterId|null, hasMore }' })
   @ApiResponse({ status: 400, description: 'Backup not configured for this node' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   @ApiResponse({ status: 409, description: 'runId is not the active running run' })
   async getManifest(
     @CurrentUser() user: RequestUser,
@@ -264,8 +258,7 @@ export class NodeBackupController {
   })
   @ApiParam({ name: 'id', description: 'Worker node UUID' })
   @ApiResponse({ status: 200, description: '{ albums[], people[], tags[], generatedAt }' })
-  @ApiResponse({ status: 403, description: 'Caller does not own this node' })
-  @ApiResponse({ status: 404, description: 'Node not found' })
+  @ApiResponse({ status: 404, description: 'Node not found, or owned by another user' })
   async getDimensions(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.backupService.getDimensions(user.id, id);
   }

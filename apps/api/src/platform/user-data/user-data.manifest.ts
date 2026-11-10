@@ -99,8 +99,8 @@ import './factory-reset.steps';
 //               credentials, settings and the profile picture
 //
 // KEPT by every data reset: the user's circle memberships, the circles they
-// share with others and what they added there, the legacy worker nodes (until
-// RETRO-C2) and the platform's account state.
+// share with others and what they added there, the worker-node fleet (the platform
+// reassigns it to the administrator) and the platform's account state.
 // =============================================================================
 
 const delegate = (jobType: string): UserDataPurgeDelegate => ({
@@ -177,11 +177,6 @@ export const MEMORIAHUB_USER_DATA_MODELS: readonly UserDataModelHint<Prisma.Mode
     keep: 'Access model: a data reset never removes the user from a circle; the circle and what they added to it are the members\'.',
     summary: 'Your circle memberships, and what you added to circles shared with others',
   },
-  {
-    model: 'MhLegacyWorkerNode',
-    keep: 'Deployment infrastructure (legacy worker nodes, replaced by RETRO-C2); the factory reset reassigns them to the administrator.',
-  },
-  { model: 'MhLegacyNodeCredential', keep: 'A worker node identity, deployment infrastructure (RETRO-C2).' },
 
   // ---- not owner models: lines for the factory reset page's "Kept" list ------------
   { model: 'TagLabel', factoryReset: 'keep', summary: 'The AI tag vocabulary' },

@@ -74,21 +74,6 @@ export const APP_USER_OWNED_MODELS: readonly UserOwnedModelDef<Prisma.ModelName>
     rationale: "The user's own seen, hidden and favourite marks on a memory.",
   },
   {
-    model: 'MhLegacyNodeCredential',
-    ownerField: 'userId',
-    purge: 'delete',
-    export: 'include',
-    exportOmit: ['tokenHash'],
-    rationale: "The user's worker-node credentials; the hash never leaves the server. Replaced by the platform nodes slice (RETRO-C2).",
-  },
-  {
-    model: 'MhLegacyWorkerNode',
-    ownerField: 'createdById',
-    purge: 'delete',
-    export: 'include',
-    rationale: 'A worker node the user registered. Replaced by the platform nodes slice (RETRO-C2).',
-  },
-  {
     model: 'MhLegacyNotification',
     ownerField: 'userId',
     purge: 'delete',

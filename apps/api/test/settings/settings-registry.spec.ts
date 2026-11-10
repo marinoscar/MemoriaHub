@@ -28,6 +28,7 @@ import {
 const SYSTEM_KEYS = [
   'maintenance', // the platform's, registered first
   'jobs', 'retention', // the jobs slice's (RETRO-C1)
+  'nodes', // the nodes slice's (RETRO-C2)
   'databaseBackup', // the db-backup slice's (RETRO-D4)
   'notifications', // the notifications slice's (RETRO-D3)
   'storage', // the storage slice's (RETRO-D1), extended with MemoriaHub's insights and trash
