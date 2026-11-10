@@ -102,14 +102,9 @@ The platform reads `JOBS_*`. Each old name is read for **one release**, with one
 | Events | `enrichment.job.settled` is re-emitted from the platform `job.settled`, same payload. |
 | Temp files | `memoriahub-job-*` (was `memoriaHub-*`). |
 
-## 6. The legacy node plane while the queue is the platform's
+## 6. Worker nodes after the queue is the platform's
 
-A worker node registered under the old API lives in `mh_legacy_worker_nodes`; `jobs.claimed_by_node_id` references the platform's `worker_nodes`, so a legacy node cannot hold a platform job. Until RETRO-C2 replaces the node control plane (and C10 the CLI engine):
-
-- `POST /api/nodes/:id/claim` answers `{ jobs: [] }`;
-- a node's result or failure report answers 409;
-- registration, heartbeats, listing, credentials (`nod_`) and the Local Media Backup feed work as before;
-- `JOBS_WORKER_MODE` should be `all` (the default): `system` would leave the node-eligible media compute unclaimed.
+RETRO-C2 (#581) moved the fleet onto the platform nodes slice: the legacy nodes and their credentials were copied into `worker_nodes` / `node_credentials` and every node must re-register, so a node can hold a platform job again. The 1.3 CLI still speaks the old protocol, so no node claims until RETRO-C10 and `JOBS_WORKER_MODE` should stay `all`. See [worker-nodes-cutover.md](worker-nodes-cutover.md).
 
 ## 7. Rehearsal on a production backup (required before the release)
 
