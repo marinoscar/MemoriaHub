@@ -27,7 +27,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { FaceDetectionService } from './face-detection.service';
 import { FaceDetectionCore } from './face-detection-core.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../prisma/prisma.service';
 import { FaceSettingsService } from './face-settings.service';
 import { FaceProviderRegistry } from './providers/face-provider.registry';

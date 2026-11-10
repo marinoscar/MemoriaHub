@@ -60,7 +60,7 @@ import {
 import { VideoFrameExtractionService } from './video-frame-extraction.service';
 import { FaceMatchingService } from './face-matching.service';
 import type { DetectedFace } from './providers/face-provider.interface';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { DefaultOrgId } from '../common/tenancy/default-org-id';
 
 // Max long-edge for face detection on video frames (same env var as photo path).

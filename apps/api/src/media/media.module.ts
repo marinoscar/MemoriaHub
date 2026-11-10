@@ -4,8 +4,7 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
-import { MediaTouchModule } from './media-touch.module';
+import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
@@ -68,12 +67,13 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * MediaReprocessController (admin bulk recovery) only enqueues jobs. MediaProcessingModule does not
  * depend on MediaModule, so this does not introduce a cycle.
  *
- * Imports NotificationProducersModule so UploadNotificationService resolves
- * inside MediaService (the `media.upload_completed` producer, epic #240 /
- * issue #247; platform notifications since RETRO-D3). That module imports
- * NOTHING, so this edge cannot close a cycle — which is why the review-queue
+ * Imports the packaged media slice (`MediaCoreModule.forRoot()`, RETRO-J5) so
+ * UploadNotificationService (the `media.upload_completed` producer, epic #240 /
+ * issue #247; through MEMORIAHUB_NOTIFY), MediaTouchService, the upload
+ * enrichment registry and MediaSyncService resolve. It imports nothing of the
+ * media graph, so this edge cannot close a cycle — which is why the review-queue
  * reconcile, which needs MediaService, lives in NotificationReconcileModule:
- *   NotificationReconcileModule -> MediaModule -> NotificationProducersModule
+ *   NotificationReconcileModule -> MediaModule -> MediaCoreModule
  */
 @Module({
   imports: [
@@ -83,8 +83,9 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     GeoLocationModule,
     
     EnrichmentModule,
-    NotificationProducersModule,
-    MediaTouchModule,
+    // The packaged media slice (RETRO-J5): upload fan-out registry, touch service, the
+    // `upload_completed` producer and the Media Sync device service.
+    MediaCoreModule.forRoot(),
     // Location Grouping (issue #373) — MediaService.bulkUpdateMedia and
     // MediaMetadataSyncService both need the canonical-name resolver.
     LocationGroupsModule,
@@ -116,6 +117,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaTouchModule],
+  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaThumbnailService, TrashEmptyRunService, MediaCoreModule.forRoot()],
 })
 export class MediaModule {}
