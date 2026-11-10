@@ -195,6 +195,14 @@
         "@marinoscar/memoriahub-contract",
         "zod"
       ]
+    },
+    "face": {
+      "peers": [
+        "@nestjs/common",
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "zod"
+      ]
     }
   }
 }
