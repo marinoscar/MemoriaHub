@@ -8,8 +8,8 @@ import {
 } from '@mui/material';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { getExploreTags } from '../../services/media';
-import type { ExploreItem } from '../../services/media';
+import { getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Constants

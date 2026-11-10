@@ -13,7 +13,7 @@ import { renderHook, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { useReviewQueues } from '../../hooks/useReviewQueues';
 import { ReviewQueueList } from '../../components/review/ReviewQueueList';
-import type { ReviewCountsResponse } from '../../types/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PictureEnhancementPolicy } from '../../services/features';
 
 // This is a `.ts` file (not `.tsx`), so the loading-state integration test

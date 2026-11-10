@@ -14,8 +14,8 @@ import type {
   AcceptLocationSuggestionResult,
   RejectRevertResult,
 } from '../services/locationSuggestions';
-import type { SortOrder } from '../types/media';
-import { getMedia } from '../services/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 import { useIsMounted } from './useIsMounted';
 
 /**

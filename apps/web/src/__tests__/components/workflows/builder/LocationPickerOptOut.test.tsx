@@ -19,8 +19,10 @@ import { render } from '../../../utils/test-utils';
 // Module mocks — declared BEFORE importing the modules under test
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../../components/media/LocationPickerMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationPickerMap: vi.fn(() => <div data-testid="location-picker-map" />),
+
 }));
 
 // ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ vi.mock('../../../../components/media/LocationPickerMap', () => ({
 
 import { ActionParamEditor } from '../../../../components/workflows/builder/ActionParamEditor';
 import { ConditionValueEditor } from '../../../../components/workflows/builder/ConditionValueEditor';
-import { LocationPickerMap } from '../../../../components/media/LocationPickerMap';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
 import type {
   WorkflowActionInstance,
   WorkflowFieldDescriptor,

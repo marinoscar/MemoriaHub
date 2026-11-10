@@ -1,7 +1,7 @@
 import { api } from './api';
 import type { CreateReviewRunResponse } from '../types/reviewRuns';
 import type { BulkResolveBurst, BurstQuery } from '@marinoscar/memoriahub-contract/burst';
-import type { SortOrder } from '../types/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 
 /**
  * Maximum number of group ids accepted by a single explicit-id bulk-resolve

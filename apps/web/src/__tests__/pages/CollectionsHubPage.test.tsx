@@ -12,13 +12,13 @@ import { screen, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { render } from '../utils/test-utils';
 import CollectionsHubPage from '../../pages/Collections/CollectionsHubPage';
-import type { Album, AlbumListResponse } from '../../types/media';
+import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListResponse } from '../../services/face';
-import type { ExploreLocations } from '../../services/media';
+import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryListResponse } from '../../types/memories';
 
-vi.mock('../../services/media', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/media')>()),
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
@@ -44,7 +44,7 @@ vi.mock('../../hooks/useScrollRestoration', () => ({
   useScrollRestoration: vi.fn(),
 }));
 
-import { listAlbums, getExploreLocations } from '../../services/media';
+import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../../services/face';
 import { listMemories } from '../../services/memories';
 import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';

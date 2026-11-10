@@ -102,5 +102,17 @@
       "core",
       "testing"
     ]
+  },
+  "memoriahub-web": {
+    "core": [],
+    "brand": [],
+    "media": [
+      "core"
+    ],
+    "shell": [
+      "core",
+      "brand",
+      "media"
+    ]
   }
 }

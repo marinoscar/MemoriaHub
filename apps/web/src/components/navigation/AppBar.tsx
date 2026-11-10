@@ -33,14 +33,14 @@ import UploadIcon from '@mui/icons-material/CloudUpload';
 import { ShellAppBar } from '@marinoscar/platform-web/shell/ui';
 import { APP_NAVIGATION } from '../../config/shell';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useMediaRefresh } from '../../contexts/MediaRefreshContext';
+import { useMediaRefresh } from '@marinoscar/memoriahub-web/media/headless';
 import { UserMenu } from './UserMenu';
 import { OwnerScopeChip } from './OwnerScopeChip';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { TopbarSearch } from '../search/TopbarSearch';
-import { MediaUploadDialog } from '../media/MediaUploadDialog';
+import { MediaUploadDialog } from '@marinoscar/memoriahub-web/media/ui';
 import { APP_NAME } from '../../constants/app';
-import appLogo from '../../assets/app_logo.png';
+import appLogo from '@marinoscar/memoriahub-web/brand/assets/app-logo.png';
 
 /** Stops a click inside the chip (or its portalled menu) reaching the brand's "go home". */
 function stopPropagation(event: MouseEvent) {

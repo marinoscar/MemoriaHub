@@ -1,6 +1,6 @@
 import type { NearFilterValue } from '@marinoscar/memoriahub-contract/search';
 import { api } from './api';
-import type { MediaItem, MediaListMeta } from '../types/media';
+import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Types

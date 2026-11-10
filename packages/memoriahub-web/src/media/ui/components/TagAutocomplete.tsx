@@ -1,0 +1,87 @@
+import { useState, useEffect, type SyntheticEvent } from 'react';
+import { Autocomplete, TextField, Chip } from '@mui/material';
+import type {
+  AutocompleteRenderValueGetItemProps,
+  AutocompleteOwnerState,
+  AutocompleteRenderValue,
+} from '@mui/material/Autocomplete';
+import { listTags } from '../../headless/services/media.js';
+
+/**
+ * Tag Autocomplete Props.
+ *
+ * @stability experimental
+ */
+export interface TagAutocompleteProps {
+  label: string;
+  value: string[];
+  /** The `onChange` callback (on change). */
+  onChange: (tags: string[]) => void;
+  circleId?: string;
+  disabled?: boolean;
+  placeholder?: string;
+}
+
+/**
+ * Tag Autocomplete.
+ *
+ * @stability experimental
+ */
+export function TagAutocomplete({
+  label,
+  value,
+  onChange,
+  circleId,
+  disabled,
+  placeholder,
+}: TagAutocompleteProps) {
+  const [options, setOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    listTags(circleId)
+      .then((tags) => setOptions(tags.map((t) => t.name)))
+      .catch(() => setOptions([]));
+  }, [circleId]);
+
+  const handleChange = (_event: SyntheticEvent, newValue: (string | string)[]) => {
+    onChange(newValue as string[]);
+  };
+
+  const renderValue = (
+    tagValue: AutocompleteRenderValue<string, true, true>,
+    getItemProps: AutocompleteRenderValueGetItemProps<true>,
+    _ownerState: AutocompleteOwnerState<string, true, false, true>,
+  ) =>
+    (tagValue as string[]).map((option: string, index: number) => {
+      const { key, ...chipProps } = getItemProps({ index });
+      return (
+        <Chip
+          key={key}
+          label={option}
+          size="small"
+          {...chipProps}
+        />
+      );
+    });
+
+  return (
+    <Autocomplete<string, true, false, true>
+      multiple
+      freeSolo
+      options={options}
+      value={value}
+      onChange={handleChange}
+      disabled={disabled}
+      renderValue={renderValue}
+      slotProps={{ popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 2 } } }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          placeholder={placeholder ?? 'Type or select tags'}
+          size="small"
+        />
+      )}
+    />
+  );
+}

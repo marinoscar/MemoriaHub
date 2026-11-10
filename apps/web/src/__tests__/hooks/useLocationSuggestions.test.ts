@@ -51,8 +51,10 @@ vi.mock('../../services/locationSuggestions', () => ({
   inferLocation: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
+
 }));
 
 import {
@@ -62,12 +64,12 @@ import {
   revertLocationSuggestion,
   inferLocation,
 } from '../../services/locationSuggestions';
-import { getMedia } from '../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   LocationSuggestionSummary,
   LocationSuggestionListResponse,
 } from '../../services/locationSuggestions';
-import type { MediaItem } from '../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockListLocationSuggestions = vi.mocked(listLocationSuggestions);
 const mockAcceptLocationSuggestion = vi.mocked(acceptLocationSuggestion);

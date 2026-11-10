@@ -3,8 +3,8 @@ import type {
   TrashEmptyRunItem,
   TrashEmptyRunListMeta,
   TrashEmptyRunItemsQueryParams,
-} from '../types/trashEmptyRuns';
-import { listTrashEmptyRunItems as listTrashEmptyRunItemsApi } from '../services/trashEmptyRuns';
+} from '@marinoscar/memoriahub-web/media/headless';
+import { listTrashEmptyRunItems as listTrashEmptyRunItemsApi } from '@marinoscar/memoriahub-web/media/headless';
 import { useIsMounted } from './useIsMounted';
 
 interface UseTrashEmptyRunItemsResult {

@@ -16,9 +16,9 @@ import {
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import type { AddAlbumItemsByFilterDto, MediaItem } from '../../types/media';
-import { bulkEnhance, bulkEnhanceByFilter } from '../../services/media';
-import type { BulkEnhanceResult } from '../../services/media';
+import type { AddAlbumItemsByFilterDto, MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { bulkEnhance, bulkEnhanceByFilter } from '@marinoscar/memoriahub-web/media/headless';
+import type { BulkEnhanceResult } from '@marinoscar/memoriahub-web/media/headless';
 import { ApiError } from '../../services/api';
 import type { EnhanceQuality, EnhanceStrength } from '../../services/enhance';
 import {

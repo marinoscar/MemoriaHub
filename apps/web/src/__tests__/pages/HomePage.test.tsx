@@ -33,10 +33,12 @@ vi.mock('../../hooks/useOwnerScope', () => ({
 }));
 
 // Mock MediaGallery so its internal useInfiniteMedia / listMedia calls never fire.
-vi.mock('../../components/media/MediaGallery', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(({ emptyState }: { emptyState?: React.ReactNode }) => (
     <div data-testid="media-gallery">{emptyState}</div>
   )),
+
 }));
 
 // The memories carousel owns its own feature-flag gating and feed request;

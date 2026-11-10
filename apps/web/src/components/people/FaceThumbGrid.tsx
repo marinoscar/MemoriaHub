@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Box, Grid, Checkbox } from '@mui/material';
 import { FaceCrop } from './FaceCrop';
 import type { UnassignedFaceDto } from '../../services/face';
-import { getMedia } from '../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 /**
  * Renders a selectable grid of face thumbnails, resolving each face's media

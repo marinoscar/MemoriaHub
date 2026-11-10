@@ -31,6 +31,7 @@ on:
       - 'package-lock.json'
       - 'apps/api/package.json'
       - 'apps/cli/package.json'
+      - 'apps/web/package.json'
       - '.github/workflows/memoriahub-packages.yml'
   push:
     branches: [main]
@@ -48,6 +49,7 @@ on:
       - 'package-lock.json'
       - 'apps/api/package.json'
       - 'apps/cli/package.json'
+      - 'apps/web/package.json'
       - '.github/workflows/memoriahub-packages.yml'
 
 concurrency:
@@ -121,6 +123,11 @@ jobs:
           for slice in $(node -p "Object.keys(require('./packages/memoriahub-slices.json')['memoriahub-api']).join(' ')"); do
             node -e "require('@marinoscar/memoriahub-api/$slice')"
             node --input-type=module -e "await import('@marinoscar/memoriahub-api/$slice')"
+          done
+          # The web package: ESM. Only the entries that load in Node without a bundler
+          # (the headless ones, the brand and the shell data); the ui entries import CSS.
+          for entry in core/headless media/headless brand shell; do
+            node --input-type=module -e "await import('@marinoscar/memoriahub-web/$entry')"
           done
 
   db-apply:

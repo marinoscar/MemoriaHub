@@ -61,8 +61,8 @@ import {
   updatePerson,
   setPersonFavorite,
 } from '../../services/face';
-import { listMedia, getMedia } from '../../services/media';
-import type { MediaItem } from '../../types/media';
+import { listMedia, getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
 import { scrollableTabsProps } from '../../components/common/tabs';
 

@@ -20,8 +20,10 @@ import { screen, waitFor, act } from '@testing-library/react';
 import { render, mockUser } from '../../utils/test-utils';
 import type { MemoryDetail, MemoryDetailItem } from '../../../types/memories';
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
+
 }));
 
 import {
@@ -32,7 +34,7 @@ import {
   PHOTO_DURATION_MS,
   TITLE_CARD_DURATION_MS,
 } from '../../../components/memories/storyTiming';
-import { getMedia } from '../../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockGetMedia = vi.mocked(getMedia);
 

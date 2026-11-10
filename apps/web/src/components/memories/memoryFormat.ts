@@ -1,6 +1,6 @@
 import { memoryTypeMeta } from './memoryTypeMeta';
 import type { MemoryCard } from '../../types/memories';
-import { formatCivilDate } from '../../utils/civilDate';
+import { formatCivilDate } from '@marinoscar/memoriahub-web/media/headless';
 
 /**
  * Human period for a memory ("March 2023", "Mar – Apr 2023", "2019 – 2025").

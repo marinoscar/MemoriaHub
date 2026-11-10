@@ -11,7 +11,7 @@ import { render } from '../utils/test-utils';
 import ReviewHubPage from '../../pages/Reviews/ReviewHubPage';
 import { __resetReviewCountsForTests } from '../../hooks/useReviewCounts';
 import { useReviewQueues } from '../../hooks/useReviewQueues';
-import type { ReviewCountsResponse } from '../../types/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PictureEnhancementPolicy } from '../../services/features';
 
 vi.mock('../../hooks/useFeatureFlags', () => ({
@@ -32,15 +32,15 @@ vi.mock('../../hooks/useScrollRestoration', () => ({
 }));
 // The service layer, not the hook, so the count-refresh test drives the real
 // useReviewCounts / refreshReviewCounts machinery end to end.
-vi.mock('../../services/media', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/media')>()),
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
   getReviewCounts: vi.fn(),
 }));
 
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
 import { useScrollRestoration } from '../../hooks/useScrollRestoration';
-import { getReviewCounts } from '../../services/media';
+import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseWorkflowsEnabled = vi.mocked(useWorkflowsEnabled);
