@@ -24,7 +24,7 @@ Every check that queries the database depends on `db.connection`. When it fails,
 | `memoriahub.ai.flag-consistency`, `memoriahub.face.flag-consistency` | A feature flag and its provider disagree (on with no provider is a `fail`; a provider with the flag off is a `warn`) | Admin, Settings, Tagging / Face |
 | `memoriahub.ai.video-tagging` | `fail`: the visual pass cannot run (no tagging model or credential). `warn`: only transcription is misconfigured; videos are still tagged visual-only | Admin, Settings, AI |
 | `memoriahub.face.pgvector` | The `faces.embedding_vec` column or one of its three HNSW indexes is missing (`warn`) | Run migrations, or set `FACE_VECTOR_BACKEND=app` |
-| `memoriahub.jobs.worker-enabled` | In `system` or `off` mode no healthy worker node is serving media compute | Start a node or set `ENRICHMENT_WORKER_MODE=all` |
+| `memoriahub.jobs.worker-enabled` | In `system` or `off` mode no healthy worker node is serving media compute | Start a node or set `JOBS_WORKER_MODE=all` |
 | `memoriahub.nodes.*` | A node is stale, a lease expired, or a node reports a degraded capability | Admin, Settings, Worker Nodes; `memoriahub node doctor` on the node |
 | `memoriahub.workflows.state` | A run is stuck, an approval expired unnoticed, or scheduled workflows cannot fire | Admin, Settings, Workflow Automation |
 | `memoriahub.android.*` | See the [Android runbook, section 11](android-app.md#11-the-doctor-android-section) | Admin, Settings, Android app |

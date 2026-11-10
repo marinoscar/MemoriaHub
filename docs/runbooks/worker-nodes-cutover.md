@@ -1,6 +1,6 @@
 # Worker nodes on the platform nodes slice (RETRO-C2, #581)
 
-The worker-node fleet (registration, claim, credentials, the admin routes, the fleet sweeps) is `@marinoscar/platform-api/nodes`. The old node plane in `apps/api/src/nodes/` is deleted. Design and the protocol differences: [distributed-nodes.md section 15](../specs/distributed-nodes.md#15-the-platform-node-protocol-retro-c2). Every deviation from the platform: [local-exceptions.md](../platform-adoption/local-exceptions.md).
+The worker-node fleet (registration, claim, credentials, the admin routes, the fleet sweeps) is `@marinoscar/platform-api/nodes`. The old node plane in `apps/api/src/nodes/` is deleted. Design and what runs on a node: [distributed-nodes.md](../specs/distributed-nodes.md#9-permissions-and-routes). Every deviation from the platform: [local-exceptions.md](../platform-adoption/local-exceptions.md).
 
 ## What the release changes for an operator
 

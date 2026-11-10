@@ -60,7 +60,7 @@ flowchart TD
     B -->|SystemSettings features.faceRecognition AND FACE_AUTO_DETECT != false| C[EnrichmentJobService.enqueue]
     C -->|INSERT enrichment_jobs type=face_detection| D[(enrichment_jobs table)]
     C --> E[Upsert MediaFaceStatus → pending]
-    D -->|poll every ENRICHMENT_JOB_POLL_MS| F[EnrichmentJobWorker]
+    D -->|poll every JOBS_POLL_MS| F[EnrichmentJobWorker]
     F -->|atomic claim: UPDATE status=running| G[FaceDetectionHandler]
     G --> H[FaceDetectionService.processMediaItem]
     H --> I[Stream image from S3]
@@ -220,7 +220,7 @@ For queue mechanics (worker polling, atomic claim, retry, concurrency), see **[d
 | Type | Label | Profile | Eligibility |
 |---|---|---|---|
 | `face_detection` | Face detection (photo) | 5 min, 3 attempts | node-eligible; throttle bucket `face` |
-| `video_face_detection` | Face detection (video) | 20 min (`ENRICHMENT_VIDEO_JOB_TIMEOUT_MS` for one release), 3 attempts | node-eligible |
+| `video_face_detection` | Face detection (video) | 20 min profile, 3 attempts | node-eligible |
 | `face_auto_archive_sweep` | Face auto-archive sweep | 10 min, 3 attempts | server-only (subject `circle`) |
 
 The handler reads the media item from `job.subjectId` (`subjectType: 'media_item'`) and the circle from `job.payload.circleId` (falling back to the media item's own circle); a media item deleted since the job was queued settles it as a no-op. `persistNodeResult` writes Face rows, matches people and marks the status row from the node's DTO: no download and no second CompreFace call. The node's video frame thumbnails land under the data plane's default key (one key per job cannot name one frame per cluster) and are recorded from the cluster's `frameThumbnailKey`.
@@ -910,7 +910,7 @@ One row per media item — tracks detection status.
 
 ### enrichment_jobs (face_detection / video_face_detection types)
 
-The generic job queue. Photo face detection uses `type = 'face_detection'`; video face detection uses `type = 'video_face_detection'`. Full schema in [enrichment-queue.md](enrichment-queue.md#2-data-model).
+The generic job queue. Photo face detection uses `type = 'face_detection'`; video face detection uses `type = 'video_face_detection'`. Full schema in [enrichment-queue.md](enrichment-queue.md#memoriahub-job-types).
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -1022,12 +1022,12 @@ The `noFaces` filter is also available in `POST /api/search` (as the `noFaces: t
 | `FACE_AUTO_ARCHIVE` | `'true'` | Kill-switch for the auto-archive-on-match feature (see [Auto-Archive on Match](#auto-archive-on-match)). `'false'` disables it regardless of `features.faceAutoArchive`. |
 | `FACE_ARCHIVE_MATCH_THRESHOLD` | `0.45` | Cosine-similarity threshold for auto-archiving a face against the archived (hidden, unassigned) pool. Seeds `face.autoArchive.matchThreshold`'s default. |
 | `FACE_ARCHIVE_MAX_CANDIDATES` | `5000` | Max archived faces loaded per circle as the reference set for archive matching; bounds memory to `cap × embeddingDim × 8 bytes`. |
-| `ENRICHMENT_WORKER_ENABLED` | `'true'` | Set to `'false'` to disable the enrichment worker. Takes precedence over `FACE_WORKER_ENABLED`. |
-| `FACE_WORKER_ENABLED` | `'true'` | Legacy alias. Either this or `ENRICHMENT_WORKER_ENABLED` set to `'false'` disables the worker. |
-| `ENRICHMENT_JOB_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
-| `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `ENRICHMENT_JOB_POLL_MS`. |
-| `ENRICHMENT_WORKER_CONCURRENCY` | `'1'` | Number of jobs to process concurrently per worker tick. |
-| `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `ENRICHMENT_WORKER_CONCURRENCY`. |
+| `JOBS_WORKER_MODE` | `all` | `off` disables the in-process job worker; `system` leaves node-eligible work (face detection) to the fleet. |
+| `FACE_WORKER_ENABLED` | `'true'` | Legacy alias, read for one release: `false` maps to `JOBS_WORKER_MODE=off`. |
+| `JOBS_POLL_MS` | `'5000'` | Worker poll interval in milliseconds. |
+| `FACE_JOB_POLL_MS` | `'5000'` | Legacy alias for `JOBS_POLL_MS`. |
+| `JOBS_WORKER_CONCURRENCY` | `'1'` | Number of jobs to process concurrently per worker tick. |
+| `FACE_WORKER_CONCURRENCY` | `'1'` | Legacy alias for `JOBS_WORKER_CONCURRENCY`. |
 
 ---
 

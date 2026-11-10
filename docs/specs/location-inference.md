@@ -251,12 +251,12 @@ Upload-time enqueue lives in `MediaEnrichmentService.enqueueUploadEnrichment` al
 This is the deliberate opposite design choice from duplicate detection's chunked batch backfill (`docs/specs/duplicate-detection.md` §6.2), and the reason is the underlying work's cost profile:
 
 - The sweep is **pure DB read + in-memory computation + batched writes** — no image download, no ML inference, no external API call per item. A 10k-photo circle's entire projection is on the order of a few MB, and the two-pointer walk (§4.2) is linear in the number of rows.
-- Duplicate detection's backfill is **compute-bound** (CLIP embedding ≈150-400ms/image plus download/decode, ≈1-2s/photo end-to-end) — chunking to 100 items/job exists there specifically to stay under the `ENRICHMENT_STUCK_MINUTES` ceiling (default 15 minutes; worst case ≈5 min/chunk).
+- Duplicate detection's backfill is **compute-bound** (CLIP embedding ≈150-400ms/image plus download/decode, ≈1-2s/photo end-to-end) — chunking to 100 items/job exists there specifically to stay under the job profile's 30-minute `maxRuntimeMs` (worst case ≈5 min/chunk).
 - A location-inference sweep of even a 50k-photo circle is estimated at 1-3 minutes end-to-end (see the table below) — an order of magnitude under the stuck-reset threshold, so there is no scale at which chunking the sweep itself would currently be necessary. (If a future circle vastly exceeds 50k-100k+ photos, keyset-chunking the sweep's initial load is the documented escape hatch — not needed today; see §15.)
 
 ### 5.4 Throughput expectations
 
-Defaults assumed: `ENRICHMENT_JOB_POLL_MS=5000`, `ENRICHMENT_WORKER_CONCURRENCY=1`, 2 vCPU host.
+Defaults assumed: `JOBS_POLL_MS=5000`, `JOBS_WORKER_CONCURRENCY=1`, 2 vCPU host.
 
 | Library size (per circle) | Sweep jobs enqueued | Approximate wall-clock time |
 |---|---|---|
@@ -270,7 +270,7 @@ One sweep job per circle regardless of size — there is no chunk count to repor
 
 **As of issue #190, the Location Suggestions bulk-accept/bulk-reject actions run on the shared `review_run_evaluate` / `review_run_execute_batch` job pair** — the two location-suggestion-specific job types originally added by issue #125 (`location_suggestion_run_evaluate` / `location_suggestion_run_execute_batch`) were absorbed into the generic pair used by all three review queues (bursts, duplicates, location suggestions). See [review-runs.md §5](review-runs.md#5-job-types) for the full job-type reference and [review-runs.md §6](review-runs.md#6-subject-strategy-split) for `LocationSuggestionReviewStrategy`, which carries forward the accept/reject transaction body and its deferred `geocode` enqueue unchanged from the original handler.
 
-The two old type names still exist in the codebase as thin, deprecated shim handler classes — kept only so a job already enqueued under the old type at the moment of deploy still executes correctly — but nothing enqueues new jobs under them; every new bulk-accept/bulk-reject run enqueues `review_run_evaluate`/`review_run_execute_batch` directly. Both the current and the deprecated types remain **server-only** (no `nodeResultSchema`/`persistNodeResult` node pair) and auto-eligible for `ENRICHMENT_WORKER_MODE=system`. The chunking rationale from the original design is unchanged: unlike the sweep (§5.3), this pair chunks its execute step into 200-item batches — not because the per-item work is compute-bound (it is pure DB writes, same profile as the sweep), but to mirror the Empty Trash at Scale precedent (`docs/specs/archive-trash.md` §10) for progress-polling granularity, so a run with tens of thousands of matched suggestions reports incremental `processedCount` progress batch-by-batch rather than jumping from 0 to 100% on a single job's completion.
+The two old type names still exist in the codebase as thin, deprecated shim handler classes — kept only so a job already enqueued under the old type at the moment of deploy still executes correctly — but nothing enqueues new jobs under them; every new bulk-accept/bulk-reject run enqueues `review_run_evaluate`/`review_run_execute_batch` directly. Both the current and the deprecated types remain **server-only** (no `nodeResultSchema`/`persistNodeResult` node pair) and auto-eligible for `JOBS_WORKER_MODE=system`. The chunking rationale from the original design is unchanged: unlike the sweep (§5.3), this pair chunks its execute step into 200-item batches — not because the per-item work is compute-bound (it is pure DB writes, same profile as the sweep), but to mirror the Empty Trash at Scale precedent (`docs/specs/archive-trash.md` §10) for progress-polling granularity, so a run with tens of thousands of matched suggestions reports incremental `processedCount` progress batch-by-batch rather than jumping from 0 to 100% on a single job's completion.
 
 ---
 
@@ -352,7 +352,7 @@ All seven are validated by the shared Zod schema in `apps/api/src/settings/regis
 |---|---|---|
 | `LOCATION_INFERENCE_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable upload-time `location_inference` enqueue regardless of `features.locationInference`. The system setting is the runtime toggle; this env var is a hard override for CI/test environments — same pattern as `DUPLICATE_DETECTION_ENABLED`, `BURST_DETECTION_ENABLED`, `AUTO_TAG_ENABLED`, `FACE_AUTO_DETECT`. |
 
-The shared enrichment worker variables (`ENRICHMENT_WORKER_ENABLED`, `ENRICHMENT_JOB_POLL_MS`, `ENRICHMENT_WORKER_CONCURRENCY`) govern the same queue that runs both per-item and sweep `location_inference` jobs alongside every other enrichment type — see [enrichment-queue.md](enrichment-queue.md).
+The shared enrichment worker variables (`JOBS_WORKER_MODE`, `JOBS_POLL_MS`, `JOBS_WORKER_CONCURRENCY`) govern the same queue that runs both per-item and sweep `location_inference` jobs alongside every other enrichment type — see [enrichment-queue.md](enrichment-queue.md).
 
 ---
 
