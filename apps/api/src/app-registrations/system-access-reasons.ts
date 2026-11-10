@@ -19,6 +19,11 @@ import { registerSystemAccessReason } from '@marinoscar/platform-api/core';
 //                       `processing` (or `failed`) across every organization,
 //                       bump their retry counter and queue a processing job.
 //
+//   owner-scope-sweep   the admin backfills and the location rebuild list every
+//                       shared library (group) through `GroupsService.listForSystem`
+//                       (platform next.29): read-only ids of every organization's
+//                       groups, with no organization to scope to.
+//
 // Registered at import time (the registry freezes at bootstrap); imported by
 // `prisma/prisma-system.service.ts`.
 // =============================================================================
@@ -27,6 +32,9 @@ export const MEDIA_HOUSEKEEPING_REASON = 'media-housekeeping';
 
 /** The stuck/failed storage-object recovery and the admin reprocess jobs (RETRO-D1b, #567). */
 export const STORAGE_PROCESSING_RECOVERY_REASON = 'storage-processing-recovery';
+
+/** The admin backfills' and the location rebuild's listing of every group (RETRO-N29). */
+export const OWNER_SCOPE_SWEEP_REASON = 'owner-scope-sweep';
 
 let registered = false;
 
@@ -46,6 +54,13 @@ export function registerMemoriaHubSystemAccessReasons(): void {
       'The media.storage.recover_stuck and media.storage.reprocess jobs find storage objects stuck at processing ' +
       '(or failed) in every organization, bump their retry counter and queue a storage.object.process job for each; ' +
       'they are system jobs with no organization to scope to.',
+  });
+  registerSystemAccessReason({
+    id: OWNER_SCOPE_SWEEP_REASON,
+    description:
+      'The admin backfills (metadata, face, burst, duplicate, tagging, social media) and the location-group rebuild ' +
+      'list the id of every group in every organization through GroupsService.listForSystem, read-only, ' +
+      'to enqueue or run per-library work; they are system sweeps with no organization to scope to.',
   });
 }
 

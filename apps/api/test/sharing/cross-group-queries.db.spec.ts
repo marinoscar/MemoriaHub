@@ -3,12 +3,13 @@
  * (docs/platform-adoption/circles-to-groups.md §8) sees exactly the platform
  * groups plus personal content, and grants add records on top.
  *
- * The background sweeps of §8 (memories generation and digest, the
- * review-queue reconcile, the admin backfills, the node backup scope) still
- * iterate the app's `circles` / `circle_members`: the platform has no system
- * listing of groups and members yet (EAB seam, local-exceptions.md), and the
- * RETRO-I2 triggers keep the two equal. This spec pins that equality on the
- * real schema, as the application role (NOSUPERUSER NOBYPASSRLS):
+ * The admin backfills and the location rebuild list their groups through
+ * `GroupsService.listForSystem` (RETRO-N29, platform next.29; case 1b). The
+ * other sweeps of §8 (memories generation and digest, the review-queue
+ * reconcile, the node backup scope) still iterate the app's `circles` /
+ * `circle_members`, and the RETRO-I2 triggers keep the two equal. This spec
+ * pins that equality on the real schema, as the application role
+ * (NOSUPERUSER NOBYPASSRLS):
  *
  *   1. the owner scopes a sweep iterates = the default organization's groups
  *      plus one personal library per user, whose content the user owns;
@@ -31,6 +32,8 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
   AccessPolicy,
+  GroupMembershipService,
+  GroupsService,
   PrincipalGroupsProvider,
   accessibleWhere,
   resolveSharingModuleOptions,
@@ -42,6 +45,7 @@ import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.confi
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
 import { RecordAccessService } from '../../src/platform/sharing/record-access';
 import '../../src/app-registrations/sharing';
+import { OWNER_SCOPE_SWEEP_REASON } from '../../src/app-registrations/system-access-reasons';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -180,6 +184,23 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     // The personal library's content is user-owned: no group behind it.
     const personal = (await admin.query(`SELECT owner_user_id::text AS u, owner_group_id FROM media_items WHERE id = $1`, [items.p])).rows[0];
     expect(personal).toEqual({ u: users.u, owner_group_id: null });
+  });
+
+  it('1b. GroupsService.listForSystem lists exactly the groups the circle mirror holds', async () => {
+    const options = resolveSharingModuleOptions({ ...SHARING_MODULE_OPTIONS });
+    const membership = new GroupMembershipService(data, options, {} as never, {} as never);
+    const service = new GroupsService(data, options, membership, {} as never);
+    const listed = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await service.listForSystem({ reason: OWNER_SCOPE_SWEEP_REASON, orgId, cursor, limit: 500 });
+      for (const group of page.items) listed.add(group.id);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    const mine = Object.values({ a: circles.a, b: circles.b, c: circles.c });
+    expect(mine.every((id) => listed.has(id))).toBe(true);
+    // The personal library is no group.
+    expect(listed.has(circles.p)).toBe(false);
   });
 
   it.each(['a', 'b', 'c'] as const)('2. circle %s: reconcile audience = group editor+admin, digest audience = all members', async (key) => {

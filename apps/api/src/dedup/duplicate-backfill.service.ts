@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JobReason, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 
 const PAGE_SIZE = 5000;
@@ -33,12 +35,14 @@ export class DuplicateBackfillService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enrichmentJobService: EnrichmentJobService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   async backfillAllCircles(
     opts: DuplicateBackfillOptions,
   ): Promise<{ enqueued: number; circles: number; estimatedItems: number }> {
-    const circles = await this.prisma.circle.findMany({ select: { id: true } });
+    // Every shared library (a platform group) plus every personal library (RETRO-N29).
+    const circles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
 
     let totalJobs = 0;
     let totalItems = 0;

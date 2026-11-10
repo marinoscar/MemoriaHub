@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EnrichmentJob, LocationGroupLevel, Prisma } from '@prisma/client';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
+import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
 import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
 import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
@@ -72,6 +74,7 @@ export class LocationGroupRebuildHandler implements EnrichmentHandler, OnModuleI
     private readonly registry: EnrichmentHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
+    private readonly scopes: OwnerScopeSweepService,
   ) {}
 
   onModuleInit(): void {
@@ -191,22 +194,9 @@ export class LocationGroupRebuildHandler implements EnrichmentHandler, OnModuleI
       return scanned;
     }
 
-    let cursor: string | null = null;
-    for (;;) {
-      const circles: { id: string }[] = await this.prisma.circle.findMany({
-        where: cursor ? { id: { gt: cursor } } : {},
-        orderBy: { id: 'asc' },
-        take: 100,
-        select: { id: true },
-      });
-      if (circles.length === 0) break;
-      cursor = circles[circles.length - 1].id;
-
-      for (const circle of circles) {
-        scanned += await this.resetCircle(circle.id);
-      }
-
-      if (circles.length < 100) break;
+    // Every shared library (a platform group) plus every personal library (RETRO-N29).
+    for (const id of await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)) {
+      scanned += await this.resetCircle(id);
     }
 
     return scanned;

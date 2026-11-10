@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { isSystemAccessReason, runInOrg } from '@marinoscar/platform-api/core';
-import type { SharingDataPort, SharingSystemReason } from '@marinoscar/platform-api/sharing';
+import type { SharingDataPort, SharingSystemAccessReason } from '@marinoscar/platform-api/sharing';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { PrismaSystemService } from '../../prisma/prisma-system.service';
@@ -39,7 +39,7 @@ export class SharingDataAdapter implements SharingDataPort {
     ) as Promise<R>;
   }
 
-  runAsSystem<R>(reason: SharingSystemReason, fn: (tx: unknown) => Promise<R>): Promise<R> {
+  runAsSystem<R>(reason: SharingSystemAccessReason, fn: (tx: unknown) => Promise<R>): Promise<R> {
     // The platform's rule: every bypass names a registered reason.
     if (!isSystemAccessReason(reason)) {
       return Promise.reject(new Error(`SharingDataAdapter.runAsSystem: unregistered system access reason "${reason}"`));

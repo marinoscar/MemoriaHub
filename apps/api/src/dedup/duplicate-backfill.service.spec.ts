@@ -15,6 +15,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JobReason } from '@prisma/client';
 import { DuplicateBackfillService } from './duplicate-backfill.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
@@ -31,6 +32,12 @@ describe('DuplicateBackfillService', () => {
       providers: [
         DuplicateBackfillService,
         { provide: PrismaService, useValue: mockPrisma },
+        // The sweep helper (groups through the slice, personal libraries through `circles`) is
+        // stood in for by the mocked `circle.findMany`, which each case fills with the scope ids.
+        {
+          provide: OwnerScopeSweepService,
+          useValue: { allScopeIds: async () => ((await mockPrisma.circle.findMany({})) as { id: string }[]).map((c) => c.id) },
+        },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
       ],
     }).compile();
