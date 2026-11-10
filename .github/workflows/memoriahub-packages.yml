@@ -95,6 +95,10 @@ jobs:
       # platform package and no provider SDK is in the tree. Needs the build
       # above and the registry (for sharp, onnxruntime-node, exifr, zod).
       - run: npm run check:memoriahub-lean-install
+      # The domain schema package: the app's installed copies (fragments, lock) are
+      # byte-identical to it, and the command runs. Needs the build above.
+      - run: npm run db:check --workspace=api
+      - run: node packages/memoriahub-db/bin/memoriahub-db.js --help
 
       # Every entry point must load from the module system it advertises. The
       # packages resolve through the workspace links `npm ci` created.
@@ -113,6 +117,43 @@ jobs:
           done
           node -e "require('@marinoscar/memoriahub-contract')"
           node --input-type=module -e "await import('@marinoscar/memoriahub-contract')"
+
+  db-apply:
+    name: memoriahub-db against PostgreSQL
+    # test/apply.db.test.ts builds the platform history plus the baseline on one
+    # database and the web app's whole history on another, runs check --database
+    # on both and compares the two domain schemas (RETRO-J3, #606).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build -w @marinoscar/memoriahub-db
+      - run: npm run test:run -w @marinoscar/memoriahub-db
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/postgres
 
   package-docs:
     name: Package docs
