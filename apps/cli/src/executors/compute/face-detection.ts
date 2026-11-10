@@ -31,7 +31,8 @@ import {
   COMPREFACE_PROVIDER_KEY,
 } from '@memoriahub/enrichment-compute/face-compreface';
 
-import { comprefaceUrl as resolveComprefaceUrl, type ComputeFn } from '../support.js';
+import { comprefaceUrl as resolveComprefaceUrl, intAttribute, runPhase, type ComputeFn } from '../support.js';
+import { timedCompreface } from './telemetry-state.js';
 
 /**
  * Downscale ceiling before detection — MUST match the server's
@@ -42,18 +43,28 @@ import { comprefaceUrl as resolveComprefaceUrl, type ComputeFn } from '../suppor
  */
 const FACE_MAX_IMAGE_DIM = 2000;
 
-const computeFaceDetection: ComputeFn = async (inputPath, _params) => {
+const computeFaceDetection: ComputeFn = async (inputPath, _params, ctx) => {
   const buffer = fs.readFileSync(inputPath);
   const comprefaceUrl = resolveComprefaceUrl();
 
   // Same EXIF-orientation + downscale step the server runs before detection.
-  const prepared = await prepareImageForProcessing(buffer, { maxDim: FACE_MAX_IMAGE_DIM });
+  const prepared = await runPhase(
+    ctx,
+    'job.app.decode',
+    () => prepareImageForProcessing(buffer, { maxDim: FACE_MAX_IMAGE_DIM }),
+    (result) => ({ width: intAttribute(result.width), height: intAttribute(result.height) }),
+  );
   const uprightBuffer = prepared.width > 0 && prepared.height > 0 ? prepared.buffer : buffer;
 
   // No catch-and-fallback here: an unreachable sidecar must surface as a
   // normal compute error, routed through the engine's existing /failure +
   // retry/backoff path — never a silent degrade to another provider.
-  const faces = await detectComprefaceFaces(comprefaceUrl, uprightBuffer);
+  const faces = await runPhase(
+    ctx,
+    'job.app.compreface_detect',
+    () => timedCompreface(() => detectComprefaceFaces(comprefaceUrl, uprightBuffer)),
+    (result) => ({ faces: result.length }),
+  );
 
   // CompreFace's response carries no image dimensions. When
   // prepareImageForProcessing already gave us dimensions, use those;

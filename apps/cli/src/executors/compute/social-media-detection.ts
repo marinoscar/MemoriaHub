@@ -49,7 +49,8 @@ import { extractFramesAt } from '@memoriahub/enrichment-compute/video';
 import { createOcrEngine, type OcrEngine } from '@memoriahub/enrichment-compute/ocr';
 
 import { resolveModelsDirectory } from '../models.js';
-import { loadNativeModule, NATIVE_MODULES, type ComputeFn } from '../support.js';
+import { loadNativeModule, NATIVE_MODULES, runPhase, tokenAttribute, type ComputeFn } from '../support.js';
+import { nodeTelemetry } from './telemetry-state.js';
 
 const DEFAULT_MIN_CONFIDENCE = 0.8;
 const DEFAULT_OCR_MAX_FRAMES = 4;
@@ -141,21 +142,23 @@ async function recognizeFramesWithBudget(
   return texts;
 }
 
-const computeSocialMediaDetection: ComputeFn = async (inputPath, params) => {
+const computeSocialMediaDetection: ComputeFn = async (inputPath, params, ctx) => {
   const p = params as Record<string, unknown>;
   const minConfidence = typeof p['minConfidence'] === 'number' ? p['minConfidence'] : DEFAULT_MIN_CONFIDENCE;
   const ocrEnabled = p['ocrEnabled'] !== false;
   const ocrMaxFrames = typeof p['ocrMaxFrames'] === 'number' ? p['ocrMaxFrames'] : DEFAULT_OCR_MAX_FRAMES;
-  const ocrLanguages = Array.isArray(p['ocrLanguages'])
-    ? (p['ocrLanguages'] as string[])
-    : DEFAULT_OCR_LANGUAGES;
+  const ocrLanguages = Array.isArray(p['ocrLanguages']) ? (p['ocrLanguages'] as string[]) : DEFAULT_OCR_LANGUAGES;
   const ocrTimeoutMs = typeof p['ocrTimeoutMs'] === 'number' ? p['ocrTimeoutMs'] : DEFAULT_OCR_TIMEOUT_MS;
   // Best-effort — see the module docstring's KNOWN GAP re: job.payload.
   const filename = typeof p['filename'] === 'string' ? p['filename'] : null;
 
   // --- Tier 1: probe container metadata from the downloaded bytes ---
-  const probeData = await probeVideo(inputPath);
-  const container = extractContainerMetadata(probeData);
+  const container = await runPhase(
+    ctx,
+    'job.app.probe',
+    async () => extractContainerMetadata(await probeVideo(inputPath)),
+    (probed) => ({ codec: tokenAttribute(probed.codec) }),
+  );
 
   const input: VideoDetectionInput = {
     kind: 'video',
@@ -169,13 +172,9 @@ const computeSocialMediaDetection: ComputeFn = async (inputPath, params) => {
   };
 
   // Mirrors the server's orientation gate: landscape videos never get Tier-2 OCR.
-  const isLandscape =
-    input.width !== undefined && input.height !== undefined && input.width > input.height;
+  const isLandscape = input.width !== undefined && input.height !== undefined && input.width > input.height;
 
-  const { result: tier1Result, recommendTier2: tier1RecommendsOcr } = detectTier1(
-    input,
-    minConfidence,
-  );
+  const { result: tier1Result, recommendTier2: tier1RecommendsOcr } = detectTier1(input, minConfidence);
   const recommendTier2 = tier1RecommendsOcr && !isLandscape;
 
   let result = tier1Result;
@@ -186,9 +185,20 @@ const computeSocialMediaDetection: ComputeFn = async (inputPath, params) => {
     const engine = await getOcrEngine(ocrLanguages);
     if (engine) {
       const timestamps = computeOcrTimestamps(container.durationMs, ocrMaxFrames);
-      const frames = await extractFramesAt(inputPath, timestamps);
+      const frames = await runPhase(
+        ctx,
+        'job.app.frames_extract',
+        () => extractFramesAt(inputPath, timestamps),
+        (extracted) => ({ frames: extracted.length }),
+      );
       if (frames.length > 0) {
-        const texts = await recognizeFramesWithBudget(engine, frames, ocrTimeoutMs);
+        const texts = await runPhase(
+          ctx,
+          'job.app.ocr',
+          () => recognizeFramesWithBudget(engine, frames, ocrTimeoutMs),
+          () => ({ ocrFrames: frames.length }),
+        );
+        nodeTelemetry.ocrFramesTotal += frames.length;
         ocrText = texts.length > 0 ? texts.join(' \n ') : null;
         const ocrResult = detectFromOcr(texts, input, minConfidence);
         if (ocrResult) result = ocrResult;

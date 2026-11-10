@@ -33,6 +33,7 @@ import {
 } from '@marinoscar/platform-cli/node';
 
 import { MEMORY_VALVE_EXIT_CODE, appWorkerEnv } from '../worker-env.js';
+import { nodeTelemetry } from './compute/telemetry-state.js';
 import { duplicateDetectionExecutor } from './duplicate-detection.executor.js';
 import { faceDetectionExecutor } from './face-detection.executor.js';
 import { geocodeExecutor } from './geocode.executor.js';
@@ -98,10 +99,15 @@ export function registerNodeExtensions(): void {
   const ffmpeg = binaryCapability('ffmpeg');
   const ffprobe = binaryCapability('ffprobe');
   registerJobRequirement('face_detection', { required: [SHARP, COMPREFACE] });
-  registerJobRequirement('video_face_detection', { required: [SHARP, COMPREFACE, ffmpeg, ffprobe] });
+  registerJobRequirement('video_face_detection', {
+    required: [SHARP, COMPREFACE, ffmpeg, ffprobe],
+  });
   registerJobRequirement('duplicate_detection', { required: [SHARP, ONNX] });
   registerJobRequirement('metadata_extraction', { required: [SHARP, ffprobe] });
-  registerJobRequirement('social_media_detection', { required: [ffprobe, ffmpeg], degradable: [TESSERACT] });
+  registerJobRequirement('social_media_detection', {
+    required: [ffprobe, ffmpeg],
+    degradable: [TESSERACT],
+  });
   registerJobRequirement('thumbnail_regen', { required: [SHARP, ffmpeg] });
 
   registerInstallSteps();
@@ -116,6 +122,7 @@ export function registerNodeExtensions(): void {
         const sharp = (await import('sharp')).default;
         sharp.cache(false);
         sharp.concurrency(nativeThreads);
+        nodeTelemetry.sharpConcurrency = nativeThreads;
       } catch {
         /* sharp is optional: types that need it are withheld by the capability check */
       }

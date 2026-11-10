@@ -35,18 +35,31 @@ import {
   probeVideo,
   extractContainerMetadata,
 } from '@memoriahub/enrichment-compute/metadata';
-import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
+import {
+  CapabilityUnavailableError,
+  type ComputeJobContext,
+  intAttribute,
+  runPhase,
+  tokenAttribute,
+  type ComputeFn,
+} from '../support.js';
 
 /** Mirrors MetadataExtractionService.buildProbeEntry's shape exactly. */
-async function buildProbeEntry(filePath: string): Promise<Record<string, unknown>> {
+async function buildProbeEntry(filePath: string, ctx: ComputeJobContext): Promise<Record<string, unknown>> {
   const timeoutMs = Number(process.env['FFPROBE_TIMEOUT_MS']) || 30000;
-  const probeData = await probeVideo(filePath, { ffprobeTimeoutMs: timeoutMs });
+  const probeData = await runPhase(
+    ctx,
+    'job.app.probe',
+    () => probeVideo(filePath, { ffprobeTimeoutMs: timeoutMs }),
+    (probed) => ({
+      codec: tokenAttribute(probed.streams?.find((s) => s.codec_type === 'video')?.codec_name),
+    }),
+  );
   const container = extractContainerMetadata(probeData);
   const { durationMs, width, height, codec, formatName, formatTags, streamTags } = container;
 
   const videoStream = probeData.streams?.find((s) => s.codec_type === 'video');
-  const rawCreationTime: unknown =
-    probeData.format?.tags?.['creation_time'] ?? videoStream?.tags?.['creation_time'];
+  const rawCreationTime: unknown = probeData.format?.tags?.['creation_time'] ?? videoStream?.tags?.['creation_time'];
 
   let capturedAt: string | undefined;
   if (typeof rawCreationTime === 'string' && rawCreationTime.length > 0) {
@@ -87,23 +100,35 @@ const computeMetadata: ComputeFn = async (inputPath, params, ctx) => {
     const buffer = await readFile(inputPath);
 
     try {
-      Object.assign(exif, await extractExif(buffer));
+      Object.assign(exif, await runPhase(ctx, 'job.app.exif', () => extractExif(buffer)));
     } catch (err) {
-      throw new Error(`metadata_extraction: exif extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `metadata_extraction: exif extraction failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     try {
-      const dims = await extractDimensions(buffer);
+      const dims = await runPhase(
+        ctx,
+        'job.app.decode',
+        () => extractDimensions(buffer),
+        (found) => ({
+          width: intAttribute(found?.width),
+          height: intAttribute(found?.height),
+        }),
+      );
       if (dims) {
         exif['width'] = dims.width;
         exif['height'] = dims.height;
       }
     } catch (err) {
-      throw new Error(`metadata_extraction: dimension extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `metadata_extraction: dimension extraction failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   } else if (mimeType.startsWith('video/')) {
     try {
-      probe = await buildProbeEntry(inputPath);
+      probe = await buildProbeEntry(inputPath, ctx);
     } catch (err) {
       throw new Error(`metadata_extraction: video probe failed: ${err instanceof Error ? err.message : String(err)}`);
     }
