@@ -138,7 +138,7 @@ function dedupService() {
 }
 
 const buildDuplicateDetection = () =>
-  new DuplicateDetectionHandler(registry, subjectLookups() as never, dedupService() as never);
+  new DuplicateDetectionHandler(registry as never, subjectLookups() as never, dedupService() as never);
 
 describe('duplicate_detection', () => {
   staticContract('duplicate_detection', buildDuplicateDetection);
@@ -198,7 +198,7 @@ describe('duplicate_detection', () => {
 // ---------------------------------------------------------------------------
 
 const buildBatch = () =>
-  new DuplicateDetectionBatchHandler(registry, subjectLookups() as never, { exists: async (id: string) => world.circles.has(id) } as never, dedupService() as never);
+  new DuplicateDetectionBatchHandler(registry as never, { scopeExists: async (id: string) => world.circles.has(id) } as never, dedupService() as never);
 
 describe('duplicate_detection_batch', () => {
   staticContract('duplicate_detection_batch', buildBatch);
@@ -260,7 +260,7 @@ function buildConfidenceBackfill(): DuplicateConfidenceBackfillHandler {
     mediaItem: { findMany: async () => [{ id: 'm1' }, { id: 'm2' }] },
   };
   const detection = { computeGroupConfidence: async () => 0.97 };
-  return new DuplicateConfidenceBackfillHandler(registry, prisma as never, detection as never);
+  return new DuplicateConfidenceBackfillHandler(registry as never, prisma as never, detection as never);
 }
 
 describe('duplicate_confidence_backfill', () => {

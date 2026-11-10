@@ -14,11 +14,11 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ReviewInsightsService } from './review-insights.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { CircleRole } from '../../test/helpers/circle-role';
+import { ReviewInsightsService } from '../../src/dedup/review-insights.service.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+const CircleRole = { circle_admin: 'circle_admin', collaborator: 'collaborator', viewer: 'viewer' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,14 +55,14 @@ describe('ReviewInsightsService', () => {
   let mockMembership: { requireOwnerRole: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ReviewInsightsService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockMembership },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockMembership },
       ],
     }).compile();
 

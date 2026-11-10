@@ -1,6 +1,11 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { DedupModule as DedupSliceModule } from '@marinoscar/memoriahub-api/dedup';
 
+import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
+import { MediaModule } from '../media/media.module';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { DuplicateController } from './duplicate.controller';
 import { DuplicateService } from './duplicate.service';
@@ -16,6 +21,11 @@ import { ReviewInsightsController } from './review-insights.controller';
 @Module({
   imports: [
     DedupSliceModule.forRoot(),
+    EnrichmentModule,
+    MediaProcessingModule,
+    PrismaModule,
+    OwnerAccessModule,
+    MediaModule,
     // Mutual: the duplicate review-run strategy wraps DuplicateService's
     // primitives while DuplicateService's threshold endpoints start review runs
     // (issue #190).

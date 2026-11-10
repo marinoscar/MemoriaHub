@@ -19,7 +19,6 @@ import { VisualEmbeddingService } from './visual-embedding.service.js';
 const BurstGroupStatus = { pending: 'pending' } as const;
 const DuplicateGroupStatus = { pending: 'pending' } as const;
 const MediaType = { photo: 'photo' } as const;
-type MediaJobContext = MediaItemJobContext;
 
 /** Consumes a stream into a buffer. */
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -41,6 +40,8 @@ const DEFAULT_DEDUP_CONFIG = {
  * sharpness score falls out of the same dHash pipeline pass and is persisted
  * onto the MediaItem alongside the hash, so it rides along here rather than
  * being recomputed in a second decode.
+ *
+ * @stability experimental
  */
 export interface DuplicateComputeResult {
   /** Model tag for the visual embedding (VISUAL_EMBEDDING_MODEL_TAG). */
@@ -89,6 +90,8 @@ interface EligibleItem {
  * persist half (embedding row, perceptualHash column, KNN/hash matching and
  * union-find grouping). The server's own `processMediaItem` composes the two
  * around a single byte download.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class DuplicateDetectionService {
@@ -107,6 +110,11 @@ export class DuplicateDetectionService {
   // Server-side orchestration: load → download → compute → persist
   // ---------------------------------------------------------------------
 
+  /**
+   * Loads, downloads (only when something is missing), computes and persists duplicate detection for one photo.
+   *
+   * @param mediaItemId - the photo.
+   */
   async processMediaItem(mediaItemId: string): Promise<void> {
     const item = await this.loadEligibleItem(mediaItemId);
     if (!item) {
@@ -166,7 +174,7 @@ export class DuplicateDetectionService {
    * processMediaItem.
    */
   async persistDuplicate(
-    job: Pick<MediaJobContext, 'id' | 'mediaItemId'>,
+    job: Pick<MediaItemJobContext, 'id' | 'mediaItemId'>,
     result: DuplicateComputeResult,
   ): Promise<void> {
     if (!job.mediaItemId) {

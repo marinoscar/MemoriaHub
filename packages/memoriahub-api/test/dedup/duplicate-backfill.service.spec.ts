@@ -12,12 +12,12 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason } from '@prisma/client';
-import { DuplicateBackfillService } from './duplicate-backfill.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { DuplicateBackfillService } from '../../src/dedup/duplicate-backfill.service.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+
+const JobReason = { backfill: 'backfill' } as const;
 
 /** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
 const scopeFindMany = jest.fn();
@@ -29,20 +29,20 @@ describe('DuplicateBackfillService', () => {
 
   beforeEach(async () => {
     scopeFindMany.mockReset().mockResolvedValue([]);
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DuplicateBackfillService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         // The sweep helper (groups through the slice, personal libraries through the store) is
         // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
-          provide: OwnerScopeSweepService,
+          provide: MEMORIAHUB_ACCESS,
           useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
       ],
     }).compile();
 

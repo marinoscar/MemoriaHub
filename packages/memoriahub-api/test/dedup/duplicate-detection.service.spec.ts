@@ -20,13 +20,15 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
-import { DuplicateDetectionService, DuplicateComputeResult } from './duplicate-detection.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { VisualEmbeddingService } from './visual-embedding.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { BurstGroupStatus, EnrichmentJob, MediaType } from '@prisma/client';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { DuplicateDetectionService, type DuplicateComputeResult } from '../../src/dedup/duplicate-detection.service.js';
+import { MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '../../src/ports/index.js';
+import { VisualEmbeddingService } from '../../src/dedup/visual-embedding.service.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+
+const BurstGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+type EnrichmentJob = any;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,7 +41,7 @@ const DEDUP_CONFIG = { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandida
 
 function makeSubjectItem(overrides: Partial<{
   id: string;
-  type: MediaType;
+  type: string;
   deletedAt: Date | null;
   archivedAt: Date | null;
   circleId: string;
@@ -78,7 +80,7 @@ describe('DuplicateDetectionService', () => {
   };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockProvider = { download: jest.fn() };
     mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockProvider) };
     mockSystemSettings = {
@@ -115,9 +117,9 @@ describe('DuplicateDetectionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DuplicateDetectionService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: { forLocation: (provider: string | null, bucket: string | null) => mockResolver.getProviderFor(provider, bucket) } },
+        { provide: MEMORIAHUB_SETTINGS, useValue: settingsPortFrom(async () => (await mockSystemSettings.getSettings()) as Record<string, unknown>) },
         { provide: VisualEmbeddingService, useValue: mockVisualEmbeddingService },
       ],
     }).compile();

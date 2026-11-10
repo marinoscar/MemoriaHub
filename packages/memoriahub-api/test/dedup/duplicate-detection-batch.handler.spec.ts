@@ -13,17 +13,15 @@
  *  - No-op (warn + return) when the job payload has no mediaItemIds
  */
 
-import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import { DuplicateDetectionBatchHandler } from './duplicate-detection-batch.handler';
-import { DuplicateDetectionService } from './duplicate-detection.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { circleJob, subjectPrisma, subjectScopes } from '../../test/helpers/platform-job';
+import type { MemoriahubJob as Job } from '../../src/ports/index.js';
+import { DuplicateDetectionBatchHandler } from '../../src/dedup/duplicate-detection-batch.handler.js';
+import type { DuplicateDetectionService } from '../../src/dedup/duplicate-detection.service.js';
+import { circleJob, subjectScopes } from '../helpers/job-fixtures.js';
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return circleJob('duplicate_detection_batch', 'circle-1', {
     id: 'batch-job-1',
     reason: 'backfill',
-    priority: 100,
     payload: { mediaItemIds: ['media-1', 'media-2', 'media-3'] },
     ...overrides,
   });
@@ -31,25 +29,24 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 
 describe('DuplicateDetectionBatchHandler', () => {
   let handler: DuplicateDetectionBatchHandler;
-  let mockRegistry: { register: jest.Mock };
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockDuplicateDetectionService: { processMediaItem: jest.Mock };
 
   beforeEach(() => {
-    mockRegistry = { register: jest.fn() };
+    mockRegistry = { registerHandler: jest.fn() };
     mockDuplicateDetectionService = { processMediaItem: jest.fn().mockResolvedValue(undefined) };
 
     handler = new DuplicateDetectionBatchHandler(
-      mockRegistry as unknown as JobHandlerRegistry,
-      subjectPrisma() as unknown as PrismaService,
+      mockRegistry as never,
       subjectScopes(['circle-1']) as never,
       mockDuplicateDetectionService as unknown as DuplicateDetectionService,
     );
   });
 
-  it('registers itself with the platform registry on module init', () => {
+  it('registers itself with the jobs port on module init', () => {
     handler.onModuleInit();
 
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('exposes type "duplicate_detection_batch", its label and profile, and no node pair', () => {

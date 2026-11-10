@@ -36,7 +36,7 @@ export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', '
  * relative to it.
  */
 const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
-export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location'].map((slice) => join(SLICES_ROOT, slice));
+export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup'].map((slice) => join(SLICES_ROOT, slice));
 
 /** Every root the two scans read. */
 export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT, ...J10_SLICE_SOURCE_ROOTS];

@@ -134,6 +134,7 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
     }
   }
 
+  /** Releases the model session and the idle timer. */
   onModuleDestroy(): void {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
@@ -155,6 +156,7 @@ export class VisualEmbeddingService implements OnApplicationBootstrap, OnModuleD
     return process.env['MODELS_DIR'] ?? './data/models';
   }
 
+  /** The resolved path of the CLIP model file. */
   getModelPath(): string {
     return path.join(this.getModelsDir(), MODEL_FILENAME);
   }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { PrismaModule } from '../prisma/prisma.module';
 import { LocationGroupsModule } from './location-groups.module';
 import { LocationGroupsController } from './location-groups.controller';
 import { LocationGroupsAdminController } from './location-groups-admin.controller';
@@ -10,7 +11,7 @@ import { LocationGroupsAdminController } from './location-groups-admin.controlle
  * identity-backed guard lands in the package.
  */
 @Module({
-  imports: [LocationGroupsModule],
+  imports: [PrismaModule, LocationGroupsModule],
   controllers: [LocationGroupsController, LocationGroupsAdminController],
 })
 export class LocationGroupsAdminModule {}

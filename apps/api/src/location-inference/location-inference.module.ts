@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common';
 import { LocationInferenceModule as LocationInferenceSliceModule } from '@marinoscar/memoriahub-api/location';
 
+import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { MediaProcessingModule } from '../media-processing/media-processing.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
+import { MediaModule } from '../media/media.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
@@ -22,6 +27,11 @@ import { LocationSuggestionRunExecuteBatchHandler } from './runs/location-sugges
 @Module({
   imports: [
     LocationInferenceSliceModule.forRoot({ geoProviderImports: [GeoLocationModule] }),
+    EnrichmentModule,
+    MediaProcessingModule,
+    PrismaModule,
+    OwnerAccessModule,
+    MediaModule,
     ReviewRunsModule,
     LocationGroupsModule,
   ],

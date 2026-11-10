@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InsightsModule as InsightsSliceModule } from '@marinoscar/memoriahub-api/insights';
 
+import { PrismaModule } from '../prisma/prisma.module';
 import { InsightsController } from './insights.controller';
 
 /**
@@ -9,7 +10,7 @@ import { InsightsController } from './insights.controller';
  * identity-backed guard lands in the package.
  */
 @Module({
-  imports: [InsightsSliceModule.forRoot()],
+  imports: [PrismaModule, InsightsSliceModule.forRoot()],
   controllers: [InsightsController],
   exports: [InsightsSliceModule],
 })

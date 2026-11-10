@@ -21,6 +21,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/location`: the location slice (location grouping so far), `LocationModule.forRoot` and `LocationGroupResolverService` ([slice README](src/location/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/location/testing`: `describeLocationSliceConformance` ([slice README](src/location/README.md#extension-point-catalog)).
+- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection so far), `DedupModule.forRoot` and `DuplicateDetectionService` ([slice README](src/dedup/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/dedup/testing`: `describeDedupSliceConformance` ([slice README](src/dedup/README.md#extension-point-catalog)).
 
 ## Install and peer dependencies
 

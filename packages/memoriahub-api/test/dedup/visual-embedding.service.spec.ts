@@ -95,10 +95,10 @@ import {
   l2Normalize,
   looksLikeOnnxModel,
   VISUAL_EMBEDDING_MODEL_TAG,
-} from './visual-embedding.service';
-import { PrismaService } from '../prisma/prisma.service';
+} from '../../src/dedup/visual-embedding.service.js';
+import { MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
 import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
 
 const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;
 const CLIP_STD = [0.26862954, 0.26130258, 0.27577711] as const;
@@ -252,12 +252,12 @@ describe('VisualEmbeddingService — degraded mode', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VisualEmbeddingService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -339,10 +339,10 @@ describe('VisualEmbeddingService — onApplicationBootstrap', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [VisualEmbeddingService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [VisualEmbeddingService, { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<VisualEmbeddingService>(VisualEmbeddingService);
@@ -407,7 +407,7 @@ describe('VisualEmbeddingService — onApplicationBootstrap', () => {
 
     let errorSpy: jest.SpyInstance | undefined;
     try {
-      const freshModule = require('./visual-embedding.service') as typeof import('./visual-embedding.service');
+      const freshModule = require('../../src/dedup/visual-embedding.service') as typeof import('../../src/dedup/visual-embedding.service');
       // `jest.resetModules()` above also gives '@nestjs/common' a fresh
       // module instance, so `freshModule`'s internal `new Logger(...)` binds
       // to a DIFFERENT class object than the `Logger` imported at the top of
@@ -417,7 +417,7 @@ describe('VisualEmbeddingService — onApplicationBootstrap', () => {
       const freshCommon = require('@nestjs/common') as typeof import('@nestjs/common');
       errorSpy = jest.spyOn(freshCommon.Logger.prototype, 'error').mockImplementation();
 
-      const freshService = new freshModule.VisualEmbeddingService(mockPrisma as unknown as PrismaService);
+      const freshService = new freshModule.VisualEmbeddingService(mockPrisma as never);
       process.env['NODE_ENV'] = 'production';
 
       await freshService.onApplicationBootstrap();
@@ -473,7 +473,7 @@ describe('VisualEmbeddingService — session recycling (CLIP_SESSION_RECYCLE_AFT
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     (prepareImageForProcessing as jest.Mock).mockResolvedValue({
       buffer: Buffer.from('prepared'),
       width: 224,
@@ -488,7 +488,7 @@ describe('VisualEmbeddingService — session recycling (CLIP_SESSION_RECYCLE_AFT
     });
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [VisualEmbeddingService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [VisualEmbeddingService, { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<VisualEmbeddingService>(VisualEmbeddingService);
@@ -576,12 +576,12 @@ describe('VisualEmbeddingService — persistence half', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VisualEmbeddingService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
       ],
     }).compile();
 

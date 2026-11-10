@@ -15,12 +15,10 @@
  *    the service; a gone media item is a no-op
  */
 
-import type { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { duplicateDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { DuplicateDetectionHandler } from './duplicate-detection.handler';
-import { DuplicateDetectionService } from './duplicate-detection.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { circleJob, mediaItemJob, subjectPrisma } from '../../test/helpers/platform-job';
+import { DuplicateDetectionHandler } from '../../src/dedup/duplicate-detection.handler.js';
+import type { DuplicateDetectionService } from '../../src/dedup/duplicate-detection.service.js';
+import { circleJob, mediaItemJob, subjectPrisma } from '../helpers/job-fixtures.js';
 
 /** Canned, schema-valid node result payload (512-d embedding, decimal dHash). */
 function makeNodeResult() {
@@ -33,12 +31,12 @@ function makeNodeResult() {
 
 describe('DuplicateDetectionHandler', () => {
   let handler: DuplicateDetectionHandler;
-  let mockRegistry: { register: jest.Mock };
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockService: { processMediaItem: jest.Mock; persistDuplicate: jest.Mock };
   let prisma: ReturnType<typeof subjectPrisma>;
 
   beforeEach(() => {
-    mockRegistry = { register: jest.fn() };
+    mockRegistry = { registerHandler: jest.fn() };
     mockService = {
       processMediaItem: jest.fn().mockResolvedValue(undefined),
       persistDuplicate: jest.fn().mockResolvedValue(undefined),
@@ -46,15 +44,15 @@ describe('DuplicateDetectionHandler', () => {
     prisma = subjectPrisma();
 
     handler = new DuplicateDetectionHandler(
-      mockRegistry as unknown as JobHandlerRegistry,
-      prisma as unknown as PrismaService,
+      mockRegistry as never,
+      prisma as never,
       mockService as unknown as DuplicateDetectionService,
     );
   });
 
-  it('registers itself with the platform registry on module init', () => {
+  it('registers itself with the jobs port on module init', () => {
     handler.onModuleInit();
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('declares its label and a five-minute, three-attempt profile', () => {
