@@ -4,3 +4,4 @@ export * from './sql/sql.js';
 export * from './errors/memoriahub-error.js';
 export * from './errors/ai-errors.js';
 export * from './settings-helpers.js';
+export * from './streams/stream-utils.js';

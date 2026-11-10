@@ -360,6 +360,16 @@ export interface MemoriahubJobsPort {
    * @param suffix - a file extension such as `.mp4`.
    */
   tempPath(suffix?: string): string;
+
+  /**
+   * Records which provider and model a job ran on (the admin job list shows them). Optional: a
+   * host that does not show them binds nothing and the call is a no-op. Never throws into the job.
+   *
+   * @param jobId - the running job.
+   * @param provider - the provider key, or `null`.
+   * @param model - the model version, or `null`.
+   */
+  recordProvider?(jobId: string, provider: string | null, model: string | null): Promise<void>;
 }
 
 /**
