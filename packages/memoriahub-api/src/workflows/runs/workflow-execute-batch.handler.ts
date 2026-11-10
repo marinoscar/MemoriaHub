@@ -16,7 +16,7 @@ import {
   type MemoriahubMetricsPort,
 } from '../../ports/index.js';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor.js';
-import type { WorkflowAction, WorkflowActionContext } from '../actions/action-executor.types.js';
+import type { WorkflowActionInstance, WorkflowActionContext } from '../actions/action-executor.types.js';
 import { WorkflowConditionCompiler, type CompiledWorkflow } from '../compiler/workflow-condition.compiler.js';
 import type { WorkflowsDb } from '../data/workflows-db.js';
 import type { WorkflowDefinition } from '../definition/workflow-definition.schema.js';
@@ -229,7 +229,7 @@ export class WorkflowExecuteBatchHandler implements MemoriahubJobHandler, OnModu
 
     // Ordered action list: strip `type` off each definition action; the rest is
     // the action's params bag the executor reads by key.
-    const actions: WorkflowAction[] = definition.actions.map((a) => {
+    const actions: WorkflowActionInstance[] = definition.actions.map((a) => {
       const { type, ...params } = a as Record<string, unknown>;
       return { type: String(type), params };
     });
@@ -280,7 +280,7 @@ export class WorkflowExecuteBatchHandler implements MemoriahubJobHandler, OnModu
   private async processItem(
     runId: string,
     itemId: string,
-    actions: WorkflowAction[],
+    actions: WorkflowActionInstance[],
     compiled: CompiledWorkflow,
     ctx: WorkflowActionContext,
   ): Promise<ItemResult> {

@@ -55,7 +55,7 @@ export interface WorkflowActionItem {
  * definition-schema's passthrough `WorkflowAction`) so `params` is a distinct,
  * parsed bag the executor reads by key.
  */
-export interface WorkflowAction {
+export interface WorkflowActionInstance {
   type: string;
   params: Record<string, unknown>;
 }

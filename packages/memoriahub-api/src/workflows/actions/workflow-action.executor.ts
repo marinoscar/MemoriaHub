@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import type { ActionOutcome, WorkflowAction, WorkflowActionContext, WorkflowActionItem } from './action-executor.types.js';
+import type { ActionOutcome, WorkflowActionInstance, WorkflowActionContext, WorkflowActionItem } from './action-executor.types.js';
 
 /**
  * Applies the actions of one or more types: the executor half of a registered workflow action (the descriptor,
@@ -24,7 +24,7 @@ export interface WorkflowActionHandler {
    * @param item - the item.
    * @param ctx - the per-run context.
    */
-  execute(action: WorkflowAction, item: WorkflowActionItem, ctx: WorkflowActionContext): Promise<ActionOutcome>;
+  execute(action: WorkflowActionInstance, item: WorkflowActionItem, ctx: WorkflowActionContext): Promise<ActionOutcome>;
 
   /**
    * Releases a finished run's per-run cache, when the handler keeps one.
@@ -105,7 +105,7 @@ export class WorkflowActionExecutor {
    * @param item - the item.
    * @param ctx - the per-run context.
    */
-  async execute(action: WorkflowAction, item: WorkflowActionItem, ctx: WorkflowActionContext): Promise<ActionOutcome> {
+  async execute(action: WorkflowActionInstance, item: WorkflowActionItem, ctx: WorkflowActionContext): Promise<ActionOutcome> {
     const handler = this.handlers.find(action.type);
     if (!handler) return { status: 'failed', detail: `Unknown action type "${action.type}"` };
     try {
