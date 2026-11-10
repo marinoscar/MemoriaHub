@@ -41,6 +41,10 @@
     ],
     "media-sync": [
       "primitives"
+    ],
+    "search": [],
+    "enhancement": [
+      "media"
     ]
   }
 }

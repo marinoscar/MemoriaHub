@@ -11,3 +11,5 @@ export * from './location/index.js';
 export * from './workflows/index.js';
 export * from './media/index.js';
 export * from './media-sync/index.js';
+export * from './search/index.js';
+export * from './enhancement/index.js';

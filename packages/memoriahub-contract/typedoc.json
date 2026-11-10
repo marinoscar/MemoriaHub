@@ -12,7 +12,9 @@
     "./src/location/index.ts",
     "./src/workflows/index.ts",
     "./src/media/index.ts",
-    "./src/media-sync/index.ts"
+    "./src/media-sync/index.ts",
+    "./src/search/index.ts",
+    "./src/enhancement/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-contract",

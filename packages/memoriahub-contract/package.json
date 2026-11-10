@@ -71,6 +71,16 @@
       "import": "./dist/esm/media-sync/index.js",
       "require": "./dist/cjs/media-sync/index.js"
     },
+    "./search": {
+      "types": "./dist/types/search/index.d.ts",
+      "import": "./dist/esm/search/index.js",
+      "require": "./dist/cjs/search/index.js"
+    },
+    "./enhancement": {
+      "types": "./dist/types/enhancement/index.d.ts",
+      "import": "./dist/esm/enhancement/index.js",
+      "require": "./dist/cjs/enhancement/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -84,6 +94,8 @@
     "workflows",
     "media",
     "media-sync",
+    "search",
+    "enhancement",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
