@@ -1,12 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { bulkResolveBurstThresholdSchema } from '@marinoscar/memoriahub-contract/burst';
 
-export const bulkResolveBurstThresholdSchema = z.object({
-  circleId: z.string().uuid(),
-  threshold: z.coerce.number().int().min(0).max(100),
-  action: z.enum(['archive', 'trash']),
-});
+export { bulkResolveBurstThresholdSchema };
 
-export class BulkResolveBurstThresholdDto extends createZodDto(
-  bulkResolveBurstThresholdSchema,
-) {}
+export class BulkResolveBurstThresholdDto extends createZodDto(bulkResolveBurstThresholdSchema) {}
