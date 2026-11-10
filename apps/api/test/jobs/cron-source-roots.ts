@@ -38,5 +38,12 @@ export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', '
 const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
 export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup'].map((slice) => join(SLICES_ROOT, slice));
 
+/**
+ * The face slice of `@marinoscar/memoriahub-api` (RETRO-J6, #615), scanned like the media slice. It
+ * declares no `@Cron` or `@OnEvent` today: a later one is held to the same rules. Paths in the
+ * raw-SQL allowlist are relative to this root (`face-matching.service.ts`).
+ */
+export const FACE_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src', 'face');
+
 /** Every root the two scans read. */
-export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT, ...J10_SLICE_SOURCE_ROOTS];
+export const CRON_SOURCE_ROOTS: readonly string[] = [API_SOURCE_ROOT, MEDIA_SLICE_SOURCE_ROOT, FACE_SLICE_SOURCE_ROOT, ...J10_SLICE_SOURCE_ROOTS];

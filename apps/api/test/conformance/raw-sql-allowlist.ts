@@ -2,7 +2,7 @@
 // (the `user-owned-data` conformance suite, RETRO-B2 #611). Raw SQL bypasses the
 // typed client, so every statement is listed where a reviewer sees it. Paths are
 // relative to apps/api/src (or to packages/memoriahub-api/src/<slice> for a slice moved into the
-// package: media RETRO-J5, insights RETRO-J10). A new file with raw SQL fails the suite until it is
+// package: media RETRO-J5, face RETRO-J6, insights/location/dedup RETRO-J10). A new file with raw SQL fails the suite until it is
 // added here with a reason; prefer the typed client.
 export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
@@ -12,7 +12,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'visual-embedding.service.ts', why: 'pgvector column reads and writes (Prisma cannot type vector columns), keyed by media item id.' },
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
   { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },
-  { file: 'face/face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id.' },
+  { file: 'face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id. In the face slice package (packages/memoriahub-api/src/face).' },
   { file: 'insights.service.ts', why: 'Storage insight aggregates over the whole deployment. In the insights slice package (packages/memoriahub-api/src/insights).' },
   { file: 'legacy/media-shares-import.ts', why: 'Data migration only (RETRO-I4): reads the dropped-from-Prisma media_shares table, finds already-imported link grants by token hash, and re-keys share_expiring stamps; no request input, run by the operator script.' },
   { file: 'groups/location-group-rebuild.handler.ts', why: 'Set-based rebuild of the canonical location columns.' },

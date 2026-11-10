@@ -5,7 +5,7 @@ import {
   type DoctorCheckOutcome,
 } from '@marinoscar/platform-api/doctor';
 
-import { FaceSettingsService } from '../../../face/face-settings.service';
+import { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
 import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip } from '../outcome';
 import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
 

@@ -28,7 +28,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
 import { createOcrEngine, OcrEngine } from '@marinoscar/memoriahub-compute/ocr';
-import { VideoFrameExtractionService } from '../face/video-frame-extraction.service';
+import { VideoFrameExtractionService } from '@marinoscar/memoriahub-api/face';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 export interface RecognizeVideoOpts {

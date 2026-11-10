@@ -10,7 +10,8 @@ import { Logger } from '@nestjs/common';
 import { CredentialsService } from '@marinoscar/platform-api/credentials';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { GeoSettingsService } from '../../src/geo/geo-settings.service';
-import { FaceSettingsService } from '../../src/face/face-settings.service';
+import { FaceSettingsService, FaceSystemSettings } from '@marinoscar/memoriahub-api/face';
+import { PlatformMemoriahubSecretsAdapter } from '../../src/platform-memoriahub/secrets/platform-memoriahub-secrets.adapter';
 import { GeoGoogleCredentialResolver } from '../../src/media/geo/geo-google-credential.resolver';
 import '../../src/platform/credentials/credential-purposes.manifest';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
@@ -65,7 +66,19 @@ describeMaybeDb('Provider credentials (DB_GATED: real PostgreSQL)', () => {
       keys: () => ['compreface'],
       get: () => ({ capabilities: { detect: true }, requiresCredentials: false }),
     };
-    face = new FaceSettingsService(credentials, registry as never, systemSettings as never);
+    // The face slice reaches the credential store and the settings through the memoriahub ports (RETRO-J6).
+    const settingsPort = {
+      readSystem: async (name: string) => ({ value: settingsDoc[name], version: 1 }),
+      patchSystem: async (name: string, patch: Record<string, unknown>) => {
+        await systemSettings.patchSettings({ [name]: patch });
+        return { value: settingsDoc[name], version: 1 };
+      },
+    };
+    face = new FaceSettingsService(
+      new PlatformMemoriahubSecretsAdapter(credentials),
+      registry as never,
+      new FaceSystemSettings(settingsPort as never),
+    );
   });
 
   afterAll(async () => {

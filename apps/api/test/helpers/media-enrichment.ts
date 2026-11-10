@@ -15,7 +15,7 @@ import { UploadEnrichmentRegistry, UploadEnrichmentService } from '@marinoscar/m
 import { registerBurstUploadEnrichment } from '../../src/burst/burst-upload-enrichment';
 import { registerDedupUploadEnrichment } from '@marinoscar/memoriahub-api/dedup';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
-import { registerFaceUploadEnrichment } from '../../src/face/face-upload-enrichment';
+import { registerFaceUploadEnrichment } from '@marinoscar/memoriahub-api/face';
 import { registerLocationInferenceUploadEnrichment } from '@marinoscar/memoriahub-api/location';
 import type { MemoriahubEnqueueInput, MemoriahubJobsPort } from '@marinoscar/memoriahub-api/ports';
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';

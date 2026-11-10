@@ -26,7 +26,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { AppSystemSettings } from '../settings/app-settings.types';
 import type { AiSettingsService } from '../ai-port/ai-settings.service';
 import type { AiProviderRegistry } from '@marinoscar/platform-api/ai';
-import type { FaceSettingsService } from '../face/face-settings.service';
+import type { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
 import type { GeoSettingsService } from '../geo/geo-settings.service';
 import type { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import type { SocialMediaOcrService } from '../social-media/social-media-ocr.service';

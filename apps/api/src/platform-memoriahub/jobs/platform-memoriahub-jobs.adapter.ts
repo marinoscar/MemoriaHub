@@ -240,6 +240,11 @@ export class PlatformMemoriahubJobsAdapter implements MemoriahubJobsPort {
     return jobTempPath(suffix);
   }
 
+  @Trace()
+  async recordProvider(jobId: string, provider: string | null, model: string | null): Promise<void> {
+    await this.jobs.recordProvider(jobId, provider, model);
+  }
+
   /** One attempt: register the job's throttle bucket, run, and translate a rate limit. */
   private async run(handler: MemoriahubJobHandler, job: Job): Promise<void> {
     if (job.providerKey) this.throttle.registerProviderKey(job.type, job.providerKey);

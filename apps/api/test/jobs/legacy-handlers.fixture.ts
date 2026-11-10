@@ -6,11 +6,8 @@
 
 import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
 import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
-import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
-import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
-import { FaceAutoArchiveSweepHandler } from '../../src/face/face-auto-archive-sweep.handler';
-import { FaceDetectionHandler } from '../../src/face/face-detection.handler';
+import { DuplicateConfidenceBackfillHandler, DuplicateDetectionHandler, DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
+import { FaceAutoArchiveSweepHandler, FaceDetectionHandler, VideoFaceDetectionHandler } from '@marinoscar/memoriahub-api/face';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
 import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
@@ -36,7 +33,6 @@ import { TrashEmptyEvaluateHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
 import { VideoAutoTaggingHandler } from '../../src/tagging/video-auto-tagging.handler';
-import { VideoFaceDetectionHandler } from '../../src/face/video-face-detection.handler';
 import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
 import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
 import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';

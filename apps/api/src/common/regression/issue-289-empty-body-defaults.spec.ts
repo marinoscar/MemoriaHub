@@ -50,7 +50,7 @@
 
 import { randomUUID } from 'crypto';
 import { updateWorkflowSchema, UpdateWorkflowDto } from '../../workflows/dto/update-workflow.dto';
-import { updatePersonSchema, UpdatePersonDto } from '../../face/dto/people.dto';
+import { updatePersonSchema, UpdatePersonDto } from '@marinoscar/memoriahub-api/face';
 import { ReprocessFailedBodyDto } from '../../media/media-reprocess.controller';
 import { composePatchUserSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../../settings/registry';

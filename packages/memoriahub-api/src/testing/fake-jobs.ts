@@ -161,6 +161,20 @@ export class FakeMemoriahubJobs implements MemoriahubJobsPort {
     return `/tmp/memoriahub-fake-${randomUUID()}${suffix}`;
   }
 
+  /** The provider and model each job recorded, by job id. */
+  readonly providers = new Map<string, { provider: string | null; model: string | null }>();
+
+  /**
+   * Remembers the provider and model a job ran on.
+   *
+   * @param jobId - the job.
+   * @param provider - the provider key.
+   * @param model - the model version.
+   */
+  async recordProvider(jobId: string, provider: string | null, model: string | null): Promise<void> {
+    this.providers.set(jobId, { provider, model });
+  }
+
   /**
    * Plays the worker: runs every runnable job until none is left, honouring attempts, deferrals and
    * the node-eligibility rules. Emits one settled event per terminal job.

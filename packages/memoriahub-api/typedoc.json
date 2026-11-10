@@ -13,7 +13,9 @@
     "./src/location/index.ts",
     "./src/location/testing/index.ts",
     "./src/dedup/index.ts",
-    "./src/dedup/testing/index.ts"
+    "./src/dedup/testing/index.ts",
+    "./src/face/index.ts",
+    "./src/face/testing/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-api",

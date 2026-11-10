@@ -234,6 +234,16 @@
         "zod"
       ]
     },
+    "face": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
+        "zod"
+      ]
+    },
     "insights": {
       "peers": [
         "@nestjs/common",

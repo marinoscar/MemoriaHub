@@ -39,6 +39,14 @@
       "types": "./dist/media/testing/index.d.ts",
       "default": "./dist/media/testing/index.js"
     },
+    "./face": {
+      "types": "./dist/face/index.d.ts",
+      "default": "./dist/face/index.js"
+    },
+    "./face/testing": {
+      "types": "./dist/face/testing/index.d.ts",
+      "default": "./dist/face/testing/index.js"
+    },
     "./insights": {
       "types": "./dist/insights/index.d.ts",
       "default": "./dist/insights/index.js"
@@ -71,6 +79,7 @@
     "core",
     "testing",
     "media",
+    "face",
     "insights",
     "location",
     "dedup",
@@ -89,6 +98,7 @@
     "test:db": "jest -c jest.config.js --selectProjects db --runInBand --passWithNoTests"
   },
   "peerDependencies": {
+    "@marinoscar/memoriahub-compute": ">=0.0.0-0 || >=0.1.0-0",
     "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@nestjs/common": "^11.1.12",
     "@nestjs/core": "^11.1.12",
@@ -96,12 +106,14 @@
     "@nestjs/swagger": "^11.4.6",
     "@opentelemetry/api": "^1.9.1",
     "@prisma/client-runtime-utils": "^7.8.0",
-    "@marinoscar/memoriahub-compute": ">=0.0.0-0 || >=0.1.0-0",
     "nestjs-zod": "^5.4.0",
-    "onnxruntime-node": "^1.27.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "onnxruntime-node": "^1.27.0"
   },
   "peerDependenciesMeta": {
+    "@marinoscar/memoriahub-compute": {
+      "optional": true
+    },
     "@marinoscar/memoriahub-contract": {
       "optional": true
     },
@@ -109,9 +121,6 @@
       "optional": true
     },
     "@nestjs/schedule": {
-      "optional": true
-    },
-    "@marinoscar/memoriahub-compute": {
       "optional": true
     },
     "@nestjs/swagger": {

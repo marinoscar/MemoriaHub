@@ -102,6 +102,12 @@
       "core",
       "testing"
     ],
+    "face": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
     "insights": [
       "ports",
       "core",

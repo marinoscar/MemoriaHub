@@ -1,0 +1,831 @@
+/**
+ * Unit tests for FaceDetectionService.
+ *
+ * Tests bounding-box normalization, L2 embedding normalization, face creation,
+ * status upserts, markFailed paths, provider-not-configured error,
+ * and Phase 3 face matching after detection.
+ *
+ * IMPORTANT: SECRETS_ENCRYPTION_KEY must be set for encrypt/decrypt to work.
+ */
+
+jest.mock('sharp', () => {
+  const mockPipeline = {
+    ensureAlpha: jest.fn().mockReturnThis(),
+    raw: jest.fn().mockReturnThis(),
+    rotate: jest.fn().mockReturnThis(),
+    resize: jest.fn().mockReturnThis(),
+    jpeg: jest.fn().mockReturnThis(),
+    toBuffer: jest.fn().mockResolvedValue({
+      data: Buffer.from('upright'),
+      info: { width: 800, height: 600 },
+    }),
+  };
+  return jest.fn().mockReturnValue(mockPipeline);
+});
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { Readable } from 'stream';
+import { FaceDetectionService } from '../../src/face/face-detection.service.js';
+import { FaceDetectionCore } from '../../src/face/face-detection-core.service.js';
+import { MediaTouchService } from '../../src/media/index.js';
+import { MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { FaceSettingsService } from '../../src/face/face-settings.service.js';
+import { FaceProviderRegistry } from '../../src/face/providers/face-provider.registry.js';
+import { FaceMatchingService } from '../../src/face/face-matching.service.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from './support/mock-prisma.js';
+import { MediaFaceStatusType } from '../../src/face/host/face-enums.js';
+import { FaceJobs } from '../../src/face/host/face-jobs.js';
+import { FaceSystemSettings } from '../../src/face/host/face-system-settings.js';
+import type { MediaJobContext } from '../../src/face/host/media-item-job.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeJob(overrides: Partial<MediaJobContext> = {}): MediaJobContext {
+  return { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1', ...overrides };
+}
+
+function makeMediaItem(overrides: Partial<{
+  id: string;
+  circleId: string;
+  width: number | null;
+  height: number | null;
+  storageObject: { storageKey: string; storageProvider: string; bucket: string } | null;
+}> = {}) {
+  return {
+    id: 'media-1',
+    circleId: 'circle-1',
+    width: 500,
+    height: 400,
+    storageObject: { storageKey: 'storage/key.jpg', storageProvider: 's3', bucket: 'test-bucket' },
+    ...overrides,
+  };
+}
+
+function makeReadable(content: Buffer = Buffer.from('fake-image')): Readable {
+  return Readable.from([content]);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('FaceDetectionService', () => {
+  let service: FaceDetectionService;
+  let mockPrisma: MockPrismaService;
+  let mockFaceSettingsService: {
+    resolveCredentials: jest.Mock;
+  };
+  let mockRegistry: { get: jest.Mock };
+  let mockProvider: { detect: jest.Mock; capabilities: Record<string, never> };
+  let mockStorageProvider: { download: jest.Mock };
+  let mockObjectStore: { forLocation: jest.Mock };
+  let faceSettingsValue: any;
+  let mockMatchingService: {
+    matchFaceToPerson: jest.Mock;
+  };
+  let mockEnrichmentJobService: { recordModel: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock; face: jest.Mock };
+  let mockMediaTouch: { touchMediaItems: jest.Mock };
+
+  beforeEach(async () => {
+    // Reset sharp mock call counts between tests (implementations set in the factory are retained)
+    (jest.requireMock('sharp') as jest.Mock).mockClear();
+
+    mockPrisma = createMockPrismaService();
+    mockProvider = {
+      detect: jest.fn(),
+      capabilities: {},
+    };
+    mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
+    mockFaceSettingsService = { resolveCredentials: jest.fn().mockResolvedValue({ apiKey: 'test-key' }) };
+    mockStorageProvider = { download: jest.fn().mockResolvedValue(makeReadable()) };
+    // Resolver returns mockStorageProvider so download assertions are unchanged.
+    mockObjectStore = { forLocation: jest.fn().mockResolvedValue(mockStorageProvider) };
+    mockMatchingService = {
+      matchFaceToPerson: jest.fn().mockResolvedValue(null),
+    };
+    mockEnrichmentJobService = { recordModel: jest.fn().mockResolvedValue(undefined) };
+    // FaceDetectionCore reads auto-archive gating via AppSystemSettingsService;
+    // default to the feature OFF so pre-existing matching-behavior tests are
+    // unaffected (faceAutoArchive auto-archive branch is covered separately
+    // in face-detection-core.service.spec.ts).
+    mockSystemSettings = {
+      getSettings: jest.fn().mockResolvedValue({
+        features: {},
+        face: { autoArchive: { matchThreshold: 0.45 } },
+      }),
+      face: jest.fn(async () => faceSettingsValue),
+    };
+
+    // Default system settings: face detection configured
+    faceSettingsValue = {
+      features: {
+        detection: { provider: 'compreface', model: 'arcface-r100-v1' },
+      },
+    };
+
+    // Default media item
+    (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
+
+    // Default upserts and mutations succeed silently
+    (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
+    (mockPrisma.face.deleteMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+    // Default face.create returns a created face
+    (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+      id: 'face-1',
+      embedding: [],
+    });
+
+    // Default face.update succeeds
+    (mockPrisma.face.update as jest.Mock).mockResolvedValue({});
+
+    // Backup change feed (issue #310) — captured in a variable so tests can
+    // assert exactly which MediaItem ids persistFaces touches.
+    mockMediaTouch = {
+      touchMediaItems: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        FaceDetectionService,
+        FaceDetectionCore, // Real instance wired to the mocked dependencies below
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: FaceSettingsService, useValue: mockFaceSettingsService },
+        { provide: FaceProviderRegistry, useValue: mockRegistry },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: mockObjectStore },
+        { provide: FaceMatchingService, useValue: mockMatchingService },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
+        { provide: FaceSystemSettings, useValue: mockSystemSettings },
+        { provide: MediaTouchService, useValue: mockMediaTouch },
+      ],
+    }).compile();
+
+    service = module.get<FaceDetectionService>(FaceDetectionService);
+  });
+
+  // -------------------------------------------------------------------------
+  // Status → processing (initial upsert)
+  // -------------------------------------------------------------------------
+
+  describe('initial status upsert', () => {
+    it('upserts MediaFaceStatus to processing at the start', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      const firstUpsert = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls[0][0];
+      expect(firstUpsert.create.status).toBe(MediaFaceStatusType.processing);
+      expect(firstUpsert.update.status).toBe(MediaFaceStatusType.processing);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Bounding-box normalization
+  // -------------------------------------------------------------------------
+
+  describe('bounding box normalization', () => {
+    it('converts pixel coords to fractions when any coord > 1.0', async () => {
+      // Sharp mock returns upright dims: 800x600
+      // Box: x=160/800=0.2, y=120/600=0.2, w=80/800=0.1, h=60/600=0.1
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 160, y: 120, w: 80, h: 60 },
+          confidence: 0.95,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      expect(storedBb.x).toBeCloseTo(0.2, 5);
+      expect(storedBb.y).toBeCloseTo(0.2, 5);
+      expect(storedBb.w).toBeCloseTo(0.1, 5);
+      expect(storedBb.h).toBeCloseTo(0.1, 5);
+    });
+
+    it('passes through fractional coords unchanged when all coords <= 1.0', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+          confidence: 0.88,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      expect(storedBb.x).toBeCloseTo(0.1, 5);
+      expect(storedBb.y).toBeCloseTo(0.2, 5);
+      expect(storedBb.w).toBeCloseTo(0.3, 5);
+      expect(storedBb.h).toBeCloseTo(0.4, 5);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // EXIF preprocessing: upright buffer and box normalization
+  // -------------------------------------------------------------------------
+
+  describe('EXIF preprocessing: upright buffer and box normalization', () => {
+    it('passes the sharp-processed (upright) buffer to provider.detect, not the raw storage buffer', async () => {
+      const rawBuffer = Buffer.from('raw-storage-bytes');
+      mockStorageProvider.download.mockResolvedValue(makeReadable(rawBuffer));
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      // sharp must have been invoked with the raw downloaded buffer
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      expect(sharpMock).toHaveBeenCalledWith(rawBuffer);
+
+      // provider.detect must NOT have received the raw storage buffer
+      expect(mockProvider.detect).toHaveBeenCalledTimes(1);
+      const detectArg = (mockProvider.detect as jest.Mock).mock.calls[0][1] as Buffer;
+      expect(detectArg).not.toBe(rawBuffer);
+      expect(Buffer.isBuffer(detectArg)).toBe(true);
+    });
+
+    it('normalizes pixel bounding boxes by upright dims from sharp (not raw MediaItem dims)', async () => {
+      // MediaItem raw dims: 500x400 (set in makeMediaItem)
+      // Sharp mock upright dims: 800x600 (from jest.mock above)
+      // Provider returns pixel box: x=160, y=120, w=80, h=60
+      // Expected normalized by upright: x=160/800=0.2, y=120/600=0.2, w=80/800=0.1, h=60/600=0.1
+      // If incorrectly using raw MediaItem dims: x=160/500=0.32 (wrong)
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 160, y: 120, w: 80, h: 60 },
+          confidence: 0.95,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      // Normalized by sharp upright dims (800x600), not MediaItem dims (500x400)
+      expect(storedBb.x).toBeCloseTo(0.2, 5);   // 160/800
+      expect(storedBb.y).toBeCloseTo(0.2, 5);   // 120/600
+      expect(storedBb.w).toBeCloseTo(0.1, 5);   // 80/800
+      expect(storedBb.h).toBeCloseTo(0.1, 5);   // 60/600
+    });
+
+    it('falls back to raw buffer and MediaItem dims when sharp preprocessing throws', async () => {
+      // Override sharp to throw for this test only
+      const sharpMock = jest.requireMock('sharp') as jest.Mock;
+      sharpMock.mockReturnValueOnce({
+        rotate: jest.fn().mockReturnThis(),
+        resize: jest.fn().mockReturnThis(),
+        jpeg: jest.fn().mockReturnThis(),
+        toBuffer: jest.fn().mockRejectedValueOnce(new Error('sharp corrupt image')),
+      });
+
+      const rawBuffer = Buffer.from('raw-fallback');
+      mockStorageProvider.download.mockResolvedValue(makeReadable(rawBuffer));
+
+      // Provider returns a pixel box; will be normalized by MediaItem dims (500x400) as fallback
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 100, y: 200, w: 50, h: 80 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      // Should not throw — sharp failure is non-fatal
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // detect should have been called with the raw buffer (fallback)
+      expect(mockProvider.detect).toHaveBeenCalledWith(
+        expect.anything(),
+        rawBuffer,
+      );
+
+      // Box normalized by MediaItem dims (500x400), not sharp upright dims
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      expect(storedBb.x).toBeCloseTo(0.2, 5);  // 100/500
+      expect(storedBb.y).toBeCloseTo(0.5, 5);  // 200/400
+      expect(storedBb.w).toBeCloseTo(0.1, 5);  // 50/500
+      expect(storedBb.h).toBeCloseTo(0.2, 5);  // 80/400
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // L2 embedding normalization
+  // -------------------------------------------------------------------------
+
+  describe('embedding L2 normalization', () => {
+    it('L2-normalizes the embedding vector', async () => {
+      // [3, 4] → norm=5 → [0.6, 0.8]
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [3, 4],
+          landmarks: null,
+        },
+      ]);
+
+      // face.create returns the normalized embedding stored
+      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+        id: 'face-1',
+        embedding: [0.6, 0.8],
+      });
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedEmbedding = createCall.data.embedding;
+      expect(storedEmbedding[0]).toBeCloseTo(0.6, 5);
+      expect(storedEmbedding[1]).toBeCloseTo(0.8, 5);
+    });
+
+    it('stores empty embedding array when no embedding provided', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.embedding).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Zero faces → no_faces status
+  // -------------------------------------------------------------------------
+
+  describe('zero faces detected', () => {
+    it('upserts status to no_faces when provider returns empty array', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      // Final upsert (second call)
+      const calls = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaFaceStatusType.no_faces);
+      expect(finalUpsert.update.status).toBe(MediaFaceStatusType.no_faces);
+    });
+
+    it('does NOT call face.create when no faces detected', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Non-zero faces → processed status
+  // -------------------------------------------------------------------------
+
+  describe('faces detected', () => {
+    it('upserts status to processed with faceCount, providerKey, and modelVersion', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      const calls = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaFaceStatusType.processed);
+      expect(finalUpsert.create.faceCount).toBe(1);
+      expect(finalUpsert.create.providerKey).toBe('compreface');
+      expect(finalUpsert.create.modelVersion).toBe('arcface-r100-v1');
+      expect(finalUpsert.create.processedAt).toBeInstanceOf(Date);
+    });
+
+    it('creates face rows via face.create for each detected face', async () => {
+      const detectedFaces = [
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+        },
+        {
+          boundingBox: { x: 0.5, y: 0.5, w: 0.2, h: 0.2 },
+          confidence: 0.85,
+          embedding: [],
+          landmarks: null,
+        },
+      ];
+      mockProvider.detect.mockResolvedValue(detectedFaces);
+
+      // Each create call returns a new face row
+      (mockPrisma.face.create as jest.Mock)
+        .mockResolvedValueOnce({ id: 'face-1', embedding: [] })
+        .mockResolvedValueOnce({ id: 'face-2', embedding: [] });
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.create).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Prior non-manually-assigned faces deleted
+  // -------------------------------------------------------------------------
+
+  describe('idempotency: delete prior non-manual faces', () => {
+    it('calls face.deleteMany with manuallyAssigned:false before creating new faces', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [],
+          landmarks: null,
+        },
+      ]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: 'media-1',
+          manuallyAssigned: false,
+        },
+      });
+    });
+
+    it('calls face.deleteMany even when zero faces are detected', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: {
+          mediaItemId: 'media-1',
+          manuallyAssigned: false,
+        },
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // No provider configured → markFailed + throw
+  // -------------------------------------------------------------------------
+
+  describe('no provider configured', () => {
+    it('calls markFailed and throws when face detection provider is not configured', async () => {
+      // Return system settings with no face provider
+      faceSettingsValue = { features: { detection: { model: 'arcface-r100-v1' } } };
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow(
+        'Face detection provider not configured in system settings',
+      );
+
+      // markFailed upserts status to failed
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+          update: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+        }),
+      );
+    });
+
+    it('throws when the face settings are absent (not configured at all)', async () => {
+      faceSettingsValue = undefined;
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow();
+
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Provider detect throws → error propagates
+  // -------------------------------------------------------------------------
+
+  describe('provider detect throws', () => {
+    it('propagates error from provider.detect', async () => {
+      mockProvider.detect.mockRejectedValue(new Error('CompreFace unreachable'));
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow('CompreFace unreachable');
+    });
+
+    it('upserts MediaFaceStatus to failed when provider.detect throws', async () => {
+      mockProvider.detect.mockRejectedValue(new Error('CompreFace unreachable'));
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow('CompreFace unreachable');
+
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+          update: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+        }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // MediaItem not found → markFailed + throw
+  // -------------------------------------------------------------------------
+
+  describe('media item not found', () => {
+    it('calls markFailed and throws when mediaItem is not found', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow(
+        'MediaItem media-1 or its StorageObject not found',
+      );
+
+      expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ status: MediaFaceStatusType.failed }),
+        }),
+      );
+    });
+
+    it('calls markFailed and throws when mediaItem has no storageObject', async () => {
+      (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
+        makeMediaItem({ storageObject: null }),
+      );
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow(
+        'MediaItem media-1 or its StorageObject not found',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 3: face matching after detection
+  // -------------------------------------------------------------------------
+
+  describe('Phase 3: face matching after detection', () => {
+    it('assigns personId when matchFaceToPerson returns a match', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [0.6, 0.8],
+          landmarks: null,
+        },
+      ]);
+
+      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+        id: 'face-1',
+        embedding: [0.6, 0.8],
+      });
+
+      mockMatchingService.matchFaceToPerson.mockResolvedValue({
+        personId: 'person-1',
+        similarity: 0.9,
+      });
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.update).toHaveBeenCalledWith({
+        where: { id: 'face-1' },
+        data: { personId: 'person-1' },
+      });
+    });
+
+    it('leaves personId null when no match found (similarity below threshold)', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [0.6, 0.8],
+          landmarks: null,
+        },
+      ]);
+
+      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+        id: 'face-1',
+        embedding: [0.6, 0.8],
+      });
+
+      mockMatchingService.matchFaceToPerson.mockResolvedValue(null);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockPrisma.face.update).not.toHaveBeenCalled();
+    });
+
+    it('matching failure is non-fatal — detection still completes', async () => {
+      mockProvider.detect.mockResolvedValue([
+        {
+          boundingBox: { x: 0.1, y: 0.1, w: 0.1, h: 0.1 },
+          confidence: 0.9,
+          embedding: [0.6, 0.8],
+          landmarks: null,
+        },
+      ]);
+
+      (mockPrisma.face.create as jest.Mock).mockResolvedValue({
+        id: 'face-1',
+        embedding: [0.6, 0.8],
+      });
+
+      mockMatchingService.matchFaceToPerson.mockRejectedValue(new Error('match failed'));
+
+      // Should not throw — matching failure is non-fatal
+      await expect(service.processMediaItem(makeJob())).resolves.toBeUndefined();
+
+      // Status should still be upserted to processed
+      const calls = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls;
+      const finalUpsert = calls[calls.length - 1][0];
+      expect(finalUpsert.create.status).toBe(MediaFaceStatusType.processed);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recordModel call
+  // -------------------------------------------------------------------------
+
+  describe('recordModel integration', () => {
+    it('calls enrichmentJobService.recordModel with job.id, providerKey, and modelVersion on the processing path', async () => {
+      mockProvider.detect.mockResolvedValue([]);
+
+      await service.processMediaItem(makeJob());
+
+      expect(mockEnrichmentJobService.recordModel).toHaveBeenCalledWith(
+        'job-1',
+        'compreface',
+        'arcface-r100-v1',
+      );
+    });
+
+    it('does NOT call recordModel when provider is not configured', async () => {
+      faceSettingsValue = { features: { detection: { model: 'arcface-r100-v1' } } };
+
+      await expect(service.processMediaItem(makeJob())).rejects.toThrow();
+
+      expect(mockEnrichmentJobService.recordModel).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // persistFaces — standalone persist half (node result-ingestion path)
+  // -------------------------------------------------------------------------
+
+  describe('persistFaces (node persist path)', () => {
+    /** Canned node-computed DTO: PIXEL boxes relative to 800x600. */
+    function makeCannedResult() {
+      return {
+        modelVersion: 'human-faceres-1024',
+        providerKey: 'human',
+        imageWidth: 800,
+        imageHeight: 600,
+        faces: [
+          {
+            boundingBox: { x: 160, y: 120, width: 80, height: 60 },
+            confidence: 0.95,
+            embedding: [3, 4], // L2 norm 5 → [0.6, 0.8]
+          },
+        ],
+      };
+    }
+
+    it('throws when job.mediaItemId is missing', async () => {
+      await expect(
+        service.persistFaces(makeJob({ mediaItemId: null }), makeCannedResult()),
+      ).rejects.toThrow('face_detection job missing mediaItemId');
+    });
+
+    it('throws when job.circleId is missing', async () => {
+      await expect(
+        service.persistFaces(makeJob({ circleId: null }), makeCannedResult()),
+      ).rejects.toThrow('face_detection job missing circleId');
+    });
+
+    it('deletes prior non-manual faces before creating new ones', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      expect(mockPrisma.face.deleteMany).toHaveBeenCalledWith({
+        where: { mediaItemId: 'media-1', manuallyAssigned: false },
+      });
+    });
+
+    it('touches the MediaItem for the backup change feed after persisting (issue #310)', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(['media-1']);
+    });
+
+    it('still touches the MediaItem when the DTO has zero faces (Face rows cleared, not created)', async () => {
+      const empty = { ...makeCannedResult(), faces: [] };
+
+      await service.persistFaces(makeJob(), empty);
+
+      expect(mockMediaTouch.touchMediaItems).toHaveBeenCalledWith(['media-1']);
+    });
+
+    it('normalizes the PIXEL bounding box by the DTO imageWidth/imageHeight (not raw MediaItem dims)', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedBb = createCall.data.boundingBox;
+      // 160/800=0.2, 120/600=0.2, 80/800=0.1, 60/600=0.1
+      expect(storedBb.x).toBeCloseTo(0.2, 5);
+      expect(storedBb.y).toBeCloseTo(0.2, 5);
+      expect(storedBb.w).toBeCloseTo(0.1, 5);
+      expect(storedBb.h).toBeCloseTo(0.1, 5);
+    });
+
+    it('L2-normalizes the DTO embedding before persisting', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      const storedEmbedding = createCall.data.embedding;
+      expect(storedEmbedding[0]).toBeCloseTo(0.6, 5);
+      expect(storedEmbedding[1]).toBeCloseTo(0.8, 5);
+    });
+
+    it('persists using the DTO providerKey/modelVersion, not the currently-active provider', async () => {
+      // Active provider (per system settings mock) is compreface, but the DTO
+      // says human — persistFaces must trust the DTO, not re-resolve.
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      const createCall = (mockPrisma.face.create as jest.Mock).mock.calls[0][0];
+      expect(createCall.data.providerKey).toBe('human');
+      expect(createCall.data.modelVersion).toBe('human-faceres-1024');
+
+      const finalUpsert = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls[0][0];
+      expect(finalUpsert.create.providerKey).toBe('human');
+      expect(finalUpsert.create.modelVersion).toBe('human-faceres-1024');
+    });
+
+    it('upserts MediaFaceStatus to processed with the DTO face count', async () => {
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      const finalUpsert = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls[0][0];
+      expect(finalUpsert.create.status).toBe(MediaFaceStatusType.processed);
+      expect(finalUpsert.create.faceCount).toBe(1);
+    });
+
+    it('upserts MediaFaceStatus to no_faces and skips face.create when the DTO has zero faces', async () => {
+      const empty = { ...makeCannedResult(), faces: [] };
+
+      await service.persistFaces(makeJob(), empty);
+
+      expect(mockPrisma.face.create).not.toHaveBeenCalled();
+      const finalUpsert = (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mock.calls[0][0];
+      expect(finalUpsert.create.status).toBe(MediaFaceStatusType.no_faces);
+      expect(finalUpsert.create.faceCount).toBe(0);
+    });
+
+    it('logs a WARN when the DTO providerKey differs from the currently-active server provider', async () => {
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+      // Active provider per system settings mock is 'compreface'; DTO says 'human'.
+      await service.persistFaces(makeJob(), makeCannedResult());
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('differs from the currently-active'),
+      );
+    });
+
+    it('does NOT log a provider-mismatch WARN when the DTO providerKey matches the active provider', async () => {
+      const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+      const matching = { ...makeCannedResult(), providerKey: 'compreface', modelVersion: 'arcface-r100-v1' };
+      await service.persistFaces(makeJob(), matching);
+
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('differs from the currently-active'),
+      );
+    });
+
+    it('does not throw when resolving the active provider fails during the mismatch check', async () => {
+      mockSystemSettings.face.mockResolvedValueOnce(undefined);
+
+      await expect(
+        service.persistFaces(makeJob(), makeCannedResult()),
+      ).resolves.toBeUndefined();
+
+      // Persistence still completed despite the mismatch-check failure.
+      expect(mockPrisma.face.create).toHaveBeenCalledTimes(1);
+    });
+  });
+});
