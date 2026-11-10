@@ -6,8 +6,7 @@
  * which makes the server defer the job without consuming an attempt, only for an `instanceof` the
  * PLATFORM's own class. `withPlatformRateLimit` converts one into the other.
  *
- * PLATFORM-ADOPTION-SHIM(RETRO-SEAM-NODE-RATELIMIT): the platform does not export its class (a seam
- * request is filed). The class is loaded from the installed package's file, by URL, which is the
+ * PLATFORM-ADOPTION-SHIM(RETRO-SEAM-NODE-RATELIMIT, EAB#1144): the platform does not export its class. The class is loaded from the installed package's file, by URL, which is the
  * module instance the engine itself imports; if that cannot be done the conversion is skipped and
  * the throttle is an ordinary failure (the job still retries, but charges an attempt).
  */

@@ -36,6 +36,6 @@ export function makeContext(
     log: (message: string) => void logs.push(message),
     ...over,
   } as unknown as JobExecutionContext;
-  (context as { api: FakeApi }).api = api;
+  (context as unknown as { api: FakeApi }).api = api;
   return { context, api, logs };
 }

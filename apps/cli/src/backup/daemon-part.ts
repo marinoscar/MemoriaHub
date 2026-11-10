@@ -11,6 +11,9 @@
  *     on the backup control socket (./socket-path.ts), with the frames the 1.3 daemon used, because a
  *     platform channel cannot take commands.
  *
+ * PLATFORM-ADOPTION-SHIM(RETRO-SEAM-DAEMON-COMMANDS, EAB#1145): the control socket exists because a
+ * channel cannot take commands.
+ *
  * Activation is the 1.3 rule: a backup root bound in the settings (`backup.root` + `backup.nodeId`).
  * Nothing here ever throws into worker start.
  */

@@ -1068,6 +1068,18 @@ Both commands write a Summary + Detail report (or Detail-only for `--format csv`
 
 ## Worker Nodes (distributed compute)
 
+> **CLI 1.6 (RETRO-C10, #616): the worker is the platform node engine.** `memoriahub node ...` is `@marinoscar/platform-cli`'s group (`config`, `enroll`, `register`, `start [--daemon] [--headless]`, `stop`, `status`, `logs`, `set-concurrency`, `doctor`, `install-deps`, `models pull|status`, `service`, `heap-snapshot`) with MemoriaHub's executors (`src/executors/`) and one extra subcommand, `node list`. It speaks the platform node API: **existing nodes re-register after the upgrade** (`node register`; a stored `nod_` token stays valid, and a 1.3 daemon still running must be stopped with `kill <pid>`; the CLI names it). State moved to `~/.memoriahub/node/` (pidfile, socket, logs, models; `MEMORIAHUB_STATE_DIR` is now that directory only). The 1.3 variables keep working for one release with a deprecation line:
+>
+> | 1.3 | Now |
+> |---|---|
+> | `MEMORIAHUB_MAX_OLD_SPACE_MB` / `_HEAP_SNAPSHOT` / `_MEMWATCH` / `_HEAP_RESTART_FRACTION` | `MEMORIAHUB_HEAP_LIMIT_MB` / `_HEAP_SNAPSHOTS` / `_MEMORY_WATCHDOG` / `_MEMORY_THRESHOLD` |
+> | `MEMORIAHUB_SHARP_CONCURRENCY` | `MEMORIAHUB_NATIVE_THREADS` |
+> | `MODELS_DIR` | `MEMORIAHUB_MODELS_DIR` |
+> | `MEMORIAHUB_URL` | `MEMORIAHUB_SERVER_URL` |
+> | `MEMORIAHUB_STARTUP_SELFTEST` | none: a headless worker always self-tests |
+>
+> Unchanged: `_TOKEN`, `_NODE_ID`, `_NODE_NAME`, `_CONCURRENCY`, `_ELIGIBLE_TYPES`, `_POLL_INTERVAL_MS`, `_HEADLESS`, `_HEAP_TUNED`, `_FACE_PROVIDER`, `_COMPREFACE_URL`, `_CLIP_RECYCLE_AFTER`. The memory valve still exits 75 after a clean drain. The Worker Node menu entry opens the platform's node screen (dashboard, doctor, logs, register, enroll). `auto_tagging` and `video_auto_tagging` are server-only and never advertised; a `geocode` job reaches a node only with the Google key through the per-job secret (`nodes.jobSecretBrokerEnabled`, off by default). The sections below describe the 1.3 flags and screens; where they differ, this note wins (docs follow-up: RETRO-C11).
+
 A **worker node** turns a spare laptop or desktop into extra processing capacity for your MemoriaHub server. Enrichment jobs — face detection, near-duplicate/CLIP embedding, thumbnail generation, metadata extraction, social-media video detection, AI auto-tagging, and reverse geocoding — normally run inside the server's own in-process worker. Once a machine registers as a node, it claims eligible jobs from that same queue, runs the compute locally, and submits results back over HTTPS. The server's own worker keeps processing every job type exactly as before with zero nodes registered — a node is pure elastic extra capacity, never a dependency.
 
 A shared compute package (`packages/enrichment-compute`) is imported identically by the server and the CLI, so a node's face embeddings and CLIP visual embeddings are numerically identical to the server's — face clusters and duplicate groups stay correct no matter which machine produced the underlying vector.
@@ -1079,10 +1091,10 @@ A shared compute package (`packages/enrichment-compute`) is imported identically
 - `metadata_extraction`
 - `thumbnail_regen` (photos only — a video input falls back to the server's existing reprocess pipeline)
 - `social_media_detection`
-- `auto_tagging` (via a transient, per-job AI credential — see Security model below)
-- `geocode` (via a transient, per-job credential; only the `nominatim`/`google` providers are node-computable — the on-server `offline` provider has no node-side equivalent)
+- `geocode` (Google key through the per-job secret; the server runs the other providers)
+- `video_face_detection`, `workflow_execute_batch`
 
-`video_face_detection` and `thumbnail_repair` are listed for interface parity but are not yet fully distributable in practice — see the [Distributed Nodes spec](../../docs/specs/distributed-nodes.md#8-node-eligible-job-types) for the full status table and known gaps.
+`thumbnail_repair` and the AI types are server-only.
 
 ### Install dependencies: `memoriahub node install-deps`
 

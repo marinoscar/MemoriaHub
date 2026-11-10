@@ -1,29 +1,25 @@
 # =============================================================================
-# App overlay (scope worker) - the variables MemoriaHub's worker CLI reads
+# App overlay (scope worker) - the image and the MemoriaHub worker variables
 # =============================================================================
-# worker.compose.yml is the platform's template and names its variables after
-# the platform engine (MEMORIAHUB_SERVER_URL, MEMORIAHUB_HEAP_LIMIT_MB, ...).
-# The MemoriaHub worker image runs `memoriahub node start --headless`, and its
-# CLI reads MEMORIAHUB_URL (apps/cli/src/config.ts) and the names below. This
-# overlay sets those, so one .env serves the fleet:
+# worker.compose.yml is the platform's template and names the platform engine's
+# variables (MEMORIAHUB_SERVER_URL, MEMORIAHUB_HEAP_LIMIT_MB, ...). Since
+# RETRO-C10 (#616) the MemoriaHub worker IS that engine, with MemoriaHub's
+# executors (apps/cli/src/executors), so no variable needs renaming here: the
+# old names (MEMORIAHUB_URL, MEMORIAHUB_MAX_OLD_SPACE_MB, ...) still work for
+# one release with a deprecation line (apps/cli/src/worker-env.ts).
 #
-#   MEMORIAHUB_URL        the API base URL. The platform template requires
-#                         MEMORIAHUB_SERVER_URL (set it in .env); this overlay
-#                         passes that one value to the CLI under its own name.
+#   MEMORIAHUB_SERVER_URL the API base URL (required, in .env)
 #   MEMORIAHUB_TOKEN      a node credential (nod_...) or a PAT (required)
-#   MEMORIAHUB_HEADLESS   1: drain on SIGTERM and exit, never deregister
 #
 # The image is WORKER_IMAGE, or ghcr.io/marinoscar/memoriahub-worker at the
-# WORKER_VERSION tag (default latest), as the previous bundle pinned it.
+# WORKER_VERSION tag (default latest), as the previous bundle pinned it. The
+# CLIP model and the Tesseract language data are baked into it
+# (MEMORIAHUB_MODELS_DIR=/app/models).
 # =============================================================================
 services:
   worker:
     image: ${WORKER_IMAGE:-ghcr.io/marinoscar/memoriahub-worker:${WORKER_VERSION:-latest}}
     stop_grace_period: ${WORKER_STOP_GRACE:-180s}
     environment:
-      - MEMORIAHUB_URL=${MEMORIAHUB_SERVER_URL:?set MEMORIAHUB_SERVER_URL to the API base URL in .env}
-      - MEMORIAHUB_TOKEN=${MEMORIAHUB_TOKEN:?set MEMORIAHUB_TOKEN to a node credential (nod_...) or PAT}
-      - MEMORIAHUB_NODE_NAME=${MEMORIAHUB_NODE_NAME:-worker}
       - MEMORIAHUB_CONCURRENCY=${MEMORIAHUB_CONCURRENCY:-2}
-      - MEMORIAHUB_HEADLESS=1
-      - MEMORIAHUB_STATE_DIR=/var/lib/worker
+      - MEMORIAHUB_MODELS_DIR=/app/models
