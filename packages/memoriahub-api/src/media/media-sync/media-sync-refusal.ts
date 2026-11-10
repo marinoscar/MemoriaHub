@@ -1,6 +1,6 @@
 import { HttpException, type HttpStatus } from '@nestjs/common';
 
-import type { MediaSyncReason } from './media-sync.constants';
+import type { MediaSyncReason } from './media-sync.constants.js';
 
 /**
  * A Media Sync refusal with a stable `details.reason`. `HttpExceptionFilter`

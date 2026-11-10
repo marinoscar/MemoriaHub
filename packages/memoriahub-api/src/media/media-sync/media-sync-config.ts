@@ -2,8 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { Logger } from '@nestjs/common';
 
-import { mediaSyncConfigSchema, type MediaSyncConfig, type UpdateConfigInput } from './dto/media-sync.dto';
-import type { MediaSyncCommand } from './media-sync.constants';
+import { mediaSyncConfigSchema, type MediaSyncConfig, type UpdateConfigInput } from '@marinoscar/memoriahub-contract/media-sync';
+import type { MediaSyncCommand } from './media-sync.constants.js';
 
 // =============================================================================
 // Media Sync desired config (epic #498, issue #505): defaults, reading the

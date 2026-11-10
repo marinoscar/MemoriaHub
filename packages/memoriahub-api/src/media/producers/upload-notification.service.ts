@@ -2,7 +2,7 @@
 // Upload Notification Producer (epic #240, issue #247)
 // =============================================================================
 //
-// Raises `media.upload_completed` (platform notifications, RETRO-D3 #576) when
+// Raises `media.upload_completed` (through `MEMORIAHUB_NOTIFY`, RETRO-J5 #613) when
 // MediaService.createMedia registers a
 // NON-DEDUPLICATED item. A dedup hit is not an upload — nothing new landed in
 // the circle — so it deliberately produces nothing.
@@ -17,12 +17,12 @@
 //   extending the SAME row instead of rolling a fresh one every 15 minutes;
 //   an import next week is correctly its own row.
 //
-//   The fold is the platform's COUNTED write (`notifyCounted`, scope = the
-//   circle, `windowMs` below): it serializes on a transaction-scoped advisory
-//   lock keyed on (user, dedup key), and the partial unique index
-//   `notifications_live_dedup_uniq_idx` is the backstop, so two concurrent
-//   uploads into the same circle cannot both insert. The title is rendered by
-//   the event's template from `data` (`count`, `circleName`, `uploaderName`).
+//   The fold is the port's COUNTED write (`notifyCounted`, scope = the
+//   circle, `windowMs` below): the host serializes it on a transaction-scoped
+//   advisory lock keyed on (user, dedup key) with a partial unique index as the
+//   backstop, so two concurrent uploads into the same circle cannot both
+//   insert. The title is rendered by the event's template from `data`
+//   (`count`, `circleName`, `uploaderName`).
 //
 // AUDIENCE — the uploader plus EVERY other circle member, regardless of role.
 //   This deliberately differs from #246's review-queue audience, which is
@@ -36,15 +36,31 @@
 // never important enough to add latency to (let alone fail) an upload.
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import {
-  MEMORIAHUB_EVENT_KEYS,
-  UPLOAD_COMPLETED_WINDOW_MS,
-} from '../notifications-registry/memoriahub.notifications';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { PrismaService } from '../prisma/prisma.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_NOTIFY,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubNotifyPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+
+/**
+ * The event key the producer raises. Persisted on every notification row: never
+ * rename it. The host declares the event (template, channels, kind `counted`).
+ *
+ * @stability experimental
+ */
+export const UPLOAD_COMPLETED_EVENT_KEY = 'media.upload_completed';
+
+/**
+ * Rolling aggregation window of {@link UPLOAD_COMPLETED_EVENT_KEY}: 15 minutes.
+ *
+ * @stability experimental
+ */
+export const UPLOAD_COMPLETED_WINDOW_MS = 15 * 60 * 1000;
 
 /** Rolling aggregation window for `media.upload_completed`. See header. */
 export const UPLOAD_WINDOW_MS = UPLOAD_COMPLETED_WINDOW_MS;
@@ -58,7 +74,7 @@ export const UPLOAD_WINDOW_MS = UPLOAD_COMPLETED_WINDOW_MS;
  */
 const LOOKUP_CACHE_TTL_MS = 30_000;
 
-/** Soft bound on each cache; exceeded ⇒ cleared wholesale (never unbounded). */
+/** Soft bound on each cache; exceeded => cleared wholesale (never unbounded). */
 const LOOKUP_CACHE_MAX_ENTRIES = 1000;
 
 interface CircleLookup {
@@ -71,6 +87,12 @@ interface CacheEntry<T> {
   cachedAt: number;
 }
 
+/**
+ * The `upload_completed` producer: one rolling-window row per recipient however
+ * many files an import registers.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class UploadNotificationService {
   private readonly logger = new Logger(UploadNotificationService.name);
@@ -79,14 +101,15 @@ export class UploadNotificationService {
   private readonly userNameCache = new Map<string, CacheEntry<string>>();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly notifications: NotificationsService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_NOTIFY) private readonly notifications: MemoriahubNotifyPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
   /**
-   * Fire-and-forget entry point for the request path. Swallows everything —
-   * mirrors EmailService.sendEmailAsync.
+   * Fire-and-forget entry point for the request path. Swallows everything.
+   *
+   * @param input - the owner scope the item landed in and the uploading user.
    */
   recordUploadAsync(input: { circleId: string; uploaderId: string }): void {
     void this.recordUpload(input).catch((err) => {
@@ -98,20 +121,17 @@ export class UploadNotificationService {
   }
 
   /**
-   * One upload → one increment for the uploader and one for every OTHER member.
+   * One upload -> one increment for the uploader and one for every OTHER member.
    *
-   * Recipients are processed sequentially rather than with Promise.all: each is
-   * a short transaction taking an advisory lock, and a bulk import already
-   * drives plenty of concurrency at the request level. Fanning out in parallel
-   * here would only add lock contention on the very keys that must serialize.
+   * @param input - the owner scope the item landed in and the uploading user.
    */
   async recordUpload(input: { circleId: string; uploaderId: string }): Promise<void> {
     const circle = await this.loadCircle(input.circleId);
     if (!circle) return; // circle deleted between the upload and this call
 
     // ---- Uploader's own row -------------------------------------------------
-    await this.notifications.notifyCounted(
-      MEMORIAHUB_EVENT_KEYS.uploadCompleted,
+    this.notifications.notifyCounted(
+      UPLOAD_COMPLETED_EVENT_KEY,
       input.uploaderId,
       { circleId: input.circleId, circleName: circle.name },
       { scopeId: input.circleId, windowMs: UPLOAD_WINDOW_MS },
@@ -124,8 +144,8 @@ export class UploadNotificationService {
     const uploaderName = await this.loadUserDisplayName(input.uploaderId);
 
     for (const userId of others) {
-      await this.notifications.notifyCounted(
-        MEMORIAHUB_EVENT_KEYS.uploadCompleted,
+      this.notifications.notifyCounted(
+        UPLOAD_COMPLETED_EVENT_KEY,
         userId,
         { circleId: input.circleId, circleName: circle.name, uploaderId: input.uploaderId, uploaderName },
         { scopeId: input.circleId, windowMs: UPLOAD_WINDOW_MS },
@@ -141,14 +161,10 @@ export class UploadNotificationService {
     const cached = readCache(this.circleCache, circleId);
     if (cached !== undefined) return cached;
 
-    // Every member, every role — see the audience note in the header (RETRO-K1: through the scope directory).
-    const summary = await this.scopes.summary(circleId);
-    const members = summary ? await this.scopes.membersOf(circleId) : [];
-    const circle = summary ? { name: summary.name, members } : null;
-
-    const value: CircleLookup | null = circle
-      ? { name: circle.name, memberIds: circle.members.map((m) => m.userId) }
-      : null;
+    // Every member, every role — see the audience note in the header.
+    const summary = await this.access.scopeSummary(circleId);
+    const members = summary ? await this.access.membersOf(circleId) : [];
+    const value: CircleLookup | null = summary ? { name: summary.name, memberIds: members.map((m) => m.userId) } : null;
 
     writeCache(this.circleCache, circleId, value);
     return value;
@@ -164,8 +180,7 @@ export class UploadNotificationService {
     });
 
     // Same fallback ladder as the former circle-invitation email sender.
-    const name =
-      user?.displayName ?? user?.providerDisplayName ?? user?.email ?? 'Someone';
+    const name = user?.displayName ?? user?.providerDisplayName ?? user?.email ?? 'Someone';
 
     writeCache(this.userNameCache, userId, name);
     return name;
@@ -175,7 +190,6 @@ export class UploadNotificationService {
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-
 
 /** `undefined` = miss (an entry may legitimately cache `null`). */
 function readCache<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
