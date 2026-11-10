@@ -52,7 +52,7 @@ Restore the newest production backup into a staging database ([database-restore.
 - the row counts of every table the train renames, copies or drops, before and after (the SQL in [circles-to-groups.md §9](circles-to-groups.md#9-dropping-the-circle-tables-retro-k2), [worker-nodes-cutover.md](worker-nodes-cutover.md) and [jobs-cutover.md §3](jobs-cutover.md));
 - the wall-clock time of the whole of section 4 (this sets the maintenance window length, with the backup time on top).
 
-**Resolve the I4 ordering question here** (section 4.6 explains it). Whichever of the two options you choose, the rehearsal must show it working end to end, including the verification in section 6. If the rehearsal shows the migration step failing for a reason this page does not cover, stop: fix it in a PR and re-rehearse.
+**Rehearse the I4 order here** (section 4.6: the share import runs before `prisma:migrate`, on the pre-I2 database). The rehearsal must show it working end to end, including the verification in section 6. If the rehearsal shows the migration step failing for a reason this page does not cover, stop: fix it in a PR and re-rehearse.
 
 ## 3. Roles, announcement, freeze
 
@@ -154,28 +154,9 @@ $RUN npm run db:baseline -- --through 2 --allow-rls --apply --force-remap    # "
 
 The lock is already committed, so `--force-remap` rewrites an identical lock inside the container; it resolves nothing new on production. **UNVERIFIED:** whether, with the committed tree, a bare `prisma:migrate` before this step would also apply platform `0003`-`0040` (the issue text and §10 step 4 disagree). Do exactly what the staging rehearsal did, in that order, and write the order you used in section 9.
 
-### 4.6 Migrations, with the I4 import in the right place
+### 4.6 The I4 import, then the migrations
 
-**The hazard, stated plainly.** `prisma migrate deploy` applies every pending directory in order. Two constraints collide:
-
-- `sharing:import-media-shares` needs the I2 migration applied first (it reads `media_items.org_id` and `albums.org_id`; [circles-to-groups.md §7](circles-to-groups.md#7-public-shares-to-link-grants-retro-i4)).
-- The I4 migration (`20261109100000_i4_media_shares_to_link_grants`) **refuses** (`RAISE EXCEPTION 'RETRO-I4: N media_shares row(s) are not imported as link grants yet'`) while any share is not imported, and drops `media_shares` once it passes.
-
-On a production database that still lacks I2, one `prisma:migrate` reaches I4 before the import could have run. The migrations after I4 (I5, C2, K2) must also not run before the import completes. **The checklist sentence "run the import before `prisma:migrate`" is therefore not executable as written on this database.** Two options; the staging rehearsal picks one and records it:
-
-**Option A (recommended, UNVERIFIED): let the migration stop at I4, then import, then re-run.**
-
-```bash
-$RUN npm run prisma:migrate        # applies up to I2, then fails at I4 with the RETRO-I4 message; read the output
-```
-
-The refusal is the first statement of the I4 file (a `DO` block), so nothing of I4 is applied. Prisma then records that migration as failed in `_prisma_migrations` and **blocks later deploys** (error `P3009`) until it is marked rolled back. **UNVERIFIED:** whether your Prisma version needs the explicit step below; do it only if the next `prisma:migrate` reports `P3009`, and record the exact output in the rehearsal:
-
-```bash
-$RUN node scripts/prisma-env.js migrate resolve --rolled-back 20261109100000_i4_media_shares_to_link_grants
-```
-
-Then import, with the circles still present:
+**Order: import first, then one `prisma:migrate`.** The I4 migration (`20261109100000_i4_media_shares_to_link_grants`) **refuses** (`RAISE EXCEPTION 'RETRO-I4: N media_shares row(s) are not imported as link grants yet'`) while any share is not imported, and drops `media_shares` once it passes. `sharing:import-media-shares` does **not** need I2: on a database that lacks `media_items.org_id` / `albums.org_id` (production before this release) it takes the organization from the default organization, which is exactly what the I2 migration backfills, so it writes the same grants before or after I2. It reads only tables that exist from the baseline onward (`media_shares`, `media_items`, `albums`, `grants`, `notifications`). So the plain sequence works, with no failed migration and no `migrate resolve`:
 
 ```bash
 # 1. Read-only counts (any time):
@@ -186,15 +167,12 @@ Then import, with the circles still present:
 #    FROM media_shares GROUP BY target_type;
 $RUN npm run sharing:import-media-shares              # dry run: "media_shares: N (active a, expired e, revoked r; ...)"
 $RUN npm run sharing:import-media-shares -- --apply   # "imported N, already there 0, invalid 0, ... re-keyed K"
+$RUN npm run prisma:migrate                           # I2, I4 (drops media_shares), I5, C2, K2; read every NOTICE
 ```
 
-`invalid` lists rows whose token is malformed or whose target is gone; the migration refuses until they are deleted. Re-running is safe. Compare the dry-run counts with the rehearsal. Then continue:
+`invalid` lists rows whose token is malformed or whose target is gone; the migration refuses until they are deleted. Re-running is safe (it skips shares whose token hash already has a grant, and re-running after I2 yields the same rows). Compare the dry-run counts with the rehearsal. The import needs the baseline applied first (4.5; the `grants` table comes from the platform migrations) and `SECRETS_ENCRYPTION_KEY`.
 
-```bash
-$RUN npm run prisma:migrate        # I4 (drops media_shares), I5, C2, K2; read every NOTICE
-```
-
-**Option B (UNVERIFIED): apply the earlier migrations alone.** Run the one-off container with a migrations directory that holds only the directories up to and including `20261108200000_i2_circles_to_groups_ownership` (copy the tree, remove the later ones, mount it over `prisma/migrations`), run the import, then run `prisma:migrate` from the unmodified image. It avoids the failed-migration state but edits what the container sees; `platform.lock` hashes the real files, so do not edit any file in the repository. Use it only if Option A's `P3009` handling is not acceptable after the rehearsal.
+**Verified** (real PostgreSQL, `apps/api/test/sharing/media-shares-import-pre-i2.db.spec.ts`): a scratch database at the migration before I2, five invented shares (media item and album targets; active, expired, revoked, never expiring) imported with `--apply` logic, then every migration from I2 to the latest applied without the I4 refusal; `media_shares` gone; the grants equal (same token hashes, roles, resource ids, organization, creator, timestamps) to those the import writes after I2; each ciphertext decrypts to `lnk_<old token>`. **Not verified:** a production-sized database, the baseline-then-import interplay on real production data, and the live `/s/<token>` request path through the running API (the spec checks the stored hash and ciphertext the slice resolves, not an HTTP call).
 
 Read the `NOTICE` lines in the output and record them in section 9:
 
@@ -205,7 +183,7 @@ Read the `NOTICE` lines in the output and record them in section 9:
 | `20261109300000_c2_...` | an exception `RETRO-C2: N worker node(s) ... were not copied` aborts and rolls back; otherwise silent | **drops the legacy node tables** (irreversible without a restore) |
 | `20261110100000_k2_...` | exceptions `RETRO-K2: ...` (second personal circle, circle without a group, row with an unknown scope) abort before any change; success proves row counts and owner columns unchanged | **drops `circles`, `circle_members`, `CircleRole`** (irreversible without a restore) |
 
-**Deploy-order constraints, summarised:** the K1 code (#698, in the image) must be what runs after K2 (the previous release reads `circles` and cannot run on the migrated database); the I4 import runs after I2 and before I4's migration; the I5 migration needs I2 and I4 applied (they are earlier in the history, so the single `prisma:migrate` run satisfies it); C2's migration drops `mh_legacy_worker_nodes` and `mh_legacy_node_credentials` (a revert needs the restore).
+**Deploy-order constraints, summarised:** the K1 code (#698, in the image) must be what runs after K2 (the previous release reads `circles` and cannot run on the migrated database); the I4 import runs BEFORE `prisma:migrate` (it works on the pre-I2 schema); the I5 migration needs I2 and I4 applied (they are earlier in the history, so the single `prisma:migrate` run satisfies it); C2's migration drops `mh_legacy_worker_nodes` and `mh_legacy_node_credentials` (a revert needs the restore).
 
 ### 4.7 Seed, checks, one-off scripts
 
@@ -241,6 +219,8 @@ $RUN npm run notifications:migrate-legacy -- --apply
 ```
 
 Run the dry run again afterwards: every table reports `0 to copy` and `already in the platform shape`.
+
+**Order of the one-off scripts against `prisma:migrate` (read from the scripts, 2026-11-10).** Only the I4 import reads a table that a migration of this train drops, so only it must run before `prisma:migrate` (4.6). Every script above reads the `mh_legacy_*` tables created by the rename migration `20260817000000_rename_legacy_platform_tables`, `system_settings`, `storage_provider_credentials` or `ai_provider_credentials`, none of which the I2, I4, I5, C2 or K2 migrations touch (C2 drops only `mh_legacy_worker_nodes` and `mh_legacy_node_credentials`, which no script reads; K2 drops `circles` and `circle_members`, which none reads). They therefore run after the migrations, as listed, and would also work before them. **UNVERIFIED by execution:** only the I4 import has a real-database proof; the others were checked by reading their SQL.
 
 **Scripts you did not find a place for.** `apps/api/package.json` also defines `settings:verify` (read-only; reports stored settings values the schemas would not accept; [DEVELOPMENT.md](../DEVELOPMENT.md)) and `ai:migrate-keys:dev` (a development-checkout variant of row 8, not for the image). `apps/api/scripts/verify-identity-transform.mjs` is the identity verifier of step 4.9. There is no other `migrate-` or `import-` script in `apps/api/package.json` as of 2026-11-10; re-run `node -e 'for (const k of Object.keys(require("./apps/api/package.json").scripts)) if (/migrate-|import-|:migrate|:import/.test(k)) console.log(k)'` against the release commit before the window in case one was added.
 
@@ -333,7 +313,7 @@ Not blockers for the window; each has an owner or an issue.
 | **EnterpriseAppBase seam requests** | Open: #1143, #1144, #1145, #1119 (opt-in node credential delivery; needs the owner's decision), plus [EAB#1134](https://github.com/marinoscar/EnterpriseAppBase/issues/1134) (releases on a non-active provider cannot be downloaded or deleted through the android-app slice) |
 | **J-series packages** (J1, J2 merged, **private**) | Nothing is published. The registry decision (public npm, a private registry or GitHub Packages) is the owner's and is not part of this window ([release-memoriahub-packages.md](release-memoriahub-packages.md)) |
 | **Application role** | `db.rls_role` fails until the API connects as the non-superuser role ([application-role.md](application-role.md)) |
-| **UNVERIFIED in this page** | The I4 ordering option (4.6); the identity snapshot path from a one-off container (4.4, 4.9); whether `update.sh` finds nothing to migrate after the manual migration (4.8); the exact `db:baseline` order with the committed tree (4.5) |
+| **UNVERIFIED in this page** | The identity snapshot path from a one-off container (4.4, 4.9); whether `update.sh` finds nothing to migrate after the manual migration (4.8); the exact `db:baseline` order with the committed tree (4.5) |
 
 ## 9. Production record template
 
@@ -369,7 +349,6 @@ Baseline (4.5)
   Order used (bare prisma:migrate before or after the baseline apply):
 
 Migrations (4.6)
-  Option used (A or B), and any P3009 / resolve output:
   sharing:import-media-shares dry run: media_shares N (active / expired / revoked):
   sharing:import-media-shares --apply: imported / already there / invalid / re-keyed:
   NOTICE RETRO-I2:
