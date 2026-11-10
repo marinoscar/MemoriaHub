@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Scope is deliberately narrow: ONLY a deep-import ban on the published
-// @marinoscar/platform-* packages for `apps/{api,web,cli}/src/**`. An app
+// @marinoscar/platform-* and @marinoscar/memoriahub-* packages (RETRO-J1) for `apps/{api,web,cli}/src/**`. An app
 // reaches a package through its `exports` map, never its `src/` or `dist/`.
 // App-wide lint is not this config's job; the apps' `lint` scripts are
 // unchanged. Run: `npm run check:platform-imports`.
@@ -24,6 +24,14 @@ export const PACKAGE_DEEP_IMPORT_PATTERNS = [
   {
     group: ['@marinoscar/platform-*/dist', '@marinoscar/platform-*/dist/**'],
     message: 'Import a platform package through its exports map, never its dist/ folder.',
+  },
+  {
+    group: ['@marinoscar/memoriahub-*/src', '@marinoscar/memoriahub-*/src/**', '@marinoscar/memoriahub-*/internal', '@marinoscar/memoriahub-*/internal/**'],
+    message: 'Import a MemoriaHub package through its exports map, never its src/ or internal/ folder.',
+  },
+  {
+    group: ['@marinoscar/memoriahub-*/dist', '@marinoscar/memoriahub-*/dist/**'],
+    message: 'Import a MemoriaHub package through its exports map, never its dist/ folder.',
   },
 ];
 
@@ -47,8 +55,40 @@ const APP_LEGACY_RULE_STUBS = {
   'jsx-a11y': stubs(['click-events-have-key-events', 'no-static-element-interactions']),
 };
 
+/**
+ * Sources of the MemoriaHub domain packages. The platform-free rule
+ * (check:memoriahub-slice-peers, rule 6) and the slice graph are enforced by the
+ * script; this config adds the import ban the script cannot express: a package
+ * source never reaches into another package's src/ or dist/, and never imports
+ * the platform at all (compute and the other host-neutral packages).
+ */
+export const MEMORIAHUB_PACKAGE_SOURCE_FILES = ['packages/memoriahub-*/src/**/*.{ts,tsx}'];
+
 export default [
   { ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**'] },
+  {
+    files: MEMORIAHUB_PACKAGE_SOURCE_FILES,
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+    },
+    linterOptions: { reportUnusedDisableDirectives: 'off' },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            ...PACKAGE_DEEP_IMPORT_PATTERNS,
+            {
+              group: ['@marinoscar/platform-*', '@marinoscar/platform-*/**'],
+              message: 'A MemoriaHub domain package is host-neutral: bind the platform in the app, behind a port (ADR-0001).',
+            },
+            { group: ['@app/shared', '@app/shared/**'], message: 'A package never imports an application workspace.' },
+          ],
+        },
+      ],
+    },
+  },
   {
     files: APP_SOURCE_FILES,
     languageOptions: {

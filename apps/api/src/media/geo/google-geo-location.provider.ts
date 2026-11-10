@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mapGoogleResponse } from '@memoriahub/enrichment-compute/geo';
+import { mapGoogleResponse } from '@marinoscar/memoriahub-compute/geo';
 import { GeoLocationResult } from './geo-location-provider.interface';
 import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
@@ -53,7 +53,7 @@ export class GoogleGeoLocationProvider {
       }
 
       // Shared with the CLI's node compute module — see
-      // @memoriahub/enrichment-compute/geo mapGoogleResponse — so a
+      // @marinoscar/memoriahub-compute/geo mapGoogleResponse — so a
       // distributed worker node and the server produce byte-identical
       // GeoLocationResult-shaped values from the same raw Google response.
       return mapGoogleResponse(data);

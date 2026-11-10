@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { join, extname } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
+import { extractPosterFrame } from '@marinoscar/memoriahub-compute/video';
 import {
   renderThumbnailBuffer,
   THUMBNAIL_CACHE_CONTROL,
@@ -49,7 +49,7 @@ import { streamToBuffer, streamToTempFile } from './stream-utils';
  *   1. Streams the download to a temp file with constant memory (buffering the
  *      whole video in RAM previously OOM'd the process on large MP4s).
  *   2. Extracts one poster frame via the shared
- *      `@memoriahub/enrichment-compute/video`'s `extractPosterFrame()`, which
+ *      `@marinoscar/memoriahub-compute/video`'s `extractPosterFrame()`, which
  *      runs the three-attempt fallback ladder (seek 1 s → seek 0 s →
  *      `thumbnail` video filter, no seek) against ffmpeg, validating
  *      each attempt's output is non-empty (ffmpeg can exit 0 without writing

@@ -16,23 +16,23 @@ import { NODE_APP_SPAN_NAME_PATTERN } from '@marinoscar/platform-cli/node';
 
 import { makeContext } from './helpers.js';
 
-jest.unstable_mockModule('@memoriahub/enrichment-compute/image', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/image', () => ({
   prepareImageForProcessing: async (buffer: Buffer) => ({ buffer, width: 640, height: 480 }),
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/face-compreface', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/face-compreface', () => ({
   detectComprefaceFaces: async () => [
     { boundingBox: { x: 1, y: 2, w: 3, h: 4 }, confidence: 0.9, embedding: [0.1, 0.2], landmarks: [] },
   ],
   COMPREFACE_MODEL_VERSION: 'compreface-test',
   COMPREFACE_PROVIDER_KEY: 'compreface',
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/metadata', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/metadata', () => ({
   probeVideo: async () => ({ streams: [{ codec_type: 'video', codec_name: 'h264' }], format: {} }),
   extractContainerMetadata: () => ({ durationMs: 4000, codec: 'h264', formatTags: {}, streamTags: {} }),
   extractExif: async () => ({}),
   extractDimensions: async () => ({ width: 800, height: 600 }),
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/video', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/video', () => ({
   extractFrames: async () => [
     { buffer: Buffer.from('f1'), timestampMs: 0 },
     { buffer: Buffer.from('f2'), timestampMs: 1000 },
@@ -40,13 +40,13 @@ jest.unstable_mockModule('@memoriahub/enrichment-compute/video', () => ({
   extractFramesAt: async () => [],
   extractPosterFrame: async () => Buffer.from('poster'),
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/face-video', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/face-video', () => ({
   clusterFaceDetections: (detections: unknown[]) => detections.slice(0, 1).map((d) => ({ representative: d, allTimestampsMs: [0] })),
   buildFaceCropThumbnail: async () => Buffer.from('thumb'),
   DEFAULT_FACE_CLUSTER_THRESHOLD: 0.45,
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/dhash', () => ({ computeDHash: async () => '123' }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/clip', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/dhash', () => ({ computeDHash: async () => '123' }));
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/clip', () => ({
   createClipSession: async () => ({}),
   embedImageWithSession: async () => new Array(512).fill(0),
   releaseClipSession: async () => undefined,
@@ -57,7 +57,7 @@ jest.unstable_mockModule('../../src/executors/models.js', () => ({
   clipModelPath: () => path.join(os.tmpdir(), 'mh-phases-clip.onnx'),
   resolveModelsDirectory: () => os.tmpdir(),
 }));
-jest.unstable_mockModule('@memoriahub/enrichment-compute/geo', () => ({
+jest.unstable_mockModule('@marinoscar/memoriahub-compute/geo', () => ({
   fetchGoogleReverse: async () => ({}),
   fetchNominatim: async () => ({}),
   mapGoogleResponse: () => ({ country: 'C' }),

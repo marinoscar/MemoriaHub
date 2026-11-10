@@ -94,7 +94,7 @@ Every backup route is mounted under the existing node namespace and gated by `no
 
 On a machine running `memoriahub node start --daemon`, the daemon process hosts **two independent engines side by side**, not one feature layered on the other:
 
-- `NodeEngine` — the existing enrichment-compute claim/compute/submit loop (see [Distributed Nodes](distributed-nodes.md)).
+- `NodeEngine` — the existing memoriahub-compute claim/compute/submit loop (see [Distributed Nodes](distributed-nodes.md)).
 - `BackupHost` (`apps/cli/src/backup/backup-host.ts`) — owns at most one active `BackupEngine` run, the pull-based schedule poller (§8), and the throttle knobs (§9).
 
 They share **only the daemon process** — never a job queue, a concurrency budget, or an HTTP client:

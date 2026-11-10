@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
-import { extractExif } from '@memoriahub/enrichment-compute/metadata';
+import { extractExif } from '@marinoscar/memoriahub-compute/metadata';
 import type { ObjectProcessor, ObjectProcessorResult } from '@marinoscar/platform-api/storage';
 import { streamToBuffer } from './stream-utils';
 
@@ -14,7 +14,7 @@ import { streamToBuffer } from './stream-utils';
  *
  * The field extraction itself (exifr parse + capturedAt/GPS/camera/orientation/
  * burstUuid mapping) lives in the shared parity package
- * @memoriahub/enrichment-compute/metadata (`extractExif`) so distributed worker
+ * @marinoscar/memoriahub-compute/metadata (`extractExif`) so distributed worker
  * nodes extract EXACTLY the same values as the server. This class keeps only
  * the host concerns: streaming, logging, and the never-throws success/failure
  * envelope.

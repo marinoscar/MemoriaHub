@@ -12,7 +12,7 @@ import {
   WorkflowRunItemStatus,
   WorkflowRunStatus,
 } from '@prisma/client';
-import { workflowExecuteBatchResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { workflowExecuteBatchResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkflowConditionCompiler, CompiledWorkflow } from '../compiler/workflow-condition.compiler';
 import { WorkflowActionExecutor } from '../actions/workflow-action.executor';

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { mapNominatimResponse } from '@memoriahub/enrichment-compute/geo';
+import { mapNominatimResponse } from '@marinoscar/memoriahub-compute/geo';
 import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface';
 import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
 
@@ -74,7 +74,7 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
       const data = await response.json();
 
       // Shared with the CLI's node compute module — see
-      // @memoriahub/enrichment-compute/geo mapNominatimResponse — so a
+      // @marinoscar/memoriahub-compute/geo mapNominatimResponse — so a
       // distributed worker node and the server produce byte-identical
       // GeoLocationResult-shaped values from the same raw Nominatim response.
       return mapNominatimResponse(data);

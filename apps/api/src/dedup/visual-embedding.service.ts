@@ -10,7 +10,7 @@
  * call, then released after a period of inactivity to free memory.
  *
  * The PURE compute (preprocessing, session creation, inference) lives in the
- * shared parity package @memoriahub/enrichment-compute (clip subpath) so
+ * shared parity package @marinoscar/memoriahub-compute (clip subpath) so
  * distributed worker nodes produce numerically identical vectors — see
  * docs/specs/distributed-nodes.md §7. This service keeps the HOST concerns:
  * model download/MODELS_DIR resolution, degraded-mode tracking, idle session
@@ -44,7 +44,7 @@ import {
   looksLikeOnnxModel,
   DEFAULT_CLIP_RECYCLE_AFTER,
   VISUAL_EMBEDDING_MODEL_TAG,
-} from '@memoriahub/enrichment-compute/clip';
+} from '@marinoscar/memoriahub-compute/clip';
 import { PrismaService } from '../prisma/prisma.service';
 // Imported for the side effect of wiring the shared package's logger into
 // NestJS logging (and kept as the canonical orientation-prep import site).
@@ -61,7 +61,7 @@ export {
   looksLikeOnnxModel,
   VISUAL_EMBEDDING_MODEL_TAG,
   VISUAL_EMBEDDING_DIMENSIONS,
-} from '@memoriahub/enrichment-compute/clip';
+} from '@marinoscar/memoriahub-compute/clip';
 
 // -----------------------------------------------------------------------------
 // Host-side constants (model download/lifecycle — NOT part of the compute)

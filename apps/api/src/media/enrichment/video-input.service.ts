@@ -33,7 +33,7 @@
 // =============================================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { probeRangeSeekSuitability } from '@memoriahub/enrichment-compute/video';
+import { probeRangeSeekSuitability } from '@marinoscar/memoriahub-compute/video';
 import { StorageProviderResolver } from '../../platform/storage/storage-provider.resolver';
 import { downloadToTempFile } from '../../media-processing/processors/stream-utils';
 

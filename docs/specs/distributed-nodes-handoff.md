@@ -145,7 +145,7 @@ written, the server's face pipeline was `apps/api/src/face/providers/human.provi
 `blazeface-back.json`/`faceres.json` model files; L2-normalized 1024-d faceres embeddings,
 `providerKey='human'`). That provider — and AWS Rekognition alongside it — has since been
 removed entirely; CompreFace (`apps/api/src/face/providers/compreface.provider.ts`, a thin
-adapter over the shared `@memoriahub/enrichment-compute/face-compreface` HTTP client, 128-d
+adapter over the shared `@marinoscar/memoriahub-compute/face-compreface` HTTP client, 128-d
 ArcFace MobileFaceNet embeddings) is now the sole face-detection pipeline, server and node
 alike. See [distributed-nodes.md §7](distributed-nodes.md) for the
 current parity story.
@@ -169,9 +169,9 @@ libvips build re-encodes JPEG bytes differently → different tensors → differ
 Do them in this order; each has an acceptance check. Respect the mandatory-subagent rules
 (`database-dev`/`backend-dev`/`frontend-dev`/`testing-dev`/`docs-dev`) and Conventional Commits.
 
-### A. Shared parity package `packages/enrichment-compute` (backend-dev)
+### A. Shared parity package `packages/memoriahub-compute` (backend-dev)
 The linchpin. One package, imported IDENTICALLY by API and CLI, with **pinned** native deps.
-1. `git mv`/create `packages/enrichment-compute/` and add `"packages/*"` to root
+1. `git mv`/create `packages/memoriahub-compute/` and add `"packages/*"` to root
    `package.json` `workspaces`. Use NodeNext + a `package.json` with pinned
    `sharp`, `onnxruntime-node`, `tesseract.js`. (At the time this was written the plan also
    pinned `@tensorflow/tfjs`/`@tensorflow/tfjs-backend-wasm`/`@vladmandic/human` for the Human
@@ -188,7 +188,7 @@ The linchpin. One package, imported IDENTICALLY by API and CLI, with **pinned** 
      here.
    - dHash, OCR (tesseract) core, ffprobe/metadata helpers.
 3. **Acceptance:** `cd apps/api && npx tsc --noEmit` clean; `npm test` in apps/api green;
-   `node -e "require('@memoriahub/enrichment-compute')"` loads.
+   `node -e "require('@marinoscar/memoriahub-compute')"` loads.
 
 ### B. Compute/persist split in API handlers (backend-dev)
 For each node-eligible type, split the service into `compute*(buffer, params) → ResultDto`
@@ -225,7 +225,7 @@ Add to `apps/api/src/nodes/` (currently omitted — the CLI already calls them o
 
 ### D. Implement the 8 CLI compute modules (CLI)
 Replace the scaffolds in `apps/cli/src/node/compute/*` with real calls into
-`@memoriahub/enrichment-compute` (add it as a CLI dependency). Each module:
+`@marinoscar/memoriahub-compute` (add it as a CLI dependency). Each module:
 download already done by the engine → run the shared compute → return the ResultDto the engine
 submits. **Must process ORIGINAL bytes and run the identical `prepareImageForProcessing` first.**
 Thumbnails: generate bytes, upload via the existing presigned-PUT flow (`ApiClient.putRaw` +
@@ -333,7 +333,7 @@ each laptop → 1 server + 2 + 2 = 5 concurrent workers, all coordinated safely 
 
 ## 8. Remaining-work checklist
 
-- [ ] A. `packages/enrichment-compute` shared package (pinned native deps) + API re-exports
+- [ ] A. `packages/memoriahub-compute` shared package (pinned native deps) + API re-exports
 - [ ] B. compute/persist split of the eligible API handlers
 - [ ] C. `POST /nodes/:id/jobs/:jobId/result` + `/fail` + `/proxy/*` + result DTOs
 - [ ] D. implement the 8 CLI compute modules against the shared package

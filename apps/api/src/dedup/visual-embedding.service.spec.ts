@@ -60,7 +60,7 @@ jest.mock('sharp', () => {
 // package's image module (the clip module imports prepareImageForProcessing
 // from there internally). setComputeLogger must be present because the API's
 // image-orientation.util re-export module calls it at import time.
-jest.mock('@memoriahub/enrichment-compute/image', () => ({
+jest.mock('@marinoscar/memoriahub-compute/image', () => ({
   setComputeLogger: jest.fn(),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared'),
@@ -97,7 +97,7 @@ import {
   VISUAL_EMBEDDING_MODEL_TAG,
 } from './visual-embedding.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { prepareImageForProcessing } from '@memoriahub/enrichment-compute/image';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 
 const CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073] as const;

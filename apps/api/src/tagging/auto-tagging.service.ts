@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
 import { MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
-import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
+import { autoTaggingResultSchema, type AutoTaggingResult } from '@marinoscar/memoriahub-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService, type AiContentPart } from '@marinoscar/platform-api/ai';
 import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
@@ -231,9 +231,8 @@ export class AutoTaggingService {
       const labelNames = tagLabels.map((t) => t.name);
       const { system: systemPrompt, prompt: userPrompt } = this.buildPrompt(labelNames, peopleNames);
 
-      // COMPUTE half — same seam a distributed worker node uses locally
-      // (with a transiently-fetched API key) via
-      // @memoriahub/enrichment-compute/ai's callAnthropicVision.
+      // COMPUTE half — the provider call, through the platform AI layer
+      // (AI jobs are server-only; a worker node never holds a provider key).
       const { rawText } = await this.computeAutoTagging(imageBuffer, {
         model,
         system: systemPrompt,

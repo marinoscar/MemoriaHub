@@ -1,0 +1,55 @@
+{
+  "$comment": "Peer dependencies per slice of @marinoscar/memoriahub-* (RETRO-J1 #593). Append-only: J2-J11 add slices, never rename or remove one. memoriahub-compute declares its libraries (sharp, onnxruntime-node, exifr, zod; optional tesseract.js) as exact-pinned dependencies, not peers, so that a server and a worker node run byte-identical native builds; every slice therefore lists no peer. Enforced by scripts/memoriahub-packages/check-slice-peers.mjs; the rules are in docs/PACKAGES.md#peer-dependencies-per-slice.",
+  "$universal": {
+    "memoriahub-compute": "*"
+  },
+  "$implies": {},
+  "$reserved": {
+    "memoriahub-compute": []
+  },
+  "$hostOnly": {
+    "memoriahub-compute": []
+  },
+  "$hostPlugins": {},
+  "memoriahub-compute": {
+    "ffmpeg": {
+      "peers": []
+    },
+    "rate-limit": {
+      "peers": []
+    },
+    "dto": {
+      "peers": []
+    },
+    "social": {
+      "peers": []
+    },
+    "face-compreface": {
+      "peers": []
+    },
+    "face-video": {
+      "peers": []
+    },
+    "ocr": {
+      "peers": []
+    },
+    "image": {
+      "peers": []
+    },
+    "video": {
+      "peers": []
+    },
+    "dhash": {
+      "peers": []
+    },
+    "clip": {
+      "peers": []
+    },
+    "metadata": {
+      "peers": []
+    },
+    "geo": {
+      "peers": []
+    }
+  }
+}

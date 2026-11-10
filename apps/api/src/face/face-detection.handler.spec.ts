@@ -12,7 +12,7 @@
 
 import { RateLimitError } from '@marinoscar/platform-api/jobs';
 import { FaceDetectionHandler } from './face-detection.handler';
-import { faceDetectionResultSchema } from '@memoriahub/enrichment-compute/dto';
+import { faceDetectionResultSchema } from '@marinoscar/memoriahub-compute/dto';
 import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
 import { mediaItemJob, subjectPrisma } from '../../test/helpers/platform-job';
 

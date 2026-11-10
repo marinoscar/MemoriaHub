@@ -29,7 +29,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
-import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
+import type { ThumbnailResult } from '@marinoscar/memoriahub-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { storageObjectSize } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';

@@ -1,0 +1,162 @@
+name: MemoriaHub packages
+
+# Build, check and pack the @marinoscar/memoriahub-* packages (today
+# memoriahub-compute). The standard these jobs enforce: docs/PACKAGES.md.
+#
+# NOTHING IN THIS WORKFLOW PUBLISHES. Publishing is gated (ADR-0001,
+# docs/runbooks/release-memoriahub-packages.md): the packages are
+# "private": true until the owner chooses a registry, there is no registry
+# credential, and no job runs `npm publish`. The release workflow (RETRO-J12)
+# will default to a dry run.
+#
+# `ci.yml` builds the compute package for the app test jobs; this workflow adds
+# the checks that only matter when a package changes (docs, peers, pack,
+# smoke imports, the package's own tests) and runs on the paths below. The
+# bare-host job arrives with RETRO-J12.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/memoriahub-*/**'
+      - 'packages/memoriahub-*.json'
+      - 'scripts/memoriahub-packages/**'
+      - 'scripts/check-single-instance.mjs'
+      - '.changeset/**'
+      - 'eslint.config.mjs'
+      - 'typedoc.base.json'
+      - 'tsdoc.json'
+      - 'tsconfig.base.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'apps/api/package.json'
+      - 'apps/cli/package.json'
+      - '.github/workflows/memoriahub-packages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/memoriahub-*/**'
+      - 'packages/memoriahub-*.json'
+      - 'scripts/memoriahub-packages/**'
+      - 'scripts/check-single-instance.mjs'
+      - '.changeset/**'
+      - 'eslint.config.mjs'
+      - 'typedoc.base.json'
+      - 'tsdoc.json'
+      - 'tsconfig.base.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'apps/api/package.json'
+      - 'apps/cli/package.json'
+      - '.github/workflows/memoriahub-packages.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, check and pack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install ffmpeg (background) and dependencies
+        run: |
+          (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg) &
+          apt_pid=$!
+          npm ci
+          wait "$apt_pid"
+
+      - run: npm run build:memoriahub-packages
+      - run: npm run typecheck:memoriahub-packages
+      # Rules graph, peers-data, manifest, imports and host-neutral for the
+      # packages, then app-installs for the two apps that depend on them.
+      - run: npm run check:memoriahub-slice-peers
+      # The check scripts themselves, against fixtures (including a file that
+      # breaks the host-neutral rule).
+      - run: npm run test:memoriahub-scripts
+      # The package's own suite: golden vectors, ffmpeg argv pins, DTO and
+      # geo/social/video unit tests. The HEIC and golden gates run again, against
+      # the built images, in deploy.yml.
+      - run: npm run test:memoriahub-packages
+      # Asks npm what each package would publish and compares it with the
+      # manifest. Needs the build above.
+      - run: npm run check:memoriahub-pack
+      # Installs the packed package alone into an empty project and asserts no
+      # platform package and no provider SDK is in the tree. Needs the build
+      # above and the registry (for sharp, onnxruntime-node, exifr, zod).
+      - run: npm run check:memoriahub-lean-install
+
+      # Every entry point must load from the module system it advertises. The
+      # packages resolve through the workspace links `npm ci` created.
+      - name: Smoke-import every entry point
+        run: |
+          for slice in image clip dhash ffmpeg video metadata geo rate-limit face-compreface face-video ocr social dto; do
+            node -e "require('@marinoscar/memoriahub-compute/$slice')"
+            node --input-type=module -e "await import('@marinoscar/memoriahub-compute/$slice')"
+          done
+          node -e "require('@marinoscar/memoriahub-compute')"
+          node --input-type=module -e "await import('@marinoscar/memoriahub-compute')"
+
+  package-docs:
+    name: Package docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # TypeDoc for the packages (fails on an undocumented export or a broken
+      # {@link}), then README, TSDoc tag and entry-point checks.
+      - run: npm run check:memoriahub-package-docs
+
+  single-instance:
+    name: Single instance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: node scripts/memoriahub-packages/check-single-instance.mjs --root . --guard '@marinoscar/platform-*' --guard '@marinoscar/memoriahub-*'
+
+  changeset-status:
+    name: Changeset status
+    # A pull request that changes a package source needs a changeset. The
+    # version pull request of the release workflow (RETRO-J12) consumes the
+    # changesets and is the one exception.
+    if: github.event_name == 'pull_request' && github.head_ref != 'memoriahub-release/version'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: git fetch origin main
+      - run: npx changeset status --since=origin/main

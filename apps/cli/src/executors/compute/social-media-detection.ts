@@ -2,7 +2,7 @@
  * node/compute/social-media-detection.ts — Social-media video detection.
  *
  * Runs the two-tier classification locally via the shared
- * `@memoriahub/enrichment-compute` parity package so a node classifies a
+ * `@marinoscar/memoriahub-compute` parity package so a node classifies a
  * video IDENTICALLY to the server for the same inputs — one rule catalog,
  * two hosts (distributed-nodes spec §7):
  *
@@ -38,15 +38,15 @@
 
 import path from 'node:path';
 
-import { probeVideo, extractContainerMetadata } from '@memoriahub/enrichment-compute/metadata';
+import { probeVideo, extractContainerMetadata } from '@marinoscar/memoriahub-compute/metadata';
 import {
   detectTier1,
   detectFromOcr,
   computeOcrTimestamps,
   type VideoDetectionInput,
-} from '@memoriahub/enrichment-compute/social';
-import { extractFramesAt } from '@memoriahub/enrichment-compute/video';
-import { createOcrEngine, type OcrEngine } from '@memoriahub/enrichment-compute/ocr';
+} from '@marinoscar/memoriahub-compute/social';
+import { extractFramesAt } from '@marinoscar/memoriahub-compute/video';
+import { createOcrEngine, type OcrEngine } from '@marinoscar/memoriahub-compute/ocr';
 
 import { resolveModelsDirectory } from '../models.js';
 import { loadNativeModule, NATIVE_MODULES, runPhase, tokenAttribute, type ComputeFn } from '../support.js';

@@ -24,7 +24,7 @@ import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';
-import type { ThumbnailResult } from '@memoriahub/enrichment-compute/dto';
+import type { ThumbnailResult } from '@marinoscar/memoriahub-compute/dto';
 import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
 
 // ---------------------------------------------------------------------------
