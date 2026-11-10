@@ -160,7 +160,7 @@ The public routes carry the identity slice's `@Public()` marker and `LinkGrantGu
 
 `/admin/settings/sharing` (card permission `sharing:admin`, the string `GET /api/admin/links` enforces) lists every public link of the organization: preview, type, album item count, URL (copy; never exported to CSV), creator, expiry, status. Filters: status (active, expired, revoked) and type. Row and bulk actions: **revoke** (`DELETE /api/grants/:id` per link) and **set expiration** (`PATCH /api/grants/:id`). There is no hard delete.
 
-`GET /api/admin/links` reads `grants` through `LinkGrantDirectory` (`apps/api/src/public-links/link-grant-directory.service.ts`), the one app file exempt from the sharing conformance suite's `no-direct-access`: read-only, link-only, in the default organization's RLS scope. `PLATFORM-ADOPTION-SHIM(#578)` until the slice offers an organization-wide link listing (seam request in `docs/platform-adoption/local-exceptions.md`).
+`GET /api/admin/links` lists through `LinkGrantsService.listForOrg` (the sharing slice's organization-wide link listing, platform 0.1.0-next.29, `sharing:admin`) and adds the status, creator and preview; the `share_expiring` sweep reads `LinkGrantsService.listExpiring`. No app file reads `grants` any more (the I4 shim is retired).
 
 ---
 
@@ -203,7 +203,7 @@ The old API routes `GET /api/public/shares/:token` and `/:token/media/:idx` answ
 | `apps/api/src/public-links/public-media-link.controller.ts`, `public-album-link.controller.ts` | the guarded public views |
 | `apps/api/src/public-links/public-link-view.service.ts` | reads in `withLinkScope`, strips metadata, signs URLs |
 | `apps/api/src/public-links/legacy-public-share.controller.ts` | the 410s |
-| `apps/api/src/public-links/admin-public-links.controller.ts`, `admin-public-links.service.ts`, `link-grant-directory.service.ts` | the admin listing (shim) |
+| `apps/api/src/public-links/admin-public-links.controller.ts`, `admin-public-links.service.ts` | the admin listing (over `LinkGrantsService.listForOrg`) |
 | `apps/api/src/notification-producers/share-expiring.service.ts` | the `share_expiring` sweep over link grants |
 | `apps/api/scripts/import-media-shares.ts`, `src/legacy/media-shares-import.ts` | the one-time import |
 | `apps/api/prisma/migrations/20261109100000_i4_media_shares_to_link_grants/` | the contract migration (guarded) |

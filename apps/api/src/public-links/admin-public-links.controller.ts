@@ -14,7 +14,8 @@
 
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Auth } from '@marinoscar/platform-api/identity';
+import type { Principal } from '@marinoscar/platform-api/core';
+import { Auth, CurrentPrincipal } from '@marinoscar/platform-api/identity';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
@@ -48,7 +49,7 @@ export class AdminPublicLinksController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'A page of links' })
-  list(@Query() query: AdminLinksQueryDto): Promise<AdminPublicLinkPage> {
-    return this.links.list(query);
+  list(@CurrentPrincipal() principal: Principal, @Query() query: AdminLinksQueryDto): Promise<AdminPublicLinkPage> {
+    return this.links.list(principal, query);
   }
 }

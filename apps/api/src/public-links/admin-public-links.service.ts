@@ -1,9 +1,46 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import type { Principal } from '@marinoscar/platform-api/core';
+import { LinkGrantsService } from '@marinoscar/platform-api/sharing';
 
 import { MediaThumbnailService } from '../media/media-thumbnail.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { LinkGrantDirectory, type AdminLinkQuery, type AdminLinkRow } from './link-grant-directory.service';
+
+/** The two resource types a MemoriaHub link can open. */
+export type LinkResourceType = 'media_item' | 'album';
+
+/** A link's state, derived from `revoked_at` and `expires_at`. */
+export type LinkStatus = 'active' | 'expired' | 'revoked';
+
+/** One link as the admin page lists it. */
+export interface AdminLinkRow {
+  id: string;
+  resourceType: string;
+  resourceId: string;
+  role: string;
+  label: string | null;
+  /** `<APP_URL>/s#lnk_...`, re-derived by the slice; `null` when it cannot be. */
+  url: string | null;
+  status: LinkStatus;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  grantedById: string | null;
+  createdAt: string;
+}
+
+export interface AdminLinkQuery {
+  status?: LinkStatus;
+  resourceType?: LinkResourceType;
+  page: number;
+  pageSize: number;
+}
+
+/** `active` / `expired` / `revoked` of one link at `now`. */
+export function linkStatusOf(row: { revokedAt: string | null; expiresAt: string | null }, now: Date): LinkStatus {
+  if (row.revokedAt) return 'revoked';
+  if (row.expiresAt && new Date(row.expiresAt) <= now) return 'expired';
+  return 'active';
+}
 
 /** What the admin page shows of the record a link opens. */
 export interface AdminLinkPreview {
@@ -27,20 +64,41 @@ export interface AdminPublicLinkPage {
 
 /**
  * The admin listing of public links (RETRO-I4, #578): a page of link grants
- * (`LinkGrantDirectory`) plus, in batched reads, each link's creator and a
+ * (`LinkGrantsService.listForOrg`, the slice's organization-wide link listing, `sharing:admin`) plus, in batched reads, each link's creator and a
  * preview of its record (one thumbnail-signing round per page, as the
  * `media_shares` listing did).
  */
 @Injectable()
 export class AdminPublicLinksService {
   constructor(
-    private readonly directory: LinkGrantDirectory,
+    private readonly links: LinkGrantsService,
     private readonly prisma: PrismaService,
     private readonly thumbnails: MediaThumbnailService,
   ) {}
 
-  async list(query: AdminLinkQuery): Promise<AdminPublicLinkPage> {
-    const { items, total } = await this.directory.adminPage(query);
+  async list(principal: Principal, query: AdminLinkQuery, now: Date = new Date()): Promise<AdminPublicLinkPage> {
+    const listed = await this.links.listForOrg(principal, {
+      page: query.page,
+      pageSize: query.pageSize,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.resourceType ? { resourceType: query.resourceType } : {}),
+    });
+    const total = listed.total;
+    const items = listed.items.map(
+      (view): AdminLinkRow => ({
+        id: view.id,
+        resourceType: view.resourceType,
+        resourceId: view.resourceId,
+        role: view.role,
+        label: view.label,
+        url: view.url,
+        status: linkStatusOf(view, now),
+        expiresAt: view.expiresAt,
+        revokedAt: view.revokedAt,
+        grantedById: view.grantedById,
+        createdAt: view.createdAt,
+      }),
+    );
 
     const mediaIds = items.filter((i) => i.resourceType === 'media_item').map((i) => i.resourceId);
     const albumIds = items.filter((i) => i.resourceType === 'album').map((i) => i.resourceId);
