@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaSyncController } from './media-sync.controller';
-import { MediaSyncService } from './media-sync.service';
+import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
 import { MediaSyncDeviceSourceBinder } from './media-sync.device-source';
 
 /**
@@ -12,9 +12,9 @@ import { MediaSyncDeviceSourceBinder } from './media-sync.device-source';
  * `PrismaModule`.
  */
 @Module({
-  imports: [OwnerAccessModule],
+  imports: [OwnerAccessModule, MediaCoreModule.forRoot()],
   controllers: [MediaSyncController],
-  providers: [MediaSyncService, MediaSyncDeviceSourceBinder],
-  exports: [MediaSyncService],
+  providers: [MediaSyncDeviceSourceBinder],
+  exports: [MediaCoreModule.forRoot()],
 })
 export class MediaSyncModule {}

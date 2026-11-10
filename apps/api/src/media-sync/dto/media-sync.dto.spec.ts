@@ -1,4 +1,4 @@
-import { applyCommand, applyPatch, defaultConfig, readConfig } from '../media-sync-config';
+import { applyCommand, applyPatch, defaultConfig, readConfig } from '@marinoscar/memoriahub-api/media';
 import {
   checkinSchema,
   commandSchema,
