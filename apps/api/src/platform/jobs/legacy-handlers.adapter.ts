@@ -61,7 +61,9 @@ import { videoJobTimeoutMs } from './legacy-env';
 // did the same for `duplicate_detection`, `duplicate_detection_batch`,
 // `duplicate_confidence_backfill`, `burst_detection` and
 // `social_media_detection` (which now declares the 20-minute video profile
-// itself).
+// itself). RETRO-C4 (#590) did the same for the four AI-bound types
+// (`auto_tagging`, `video_auto_tagging`, `picture_enhancement`,
+// `picture_enhancement_purge`), which are server-only permanently (AI rule 3).
 //
 // The orchestration (claim, lease, retry, deferral, settle) is the platform's;
 // none of it is reimplemented here.
@@ -69,21 +71,17 @@ import { videoJobTimeoutMs } from './legacy-env';
 
 /** Job types that call a rate-limited provider -> the throttle bucket they draw on. */
 export const LEGACY_THROTTLE_KEYS: Readonly<Record<string, string>> = {
-  auto_tagging: 'tagging',
-  // Video tagging calls the SAME configured tagging provider, so it shares the photo path's gate.
-  video_auto_tagging: 'tagging',
+  // auto_tagging and video_auto_tagging (RETRO-C4) register the shared `tagging` key themselves.
   geocode: 'geocode',
 };
 
 /**
- * The video job types still on the adapter: download + ffmpeg + per-frame
- * provider calls legitimately exceed 10 minutes. (`video_face_detection`,
- * native since RETRO-C3, and `social_media_detection`, native since RETRO-C5,
- * declare the same profile themselves.)
+ * The video job types still on the adapter: none. (`video_face_detection`,
+ * native since RETRO-C3, `social_media_detection`, native since RETRO-C5, and
+ * `video_auto_tagging`, native since RETRO-C4, declare the 20-minute profile
+ * themselves.)
  */
-export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set([
-  'video_auto_tagging',
-]);
+export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set<string>();
 
 /** A `JsonValue` that is a plain object, or null. */
 function asObject(value: unknown): Record<string, unknown> | null {

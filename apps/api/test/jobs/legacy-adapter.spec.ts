@@ -186,10 +186,11 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
   });
 
   describe('execution profile', () => {
-    it('the video types still on the adapter get the 20-minute profile; everything else takes the deployment default', () => {
-      // social_media_detection left this list in RETRO-C5: native, it declares the profile itself.
+    it('no video type is left on the adapter; everything takes the deployment default', () => {
+      // social_media_detection (RETRO-C5) and video_auto_tagging (RETRO-C4) are native: they declare the profile themselves.
       expect(VIDEO_JOB_TYPES.has('social_media_detection')).toBe(false);
-      for (const type of ['video_auto_tagging', 'geocode', 'trash_purge']) {
+      expect(VIDEO_JOB_TYPES.has('video_auto_tagging')).toBe(false);
+      for (const type of ['geocode', 'trash_purge']) {
         const handler = register({ type });
         if (VIDEO_JOB_TYPES.has(type)) {
           expect(handler!.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: expect.any(Number) });
@@ -203,8 +204,8 @@ describe('LegacyEnrichmentHandlerAdapter', () => {
   describe('provider throttle keys', () => {
     it('registers the buckets the old gate resolved', () => {
       for (const type of Object.keys(LEGACY_THROTTLE_KEYS)) register({ type });
-      expect(throttle.resolveKey('auto_tagging')).toBe('tagging');
-      expect(throttle.resolveKey('video_auto_tagging')).toBe('tagging');
+      // auto_tagging / video_auto_tagging are native since RETRO-C4 and register `tagging` themselves.
+      expect(Object.keys(LEGACY_THROTTLE_KEYS)).not.toContain('auto_tagging');
       expect(throttle.resolveKey('geocode')).toBe('geocode');
       // face_detection is native since RETRO-C3 and registers its own `face` key.
       expect(Object.keys(LEGACY_THROTTLE_KEYS)).not.toContain('face_detection');
