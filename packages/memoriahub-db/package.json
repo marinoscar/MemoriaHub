@@ -1,0 +1,66 @@
+{
+  "name": "@marinoscar/memoriahub-db",
+  "version": "0.0.0",
+  "description": "Prisma schema fragments, SQL migrations, the raw-SQL inventory and the memoriahub-db command (sync, check, promote) of the MemoriaHub domain (CommonJS). Private: nothing is published.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marinoscar/MemoriaHub.git",
+    "directory": "packages/memoriahub-db"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "memoriahub-db": "./bin/memoriahub-db.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "schema",
+    "migrations",
+    "raw-sql-indexes.json",
+    "extensions.json",
+    "schema-objects.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "node ../../scripts/memoriahub-packages/copy-license.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "docs": "typedoc --options typedoc.json",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "commander": "^14.0.2"
+  },
+  "peerDependencies": {
+    "prisma": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.32",
+    "prisma": "^7.8.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "private": true
+}

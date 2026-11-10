@@ -58,5 +58,34 @@
     "social": [
       "primitives"
     ]
+  },
+  "memoriahub-db": {
+    "bin": [
+      "check",
+      "lock",
+      "promote",
+      "sync"
+    ],
+    "check": [
+      "lock",
+      "manifest",
+      "sql",
+      "sync"
+    ],
+    "lock": [],
+    "manifest": [
+      "lock"
+    ],
+    "promote": [
+      "lock",
+      "manifest",
+      "sql",
+      "sync"
+    ],
+    "sql": [],
+    "sync": [
+      "lock",
+      "manifest"
+    ]
   }
 }

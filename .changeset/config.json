@@ -5,7 +5,8 @@
   "fixed": [
     [
       "@marinoscar/memoriahub-compute",
-      "@marinoscar/memoriahub-contract"
+      "@marinoscar/memoriahub-contract",
+      "@marinoscar/memoriahub-db"
     ]
   ],
   "linked": [],

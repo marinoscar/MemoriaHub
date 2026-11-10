@@ -118,17 +118,27 @@ model User {
 
   // composed from app:identity-extensions.prisma
   profile                        UserProfile?                    @relation("UserProfileOwner")
+  aiCredentialsUpdated           AiProviderCredential[]          @relation("AiCredentialUpdater")
+  faceCredentialsUpdated         FaceProviderCredential[]        @relation("FaceCredentialUpdater")
+  storageCredentialsUpdated      StorageProviderCredential[]     @relation("StorageCredentialUpdater")
+  geoCredentialsUpdated          GeoProviderCredential[]         @relation("GeoCredentialUpdater")
+  mhLegacyNotifications          MhLegacyNotification[]          @relation("UserNotifications")
+  mhLegacyPushSubscriptions      MhLegacyPushSubscription[]      @relation("UserPushSubscriptions")
+  mhLegacyNotificationDeliveries MhLegacyNotificationDelivery[]  @relation("UserNotificationDeliveries")
+  androidAppReleasesUploaded     MhLegacyAndroidAppRelease[]     @relation("AndroidAppReleaseUploader")
+  notificationBroadcastsCreated  MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCreatedBy")
+  notificationBroadcastsCanceled MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCanceledBy")
+  databaseBackupsCreated         MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupCreatedBy")
+  databaseBackupsRestored        MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupRestoredBy")
+
+  // composed from app:memoriahub.identity.prisma
   mediaItems                     MediaItem[]                     @relation("MediaAddedBy")
   albums                         Album[]                         @relation("AlbumAddedBy")
   tags                           Tag[]                           @relation("TagAddedBy")
   personalLibrary                PersonalLibrary?
-  aiCredentialsUpdated           AiProviderCredential[]          @relation("AiCredentialUpdater")
-  faceCredentialsUpdated         FaceProviderCredential[]        @relation("FaceCredentialUpdater")
-  storageCredentialsUpdated      StorageProviderCredential[]     @relation("StorageCredentialUpdater")
   peopleAdded                    Person[]                        @relation("PersonAddedBy")
   resolvedBursts                 BurstGroup[]                    @relation("BurstGroupResolvedBy")
   resolvedDuplicates             DuplicateGroup[]                @relation("DuplicateGroupResolvedBy")
-  geoCredentialsUpdated          GeoProviderCredential[]         @relation("GeoCredentialUpdater")
   resolvedLocationSuggestions    LocationSuggestion[]            @relation("LocationSuggestionResolvedBy")
   mediaEnhancementsCreated       MediaEnhancement[]              @relation("MediaEnhancementCreatedBy")
   mediaEnhancementBatchesCreated MediaEnhancementBatch[]         @relation("MediaEnhancementBatchCreatedBy")
@@ -137,19 +147,11 @@ model User {
   workflowRunsApproved           WorkflowRun[]                   @relation("WorkflowRunApprovedBy")
   trashEmptyRunsStarted          TrashEmptyRun[]                 @relation("TrashEmptyRunStartedBy")
   reviewRunsStarted              ReviewRun[]                     @relation("ReviewRunStartedBy")
-  mhLegacyNotifications          MhLegacyNotification[]          @relation("UserNotifications")
-  mhLegacyPushSubscriptions      MhLegacyPushSubscription[]      @relation("UserPushSubscriptions")
-  mhLegacyNotificationDeliveries MhLegacyNotificationDelivery[]  @relation("UserNotificationDeliveries")
-  androidAppReleasesUploaded     MhLegacyAndroidAppRelease[]     @relation("AndroidAppReleaseUploader")
   mediaSyncDevices               MediaSyncDevice[]
-  notificationBroadcastsCreated  MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCreatedBy")
-  notificationBroadcastsCanceled MhLegacyNotificationBroadcast[] @relation("NotificationBroadcastCanceledBy")
   memoryUserStates               MemoryUserState[]
-  databaseBackupsCreated         MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupCreatedBy")
-  databaseBackupsRestored        MhLegacyDatabaseBackupRun[]     @relation("DatabaseBackupRestoredBy")
   locationGroups                 LocationGroup[]
 
-  // composed from app:ownership.prisma
+  // composed from app:memoriahub.ownership.prisma
   ownedMediaItems             MediaItem[]             @relation("MediaItemOwnerUser")
   ownedAlbums                 Album[]                 @relation("AlbumOwnerUser")
   ownedTags                   Tag[]                   @relation("TagOwnerUser")
@@ -542,7 +544,7 @@ model Organization {
   // composed from package:webhooks.prisma
   webhookEndpoints WebhookEndpoint[]
 
-  // composed from app:ownership.prisma
+  // composed from app:memoriahub.ownership.prisma
   mediaItems             MediaItem[]             @relation("MediaItemOrg")
   mediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOrg")
   albums                 Album[]                 @relation("AlbumOrg")

@@ -111,6 +111,10 @@ COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/memoriahub-compute ./packages/memoriahub-compute/
 # The wire-schema package (zod only) both the API and the CLI import by subpath.
 COPY packages/memoriahub-contract ./packages/memoriahub-contract/
+# The domain schema package (a dev dependency of apps/api: its command installs the
+# fragments; no build step, nothing runs from it in the image). Present so
+# `npm install` links the workspace instead of looking the private name up.
+COPY packages/memoriahub-db ./packages/memoriahub-db/
 # The compute package's build ends with write-dist-stubs.mjs, which lives in the
 # shared package tooling folder (../../scripts/memoriahub-packages).
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs

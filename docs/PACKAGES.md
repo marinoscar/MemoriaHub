@@ -23,11 +23,13 @@ How MemoriaHub's own domain packages are laid out, documented, checked and relea
 |---|---|---|---|---|
 | `@marinoscar/memoriahub-compute` | `packages/memoriahub-compute` | exists (RETRO-J1, #593) | dual ESM + CommonJS | `.`, `./image`, `./clip`, `./dhash`, `./ffmpeg`, `./video`, `./metadata`, `./geo`, `./rate-limit`, `./face-compreface`, `./face-video`, `./ocr`, `./social`, `./dto` |
 | `@marinoscar/memoriahub-contract` | `packages/memoriahub-contract` | exists (RETRO-J2, #598) | dual ESM + CommonJS | `.`, `./primitives`, `./errors`, `./media`, `./media-sync`, `./face`, `./tagging`, `./search`, `./memories`, `./workflows`, `./review-runs`, `./location`, `./dedup`, `./burst`, `./social`, `./enhancement` |
-| `@marinoscar/memoriahub-db` | `packages/memoriahub-db` | planned (J3) | CommonJS plus a bin | domain schema fragments and migrations |
+| `@marinoscar/memoriahub-db` | `packages/memoriahub-db` | exists (RETRO-J3, #606) | CommonJS plus a bin | `.` (the `memoriahub-db` command: `sync`, `check`, `promote`), the `schema/`, `migrations/` and inventory files |
 | `@marinoscar/memoriahub-api` | `packages/memoriahub-api` | planned (J4 to J10) | CommonJS (`tsc`, decorator metadata) | one entry per domain slice |
 | `@marinoscar/memoriahub-web` | `packages/memoriahub-web` | planned (J11) | ESM | `headless` and `ui` entries per slice |
 
 Every package, once it exists: `"version"` moved by Changesets (the source says `0.0.0`), a `repository.directory`, `engines.node >=24`, `publishConfig` `{ "access": "public", "provenance": true }`, and a `files` list of `dist`, the per-subpath stub folders where the package has them, `README.md`, `CHANGELOG.md` and `LICENSE`. **While the publish gate is closed** a package also carries `"private": true` and `"license": "UNLICENSED"`, and `LICENSE` is not required ([the gate](runbooks/release-memoriahub-packages.md#the-publish-gate)). `LICENSE` is copied from the repository root by the `prepack` script (`scripts/memoriahub-packages/copy-license.mjs`) and is git-ignored in the package.
+
+`@marinoscar/memoriahub-db` owns the domain's Prisma fragments, migrations and raw-SQL inventory and installs them into an app with `memoriahub-db sync`; it never imports platform code at run time and only reads the app's lock files. Its migration policy (one baseline, adopted by the web app) and procedures are in [the runbook](runbooks/memoriahub-domain-migration.md). Its tests (`npm run test:run -w @marinoscar/memoriahub-db`) include `test/apply.db.test.ts`, which runs when `DATABASE_URL` names a PostgreSQL 16 server with pgvector.
 
 The packages are one Changesets `fixed` group (`.changeset/config.json`): they always share one version. Each package name is added to the group by the issue that creates the package; until then the group lists only the packages that exist. The apps (`api`, `web`, `@memoriahub/cli`) and `@app/shared` are in `ignore`; the apps depend on the packages with a `*` workspace range.
 

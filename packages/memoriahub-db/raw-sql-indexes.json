@@ -1,0 +1,77 @@
+[
+  {
+    "definition": "CREATE INDEX faces_embedding_vec_archive_hnsw_idx ON public.faces USING hnsw (embedding_vec vector_cosine_ops) WHERE ((person_id IS NULL) AND (hidden_at IS NOT NULL))",
+    "name": "faces_embedding_vec_archive_hnsw_idx",
+    "table": "faces"
+  },
+  {
+    "definition": "CREATE INDEX faces_embedding_vec_assigned_hnsw_idx ON public.faces USING hnsw (embedding_vec vector_cosine_ops) WITH (m='16', ef_construction='64') WHERE ((person_id IS NOT NULL) AND (embedding_vec IS NOT NULL))",
+    "name": "faces_embedding_vec_assigned_hnsw_idx",
+    "table": "faces"
+  },
+  {
+    "definition": "CREATE INDEX faces_embedding_vec_hnsw_idx ON public.faces USING hnsw (embedding_vec vector_cosine_ops) WITH (m='16', ef_construction='64')",
+    "name": "faces_embedding_vec_hnsw_idx",
+    "table": "faces"
+  },
+  {
+    "definition": "CREATE INDEX idx_media_circle_device_captured ON public.media_items USING btree (circle_id, camera_make, camera_model, captured_at) WHERE (deleted_at IS NULL)",
+    "name": "idx_media_circle_device_captured",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE INDEX media_item_embedding_hnsw_idx ON public.media_item_embedding USING hnsw (embedding vector_cosine_ops)",
+    "name": "media_item_embedding_hnsw_idx",
+    "table": "media_item_embedding"
+  },
+  {
+    "definition": "CREATE INDEX media_items_captured_md_idx ON public.media_items USING btree (EXTRACT(month FROM (captured_at AT TIME ZONE 'UTC'::text)), EXTRACT(day FROM (captured_at AT TIME ZONE 'UTC'::text))) WHERE (deleted_at IS NULL)",
+    "name": "media_items_captured_md_idx",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE INDEX media_items_circle_captured_md_idx ON public.media_items USING btree (circle_id, EXTRACT(month FROM (captured_at AT TIME ZONE 'UTC'::text)), EXTRACT(day FROM (captured_at AT TIME ZONE 'UTC'::text))) WHERE ((deleted_at IS NULL) AND (archived_at IS NULL) AND (captured_at IS NOT NULL))",
+    "name": "media_items_circle_captured_md_idx",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE UNIQUE INDEX media_items_circle_content_hash_active_key ON public.media_items USING btree (circle_id, content_hash) WHERE ((content_hash IS NOT NULL) AND (deleted_at IS NULL))",
+    "name": "media_items_circle_content_hash_active_key",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE INDEX media_items_gallery_idx ON public.media_items USING btree (circle_id, captured_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (archived_at IS NULL))",
+    "name": "media_items_gallery_idx",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE INDEX media_items_map_locations_idx ON public.media_items USING btree (circle_id, captured_at DESC, taken_lat, taken_lng) WHERE ((deleted_at IS NULL) AND (archived_at IS NULL) AND (taken_lat IS NOT NULL) AND (taken_lng IS NOT NULL))",
+    "name": "media_items_map_locations_idx",
+    "table": "media_items"
+  },
+  {
+    "definition": "CREATE INDEX media_visual_embedding_hnsw_idx ON public.media_visual_embedding USING hnsw (embedding vector_cosine_ops) WITH (m='16', ef_construction='64')",
+    "name": "media_visual_embedding_hnsw_idx",
+    "table": "media_visual_embedding"
+  },
+  {
+    "definition": "CREATE INDEX people_circle_id_hidden_at_idx ON public.people USING btree (circle_id) WHERE ((hidden_at IS NULL) AND (deleted_at IS NULL))",
+    "name": "people_circle_id_hidden_at_idx",
+    "table": "people"
+  },
+  {
+    "definition": "CREATE UNIQUE INDEX review_run_items_run_id_burst_group_id_key ON public.review_run_items USING btree (run_id, burst_group_id) WHERE (burst_group_id IS NOT NULL)",
+    "name": "review_run_items_run_id_burst_group_id_key",
+    "table": "review_run_items"
+  },
+  {
+    "definition": "CREATE UNIQUE INDEX review_run_items_run_id_duplicate_group_id_key ON public.review_run_items USING btree (run_id, duplicate_group_id) WHERE (duplicate_group_id IS NOT NULL)",
+    "name": "review_run_items_run_id_duplicate_group_id_key",
+    "table": "review_run_items"
+  },
+  {
+    "definition": "CREATE UNIQUE INDEX review_run_items_run_id_location_suggestion_id_key ON public.review_run_items USING btree (run_id, location_suggestion_id) WHERE (location_suggestion_id IS NOT NULL)",
+    "name": "review_run_items_run_id_location_suggestion_id_key",
+    "table": "review_run_items"
+  }
+]
