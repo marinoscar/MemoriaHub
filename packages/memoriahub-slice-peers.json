@@ -8,22 +8,53 @@
     ],
     "memoriahub-api": [
       "ports"
+    ],
+    "memoriahub-web": [
+      "core"
     ]
   },
-  "$implies": {},
+  "$implies": {
+    "@mui/icons-material": [
+      "@mui/material"
+    ],
+    "@mui/material": [
+      "react",
+      "react-dom"
+    ],
+    "react-dom": [
+      "react"
+    ],
+    "react-router-dom": [
+      "react",
+      "react-dom"
+    ],
+    "react-leaflet": [
+      "react",
+      "leaflet"
+    ],
+    "@testing-library/react": [
+      "react",
+      "react-dom"
+    ],
+    "leaflet.markercluster": [
+      "leaflet"
+    ]
+  },
   "$reserved": {
     "memoriahub-compute": [],
     "memoriahub-contract": [],
     "memoriahub-db": [],
     "memoriahub-api": [
       "@marinoscar/memoriahub-contract"
-    ]
+    ],
+    "memoriahub-web": []
   },
   "$hostOnly": {
     "memoriahub-compute": [],
     "memoriahub-contract": [],
     "memoriahub-db": [],
-    "memoriahub-api": []
+    "memoriahub-api": [],
+    "memoriahub-web": []
   },
   "$hostPlugins": {},
   "memoriahub-compute": {
@@ -186,6 +217,51 @@
       "peers": [
         "@nestjs/common",
         "zod"
+      ]
+    }
+  },
+  "memoriahub-web": {
+    "core": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [],
+        "testing": [
+          "@mui/material",
+          "@testing-library/react",
+          "react-router-dom"
+        ]
+      }
+    },
+    "brand": {
+      "peers": [
+        "react"
+      ]
+    },
+    "media": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom",
+        "hash-wasm"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "leaflet",
+          "leaflet.markercluster",
+          "react-leaflet",
+          "react-router-dom"
+        ]
+      }
+    },
+    "shell": {
+      "peers": [
+        "@mui/icons-material",
+        "react"
       ]
     }
   }

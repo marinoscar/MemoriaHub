@@ -32,6 +32,8 @@ COPY apps/web/package.json ./apps/web/package.json
 # The wire-schema package (zod only) apps/web takes its API types from, and the
 # shared tool that gives its CommonJS build a module-format stub.
 COPY packages/memoriahub-contract ./packages/memoriahub-contract/
+# The React domain package (RETRO-J11, #626): the media slice, the host interface and the brand.
+COPY packages/memoriahub-web ./packages/memoriahub-web/
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
 # --ignore-scripts: before this context widening, the build context was
 # scoped to apps/web, so the root package.json (and its postinstall,
@@ -45,7 +47,7 @@ COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packa
 RUN npm install --ignore-scripts
 
 # apps/web type-checks against the package's built dist/ (git-ignored).
-RUN npm run build -w @marinoscar/memoriahub-contract
+RUN npm run build -w @marinoscar/memoriahub-contract && npm run build -w @marinoscar/memoriahub-web
 
 # -----------------------------------------------------------------------------
 # Development stage
