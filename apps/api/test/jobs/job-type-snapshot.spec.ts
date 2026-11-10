@@ -118,15 +118,15 @@ describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
     expect(platform.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 
-  // RETRO-C2 (#581): no provider key is delivered to a node. The three types whose legacy class still
-  // carries the node pair are server-only on the platform until their native handlers land
-  // (RETRO-C4: the AI tagging types; RETRO-C6: geocode, back to nodes through the secret broker).
+  // RETRO-C2 (#581): no provider key is delivered to a node. `geocode`, whose legacy class still
+  // carries the node pair, is server-only on the platform until its native handler lands (RETRO-C6,
+  // back to nodes through the secret broker). The AI types are RETRO-C4's native, server-only handlers.
   const PLATFORM_NODE_ELIGIBLE_TYPES = EXPECTED_NODE_ELIGIBLE_TYPES.filter(
     (type) => !PROVIDER_KEY_SERVER_ONLY_TYPES.has(type),
   );
 
   it('pins the provider-key types that are server-only for now', () => {
-    expect([...PROVIDER_KEY_SERVER_ONLY_TYPES].sort()).toEqual(['auto_tagging', 'geocode', 'video_auto_tagging']);
+    expect([...PROVIDER_KEY_SERVER_ONLY_TYPES].sort()).toEqual(['geocode']);
     const serverOnly = platform.serverOnlyTypes();
     for (const type of PROVIDER_KEY_SERVER_ONLY_TYPES) {
       expect(serverOnly).toContain(type);

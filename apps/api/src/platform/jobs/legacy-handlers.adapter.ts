@@ -61,7 +61,9 @@ import { videoJobTimeoutMs } from './legacy-env';
 // did the same for `duplicate_detection`, `duplicate_detection_batch`,
 // `duplicate_confidence_backfill`, `burst_detection` and
 // `social_media_detection` (which now declares the 20-minute video profile
-// itself).
+// itself). RETRO-C4 (#590) did the same for the four AI-bound types
+// (`auto_tagging`, `video_auto_tagging`, `picture_enhancement`,
+// `picture_enhancement_purge`), which are server-only permanently (AI rule 3).
 //
 // The orchestration (claim, lease, retry, deferral, settle) is the platform's;
 // none of it is reimplemented here.
@@ -69,21 +71,17 @@ import { videoJobTimeoutMs } from './legacy-env';
 
 /** Job types that call a rate-limited provider -> the throttle bucket they draw on. */
 export const LEGACY_THROTTLE_KEYS: Readonly<Record<string, string>> = {
-  auto_tagging: 'tagging',
-  // Video tagging calls the SAME configured tagging provider, so it shares the photo path's gate.
-  video_auto_tagging: 'tagging',
+  // auto_tagging and video_auto_tagging (RETRO-C4) register the shared `tagging` key themselves.
   geocode: 'geocode',
 };
 
 /**
- * The video job types still on the adapter: download + ffmpeg + per-frame
- * provider calls legitimately exceed 10 minutes. (`video_face_detection`,
- * native since RETRO-C3, and `social_media_detection`, native since RETRO-C5,
- * declare the same profile themselves.)
+ * The video job types still on the adapter: none. (`video_face_detection`,
+ * native since RETRO-C3, `social_media_detection`, native since RETRO-C5, and
+ * `video_auto_tagging`, native since RETRO-C4, declare the 20-minute profile
+ * themselves.)
  */
-export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set([
-  'video_auto_tagging',
-]);
+export const VIDEO_JOB_TYPES: ReadonlySet<string> = new Set<string>();
 
 /** A `JsonValue` that is a plain object, or null. */
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -163,24 +161,21 @@ async function runLegacy(handler: EnrichmentHandler, job: Job, subjectExists?: S
 const logger = new Logger('LegacyEnrichmentHandlerAdapter');
 
 /**
- * The job types whose compute needs a PROVIDER KEY, which no node is handed (RETRO-C2, #581).
+ * The legacy job types whose compute needs a PROVIDER KEY, which no node is handed (RETRO-C2, #581).
  *
  * MemoriaHub's old node plane issued a transient provider credential per job
  * (`POST /api/nodes/:id/jobs/:jobId/credentials`, deleted with the legacy node plane). The platform
  * nodes slice does not deliver provider keys: a key a node needs goes through the `nodeSecretBroker`
  * (`POST /api/nodes/:id/jobs/:jobId/secret`, a handle in `job_node_secrets`, switched on by
- * `nodes.jobSecretBrokerEnabled`), and AI keys never go to a node at all. Until those types move to
- * native handlers (RETRO-C4 for the two AI tagging types, RETRO-C6 for geocode, which returns to node
- * eligibility through the broker) they run on the server: the node pair their legacy class still
- * carries is NOT forwarded, so the platform derives them as server-only.
+ * `nodes.jobSecretBrokerEnabled`), and AI keys never go to a node at all (RETRO-C4 made the AI
+ * tagging and enhancement types native, server-only handlers). `geocode` is the one legacy class that
+ * still carries a node pair and needs a key: it runs on the server until RETRO-C6 converts it and
+ * returns it to node eligibility through the broker. The pair its class carries is NOT forwarded, so
+ * the platform derives it as server-only.
  *
- * PLATFORM-ADOPTION-SHIM(RETRO-C6): delete the entry of a type when its native handler lands.
+ * PLATFORM-ADOPTION-SHIM(RETRO-C6): delete the entry when the native geocode handler lands.
  */
-export const PROVIDER_KEY_SERVER_ONLY_TYPES: ReadonlySet<string> = new Set([
-  'auto_tagging',
-  'video_auto_tagging',
-  'geocode',
-]);
+export const PROVIDER_KEY_SERVER_ONLY_TYPES: ReadonlySet<string> = new Set(['geocode']);
 
 /** The platform `JobHandler` for one legacy handler. */
 export function toPlatformHandler(handler: EnrichmentHandler, subjectExists?: SubjectExists): JobHandler {

@@ -1,15 +1,18 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { EnrichmentJob, MediaType, MediaEnhancementStatus } from '@prisma/client';
+import { MediaType, MediaEnhancementStatus } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  ProviderThrottleService,
+  RateLimitError as PlatformRateLimitError,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { RateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
-import {
-  ENRICHMENT_MAX_ATTEMPTS,
-  ENRICHMENT_RATELIMIT_MAX_HITS,
-} from '../platform/jobs/queue-limits';
+import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { AiSettingsService } from '../ai-port/ai-settings.service';
@@ -29,12 +32,16 @@ interface PictureEnhancementPayload {
   enhancementId?: string;
 }
 
+/** `gpt-image-1` can take several minutes; the row-state machine below reads `maxAttempts`. */
+const PROFILE: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+
 /**
- * PictureEnhancementHandler
+ * PictureEnhancementHandler: a native platform `JobHandler` (RETRO-C4, #590).
  *
- * Server-only (no nodeResultSchema/persistNodeResult — mirrors
- * LocationInferenceHandler): it needs the OpenAI credential and writes a staging
- * object, so it never runs on a distributed worker node.
+ * Server-only, permanently (AI rule 3; no nodeResultSchema/persistNodeResult): it
+ * needs the OpenAI credential and writes a staging object, so it never runs on a
+ * distributed worker node. A 429/529 reaches the queue as the platform
+ * `RateLimitError`, so the job is deferred without consuming an attempt.
  *
  * The row is created ahead of time (status=pending, params + compiled prompt
  * already stored) by MediaEnhancementService.startEnhance; this handler resolves
@@ -42,12 +49,15 @@ interface PictureEnhancementPayload {
  * stages the enhanced bytes for human review.
  */
 @Injectable()
-export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleInit {
+export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
   readonly type = 'picture_enhancement';
+  readonly label = 'AI picture enhancer';
+  readonly profile: JobExecutionProfile = PROFILE;
   private readonly logger = new Logger(PictureEnhancementHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly throttle: ProviderThrottleService,
     private readonly prisma: PrismaService,
     private readonly resolver: StorageProviderResolver,
     private readonly aiSettings: AiSettingsService,
@@ -64,9 +74,29 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
 
   onModuleInit(): void {
     this.registry.register(this);
+    // OpenAI image-edit quota: its own gate, apart from tagging.
+    this.throttle.registerProviderKey(this.type, 'enhance');
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
+  /**
+   * Refuse to delete a PENDING job whose batch is still active: it is what will
+   * make the row's (already requested, billed-on-run) render happen, and the
+   * batch counters derive from the rows it advances. Cancel the batch instead.
+   */
+  async canDelete(job: Job): Promise<string | null> {
+    if (job.status !== 'pending') return null;
+    const enhancementId = (job.payload as PictureEnhancementPayload | null)?.enhancementId;
+    if (!enhancementId) return null;
+    const row = await this.prisma.mediaEnhancement.findUnique({
+      where: { id: enhancementId },
+      select: { status: true, batchId: true, batch: { select: { cancelledAt: true } } },
+    });
+    if (!row?.batchId || row.batch?.cancelledAt) return null;
+    if (row.status !== MediaEnhancementStatus.pending) return null;
+    return `This job renders an enhancement of batch ${row.batchId}, which is still active: cancel the batch instead of deleting its job.`;
+  }
+
+  async process(job: Job): Promise<void> {
     const payload = job.payload as PictureEnhancementPayload | null;
     const enhancementId = payload?.enhancementId;
     if (!enhancementId) {
@@ -290,7 +320,8 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       // Classify the failure the SAME way EnrichmentTerminalService will, so
       // the row's next state always agrees with the job's next state.
       // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
-      const rl = err instanceof RateLimitError ? err : classifyRateLimit(err);
+      const rl =
+        err instanceof PlatformRateLimitError || err instanceof RateLimitError ? err : classifyRateLimit(err);
 
       // Does the queue requeue this job, or is this its last breath?
       //
@@ -301,11 +332,11 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       //  - Normal error: `attempts` is charged at CLAIM time (it means
       //    "attempts STARTED"), so `job.attempts` already includes the attempt
       //    that just failed — 1 on the first run. The queue retries while
-      //    `job.attempts < ENRICHMENT_MAX_ATTEMPTS`, i.e. attempt 3 of 3 is
+      //    `job.attempts < PROFILE.maxAttempts`, i.e. attempt 3 of 3 is
       //    terminal. Using `<` (not `<=`) here is what keeps the two in step.
       const queueWillRetry = rl
         ? job.rateLimitHits + 1 < ENRICHMENT_RATELIMIT_MAX_HITS
-        : job.attempts < ENRICHMENT_MAX_ATTEMPTS;
+        : job.attempts < PROFILE.maxAttempts;
 
       // A retryable failure must leave the row ACTIONABLE. process() early-returns
       // unless the row is pending/processing, so unconditionally tombstoning it as
@@ -341,7 +372,7 @@ export class PictureEnhancementHandler implements EnrichmentHandler, OnModuleIni
       // Rethrow the NORMALIZED RateLimitError so the queue takes its deferral
       // path (backoff + no attempt charged) rather than the retry path; any
       // other error is rethrown untouched for normal retry/backoff.
-      if (rl) throw rl;
+      if (rl) throw rl instanceof PlatformRateLimitError ? rl : new PlatformRateLimitError(rl.message, rl.retryAfterMs);
       throw err;
     }
   }

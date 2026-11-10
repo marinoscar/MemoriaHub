@@ -49,19 +49,16 @@ describe('NODE_JOB_TYPES', () => {
       'metadata_extraction',
       'social_media_detection',
       'thumbnail_regen',
-      'auto_tagging',
-      'video_auto_tagging',
       'geocode',
       'workflow_execute_batch',
     ]);
   });
 
-  it('requires ffmpeg AND ffprobe for video_auto_tagging — a node without them must never claim it', () => {
-    // Frame extraction (and optional audio extraction) shell out to ffmpeg;
-    // requirements are per TYPE for exactly this reason, which is also why
-    // video tagging is a separate job type from auto_tagging (['sharp']).
-    expect(JOB_TYPE_REQUIREMENTS.video_auto_tagging).toEqual(['sharp', 'ffmpeg', 'ffprobe']);
-    expect(JOB_TYPE_REQUIREMENTS.auto_tagging).toEqual(['sharp']);
+  it('never advertises an AI job type: AI jobs are server-only (EAB AI rule 3, RETRO-C4)', () => {
+    for (const type of ['auto_tagging', 'video_auto_tagging', 'picture_enhancement']) {
+      expect(isNodeJobType(type)).toBe(false);
+      expect(JOB_TYPE_REQUIREMENTS).not.toHaveProperty(type);
+    }
   });
 });
 
@@ -152,7 +149,7 @@ describe('effectiveRequirements', () => {
       JOB_TYPE_REQUIREMENTS.duplicate_detection,
     );
     expect(effectiveRequirements('geocode')).toEqual(JOB_TYPE_REQUIREMENTS.geocode);
-    expect(effectiveRequirements('auto_tagging')).toEqual(JOB_TYPE_REQUIREMENTS.auto_tagging);
+    expect(effectiveRequirements('metadata_extraction')).toEqual(JOB_TYPE_REQUIREMENTS.metadata_extraction);
   });
 
   it('never mutates the JOB_TYPE_REQUIREMENTS source-of-truth map', () => {

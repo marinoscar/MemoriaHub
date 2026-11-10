@@ -1,5 +1,7 @@
 # Distributed Worker Nodes — Remote Enrichment Compute
 
+> **RETRO-C4 (#590):** the four AI-bound job types (`auto_tagging`, `video_auto_tagging`, `picture_enhancement`, `picture_enhancement_purge`) are server-only permanently (EAB AI rule 3); no AI key is delivered to a node. References below to node-computed tagging are historical.
+
 | Field | Value |
 |-------|-------|
 | **Version** | 2.3 |

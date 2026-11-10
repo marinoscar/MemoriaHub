@@ -10,7 +10,7 @@
  *     (`/api/media`, `/api/system-settings`), even when its owner is an administrator;
  *   - the node is resolved by id AND the caller: another user's node answers 404 on a backup route;
  *   - `nodes:read` / `nodes:write` gate the app routes (a caller without them gets 403);
- *   - the nodes fleet jobs are registered, server-only, and the provider-key types are server-only;
+ *   - the nodes fleet jobs are registered, server-only, and the AI and geocode types are server-only;
  *   - the `nodes` settings namespace carries the legacy `NODE_*` values as defaults.
  */
 
@@ -25,6 +25,7 @@ import {
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 
 import { legacyNodesDefaults } from '../../src/app-registrations/settings';
+import { MEMORIAHUB_AI_JOB_TYPES } from '../../src/app-registrations/jobs';
 import { PROVIDER_KEY_SERVER_ONLY_TYPES } from '../../src/platform/jobs/legacy-handlers.adapter';
 import { TestContext, createTestApp, closeTestApp } from '../helpers/test-app.helper';
 import { resetPrismaMock, mockPrismaTransaction } from '../mocks/prisma.mock';
@@ -212,12 +213,13 @@ describe('platform nodes slice mount (RETRO-C2)', () => {
     expect(res.status).toBe(404);
   });
 
-  it('registers the fleet jobs server-only, and keeps the provider-key types server-only', () => {
+  it('registers the fleet jobs server-only, and keeps the AI and geocode types server-only', () => {
     const registry = context.module.get(JobHandlerRegistry);
     const serverOnly = registry.serverOnlyTypes();
     expect(registry.types()).toEqual(expect.arrayContaining([NODE_FLEET_SWEEP_TYPE, NODE_FLEET_PRUNE_TYPE]));
     expect(serverOnly).toEqual(expect.arrayContaining([NODE_FLEET_SWEEP_TYPE, NODE_FLEET_PRUNE_TYPE]));
-    for (const type of PROVIDER_KEY_SERVER_ONLY_TYPES) {
+    // The provider-key types: the AI types (RETRO-C4, native) and geocode (legacy class, no node pair forwarded).
+    for (const type of [...MEMORIAHUB_AI_JOB_TYPES, ...PROVIDER_KEY_SERVER_ONLY_TYPES]) {
       expect(registry.types()).toContain(type);
       expect(serverOnly).toContain(type);
     }

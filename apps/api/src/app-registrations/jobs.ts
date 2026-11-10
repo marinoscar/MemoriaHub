@@ -37,24 +37,34 @@ import { REVIEW_RUNS_RETENTION_POLICY } from '../review-runs/review-runs.retenti
 import { WORKFLOW_RUNS_RETENTION_POLICY } from '../workflows/runs/workflow-runs.retention';
 
 /**
+ * The AI-bound job types (RETRO-C4, #590). SERVER-ONLY, permanently (EAB AI rule 3):
+ * an AI provider key is resolved on the API and never brokered to a worker node,
+ * so none of these may carry the node pair (`nodeResultSchema` +
+ * `persistNodeResult`). Pinned by `test/jobs/ai-bound.conformance.spec.ts`. The
+ * strings are permanent and deliberately not `ai.`-prefixed (queued rows).
+ */
+export const MEMORIAHUB_AI_JOB_TYPES: readonly string[] = [
+  'auto_tagging',
+  'video_auto_tagging',
+  'picture_enhancement',
+  'picture_enhancement_purge',
+];
+
+/**
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
- * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C8:
+ * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C4: the four AI-bound types; RETRO-C8:
  * memory_generation, memory_digest and storage_insights; RETRO-D3 retired
  * broadcast_start, broadcast_chunk and notification_purge, listed below).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   // Media enrichment (per-item compute)
-  auto_tagging: 'Auto-tagging',
-  video_auto_tagging: 'Video auto-tagging',
   geocode: 'Geocoding',
   location_inference: 'Location inference',
   // Deprecated aliases kept so already-queued rows still render a friendly label;
   // superseded by review_run_* below (issue #190).
   location_suggestion_run_evaluate: 'Location suggestion run evaluate',
   location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
-  picture_enhancement: 'AI picture enhancer',
-  picture_enhancement_purge: 'AI picture enhancer purge',
   // Storage / system
   storage_migration: 'Storage migration',
   trash_purge: 'Trash purge',
