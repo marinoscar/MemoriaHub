@@ -6,7 +6,7 @@
 | **Last Updated** | November 2026 |
 | **Status** | Implemented |
 
-> **Status since RETRO-C1 (issue #575): served by the platform.** `GET /api/admin/jobs/insights` and `POST /api/admin/jobs/insights/reset-history` are the jobs slice's (`JobInsightsService`, `@marinoscar/platform-api/jobs`), and the page is `JobInsightsPage` of `@marinoscar/platform-web/jobs/ui`. The model below (on-demand aggregate, lock safety, ETA basis, the lifetime rollup folded in by the nightly purge) is unchanged in meaning. What changed on the wire: `generatedAt` replaces `computedAt`; the status counts are under `live.byStatus` only; `eta` is an array with one entry per type that has work outstanding (`remaining`, `avgMs`, `basis`, `estimatedMs`) and `lifetime` an array per type, instead of the `{ totalRemaining, etaMs, basis, perType }` and `{ overall, byType }` objects. The rollup table is the platform's `job_stats_rollup` (the old rows were merged in; `mh_legacy_job_stats_rollup` is gone). The CLI (`memoriahub jobs insights`, the TUI) maps the new shape back (`normalizeJobInsights`). See the [Jobs cutover runbook](../runbooks/jobs-cutover.md).
+> **Status since RETRO-C1 (issue #575): served by the platform.** `GET /api/admin/jobs/insights` and `POST /api/admin/jobs/insights/reset-history` are the jobs slice's (`JobInsightsService`, `@marinoscar/platform-api/jobs`), and the page is `JobInsightsPage` of `@marinoscar/platform-web/jobs/ui`. The model below (on-demand aggregate, lock safety, ETA basis, the lifetime rollup folded in by the nightly purge) is unchanged in meaning. What changed on the wire: `generatedAt` replaces `computedAt`; the status counts are under `live.byStatus` only; `eta` is an array with one entry per type that has work outstanding (`remaining`, `avgMs`, `basis`, `estimatedMs`) and `lifetime` an array per type, instead of the `{ totalRemaining, etaMs, basis, perType }` and `{ overall, byType }` objects. The rollup table is the platform's `job_stats_rollup` (the old rows were merged in; `mh_legacy_job_stats_rollup` is gone). The CLI (`memoriahub jobs insights`, the TUI) maps the new shape back (`normalizeJobInsights`). See the [Jobs cutover runbook](../runbooks/jobs-cutover.md). (RETRO-C11) Below, `enrichment_jobs`, `EnrichmentAdminService` and the `enrichment_jobs_*` index names are the pre-cutover names of the platform `jobs` table and `JobInsightsService`; the model, formulas and lock-safety argument are unchanged. The queue and fleet are documented in [enrichment-queue.md](enrichment-queue.md) and [worker-fleet.md](../runbooks/worker-fleet.md).
 
 ---
 
@@ -197,7 +197,7 @@ The endpoint is called only on demand (user opens the web page or CLI polls), no
 |-------|------|-------------|
 | `computedAt` | ISO 8601 | Timestamp of when this response was assembled |
 | `windowDays` | number | Duration window used for history aggregates (query param, default 7) |
-| `concurrency` | number | `ENRICHMENT_WORKER_CONCURRENCY` env value used in ETA denominator |
+| `concurrency` | number | `JOBS_WORKER_CONCURRENCY` env value used in ETA denominator |
 
 **`live` object:**
 
@@ -257,7 +257,7 @@ etaMs_overall  = max(etcMs_per_type) across all types with remaining > 0
 
 The overall ETA is the maximum per-type ETA rather than the sum, because job types run concurrently on the same worker pool. The slowest bottleneck type determines when the queue drains.
 
-`concurrency` is read from `ENRICHMENT_WORKER_CONCURRENCY` (default 1). With concurrency = 1, only one job runs at a time, so the division is a no-op. With concurrency = 2, jobs drain roughly twice as fast.
+`concurrency` is read from `JOBS_WORKER_CONCURRENCY` (default 1 in this deployment). With concurrency = 1, only one job runs at a time, so the division is a no-op. With concurrency = 2, jobs drain roughly twice as fast.
 
 ### Average Duration Fallback Hierarchy
 

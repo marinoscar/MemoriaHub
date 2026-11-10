@@ -336,7 +336,7 @@ The upper bound of `hashDistance` is capped at 32 (half the 64-bit hash width) b
 |----------|---------|-------------|
 | `BURST_DETECTION_ENABLED` | `true` | Environment kill-switch. Set to `false` to disable `BurstEnqueueListener` regardless of system settings. The system setting `features.burstDetection` is the runtime on/off toggle; this env var is a hard override for CI/test environments. |
 
-The enrichment worker variables (`ENRICHMENT_WORKER_ENABLED`, `ENRICHMENT_JOB_POLL_MS`, `ENRICHMENT_WORKER_CONCURRENCY`) govern the queue that runs `burst_detection` jobs alongside all other enrichment types. See [enrichment-queue.md — Configuration](enrichment-queue.md#12-configuration).
+The queue variables (`JOBS_WORKER_MODE`, `JOBS_POLL_MS`, `JOBS_WORKER_CONCURRENCY`) govern the queue that runs `burst_detection` jobs alongside all other job types; `burst_detection` is server-only. See [enrichment-queue.md — Configuration](enrichment-queue.md#configuration).
 
 ---
 
@@ -697,7 +697,7 @@ Changes to the global `features.burstDetection` setting are tracked via the stan
 
 ### Environment
 
-Set `ENRICHMENT_WORKER_ENABLED=false` in test environments to prevent the enrichment worker from processing queued jobs during tests that are testing only the enqueue behavior. For integration tests that need end-to-end processing, set `ENRICHMENT_JOB_POLL_MS=100` and enable the worker explicitly.
+Set `JOBS_WORKER_MODE=off` in test environments to prevent the enrichment worker from processing queued jobs during tests that are testing only the enqueue behavior. For integration tests that need end-to-end processing, set `JOBS_POLL_MS=100` and enable the worker explicitly.
 
 ---
 

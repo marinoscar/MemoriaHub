@@ -7,6 +7,8 @@
 
 Running MemoriaHub on an inexpensive, memory-constrained VPS is a core design goal. But a **bulk upload of thousands of photos** is the single most demanding thing the app does: each photo fans out into ~5 enrichment jobs (face detection, auto-tagging, burst detection, duplicate detection, location inference), all processed **in-process** by the enrichment worker, and the AI/image work is memory-heavy. On a small container this can push the process into an **out-of-memory (OOM) crash loop** that manifests as `502 Bad Gateway` across the whole app.
 
+> **Since RETRO-C1/C10/C11 (#575, #616, #620):** the queue is the platform's, so the knobs are `JOBS_WORKER_CONCURRENCY`, `JOBS_WORKER_MODE` and the per-type execution profiles (see [enrichment-queue.md](enrichment-queue.md#memoriahub-job-types)); worker nodes run the platform node engine with `MEMORIAHUB_HEAP_LIMIT_MB`, `MEMORIAHUB_MEMORY_THRESHOLD` and `MEMORIAHUB_NATIVE_THREADS` ([worker-container-config.md](../worker-container-config.md#35-memory--oom-hardening)). The measured figures below were taken on the previous engine and are kept as the reference; **a staging run on the platform engine (a 2,000-item import with HEIC photos, a 2 GB video and API replica restarts) has not been done yet**, so treat them as a baseline to re-check, not as a guarantee.
+
 This document explains *why* that happens and *exactly which knobs* to turn. It is the operator runbook for large imports.
 
 Cross-references: [Bulk Import Resilience](bulk-import-resilience.md) (retry/backoff/stuck-recovery mechanics) · [Enrichment Queue](enrichment-queue.md) (worker config reference) · [Job Queue Insights](job-insights.md) (the monitoring dashboard)
@@ -20,7 +22,7 @@ It is almost certainly an OOM kill, not an app bug — but there are **two diffe
 1. **Check which OOM you actually have** before touching the heap cap — getting this backwards makes things worse:
    - **Small container (≤ ~1 GB):** set a MODEST heap cap — `NODE_OPTIONS=--max-old-space-size=<~55% of the container's memory limit>` (e.g. `320` for a 512MB container) — to force proactive GC and stop the JS heap from crowding out the off-heap pool.
    - **Larger container (≥ 2 GB):** set a GENEROUS heap cap — `NODE_OPTIONS=--max-old-space-size=<container_MB − 1024>` (e.g. `5120` for a 6G container). Too low a cap here FATAL-crashes the process at V8's own heap limit long before the container's memory limit is ever reached.
-2. **Keep concurrency at 1** on a 512MB container: `ENRICHMENT_WORKER_CONCURRENCY=1`. On the committed production default (6G container / 4 CPUs), `4` is fine.
+2. **Keep concurrency at 1** on a 512MB container: `JOBS_WORKER_CONCURRENCY=1`. On the committed production default (6G container / 4 CPUs), `4` is fine.
 3. Restart the API (env change only — no rebuild needed) and watch it survive past ~60s.
 4. Once stable, recover any casualties: `POST /api/admin/jobs/reset-stuck {"olderThanMinutes":5}` then `POST /api/admin/jobs/retry-failed`.
 
@@ -50,7 +52,7 @@ The container's **cgroup memory limit** (the `deploy.resources.limits.memory` in
 ## 2. Why bulk imports specifically trigger this
 
 - **Fixed baseline cost** (resident the whole time, regardless of load): Node + NestJS, the CLIP ViT-B/32 model (~87 MB), the face model, and the offline GeoNames dataset (loaded synchronously at boot — it can block the event loop for several seconds). This baseline is a large fraction of a 512MB budget before a single photo is processed.
-- **Per-concurrent-job cost:** each in-flight job holds a **fully-decoded image buffer** (size scales with `TAG_MAX_IMAGE_DIM` / `FACE_MAX_IMAGE_DIM`) plus the model's inference working set. With `ENRICHMENT_WORKER_CONCURRENCY=N`, you pay roughly **N×** this on top of baseline.
+- **Per-concurrent-job cost:** each in-flight job holds a **fully-decoded image buffer** (size scales with `TAG_MAX_IMAGE_DIM` / `FACE_MAX_IMAGE_DIM`) plus the model's inference working set. With `JOBS_WORKER_CONCURRENCY=N`, you pay roughly **N×** this on top of baseline.
 - **No idle breathing room:** the enrichment worker is a continuous pool — it claims the next job the instant the previous finishes, back-to-back, for as long as there's backlog. That means the process is *always* holding those buffers and rarely goes idle, so V8's garbage collector never gets a natural quiet moment to reclaim them **unless you force it** with a heap cap set well below the container limit. (This is exactly why `--max-old-space-size` turned out to be the decisive lever in practice: it makes V8 collect eagerly rather than waiting for a pressure signal that arrives *after* the cgroup has already killed it.)
 
 ---
@@ -66,7 +68,7 @@ Set these in `infra/compose/.env` (they take effect on an API restart — no ima
 
    **Container memory ≥ 2 G is necessary but not sufficient.** Without a matching heap cap, the process still fatal-crashes at the V8 limit long before the container's cgroup limit is reached — the two must be sized together and kept consistent. See the diagnosis signatures in §6.
 
-2. **`ENRICHMENT_WORKER_CONCURRENCY`** — the primary *memory multiplier*.
+2. **`JOBS_WORKER_CONCURRENCY`** — the primary *memory multiplier*.
    This is how many jobs run at once, and therefore how many decoded-image + inference buffers are resident simultaneously. **On 512MB, keep this at `1`.** Raising it is the fastest way back into an OOM loop on a small box.
 
 3. **`TAG_MAX_IMAGE_DIM` / `FACE_MAX_IMAGE_DIM`** — shrink the per-job buffer.
@@ -80,7 +82,7 @@ Set these in `infra/compose/.env` (they take effect on an API restart — no ima
 
 > **A heap cap does not make higher concurrency safe by itself.** Concurrency's cost is off-heap; the only things that make concurrency > 1 safe are a bigger container limit and/or smaller per-job buffers (`*_MAX_IMAGE_DIM`). Video cost is different again — it's temp disk, bounded by `VIDEO_ENRICHMENT_MAX_BYTES`, not RAM.
 
-> **Production posture — worker off when nodes are present:** when distributed worker nodes (`apps/cli node start`) are handling enrichment compute, set `ENRICHMENT_WORKER_ENABLED=false` on the API tier so in-process enrichment jobs don't compete with inbound HTTP requests for the same CPU budget and Prisma connection pool during a bulk import — see §4.3.
+> **Production posture — worker off when nodes are present:** when distributed worker nodes (`memoriahub node start`) are handling enrichment compute, set `JOBS_WORKER_MODE=system` on the API tier (never `off`: the AI and other server-only types would not run) so in-process enrichment jobs don't compete with inbound HTTP requests for the same CPU budget and Prisma connection pool during a bulk import — see §4.3.
 
 ---
 
@@ -111,13 +113,13 @@ Two pairs of settings, both new in `.env.example`:
 
 ### 4.3 Production posture: worker off when distributed nodes are present
 
-When distributed worker nodes are registered and handling enrichment compute (see the [Distributed Nodes spec](docs/specs/distributed-nodes.md)), set **`ENRICHMENT_WORKER_ENABLED=false`** on the API tier. This keeps the API's CPU and connection-pool budget dedicated to serving requests during a bulk import instead of competing with in-process enrichment jobs for the same core(s) and the same Prisma pool.
+When distributed worker nodes are registered and handling enrichment compute (see the [Distributed Nodes spec](distributed-nodes.md)), set **`JOBS_WORKER_MODE=system`** on the API tier (never `off`: the AI and other server-only types would not run). This keeps the API's CPU and connection-pool budget dedicated to serving requests during a bulk import instead of competing with in-process enrichment jobs for the same core(s) and the same Prisma pool.
 
 ---
 
 ## 5. Recommended presets by container size
 
-| Container limit | `ENRICHMENT_WORKER_CONCURRENCY` | `NODE_OPTIONS=--max-old-space-size` | `*_MAX_IMAGE_DIM` | Heap regime | Notes |
+| Container limit | `JOBS_WORKER_CONCURRENCY` | `NODE_OPTIONS=--max-old-space-size` | `*_MAX_IMAGE_DIM` | Heap regime | Notes |
 |---|---|---|---|---|---|
 | **512 MB** (cheap VPS) | `1` | `320` | `1024` | small (~55%) | Field-proven stable for a ~20k-job import. Slower but resilient. |
 | **1 GB** | `2` | `576` | `1024`–`1568` | small (~55%) | Step up gradually; watch `dmesg` after each bump. |
@@ -188,7 +190,7 @@ sudo docker compose -f base.compose.yml -f prod.compose.yml logs api | grep "poo
 Restarts and OOM kills leave debris. None of it is lost data — jobs live in Postgres and the handlers are idempotent — but you may need to nudge things:
 
 - **Orphaned `running` jobs** (killed mid-flight; there is no graceful drain on a hard restart):
-  `POST /api/admin/jobs/reset-stuck {"olderThanMinutes":5}` flips them back to `pending` immediately. An hourly cron (`ENRICHMENT_STUCK_MINUTES`, default 15) also does this automatically, but the manual call skips the wait.
+  `POST /api/admin/jobs/reset-stuck {"olderThanMinutes":5}` flips them back to `pending` immediately. The platform lease reaper also does this automatically once a job outlives its lease, but the manual call skips the wait.
 - **Failed jobs**: `POST /api/admin/jobs/retry-failed` (optionally `{"type":"..."}` to scope) requeues them.
 - **Monitor progress**: `/admin/settings/jobs/insights` (or `GET /api/admin/jobs/insights`) shows live counts, throughput, per-type ETA, and lifetime totals.
 - **Orphaned `StorageObject`s stuck at `status='processing'`** (upload-time thumbnail/EXIF/dimensions pipeline killed mid-flight — a *separate* system from the `enrichment_jobs` above, since it isn't a queued job at all): symptom is photos/videos showing a permanent "Processing…" spinner in the gallery. `POST /api/admin/media/reprocess-stuck {"olderThanMinutes":5}` recovers them immediately; `StorageProcessingRecoveryTask` (`STORAGE_PROCESSING_STUCK_MINUTES`, default 10) also does this automatically. See [Bulk Import Resilience § Stuck StorageObject auto-reset cron](bulk-import-resilience.md#stuck-storageobject-auto-reset-cron-new--storageprocessingrecoverytask) for the full mechanism, including the retry-cap/OOM-during-recovery correctness detail.
@@ -202,7 +204,7 @@ The video thumbnail/probe path has also been hardened since the reference run be
 
 ## 8. What a real bulk run looks like (reference numbers)
 
-These are measured figures from a production import of ~4,200 photos on a **512 MB** container at **`ENRICHMENT_WORKER_CONCURRENCY=1`** with the heap cap in place — roughly **19–20k enrichment jobs total** (~5 per photo). Use them to sanity-check your own run and set expectations.
+These are measured figures from a production import of ~4,200 photos on a **512 MB** container at **`JOBS_WORKER_CONCURRENCY=1`** with the heap cap in place — roughly **19–20k enrichment jobs total** (~5 per photo). Use them to sanity-check your own run and set expectations.
 
 **Lifetime totals (all-time, survives history purges):**
 
@@ -240,7 +242,7 @@ These are measured figures from a production import of ~4,200 photos on a **512 
 - **cgroup OOM kills are invisible from inside the app; V8 heap OOMs are the opposite.** A cgroup kill just vanishes the process (`SIGKILL`); there's no catchable error and nothing in the app logs — always check `dmesg`. A V8 heap OOM is the mirror image: it writes a fatal-error stack trace straight to the API log and never touches `dmesg` at all, because the kernel never intervenes. Checking only one of the two will make you misdiagnose the other (see §6).
 - **A heap cap sized for a small box will crash a large one.** The "~55% of container" rule that keeps a 512MB box stable actively causes the FATAL heap-OOM crash on a multi-GB production container, because it artificially starves V8 of heap the process legitimately needs. Heap sizing is not one universal formula — it is two regimes, and picking the wrong one for the container size is itself the bug (2026-07-15 incident, §3 lever 1 and §6).
 - **No graceful shutdown.** `main.ts` does not call `enableShutdownHooks()`, so any restart (deploy, OOM, manual) kills in-flight jobs mid-processing. They're recoverable (`reset-stuck`), but expect to run that after every restart during a big import.
-- **Concurrency is a memory decision, not just a speed decision.** On a fixed container limit, the safe concurrency is whatever leaves headroom above `baseline + concurrency × per-job`. Treat `ENRICHMENT_WORKER_CONCURRENCY` and the container `memory:` limit as a *matched pair*.
+- **Concurrency is a memory decision, not just a speed decision.** On a fixed container limit, the safe concurrency is whatever leaves headroom above `baseline + concurrency × per-job`. Treat `JOBS_WORKER_CONCURRENCY` and the container `memory:` limit as a *matched pair*.
 - **`*_MAX_IMAGE_DIM` is the underused lever.** Shrinking decoded-image size is often a better trade than throttling to concurrency 1, because it lets multiple slots coexist in the same budget.
 - **A CPU limit is not just a throughput knob — it can break correctness-adjacent timeouts.** Pinning the API to a single core (2026-07-14 incident) didn't just slow things down; it starved the event loop badly enough that Prisma interactive transactions blew past their timeout mid-flight, surfacing as `expired transaction` errors that look like a database or code bug rather than a resource-allocation one. When you see Prisma transaction timeouts under load, check `API_CPU_LIMIT` before you go looking in application code (§4).
 
@@ -248,7 +250,7 @@ These are measured figures from a production import of ~4,200 photos on a **512 
 
 ## 10. Related configuration
 
-All the environment variables referenced here are documented in full in [Enrichment Queue → §13 Configuration](enrichment-queue.md#13-configuration), including the retry/backoff and rate-limit knobs. The provider rate-limit classification matrix and CLI-side resilience live in [Bulk Import Resilience](bulk-import-resilience.md).
+All the environment variables referenced here are documented in full in [MemoriaHub job types → Configuration](enrichment-queue.md#configuration), including the retry/backoff and rate-limit knobs. The provider rate-limit classification matrix and CLI-side resilience live in [Bulk Import Resilience](bulk-import-resilience.md).
 
 ---
 
