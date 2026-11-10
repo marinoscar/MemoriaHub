@@ -26,6 +26,9 @@ import { dirname, join, relative, sep } from 'node:path';
  */
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../..');
+// RETRO-J11 (#626): the packaged domain slices are scanned too, so moving a page out of the app
+// never moves a breakpoint read out of sight. Their files are keyed `memoriahub-web/<path>`.
+const WEB_PACKAGE_SRC = join(dirname(fileURLToPath(import.meta.url)), '../../../../../packages/memoriahub-web/src');
 
 const BREAKPOINT_READ = /\buseMediaQuery\s*\(|\bbreakpoints\.(?:up|down|between|only)\s*\(/;
 
@@ -50,7 +53,7 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'components/media/MediaDetailDrawer.tsx': WHY.dialog,
   'components/search/SearchPanel.tsx': WHY.dialog,
 
-  'components/media/MediaGallery.tsx': WHY.media,
+  'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
   'components/media/MediaLightbox.tsx': WHY.media,
   'components/media/VideoPlayer.tsx': WHY.media,
   'components/memories/MemoriesCarousel.tsx': WHY.media,
@@ -105,13 +108,17 @@ function sourceFiles(dir: string): string[] {
 }
 
 const FILES = sourceFiles(SRC);
-const READERS = FILES.filter((file) => BREAKPOINT_READ.test(stripComments(readFileSync(file, 'utf8')))).map(
-  (file) => relative(SRC, file).split(sep).join('/'),
-);
+const PACKAGE_FILES = sourceFiles(WEB_PACKAGE_SRC);
+const reads = (file: string) => BREAKPOINT_READ.test(stripComments(readFileSync(file, 'utf8')));
+const READERS = [
+  ...FILES.filter(reads).map((file) => relative(SRC, file).split(sep).join('/')),
+  ...PACKAGE_FILES.filter(reads).map((file) => `memoriahub-web/${relative(WEB_PACKAGE_SRC, file).split(sep).join('/')}`),
+];
 
 describe("breakpoint gates — the five are the package's (RETRO-F1, #571)", () => {
   it('scans the source tree (guards the scan itself against matching nothing)', () => {
     expect(FILES.length).toBeGreaterThan(100);
+    expect(PACKAGE_FILES.length).toBeGreaterThan(20);
     expect(READERS).toContain('components/navigation/AppBar.tsx');
   });
 

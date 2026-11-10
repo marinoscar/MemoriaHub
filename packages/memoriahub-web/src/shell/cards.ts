@@ -1,5 +1,5 @@
+import type { SvgIconComponent } from '@mui/icons-material';
 import PhonelinkRingIcon from '@mui/icons-material/PhonelinkRing';
-import type { ComponentType } from 'react';
 
 /**
  * The settings page of the paired Android phones.
@@ -13,25 +13,27 @@ export const MEDIA_SYNC_SETTINGS_PATH = '/settings/media-sync';
  * (title, description, `Icon`, `path`, `permission`, `feature`), declared here so the
  * package imports no platform package; the app spreads it into its registries.
  *
+ * @typeParam Feature - the feature keys the card may name; none by default.
+ *
  * @remarks
  * `permission` is the exact string the API controller enforces, never invented;
  * `feature` hides the card while that feature is off.
  *
  * @stability experimental
  */
-export interface MemoriahubSettingsCard {
+export interface MemoriahubSettingsCard<Feature extends string = never> {
   /** The card title. */
   title: string;
   /** One line under the title. */
   description: string;
   /** The icon, as a component (the hub renders it at 40px and the rail at 20px). */
-  Icon: ComponentType<{ fontSize?: 'small' | 'medium' | 'large' | 'inherit' }>;
+  Icon: SvgIconComponent;
   /** The route the card opens. */
   path: string;
   /** The permission string the API enforces; the card is hidden without it. */
   permission?: string;
-  /** The feature the card needs on. */
-  feature?: string;
+  /** The feature the card needs on; a card with none leaves it out (`Feature` defaults to `never`, so a card with a gate names it: `MemoriahubSettingsCard<'ai'>`). */
+  feature?: Feature;
 }
 
 /**
