@@ -46,6 +46,21 @@ describe('review catalog registration', () => {
   });
 });
 
+describe('review catalog (triggers)', () => {
+  it.each([
+    'resolve_burst_group',
+    'dismiss_burst_group',
+    'resolve_duplicate_group',
+    'dismiss_duplicate_group',
+    'accept_location_suggestion',
+    'reject_location_suggestion',
+  ])('allows "%s" on every trigger (not manual-only)', (type) => {
+    const action = REVIEW_ACTIONS.find((a) => a.type === type);
+    expect(action).toBeDefined();
+    expect(action!.triggerCompatibility).toBe('all');
+  });
+});
+
 describe('review catalog (compiler)', () => {
   let compiler: WorkflowConditionCompiler;
 
