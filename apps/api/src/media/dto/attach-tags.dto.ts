@@ -1,10 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { attachTagsSchema } from '@marinoscar/memoriahub-contract/media';
 
-export const attachTagsSchema = z.object({
-  names: z
-    .array(z.string().min(1).max(128))
-    .min(1, 'At least one tag name is required'),
-});
+export { attachTagsSchema };
 
 export class AttachTagsDto extends createZodDto(attachTagsSchema) {}

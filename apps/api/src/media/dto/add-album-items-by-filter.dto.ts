@@ -1,11 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
-import { mediaFilterFields } from './media-query.dto';
+import { addAlbumItemsByFilterSchema } from '@marinoscar/memoriahub-contract/media';
 
-export const addAlbumItemsByFilterSchema = z.object({
-  ...mediaFilterFields,
-  // circleId is required here (not optional like in mediaFilterFields)
-  circleId: z.string().uuid(),
-});
+export { addAlbumItemsByFilterSchema };
 
 export class AddAlbumItemsByFilterDto extends createZodDto(addAlbumItemsByFilterSchema) {}

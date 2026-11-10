@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// Lean-install smoke for @marinoscar/memoriahub-compute (issue #593)
+// Lean-install smoke for @marinoscar/memoriahub-compute and -contract (issue #593, #598)
 // =============================================================================
 //
 // memoriahub-compute is installed by a worker node (and the API image) with no
@@ -13,8 +13,10 @@
 //      node_modules folder). If that ever stops being true it is a finding, not
 //      something to relax: provider SDKs live only in
 //      @marinoscar/platform-ai-providers, and a node never holds a provider key.
-//   2. The package loads through BOTH exports conditions (require and import)
-//      and a pure function works (dHash Hamming distance).
+//   2. The packages load through BOTH exports conditions (require and import)
+//      and a pure function works (dHash Hamming distance; a contract schema
+//      parser exists). The contract is installed beside compute and brings only
+//      its zod peer.
 //
 // Needs: `npm run build:memoriahub-packages` first, and the npm registry for the
 // package's own dependencies (sharp, onnxruntime-node, exifr, zod); the tarball
@@ -31,7 +33,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** The workspace packages the smoke installs. */
-export const PACKED = Object.freeze(['memoriahub-compute']);
+export const PACKED = Object.freeze(['memoriahub-compute', 'memoriahub-contract']);
 /** Packages that must NOT appear anywhere in the installed tree. */
 export const FORBIDDEN_PACKAGES = Object.freeze([
   '@marinoscar/platform-api',
@@ -75,9 +77,12 @@ const SMOKE = `
 const assert = require('node:assert/strict');
 const cjs = require('@marinoscar/memoriahub-compute/dhash');
 assert.equal(typeof cjs.hammingDistance, 'function', 'require() condition');
-import('@marinoscar/memoriahub-compute/dhash').then((esm) => {
+const contract = require('@marinoscar/memoriahub-contract/media');
+assert.equal(typeof contract.mediaQuerySchema.parse, 'function', 'contract require() condition');
+Promise.all([import('@marinoscar/memoriahub-compute/dhash'), import('@marinoscar/memoriahub-contract')]).then(([esm, contractEsm]) => {
   assert.equal(typeof esm.hammingDistance, 'function', 'import condition');
   assert.equal(esm.hammingDistance('0', '0'), 0);
+  assert.equal(typeof contractEsm.mediaQuerySchema.parse, 'function', 'contract import condition');
   assert.throws(() => require.resolve('@marinoscar/memoriahub-compute/ai'), /./, 'the removed ./ai subpath must not resolve');
   console.log('lean-install smoke: ok');
 }).catch((error) => { console.error(error); process.exit(1); });
@@ -111,7 +116,10 @@ function main() {
       const out = run(NPM, ['pack', '-w', `@marinoscar/${name}`, '--pack-destination', tarballs, '--json'], { cwd: repo });
       files[name] = join(tarballs, JSON.parse(out.stdout)[0].filename.replace(/^.*\//, ''));
     }
-    const dependencies = { '@marinoscar/memoriahub-compute': `file:${files['memoriahub-compute']}` };
+    const dependencies = {
+      '@marinoscar/memoriahub-compute': `file:${files['memoriahub-compute']}`,
+      '@marinoscar/memoriahub-contract': `file:${files['memoriahub-contract']}`,
+    };
     writeFileSync(join(app, 'package.json'), JSON.stringify({ name: 'lean-install-smoke', version: '0.0.0', private: true, dependencies }, null, 2));
     console.log('check-lean-install: npm install (packed tarballs + peers only)');
     run(NPM, ['install', '--no-audit', '--no-fund', '--ignore-scripts'], { cwd: app });

@@ -11,7 +11,6 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JobReason } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
 import { FEATURE_KEYS } from '../settings/feature-gates';
@@ -19,21 +18,14 @@ import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { DuplicateBackfillService } from './duplicate-backfill.service';
 import { VisualEmbeddingService, VISUAL_EMBEDDING_MODEL_TAG } from './visual-embedding.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { adminDuplicateBackfillSchema, adminDuplicateConfidenceBackfillSchema } from '@marinoscar/memoriahub-contract/dedup';
 
 // Both schemas below accept a bodyless POST — see issue #289 (app.module.ts).
 // This one uses .prefault({}) rather than .default({}) so the empty body is fed
 // THROUGH the schema and still yields force: false; see the fuller note in
 // admin-metadata.controller.ts.
-const adminDuplicateBackfillSchema = z.object({
-  from: z.string().datetime({ offset: true }).optional(),
-  to: z.string().datetime({ offset: true }).optional(),
-  force: z.boolean().optional().default(false),
-}).prefault({});
 class AdminDuplicateBackfillDto extends createZodDto(adminDuplicateBackfillSchema) {}
 
-const adminDuplicateConfidenceBackfillSchema = z.object({
-  limit: z.coerce.number().int().min(1).optional(),
-}).default({});
 class AdminDuplicateConfidenceBackfillDto extends createZodDto(
   adminDuplicateConfidenceBackfillSchema,
 ) {}

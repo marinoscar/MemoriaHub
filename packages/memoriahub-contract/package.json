@@ -1,0 +1,144 @@
+{
+  "name": "@marinoscar/memoriahub-contract",
+  "version": "0.0.0",
+  "description": "Zod wire schemas, inferred types and error reasons of the MemoriaHub domain, shared by the API, the web app and the CLI. Leaf package: imports only zod. Dual CommonJS + ESM.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marinoscar/MemoriaHub.git",
+    "directory": "packages/memoriahub-contract"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./primitives": {
+      "types": "./dist/types/primitives/index.d.ts",
+      "import": "./dist/esm/primitives/index.js",
+      "require": "./dist/cjs/primitives/index.js"
+    },
+    "./errors": {
+      "types": "./dist/types/errors/index.d.ts",
+      "import": "./dist/esm/errors/index.js",
+      "require": "./dist/cjs/errors/index.js"
+    },
+    "./burst": {
+      "types": "./dist/types/burst/index.d.ts",
+      "import": "./dist/esm/burst/index.js",
+      "require": "./dist/cjs/burst/index.js"
+    },
+    "./dedup": {
+      "types": "./dist/types/dedup/index.d.ts",
+      "import": "./dist/esm/dedup/index.js",
+      "require": "./dist/cjs/dedup/index.js"
+    },
+    "./review-runs": {
+      "types": "./dist/types/review-runs/index.d.ts",
+      "import": "./dist/esm/review-runs/index.js",
+      "require": "./dist/cjs/review-runs/index.js"
+    },
+    "./location": {
+      "types": "./dist/types/location/index.d.ts",
+      "import": "./dist/esm/location/index.js",
+      "require": "./dist/cjs/location/index.js"
+    },
+    "./workflows": {
+      "types": "./dist/types/workflows/index.d.ts",
+      "import": "./dist/esm/workflows/index.js",
+      "require": "./dist/cjs/workflows/index.js"
+    },
+    "./media": {
+      "types": "./dist/types/media/index.d.ts",
+      "import": "./dist/esm/media/index.js",
+      "require": "./dist/cjs/media/index.js"
+    },
+    "./media-sync": {
+      "types": "./dist/types/media-sync/index.d.ts",
+      "import": "./dist/esm/media-sync/index.js",
+      "require": "./dist/cjs/media-sync/index.js"
+    },
+    "./search": {
+      "types": "./dist/types/search/index.d.ts",
+      "import": "./dist/esm/search/index.js",
+      "require": "./dist/cjs/search/index.js"
+    },
+    "./enhancement": {
+      "types": "./dist/types/enhancement/index.d.ts",
+      "import": "./dist/esm/enhancement/index.js",
+      "require": "./dist/cjs/enhancement/index.js"
+    },
+    "./face": {
+      "types": "./dist/types/face/index.d.ts",
+      "import": "./dist/esm/face/index.js",
+      "require": "./dist/cjs/face/index.js"
+    },
+    "./memories": {
+      "types": "./dist/types/memories/index.d.ts",
+      "import": "./dist/esm/memories/index.js",
+      "require": "./dist/cjs/memories/index.js"
+    },
+    "./tagging": {
+      "types": "./dist/types/tagging/index.d.ts",
+      "import": "./dist/esm/tagging/index.js",
+      "require": "./dist/cjs/tagging/index.js"
+    },
+    "./social": {
+      "types": "./dist/types/social/index.d.ts",
+      "import": "./dist/esm/social/index.js",
+      "require": "./dist/cjs/social/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "primitives",
+    "errors",
+    "burst",
+    "dedup",
+    "review-runs",
+    "location",
+    "workflows",
+    "media",
+    "media-sync",
+    "search",
+    "enhancement",
+    "face",
+    "memories",
+    "tagging",
+    "social",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "node ../../scripts/memoriahub-packages/copy-license.mjs",
+    "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node ../../scripts/memoriahub-packages/write-dist-stubs.mjs",
+    "typecheck": "tsc -p tsconfig.esm.json --noEmit",
+    "docs": "typedoc --options typedoc.json",
+    "test": "node --test",
+    "test:run": "node --test"
+  },
+  "peerDependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}

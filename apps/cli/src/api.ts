@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import { once } from 'node:events';
 import { Readable } from 'node:stream';
+import type { BulkUpdateMediaInput, CreateMediaInput } from '@marinoscar/memoriahub-contract/media';
 import {
   withRetry,
   DEFAULT_RETRY_CONFIG,
@@ -51,39 +52,11 @@ export interface MediaItemRecord {
   [key: string]: unknown;
 }
 
-/** Body of POST /api/media (mirrors createMediaSchema in the API). */
-export interface CreateMediaItemBody {
-  storageObjectId: string;
-  type: 'photo' | 'video';
-  source: 'web' | 'cli' | 'android' | 'import' | 'sync';
-  originalFilename: string;
-  circleId: string;
-  contentHash?: string;
-  capturedAt?: string;
-  capturedAtOffset?: number;
-  description?: string;
-  favorite?: boolean;
-  originalCreatedAt?: string;
-  sourcePath?: string;
-  sourceDeviceId?: string;
-  sourceDeviceName?: string;
-  /** Client-supplied FALLBACK location; the server restricts this to 'manual'. */
-  takenLat?: number;
-  takenLng?: number;
-  takenAltitude?: number;
-  coordSource?: 'manual';
-}
+/** Body of POST /api/media: the request shape of `createMediaSchema` in `@marinoscar/memoriahub-contract/media`. */
+export type CreateMediaItemBody = CreateMediaInput;
 
-/** Body of PATCH /api/media/bulk (1–500 ids; `set` needs ≥1 field). */
-export interface BulkUpdateMediaBody {
-  circleId: string;
-  ids: string[];
-  set: {
-    location?: { lat: number; lng: number; altitude?: number } | null;
-    favorite?: boolean;
-    capturedAt?: string | null;
-  };
-}
+/** Body of PATCH /api/media/bulk (1–500 ids; `set` needs ≥1 field): `bulkUpdateMediaSchema` in the contract. */
+export type BulkUpdateMediaBody = BulkUpdateMediaInput;
 
 /** An album row from GET /api/media/albums / POST /api/media/albums. */
 export interface AlbumSummary {

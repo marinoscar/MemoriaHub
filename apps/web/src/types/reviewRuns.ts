@@ -8,6 +8,7 @@
 // because JSON transports ISO 8601.
 // ---------------------------------------------------------------------------
 
+import type { ReviewRunAction, ReviewRunSubject } from '@marinoscar/memoriahub-contract/review-runs';
 import type {
   BaseRun,
   BaseRunDetail,
@@ -17,21 +18,9 @@ import type {
   RunStatus,
 } from './runs';
 
-/** Which review queue a run belongs to. */
-export type ReviewRunSubject = 'burst_group' | 'duplicate_group' | 'location_suggestion';
-
-/**
- * The bulk action a run performs.
- *
- * `resolve_archive` / `resolve_trash` / `dismiss` apply to the burst and
- * duplicate queues; `accept` / `reject` to location suggestions.
- */
-export type ReviewRunAction =
-  | 'resolve_archive'
-  | 'resolve_trash'
-  | 'dismiss'
-  | 'accept'
-  | 'reject';
+// Which queue a run belongs to and the bulk action it performs come from
+// `@marinoscar/memoriahub-contract/review-runs`, shared with the API.
+export type { ReviewRunAction, ReviewRunSubject };
 
 export type ReviewRunStatus = RunStatus;
 

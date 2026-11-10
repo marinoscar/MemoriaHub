@@ -22,7 +22,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { adminMemoriesBackfillSchema } from '@marinoscar/memoriahub-contract/memories';
 import { Auth } from '@marinoscar/platform-api/identity';
 import { PERMISSIONS, ROLES } from '../../common/constants/roles.constants';
 import { isMemoriesEnabled } from '../../settings/feature-gates';
@@ -30,14 +30,6 @@ import { MemoryBackfillService } from './memory-backfill.service';
 import { MEMORY_BACKFILL_SHARDS } from './memory-backfill.shards';
 import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
 
-const adminMemoriesBackfillSchema = z
-  .object({
-    /** Omit to sweep every circle in the deployment. */
-    circleId: z.string().uuid().optional(),
-    // .prefault({}) so a bodyless POST parses exactly like {} — see issue #289
-    // (app.module.ts) and admin-metadata.controller.ts.
-  })
-  .prefault({});
 class AdminMemoriesBackfillDto extends createZodDto(adminMemoriesBackfillSchema) {}
 
 @ApiTags('Admin: Memories')
