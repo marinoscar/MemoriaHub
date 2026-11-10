@@ -5,18 +5,25 @@
     "memoriahub-contract": "*",
     "memoriahub-db": [
       "bin"
+    ],
+    "memoriahub-api": [
+      "ports"
     ]
   },
   "$implies": {},
   "$reserved": {
     "memoriahub-compute": [],
     "memoriahub-contract": [],
-    "memoriahub-db": []
+    "memoriahub-db": [],
+    "memoriahub-api": [
+      "@marinoscar/memoriahub-contract"
+    ]
   },
   "$hostOnly": {
     "memoriahub-compute": [],
     "memoriahub-contract": [],
-    "memoriahub-db": []
+    "memoriahub-db": [],
+    "memoriahub-api": []
   },
   "$hostPlugins": {},
   "memoriahub-compute": {
@@ -160,6 +167,26 @@
     },
     "sync": {
       "peers": []
+    }
+  },
+  "memoriahub-api": {
+    "ports": {
+      "peers": [
+        "@nestjs/common",
+        "zod"
+      ]
+    },
+    "core": {
+      "peers": [
+        "@nestjs/common",
+        "@prisma/client-runtime-utils"
+      ]
+    },
+    "testing": {
+      "peers": [
+        "@nestjs/common",
+        "zod"
+      ]
     }
   }
 }

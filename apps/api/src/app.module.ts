@@ -65,6 +65,7 @@ import { MemoriaHubWebhooksModule } from './platform/webhooks/webhooks.config';
 import { sharingModule } from './platform/sharing/sharing.config';
 import { PersonalLibraryModule } from './platform/sharing/personal-library.controller';
 import { exportsModule } from './platform/exports/exports.config';
+import { PlatformMemoriahubModule } from './platform-memoriahub/platform-memoriahub.module';
 
 import configuration from './config/configuration';
 import { AppSystemSettingsService } from './platform/settings/app-system-settings.service';
@@ -233,6 +234,11 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // people sources (`platform/exports/`). Files are written through the app's storage
     // providers until RETRO-D1 (`exports-storage.adapter.ts`).
     exportsModule,
+    // The MemoriaHub domain's host ports (RETRO-J4, #610): @marinoscar/memoriahub-api/ports bound to the
+    // platform slices above, one adapter per port (`platform-memoriahub/`). Global. Nothing calls a port
+    // yet: each domain slice moves onto its ports in RETRO-J5 to J10, so this changes no route, no job
+    // type and no behaviour. Last, so every slice it binds is already mounted.
+    PlatformMemoriahubModule,
   ],
   providers: [
     // Global validation pipe (Zod)

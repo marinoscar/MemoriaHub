@@ -89,6 +89,7 @@ jobs:
       # this package nor Prisma — see the web-test job.)
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
       - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-api
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -129,6 +130,7 @@ jobs:
 
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
       - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-api
 
       - run: npx prisma generate
         working-directory: apps/api
@@ -213,6 +215,7 @@ jobs:
       # @marinoscar/memoriahub-compute by subpath against its git-ignored dist/.
       - run: npm run build --workspace=@marinoscar/memoriahub-compute
       - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-api
 
       - run: npx prisma generate
         working-directory: apps/api

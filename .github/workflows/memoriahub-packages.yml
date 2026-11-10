@@ -117,6 +117,11 @@ jobs:
           done
           node -e "require('@marinoscar/memoriahub-contract')"
           node --input-type=module -e "await import('@marinoscar/memoriahub-contract')"
+          # The api package: CommonJS, one subpath per slice and no root entry.
+          for slice in $(node -p "Object.keys(require('./packages/memoriahub-slices.json')['memoriahub-api']).join(' ')"); do
+            node -e "require('@marinoscar/memoriahub-api/$slice')"
+            node --input-type=module -e "await import('@marinoscar/memoriahub-api/$slice')"
+          done
 
   db-apply:
     name: memoriahub-db against PostgreSQL

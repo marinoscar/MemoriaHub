@@ -1,0 +1,82 @@
+{
+  "name": "@marinoscar/memoriahub-api",
+  "version": "0.0.0",
+  "description": "The NestJS side of the MemoriaHub domain: the host ports (injection tokens and interfaces), the module that binds them, and in-memory fakes with a conformance kit. Host-neutral: imports no @marinoscar/platform-* package. CommonJS.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "commonjs",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marinoscar/MemoriaHub.git",
+    "directory": "packages/memoriahub-api"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "exports": {
+    "./ports": {
+      "types": "./dist/ports/index.d.ts",
+      "default": "./dist/ports/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "ports",
+    "core",
+    "testing",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "node ../../scripts/memoriahub-packages/copy-license.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "docs": "typedoc --options typedoc.json",
+    "test": "jest -c jest.config.js --selectProjects unit",
+    "test:run": "jest -c jest.config.js --selectProjects unit --ci",
+    "test:db": "jest -c jest.config.js --selectProjects db --runInBand --passWithNoTests"
+  },
+  "peerDependencies": {
+    "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
+    "@nestjs/common": "^11.1.12",
+    "@prisma/client-runtime-utils": "^7.8.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependenciesMeta": {
+    "@marinoscar/memoriahub-contract": {
+      "optional": true
+    },
+    "@prisma/client-runtime-utils": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.1.12",
+    "@nestjs/core": "^11.1.12",
+    "@nestjs/testing": "^11.1.12",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.10.7",
+    "jest": "^30.4.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  }
+}

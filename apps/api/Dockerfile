@@ -111,6 +111,9 @@ COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/memoriahub-compute ./packages/memoriahub-compute/
 # The wire-schema package (zod only) both the API and the CLI import by subpath.
 COPY packages/memoriahub-contract ./packages/memoriahub-contract/
+# The domain's host ports (RETRO-J4): the injection tokens apps/api binds to the platform in
+# src/platform-memoriahub/. Built below; it imports no platform package.
+COPY packages/memoriahub-api ./packages/memoriahub-api/
 # The domain schema package (a dev dependency of apps/api: its command installs the
 # fragments; no build step, nothing runs from it in the image). Present so
 # `npm install` links the workspace instead of looking the private name up.
@@ -135,7 +138,7 @@ RUN SHARP_FORCE_GLOBAL_LIBVIPS=1 npm rebuild sharp --build-from-source
 
 # Build the shared memoriahub-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
-RUN npm run build -w @marinoscar/memoriahub-compute && npm run build -w @marinoscar/memoriahub-contract
+RUN npm run build -w @marinoscar/memoriahub-compute && npm run build -w @marinoscar/memoriahub-contract && npm run build -w @marinoscar/memoriahub-api
 
 # Set dummy DATABASE_URL for Prisma generate (actual connection not needed at build time)
 RUN cd apps/api && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate

@@ -87,5 +87,15 @@
       "lock",
       "manifest"
     ]
+  },
+  "memoriahub-api": {
+    "ports": [],
+    "core": [
+      "ports"
+    ],
+    "testing": [
+      "ports",
+      "core"
+    ]
   }
 }
