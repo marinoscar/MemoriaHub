@@ -1,4 +1,4 @@
-import { applyCommand, applyPatch, defaultConfig, readConfig } from '@marinoscar/memoriahub-api/media';
+import { applyCommand, applyPatch, defaultConfig, readConfig } from './media-sync-config.js';
 import {
   checkinSchema,
   commandSchema,
@@ -8,7 +8,7 @@ import {
   registerDeviceSchema,
   updateConfigSchema,
   uploadDiagnosticsSchema,
-} from './media-sync.dto';
+} from './media-sync.dto.js';
 
 const CIRCLE = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const INSTALL = 'a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1';

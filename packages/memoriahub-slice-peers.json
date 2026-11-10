@@ -194,8 +194,11 @@
     "media": {
       "peers": [
         "@nestjs/common",
+        "@nestjs/core",
         "@nestjs/schedule",
+        "@nestjs/swagger",
         "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
         "zod"
       ]
     }
