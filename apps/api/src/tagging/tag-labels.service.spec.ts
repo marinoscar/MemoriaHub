@@ -14,7 +14,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { TagLabelsService } from './tag-labels.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { MediaTouchService } from '../media/media-touch.service';
+import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import {
   createMockPrismaService,
   MockPrismaService,

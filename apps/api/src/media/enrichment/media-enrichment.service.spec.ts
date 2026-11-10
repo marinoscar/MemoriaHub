@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaEnrichmentService } from './media-enrichment.service';
+import { mediaEnrichmentProvider } from '../../../test/helpers/media-enrichment';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import {
@@ -58,7 +59,7 @@ describe('MediaEnrichmentService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        MediaEnrichmentService,
+        mediaEnrichmentProvider,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
         { provide: AppSystemSettingsService, useValue: mockSystemSettings },
@@ -223,8 +224,10 @@ describe('MediaEnrichmentService', () => {
       expect(enqueuedTypes()).not.toContain('face_detection');
       expect(enqueuedTypes()).not.toContain('burst_detection');
       expect(enqueuedTypes()).toContain('video_face_detection');
-      // getSettings IS called for video items (no early exit for video type)
-      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(1);
+      // getSettings IS called for video items (no early exit for video type): once for the social
+      // gate (the fan-out's memoised read) and once by the post-detection fan-out it falls back
+      // to, which resolves its own settings (the host caches the document for a few seconds).
+      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(2);
       expect(mockPrisma.mediaTagStatus.upsert).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledTimes(1);
     });

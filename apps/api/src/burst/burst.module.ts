@@ -11,6 +11,7 @@ import { BurstDetectionHandler } from './burst-detection.handler';
 import { BurstDetectionService } from './burst-detection.service';
 import { AdminBurstController } from './admin-burst.controller';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
+import { BurstUploadEnrichment } from './burst-upload-enrichment';
 
 @Module({
   imports: [
@@ -26,7 +27,13 @@ import { ReviewRunsModule } from '../review-runs/review-runs.module';
     forwardRef(() => ReviewRunsModule),
   ],
   controllers: [BurstController, AdminBurstController],
-  providers: [BurstService, BurstDetectionHandler, BurstDetectionService],
+  providers: [
+    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
+    BurstUploadEnrichment,
+    BurstService,
+    BurstDetectionHandler,
+    BurstDetectionService,
+  ],
   exports: [BurstService],
 })
 export class BurstModule {}
