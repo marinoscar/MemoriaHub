@@ -62,7 +62,11 @@ export const UPLOAD_COMPLETED_EVENT_KEY = 'media.upload_completed';
  */
 export const UPLOAD_COMPLETED_WINDOW_MS = 15 * 60 * 1000;
 
-/** Rolling aggregation window for `media.upload_completed`. See header. */
+/**
+ * Rolling aggregation window for `media.upload_completed`. See header.
+ *
+ * @stability experimental
+ */
 export const UPLOAD_WINDOW_MS = UPLOAD_COMPLETED_WINDOW_MS;
 
 /**

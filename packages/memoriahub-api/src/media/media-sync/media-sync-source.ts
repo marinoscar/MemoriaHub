@@ -16,6 +16,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  *
  * A plain function over the database client rather than a provider, so the media
  * module can call it without importing the media-sync module.
+ *
+ * @stability experimental
  */
 export async function assertMediaSyncSourceDevice(
   prisma: Pick<MediaModels, 'mediaSyncDevice'>,

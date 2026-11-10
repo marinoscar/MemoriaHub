@@ -7,6 +7,8 @@ import type { MediaSyncReason } from './media-sync.constants.js';
  * derives the error `code` from the HTTP status and rebuilds the body from an
  * allowlist, so the reason and every extra field live under `details`
  * (docs/specs/android-media-sync.md D1).
+ *
+ * @stability experimental
  */
 export function mediaSyncRefusal(
   status: HttpStatus,

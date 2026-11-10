@@ -154,9 +154,18 @@ async function attachPats<T extends MediaSyncDevice>(
   return devices.map((d) => ({ ...d, pat: d.patId ? (byId.get(d.patId) ?? null) : null }));
 }
 
-type CurrentRelease = { packageName: string; versionCode: number } | null;
+/**
+ * The server's current Android release as {@link updateStatus} reads it, or `null` when none is current.
+ *
+ * @stability experimental
+ */
+export type CurrentRelease = { packageName: string; versionCode: number } | null;
 
-/** The caller as the config validation needs it. */
+/**
+ * The caller as the config validation needs it.
+ *
+ * @stability experimental
+ */
 export interface MediaSyncCaller {
   id: string;
   permissions: string[];
@@ -167,6 +176,8 @@ export interface MediaSyncCaller {
  * applies when the device reports no package (an older app) or the same
  * package; `updateAvailable` needs the installed versionCode to be known and
  * lower.
+ *
+ * @stability experimental
  */
 export function updateStatus(
   device: { packageName: string | null; appVersionCode: number | null },
@@ -323,6 +334,12 @@ export class MediaSyncService {
     return devices.map((device) => this.toDeviceView(device, release));
   }
 
+  /**
+   * One of the caller's devices.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id (another user's device is a 404).
+   */
   async get(userId: string, deviceId: string): Promise<DeviceView> {
     const device = await this.findOwned(userId, deviceId);
     return this.toDeviceView(device, await this.currentRelease());
@@ -554,6 +571,13 @@ export class MediaSyncService {
   // Runs and diagnostics
   // ---------------------------------------------------------------------------
 
+  /**
+   * The device's recent runs, newest first.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param limit - the most runs to return.
+   */
   async listRuns(userId: string, deviceId: string, limit: number): Promise<RunView[]> {
     const device = await this.findOwned(userId, deviceId);
     const runs = await this.prisma.mediaSyncRun.findMany({
@@ -597,6 +621,13 @@ export class MediaSyncService {
     return { id: report.id, createdAt: report.createdAt.toISOString() };
   }
 
+  /**
+   * The device's diagnostics reports (summaries), newest first.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param limit - the most reports to return.
+   */
   async listDiagnostics(userId: string, deviceId: string, limit: number): Promise<ReportSummaryView[]> {
     const device = await this.findOwned(userId, deviceId);
     const reports = await this.prisma.mediaSyncDiagnosticReport.findMany({
@@ -608,6 +639,13 @@ export class MediaSyncService {
     return reports.map((report) => ({ ...report, createdAt: report.createdAt.toISOString() }));
   }
 
+  /**
+   * One diagnostics report of the device.
+   *
+   * @param userId - the caller.
+   * @param deviceId - the device id.
+   * @param reportId - the report id (404 when it is not the device's).
+   */
   async getDiagnostics(userId: string, deviceId: string, reportId: string): Promise<ReportView> {
     const device = await this.findOwned(userId, deviceId);
     const report = await this.prisma.mediaSyncDiagnosticReport.findFirst({
