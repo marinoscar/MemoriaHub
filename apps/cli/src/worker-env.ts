@@ -36,6 +36,8 @@ export const appWorkerEnv = {
   faceProvider: 'MEMORIAHUB_FACE_PROVIDER',
   /** Embeds before the CLIP session is recycled; 0 disables. */
   clipRecycleAfter: 'MEMORIAHUB_CLIP_RECYCLE_AFTER',
+  /** The node's state directory (the platform reads it too; named here so path helpers need no CLI identity). */
+  stateDir: 'MEMORIAHUB_STATE_DIR',
   /** Models directory (the platform reads it too). */
   modelsDir: 'MEMORIAHUB_MODELS_DIR',
   /** Native thread cap (the platform reads it). */

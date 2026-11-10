@@ -8,7 +8,9 @@
  * vectors are only comparable to the server's with the identical file.
  */
 
-import { modelArtifactPath, nodeModelsDirectory, type ModelArtifact } from './model-paths.js';
+import type { ModelArtifact } from '@marinoscar/platform-cli/node';
+
+import { modelArtifactPath, nodeModelsDirectory } from './model-paths.js';
 
 export const CLIP_MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
 

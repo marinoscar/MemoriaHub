@@ -6,10 +6,10 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { workerEnv } from '@marinoscar/platform-cli/node';
+import { appWorkerEnv } from '../worker-env.js';
 
 export function nodeStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env[workerEnv().stateDir]?.trim();
+  const override = env[appWorkerEnv.stateDir]?.trim();
   return override !== undefined && override !== '' ? override : path.join(os.homedir(), '.memoriahub', 'node');
 }
 
