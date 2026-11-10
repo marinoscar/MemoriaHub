@@ -1,5 +1,5 @@
 /**
- * Unit tests for WorkflowActionExecutor (issue #140).
+ * Unit tests for WorkflowActionsHandler (issue #140).
  *
  * Covers the full action library. Every reused domain service (MediaService,
  * MediaEnrichmentService, PeopleService, BurstService, DuplicateService,
@@ -16,7 +16,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { WorkflowActionExecutor } from './workflow-action.executor';
+import { WorkflowActionsHandler } from './workflow-actions.handler';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
@@ -26,7 +26,7 @@ import { DuplicateService } from '../../dedup/duplicate.service';
 import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
-import { WorkflowAction, WorkflowActionContext } from './action-executor.types';
+import type { WorkflowActionContext, WorkflowActionInstance as WorkflowAction } from '@marinoscar/memoriahub-api/workflows';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 
 const RUN_ID = randomUUID();
@@ -39,8 +39,8 @@ function action(type: string, params: Record<string, unknown> = {}): WorkflowAct
   return { type, params };
 }
 
-describe('WorkflowActionExecutor', () => {
-  let executor: WorkflowActionExecutor;
+describe('WorkflowActionsHandler', () => {
+  let executor: WorkflowActionsHandler;
   let prisma: MockPrismaService;
   let media: jest.Mocked<
     Pick<
@@ -110,7 +110,7 @@ describe('WorkflowActionExecutor', () => {
       personalLibraryOf: jest.fn().mockResolvedValue(null),
     };
 
-    executor = new WorkflowActionExecutor(
+    executor = new WorkflowActionsHandler(
       prisma as unknown as PrismaService,
       media as unknown as MediaService,
       enrichment as unknown as MediaEnrichmentService,

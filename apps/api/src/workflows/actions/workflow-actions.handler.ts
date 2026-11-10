@@ -3,6 +3,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -14,7 +16,15 @@ import { DuplicateService } from '../../dedup/duplicate.service';
 import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
-import { resolveMoveTargetScope } from './move-target';
+import {
+  resolveMoveTargetScope,
+  WorkflowActionHandlerRegistry,
+  type ActionOutcome,
+  type WorkflowActionContext,
+  type WorkflowActionHandler,
+  type WorkflowActionInstance as WorkflowAction,
+  type WorkflowActionItem,
+} from '@marinoscar/memoriahub-api/workflows';
 import { BulkDeleteDto } from '../../media/dto/bulk-delete.dto';
 import { BulkArchiveDto } from '../../media/dto/bulk-archive.dto';
 import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
@@ -24,15 +34,9 @@ import { CreateAlbumDto } from '../../media/dto/create-album.dto';
 import { ResolveBurstDto } from '../../burst/dto/resolve-burst.dto';
 import { ResolveDuplicateDto } from '../../dedup/dto/resolve-duplicate.dto';
 import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
-import {
-  ActionOutcome,
-  WorkflowAction,
-  WorkflowActionContext,
-  WorkflowActionItem,
-} from './action-executor.types';
 
 /**
- * WorkflowActionExecutor — applies a single Media-Item workflow action (the
+ * WorkflowActionsHandler — the web app's {@link WorkflowActionHandler}: applies a single Media-Item workflow action (the
  * "Then" half, issue #140) to a single item and returns a structured outcome.
  *
  * Design:
@@ -49,8 +53,36 @@ import {
  *     `{ status: 'skipped' }` with a reason.
  */
 @Injectable()
-export class WorkflowActionExecutor {
-  private readonly logger = new Logger(WorkflowActionExecutor.name);
+export class WorkflowActionsHandler implements WorkflowActionHandler, OnModuleInit {
+  /** Every action type this handler applies (the registered descriptors' types). */
+  readonly types = [
+    'move_to_trash',
+    'hard_delete',
+    'archive',
+    'unarchive',
+    'add_to_album',
+    'remove_from_album',
+    'add_tags',
+    'remove_tags',
+    'set_favorite',
+    'set_captured_at',
+    'assign_person',
+    'remove_person',
+    'set_location',
+    'clear_location',
+    'move_to_owner',
+    'move_to_circle',
+    'rerun_enrichment',
+    'rerun_ai_tagging',
+    'resolve_burst_group',
+    'dismiss_burst_group',
+    'resolve_duplicate_group',
+    'dismiss_duplicate_group',
+    'accept_location_suggestion',
+    'reject_location_suggestion',
+  ] as const;
+
+  private readonly logger = new Logger(WorkflowActionsHandler.name);
 
   /**
    * Per-run album-name → albumId cache for `add_to_album` with
@@ -71,7 +103,14 @@ export class WorkflowActionExecutor {
     private readonly locationSuggestions: LocationSuggestionService,
     private readonly enrichmentJobs: EnrichmentJobService,
     private readonly membership: OwnerAccessService,
+    // The slice's registry the engine's executor dispatches through. Optional for hand-built tests.
+    @Optional() private readonly registry?: WorkflowActionHandlerRegistry,
   ) {}
+
+  /** Registers this handler for every action type it applies. */
+  onModuleInit(): void {
+    this.registry?.register(this);
+  }
 
   /** Release a finished run's album-name cache (called by the run engine). */
   clearRunCache(runId: string): void {

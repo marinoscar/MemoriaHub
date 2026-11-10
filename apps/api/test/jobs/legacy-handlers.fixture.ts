@@ -34,12 +34,14 @@ import { StorageReprocessHandler } from '../../src/media-processing/recovery/sto
 import { TrashEmptyEvaluateHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
-import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
-import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
+import {
+  WorkflowEvaluateHandler,
+  WorkflowEvaluateItemHandler,
+  WorkflowExecuteBatchHandler,
+  WorkflowMicroRunFinalizeHandler,
+  WorkflowScheduleTickHandler,
+} from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
-import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
-import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
 import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
