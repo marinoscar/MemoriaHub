@@ -8,7 +8,7 @@
 
 MemoriaHub is moving onto the EnterpriseAppBase platform packages (`@marinoscar/platform-*`). The platform owns the generic slices (identity, settings, jobs, storage, notifications, AI, and so on). What stays MemoriaHub's own is the domain: media, albums, people and faces, the enrichment handlers, workflows, memories, public sharing, the Android media sync. If that domain stays inside `apps/api` and `apps/web`, it can only ever be reused by copying it, and every host that needs it (a worker node, a bare host that proves the packages install outside this repository, a future second front end) forks it. The kvox project met the same question and answered it with ADR-0001 of its repository; this ADR adopts that answer.
 
-One piece of domain code is already a package: `packages/enrichment-compute`, the pure enrichment compute imported identically by the API and by a worker node so that a node-computed vector is numerically identical to a server-computed one. It was internal (`@memoriahub/enrichment-compute`, `"private": true`) and carried an `./ai` subpath that depended on `@anthropic-ai/sdk` and `openai`, which the platform's AI rule forbids outside `@marinoscar/platform-ai-providers`.
+One piece of domain code is already a package: `packages/enrichment-compute`, the pure enrichment compute imported identically by the API and by a worker node so that a node-computed vector is numerically identical to a server-computed one. It was internal (an internal package, `"private": true`) and carried an `./ai` subpath that depended on `@anthropic-ai/sdk` and `openai`, which the platform's AI rule forbids outside `@marinoscar/platform-ai-providers`.
 
 ## Decision
 

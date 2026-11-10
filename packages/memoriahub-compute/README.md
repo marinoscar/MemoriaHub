@@ -6,7 +6,7 @@ Pure enrichment compute for MemoriaHub: image preparation, CLIP embeddings, perc
 
 The package is the parity layer of the distributed worker design: the compute half of a node-eligible job runs on the server or on a worker node through the same functions, so a vector or a hash computed on a node is numerically identical to one computed on the server for the same bytes. The persist half of a job stays in the API. It holds no service, no controller, no database access and no environment read: model paths, base URLs, timeouts and thresholds are parameters of each call. It makes no model call to an AI provider: AI jobs are server-only and run through the platform's AI layer, so no provider SDK and no provider key can reach a node through this package.
 
-Status: experimental. The package was `packages/enrichment-compute` (`@memoriahub/enrichment-compute`, internal) until RETRO-J1 (marinoscar/MemoriaHub#593); the subpaths kept their names, except `./ai`, which was removed. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
+Status: experimental. The package was `packages/enrichment-compute` (an internal package) until RETRO-J1 (marinoscar/MemoriaHub#593); the subpaths kept their names, except `./ai`, which was removed. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
 
 Entry points (a slice README per folder):
 
@@ -94,7 +94,7 @@ The package's own `node --test` suite (`npm run test:run -w @marinoscar/memoriah
 
 ## Upgrade notes
 
-The package was renamed from `@memoriahub/enrichment-compute` and its `./ai` subpath was removed (the video tagging prompt now lives in `apps/api/src/tagging/video-tagging-prompt.ts`). Every import path changed by the scope and name only; the other subpath names are unchanged.
+The package was renamed from the internal `enrichment-compute` package and its `./ai` subpath was removed (the video tagging prompt now lives in `apps/api/src/tagging/video-tagging-prompt.ts`). Every import path changed by the scope and name only; the other subpath names are unchanged.
 
 ## Troubleshooting
 
