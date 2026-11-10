@@ -3,10 +3,10 @@
 # =============================================================================
 # The api and web Docker build contexts were widened to the repository root
 # (see infra/compose/base.compose.yml) so npm workspaces can resolve the
-# local @memoriahub/enrichment-compute package. Docker only reads a
+# local @marinoscar/memoriahub-compute package. Docker only reads a
 # .dockerignore from the context root, so this single file governs both
 # builds. Their Dockerfiles COPY only the specific paths they need
-# (apps/api, apps/web, packages/enrichment-compute, root manifests), but
+# (apps/api, apps/web, packages/memoriahub-compute, root manifests), but
 # everything below still gets uploaded as part of the build context unless
 # excluded here — most importantly `worktrees/`, which would otherwise
 # recursively include this very checkout.

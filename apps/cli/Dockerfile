@@ -3,7 +3,7 @@
 # =============================================================================
 # Build context: the REPOSITORY ROOT (see docker-compose.worker.build.yml and
 # .github/workflows/deploy.yml). Required because apps/cli depends on the local
-# npm workspace package @memoriahub/enrichment-compute — workspace linking needs
+# npm workspace package @marinoscar/memoriahub-compute — workspace linking needs
 # the root package.json/lockfile and the member's package.json in one install,
 # which an apps/cli-scoped context cannot provide. Same pattern as
 # apps/api/Dockerfile.
@@ -32,7 +32,7 @@
 FROM node:26-slim AS base
 WORKDIR /app
 # ffmpeg/ffprobe: video probe, frame extraction, and the HEIC transcode fallback
-#   (packages/enrichment-compute transcodeToDecodableJpeg — retained as a safety
+#   (packages/memoriahub-compute transcodeToDecodableJpeg — retained as a safety
 #   net now that sharp decodes HEIC natively; see the libvips note below).
 # perl: required by exiftool-vendored at runtime for metadata_extraction.
 # wget + ca-certificates: model downloads in the models stage (HTTPS needs the
@@ -78,12 +78,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV SHARP_FORCE_GLOBAL_LIBVIPS=1
 
 # Root workspace manifests plus the two members the worker needs: apps/cli and
-# the local @memoriahub/enrichment-compute it depends on. Manifests first keeps
+# the local @marinoscar/memoriahub-compute it depends on. Manifests first keeps
 # this layer cache-friendly.
 COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/cli/package.json ./apps/cli/package.json
-COPY packages/enrichment-compute ./packages/enrichment-compute/
+COPY packages/memoriahub-compute ./packages/memoriahub-compute/
+# The compute package's build ends with write-dist-stubs.mjs, which lives in the
+# shared package tooling folder (../../scripts/memoriahub-packages).
+COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
 # Scripts ENABLED (unlike the API image): the worker needs the native binaries
 # actually built/downloaded — better-sqlite3 (node-gyp/prebuild), onnxruntime-node
 # (postinstall binary fetch, the CLIP runtime), sharp/tesseract.
@@ -91,9 +94,9 @@ COPY packages/enrichment-compute ./packages/enrichment-compute/
 # native binaries resolve automatically.
 RUN npm install
 
-# Build the shared enrichment-compute workspace package so its dist/ exists
+# Build the shared memoriahub-compute workspace package so its dist/ exists
 # before apps/cli (which imports it) is compiled.
-RUN npm run build -w @memoriahub/enrichment-compute
+RUN npm run build -w @marinoscar/memoriahub-compute
 
 # -----------------------------------------------------------------------------
 # Models stage — bake parity models into the image (reproducible / air-gap)
@@ -139,7 +142,7 @@ WORKDIR /app
 FROM base AS worker
 # node_modules + packages must land at the same absolute paths they were
 # installed/built at (npm workspace symlinks are relative:
-# node_modules/@memoriahub/enrichment-compute -> ../../packages/enrichment-compute).
+# node_modules/@marinoscar/memoriahub-compute -> ../../packages/memoriahub-compute).
 COPY --from=deps  /app/node_modules /app/node_modules
 COPY --from=deps  /app/packages /app/packages
 COPY --from=build /app/apps/cli/dist /app/apps/cli/dist

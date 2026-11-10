@@ -8,7 +8,7 @@
 #     --env-file .env.worker up -d --build
 #
 # The build context is the repository root (required for npm-workspace linking
-# of @memoriahub/enrichment-compute — see apps/cli/Dockerfile header).
+# of @marinoscar/memoriahub-compute — see apps/cli/Dockerfile header).
 # =============================================================================
 
 services:

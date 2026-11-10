@@ -4,7 +4,7 @@
 # Build context: the REPOSITORY ROOT (see infra/compose/base.compose.yml:
 # `context: ../.., dockerfile: apps/api/Dockerfile`). This is required
 # because apps/api depends on the local npm workspace package
-# @memoriahub/enrichment-compute (packages/enrichment-compute) — npm
+# @marinoscar/memoriahub-compute (packages/memoriahub-compute) — npm
 # workspace linking needs the root package.json/lockfile and the workspace
 # member's package.json to be visible in the same install, which an
 # apps/api-scoped context cannot provide.
@@ -101,14 +101,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Root workspace manifests plus the two workspace members apps/api needs:
-# itself, and the local @memoriahub/enrichment-compute package it depends on.
+# itself, and the local @marinoscar/memoriahub-compute package it depends on.
 # Copying manifests (not full source) first keeps this layer cache-friendly.
 COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma/
 COPY apps/api/scripts ./apps/api/scripts/
-COPY packages/enrichment-compute ./packages/enrichment-compute/
+COPY packages/memoriahub-compute ./packages/memoriahub-compute/
+# The compute package's build ends with write-dist-stubs.mjs, which lives in the
+# shared package tooling folder (../../scripts/memoriahub-packages).
+COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
 COPY packages/shared ./packages/shared/
 # Using npm install since this is a workspace package without its own lock file
 RUN npm install --ignore-scripts
@@ -124,9 +127,9 @@ RUN npm install --ignore-scripts
 # fails against 8.16.x, fall back to compiling libvips 8.18.3 from source.
 RUN SHARP_FORCE_GLOBAL_LIBVIPS=1 npm rebuild sharp --build-from-source
 
-# Build the shared enrichment-compute workspace package so its dist/ is
+# Build the shared memoriahub-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
-RUN npm run build -w @memoriahub/enrichment-compute
+RUN npm run build -w @marinoscar/memoriahub-compute
 
 # Set dummy DATABASE_URL for Prisma generate (actual connection not needed at build time)
 RUN cd apps/api && DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" npx prisma generate
@@ -147,8 +150,8 @@ RUN mkdir -p /app/models/human && \
 FROM base AS development
 # node_modules and packages/ must land at the same absolute paths they were
 # installed/built at (/app/node_modules, /app/packages) — npm workspace
-# linking uses relative symlinks (node_modules/@memoriahub/enrichment-compute
-# -> ../../packages/enrichment-compute) that would break if the layout shifted.
+# linking uses relative symlinks (node_modules/@marinoscar/memoriahub-compute
+# -> ../../packages/memoriahub-compute) that would break if the layout shifted.
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=deps /app/packages /app/packages
 COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json

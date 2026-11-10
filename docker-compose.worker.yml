@@ -49,7 +49,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # Headless enrichment worker. Runs the identical compute stack as the server
-  # (packages/enrichment-compute), so output is numerically identical. Scale
+  # (packages/memoriahub-compute), so output is numerically identical. Scale
   # with --scale memoriahub-worker=N.
   # ---------------------------------------------------------------------------
   memoriahub-worker:

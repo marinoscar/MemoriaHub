@@ -158,14 +158,14 @@ jobs:
             --entrypoint node \
             -e MODELS_DIR=/app/models \
             -e REQUIRE_HEIC_DECODE=1 \
-            -w /app/packages/enrichment-compute \
+            -w /app/packages/memoriahub-compute \
             memoriahub-api:parity-gate \
             --test test/golden.test.mjs
 
       - name: Build and push API image
         uses: docker/build-push-action@v7
         with:
-          # Repo root: apps/api depends on the @memoriahub/enrichment-compute
+          # Repo root: apps/api depends on the @marinoscar/memoriahub-compute
           # workspace, so the Dockerfile needs root manifests + the workspace
           # member visible (matches infra/compose context: ../..).
           context: .
@@ -239,7 +239,7 @@ jobs:
             -e MODELS_DIR=/app/models \
             -e REQUIRE_CLIP_MODEL=1 \
             -e REQUIRE_HEIC_DECODE=1 \
-            -w /app/packages/enrichment-compute \
+            -w /app/packages/memoriahub-compute \
             memoriahub-worker:parity-gate \
             --test test/golden.test.mjs
 
