@@ -5,3 +5,4 @@
 export * from './people.js';
 export * from './face-credentials.js';
 export * from './merge-people.js';
+export * from './admin-face-backfill.js';

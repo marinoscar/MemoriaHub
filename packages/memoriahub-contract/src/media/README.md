@@ -10,7 +10,7 @@ Wire shapes only: no framework import, no environment read, no behaviour beyond 
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/media`. `media/index.ts` exports one `<name>Schema` and its inferred type per request, plus `CreateMediaInput` and `BulkUpdateMediaInput` (the request shapes a client sends). Other slices: `primitives`. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/media`. `media/index.ts` exports one `<name>Schema` and its inferred type per request, plus `CreateMediaInput` and `BulkUpdateMediaInput` (the request shapes a client sends). It builds on the `primitives` slice. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 

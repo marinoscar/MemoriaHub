@@ -10,7 +10,7 @@ Wire shapes only: no framework import, no environment read, no behaviour beyond 
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/tagging`. `tagging/index.ts` exports `createTagLabelSchema`, `updateTagLabelSchema`, `adminTaggingBackfillSchema`. Other slices: `primitives`. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/tagging`. `tagging/index.ts` exports `createTagLabelSchema`, `updateTagLabelSchema`, `adminTaggingBackfillSchema`. It builds on the `primitives` slice. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 

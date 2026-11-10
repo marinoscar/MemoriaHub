@@ -8,3 +8,4 @@ export * from './bulk-resolve-burst.js';
 export * from './burst-backfill.js';
 export * from './burst-query.js';
 export * from './resolve-burst.js';
+export * from './admin-burst-backfill.js';

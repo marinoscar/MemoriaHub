@@ -34,7 +34,9 @@
     "burst": [],
     "dedup": [],
     "review-runs": [],
-    "location": [],
+    "location": [
+      "primitives"
+    ],
     "workflows": [],
     "media": [
       "primitives"
@@ -46,7 +48,9 @@
     "enhancement": [
       "media"
     ],
-    "face": [],
+    "face": [
+      "primitives"
+    ],
     "memories": [],
     "tagging": [
       "primitives"

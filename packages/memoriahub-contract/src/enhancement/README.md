@@ -10,7 +10,7 @@ Wire shapes only: no framework import, no environment read, no behaviour beyond 
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/enhancement`. `enhancement/index.ts` exports one `<name>Schema` and its inferred type per request, plus `ENHANCEMENT_STATUSES` and `ENHANCEMENT_STATUS_ALIASES`. Other slices: `media`. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/enhancement`. `enhancement/index.ts` exports one `<name>Schema` and its inferred type per request, plus `ENHANCEMENT_STATUSES` and `ENHANCEMENT_STATUS_ALIASES`. It builds on the `media` slice. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 

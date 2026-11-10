@@ -10,3 +10,5 @@ export * from './geo-credential.js';
 export * from './geo-feature.js';
 export * from './geo-test.js';
 export * from './location-group.js';
+export * from './admin-geocode-backfill.js';
+export * from './admin-location-inference-backfill.js';

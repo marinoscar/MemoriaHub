@@ -7,3 +7,4 @@ export * from './bulk-resolve-duplicate-threshold.js';
 export * from './bulk-resolve-duplicate.js';
 export * from './duplicate-query.js';
 export * from './resolve-duplicate.js';
+export * from './admin-duplicate-backfill.js';

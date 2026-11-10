@@ -10,7 +10,7 @@ Wire shapes only: no framework import, no environment read, no behaviour beyond 
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/location`. `location/index.ts` exports one `<name>Schema` and its inferred type per request, plus `LOCATION_GROUP_LEVELS` and `GROUPED_FILTERS`. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/location`. `location/index.ts` exports one `<name>Schema` and its inferred type per request, plus `LOCATION_GROUP_LEVELS` and `GROUPED_FILTERS`. It builds on the `primitives` slice. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 

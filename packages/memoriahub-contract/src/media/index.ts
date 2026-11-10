@@ -32,3 +32,5 @@ export * from './update-album.js';
 export * from './update-media.js';
 export * from './create-trash-empty-run.js';
 export * from './list-trash-empty-run-items-query.js';
+export * from './admin-metadata-backfill.js';
+export * from './reprocess.js';

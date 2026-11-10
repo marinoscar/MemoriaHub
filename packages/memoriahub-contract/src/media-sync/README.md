@@ -10,7 +10,7 @@ Wire shapes only: no framework import, no environment read, no behaviour beyond 
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/media-sync`. `media-sync/index.ts` exports the schemas, the `MEDIA_SYNC_*` vocabularies and the limit constants. Other slices: `primitives`. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/media-sync`. `media-sync/index.ts` exports the schemas, the `MEDIA_SYNC_*` vocabularies and the limit constants. It builds on the `primitives` slice. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 
