@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AiError,
   AiService,
+  classifyOpenAiModel,
   registerAiFeature,
   aiFeatureRegistry,
   type AiRequest,
@@ -116,9 +117,18 @@ function toPlatformRequest(req: MemoriahubAiRequest): AiRequest {
       : {}),
     ...(req.maxOutputTokens !== undefined ? { maxOutputTokens: req.maxOutputTokens } : {}),
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-    ...(req.reasoning !== undefined ? { reasoning: req.reasoning } : {}),
+    ...(req.reasoning !== undefined && reasons(req) ? { reasoning: req.reasoning } : {}),
     ...(req.providerOptions !== undefined ? { providerOptions: req.providerOptions } : {}),
   } as AiRequest;
+}
+
+/**
+ * `reasoning` is a hint, sent only to a model the catalogue knows reasons (an OpenAI one), so a
+ * non-reasoning model never receives a parameter it would refuse (`requiredCapabilities` adds
+ * `reasoning` for a request that carries one). Any other provider's call drops the hint.
+ */
+function reasons(req: MemoriahubAiRequest): boolean {
+  return req.provider === 'openai' && req.model !== undefined && classifyOpenAiModel(req.model)?.capabilities.includes('reasoning') === true;
 }
 
 function isZodType(value: unknown): value is z.ZodType {

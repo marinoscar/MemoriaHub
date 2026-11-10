@@ -1,5 +1,7 @@
 # Video AI Auto-Tagging — End-to-End Reference
 
+> **Where the code lives (RETRO-J7, #618).** The tagging slice is `@marinoscar/memoriahub-api/tagging` (`packages/memoriahub-api/src/tagging/`); it reaches the platform only through the host ports (AI through `MEMORIAHUB_AI`, the settings through `MEMORIAHUB_SETTINGS`, access through `MEMORIAHUB_ACCESS`). Routes, SSE events, job types and prompts are unchanged.
+
 > **Server-only, AI rule 3 (RETRO-C4, #590).** `video_auto_tagging` is a native platform `JobHandler` with no node pair: the API resolves the provider key and never brokers it to a worker node, and a node never claims the type. Any section below describing a node compute/persist split or a transient per-job credential for this type is historical. Provider throttles (HTTP 429/529, `retry-after`) are rethrown as the platform `RateLimitError` (deferral, no attempt consumed).
 
 | Field | Value |
@@ -89,7 +91,7 @@ Everything downstream: the `tag_labels` vocabulary, `media_tag_status`, `media_i
 
 `VideoAutoTaggingService` does **not** reimplement persistence. It delegates to `AutoTaggingService.persistAutoTagging`, which already reloads the media item, the enabled label vocabulary, and the assigned people names itself (it had to, for the node-result path). **Vocabulary validation therefore has exactly one implementation** — a drifted second copy would let video tagging emit tags outside the admin's vocabulary, which is precisely the failure that validation exists to prevent.
 
-The photo path is byte-identical: `auto-tagging.service.ts` and its spec were not modified by this epic.
+The photo path is byte-identical: `auto-tagging.service.ts` and its spec were not modified by this epic (RETRO-J7 #618 later moved both, with the rest of the slice, into `packages/memoriahub-api/src/tagging`).
 
 ---
 
@@ -132,7 +134,7 @@ What it adds:
 
 The output token budget is raised per-request to 2048 (from Anthropic's hardcoded 1024). A multi-frame description plus a tag list does not reliably fit in 1024, and a truncated response fails `parseAnalysisResult`'s JSON parse — an opaque failure mode.
 
-Both the prompt builder and the system prompt live in `apps/api/src/tagging/video-tagging-prompt.ts` (SDK-free; they move into the tagging slice package later). They used to live in the compute package's `./ai` subpath so that the server and a worker node composed byte-identical prompts; AI jobs are server-only now and the subpath was removed (RETRO-J1, #593), so the API is the only caller. Do not copy the prompt into a second place: a prompt string duplicated across two callers is exactly the thing that drifts silently.
+Both the prompt builder and the system prompt live in `packages/memoriahub-api/src/tagging/video-tagging-prompt.ts` (SDK-free; the file lives in the tagging slice package, RETRO-J7 #618). They used to live in the compute package's `./ai` subpath so that the server and a worker node composed byte-identical prompts; AI jobs are server-only now and the subpath was removed (RETRO-J1, #593), so the API is the only caller. Do not copy the prompt into a second place: a prompt string duplicated across two callers is exactly the thing that drifts silently.
 
 ---
 

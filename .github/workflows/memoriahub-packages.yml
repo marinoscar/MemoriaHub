@@ -6,13 +6,13 @@ name: MemoriaHub packages
 # NOTHING IN THIS WORKFLOW PUBLISHES. Publishing is gated (ADR-0001,
 # docs/runbooks/release-memoriahub-packages.md): the packages are
 # "private": true until the owner chooses a registry, there is no registry
-# credential, and no job runs `npm publish`. The release workflow (RETRO-J12)
-# will default to a dry run.
+# credential, and no job runs `npm publish`. The release workflow
+# (memoriahub-release.yml) is manual-only and defaults to a dry run.
 #
 # `ci.yml` builds the compute package for the app test jobs; this workflow adds
 # the checks that only matter when a package changes (docs, peers, pack,
-# smoke imports, the package's own tests) and runs on the paths below. The
-# bare-host job arrives with RETRO-J12.
+# smoke imports, the package's own tests, the bare host that installs the packed
+# tarballs outside the repository) and runs on the paths below.
 
 on:
   pull_request:
@@ -22,6 +22,7 @@ on:
       - 'packages/memoriahub-*.json'
       - 'scripts/memoriahub-packages/**'
       - 'scripts/check-single-instance.mjs'
+      - 'examples/bare-host/**'
       - '.changeset/**'
       - 'eslint.config.mjs'
       - 'typedoc.base.json'
@@ -33,6 +34,7 @@ on:
       - 'apps/cli/package.json'
       - 'apps/web/package.json'
       - '.github/workflows/memoriahub-packages.yml'
+      - '.github/workflows/memoriahub-release.yml'
   push:
     branches: [main]
     paths:
@@ -40,6 +42,7 @@ on:
       - 'packages/memoriahub-*.json'
       - 'scripts/memoriahub-packages/**'
       - 'scripts/check-single-instance.mjs'
+      - 'examples/bare-host/**'
       - '.changeset/**'
       - 'eslint.config.mjs'
       - 'typedoc.base.json'
@@ -51,6 +54,7 @@ on:
       - 'apps/cli/package.json'
       - 'apps/web/package.json'
       - '.github/workflows/memoriahub-packages.yml'
+      - '.github/workflows/memoriahub-release.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -93,10 +97,6 @@ jobs:
       # Asks npm what each package would publish and compares it with the
       # manifest. Needs the build above.
       - run: npm run check:memoriahub-pack
-      # Installs the packed package alone into an empty project and asserts no
-      # platform package and no provider SDK is in the tree. Needs the build
-      # above and the registry (for sharp, onnxruntime-node, exifr, zod).
-      - run: npm run check:memoriahub-lean-install
       # The domain schema package: the app's installed copies (fragments, lock) are
       # byte-identical to it, and the command runs. Needs the build above.
       - run: npm run db:check --workspace=api
@@ -129,6 +129,57 @@ jobs:
           for entry in core/headless media/headless brand shell; do
             node --input-type=module -e "await import('@marinoscar/memoriahub-web/$entry')"
           done
+
+  lean-install:
+    name: Lean install
+    # Packs the compute and contract packages and installs each ALONE into an empty
+    # project: no platform package, no provider SDK, every entry point loads through
+    # require and import. The MemoriaHub tarballs are local; only the third-party
+    # dependencies come from the registry, and the onnxruntime binary download is
+    # skipped (no entry point loads a model at import time).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build -w @marinoscar/memoriahub-compute
+      - run: npm run build -w @marinoscar/memoriahub-contract
+      - run: npm run check:memoriahub-lean-install
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+  bare-host:
+    name: Bare host (packed tarballs)
+    # examples/bare-host is copied outside the repository and installs the packed
+    # compute, contract and api tarballs with in-memory ports: it proves the packages
+    # boot with no platform package. Nothing is published; the tarballs are local.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build -w @marinoscar/memoriahub-compute
+      - run: npm run build -w @marinoscar/memoriahub-contract
+      - run: npm run build -w @marinoscar/memoriahub-api
+      - run: node examples/bare-host/run.mjs --from pack
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
 
   db-apply:
     name: memoriahub-db against PostgreSQL

@@ -1,0 +1,32 @@
+{
+  "name": "memoriahub-bare-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A minimal host that boots the @marinoscar/memoriahub-* packages with in-memory ports, outside the repository's workspaces, to prove the packages are host-neutral. Not a workspace of the root package.json; run it with run.mjs.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.12",
+    "@nestjs/core": "^11.1.12",
+    "@nestjs/schedule": "^6.1.0",
+    "@nestjs/swagger": "^11.4.6",
+    "@opentelemetry/api": "^1.9.1",
+    "@prisma/client-runtime-utils": "^7.8.0",
+    "nestjs-zod": "^5.4.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^6.0.3"
+  }
+}

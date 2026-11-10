@@ -126,6 +126,19 @@
       "testing",
       "media"
     ],
+    "tagging": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "search": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "tagging"
+    ],
     "review-runs": [
       "ports",
       "core",

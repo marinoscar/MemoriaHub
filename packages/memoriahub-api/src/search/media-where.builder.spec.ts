@@ -1,0 +1,1368 @@
+/**
+ * Unit tests for media-where.builder and searchable-fields.registry.
+ *
+ * These are pure function tests — no NestJS module or DB needed.
+ */
+import { BadRequestException } from '@nestjs/common';
+import {
+  andWhere,
+  buildMediaWhere,
+  MediaFilters,
+  whereDateRange,
+  whereTag,
+  whereCountry,
+  whereLocality,
+  whereFavorite,
+  whereType,
+} from '../media/index.js';
+import { buildWhereFromFields, SEARCHABLE_FIELDS } from './searchable-fields.registry.js';
+
+const CIRCLE_ID = 'circle-abc-123';
+
+// ---------------------------------------------------------------------------
+// Helpers for AND-composition assertions
+//
+// Both buildMediaWhere and buildWhereFromFields now collect every filter
+// contribution into a shared `where.AND = [...]` array so that two filters
+// that each emit a top-level OR key don't overwrite each other.
+//
+// These helpers let the existing single-filter tests target the contribution
+// without rewriting every assertion.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the first entry in `where.AND` that owns the given top-level key.
+ * Falls back to `{}` when the key is absent so callers get a clean miss.
+ */
+function inAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return and?.find((c: any) => key in c) ?? {};
+}
+
+/**
+ * Returns the first entry in `where.AND` whose `OR` array contains an
+ * element with the given top-level key.  Used for OR-emitting filter helpers
+ * (country, missingCamera:false) where the entry itself is `{ OR: [...] }`.
+ */
+function orInAnd(where: any, key: string): any {
+  const and = where.AND as any[] | undefined;
+  return (
+    and?.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => key in e),
+    ) ?? {}
+  );
+}
+
+// ---------------------------------------------------------------------------
+// buildMediaWhere
+// ---------------------------------------------------------------------------
+describe('buildMediaWhere', () => {
+  it('always includes circleId and deletedAt:null', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {});
+    expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+  });
+
+  it('returns only baseline when filters are empty', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {});
+    expect(Object.keys(where)).toEqual(
+      expect.arrayContaining(['circleId', 'deletedAt']),
+    );
+    // Should NOT have stray keys from un-applied filters
+    expect((where as any).type).toBeUndefined();
+    expect((where as any).favorite).toBeUndefined();
+  });
+
+  describe('tag filter', () => {
+    it('produces mediaTags.some.tag.name.equals for tag filter', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { tag: 'vacation' });
+      expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+      // AND-composition: the tag clause lives inside where.AND[0]
+      expect(inAnd(where, 'mediaTags')).toMatchObject({
+        mediaTags: {
+          some: {
+            tag: {
+              name: {
+                equals: 'vacation',
+              },
+            },
+          },
+        },
+      });
+    });
+  });
+
+  describe('country filter', () => {
+    it('produces OR clause covering geoCountry and geoCountryCode', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { country: 'CR' });
+      expect(where).toMatchObject({ circleId: CIRCLE_ID });
+      // AND-composition: the OR clause lives inside where.AND[0]
+      const or = orInAnd(where, 'geoCountry').OR as unknown[];
+      expect(Array.isArray(or)).toBe(true);
+      expect(or).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ geoCountry: expect.any(Object) }),
+          expect.objectContaining({ geoCountryCode: expect.any(Object) }),
+        ]),
+      );
+    });
+  });
+
+  describe('locality filter', () => {
+    it('produces a canonical-OR-raw geoLocality clause', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { locality: 'San José' });
+      // AND-composition: the locality fragment lives inside where.AND[0], and
+      // since Location Grouping (issue #374) it is an OR over the canonical
+      // column AND the raw one — so a bookmark carrying the pre-grouping name
+      // keeps matching after the name has been folded into a group.
+      const and = (where as any).AND as any[];
+      const clause = and.find(
+        (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoLocality' in e),
+      );
+      expect(clause.OR).toEqual([
+        { geoCanonicalLocality: { contains: 'San José', mode: 'insensitive' } },
+        { geoLocality: { contains: 'San José', mode: 'insensitive' } },
+      ]);
+    });
+  });
+
+  describe('date range filter', () => {
+    it('produces capturedAt.gte and an end-day-inclusive upper bound', () => {
+      const from = new Date('2023-01-01');
+      const to = new Date('2023-12-31');
+      const where = buildMediaWhere(CIRCLE_ID, {
+        capturedAtFrom: from,
+        capturedAtTo: to,
+      });
+      // AND-composition: capturedAt lives inside where.AND[0].
+      // A midnight upper bound becomes exclusive next-midnight so the end day
+      // is covered rather than dropped (#446).
+      expect(inAnd(where, 'capturedAt')).toMatchObject({
+        capturedAt: { gte: from, lt: new Date('2024-01-01T00:00:00.000Z') },
+      });
+    });
+
+    it('produces only gte when only from is provided', () => {
+      const from = new Date('2023-06-01');
+      const where = buildMediaWhere(CIRCLE_ID, { capturedAtFrom: from });
+      const clause = inAnd(where, 'capturedAt');
+      expect(clause.capturedAt).toMatchObject({ gte: from });
+      expect(clause.capturedAt.lte).toBeUndefined();
+    });
+
+    it('produces only an upper bound when only to is provided', () => {
+      const to = new Date('2023-06-01');
+      const where = buildMediaWhere(CIRCLE_ID, { capturedAtTo: to });
+      const clause = inAnd(where, 'capturedAt');
+      expect(clause.capturedAt).toMatchObject({ lt: new Date('2023-06-02T00:00:00.000Z') });
+      expect(clause.capturedAt.gte).toBeUndefined();
+    });
+  });
+
+  describe('type filter', () => {
+    it('sets type to the provided value', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { type: 'photo' });
+      // AND-composition: type lives inside where.AND[0]
+      expect(inAnd(where, 'type').type).toBe('photo');
+    });
+
+    it('sets type to video', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { type: 'video' });
+      expect(inAnd(where, 'type').type).toBe('video');
+    });
+  });
+
+  describe('favorite filter', () => {
+    it('sets favorite:true when true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { favorite: true });
+      // AND-composition: favorite lives inside where.AND[0]
+      expect(inAnd(where, 'favorite').favorite).toBe(true);
+    });
+
+    it('sets favorite:false when false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { favorite: false });
+      expect(inAnd(where, 'favorite').favorite).toBe(false);
+    });
+  });
+
+  describe('combined filters', () => {
+    it('applies multiple filters simultaneously', () => {
+      const from = new Date('2022-01-01');
+      const filters: MediaFilters = {
+        type: 'photo',
+        tag: 'beach',
+        country: 'CR',
+        capturedAtFrom: from,
+        favorite: true,
+      };
+      const where = buildMediaWhere(CIRCLE_ID, filters);
+      expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+      // AND-composition: every filter contribution lives in where.AND[]
+      expect(inAnd(where, 'type').type).toBe('photo');
+      expect(inAnd(where, 'favorite').favorite).toBe(true);
+      expect(inAnd(where, 'mediaTags').mediaTags).toBeDefined();
+      expect(Array.isArray(orInAnd(where, 'geoCountry').OR)).toBe(true);
+      expect(inAnd(where, 'capturedAt').capturedAt?.gte).toEqual(from);
+    });
+  });
+
+  describe('noFaces filter', () => {
+    it('produces faces.none clause when noFaces is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { noFaces: true });
+      // AND-composition: faces clause lives inside where.AND[0]
+      expect(inAnd(where, 'faces').faces).toEqual({ none: {} });
+    });
+
+    it('adds nothing extra when noFaces is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { noFaces: false });
+      expect((where as any).faces).toBeUndefined();
+    });
+
+    it('adds nothing extra when noFaces is undefined', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      expect((where as any).faces).toBeUndefined();
+    });
+  });
+
+  describe('missingCapturedAt filter', () => {
+    it('produces capturedAt:null when missingCapturedAt is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: true });
+      // AND-composition: capturedAt lives inside where.AND[0]
+      expect(inAnd(where, 'capturedAt').capturedAt).toBeNull();
+    });
+
+    it('produces capturedAt:{not:null} when missingCapturedAt is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: false });
+      expect(inAnd(where, 'capturedAt').capturedAt).toEqual({ not: null });
+    });
+
+    it('adds no capturedAt key when missingCapturedAt is omitted', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      // capturedAt must be absent when neither date-range nor missingCapturedAt is supplied
+      expect((where as any).capturedAt).toBeUndefined();
+    });
+  });
+
+  describe('missingCamera filter', () => {
+    it('produces {cameraMake:null, cameraModel:null} when missingCamera is true', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCamera: true });
+      // AND-composition: cameraMake/cameraModel live inside where.AND[0]
+      const clause = inAnd(where, 'cameraMake');
+      expect(clause.cameraMake).toBeNull();
+      expect(clause.cameraModel).toBeNull();
+    });
+
+    it('produces OR clause [{cameraMake:{not:null}}, {cameraModel:{not:null}}] when missingCamera is false', () => {
+      const where = buildMediaWhere(CIRCLE_ID, { missingCamera: false });
+      // AND-composition: the OR clause lives inside where.AND[0]
+      const or = orInAnd(where, 'cameraMake').OR as unknown[];
+      expect(Array.isArray(or)).toBe(true);
+      expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
+    });
+
+    it('adds no cameraMake or cameraModel key when missingCamera is omitted', () => {
+      const where = buildMediaWhere(CIRCLE_ID, {});
+      expect((where as any).cameraMake).toBeUndefined();
+      expect((where as any).cameraModel).toBeUndefined();
+    });
+  });
+
+  describe('helper functions directly', () => {
+    it('whereTag returns the correct Prisma fragment', () => {
+      const fragment = whereTag('nature');
+      expect(fragment).toEqual({
+        mediaTags: {
+          some: { tag: { name: { equals: 'nature', mode: 'insensitive' } } },
+        },
+      });
+    });
+
+    it('whereCountry returns OR with the canonical column, geoCountry and geoCountryCode', () => {
+      const fragment = whereCountry('Costa Rica');
+      const or = (fragment as any).OR as Array<Record<string, unknown>>;
+      expect(or).toHaveLength(3);
+      expect(or[0]).toHaveProperty('geoCanonicalCountry');
+      expect(or[1]).toHaveProperty('geoCountry');
+      expect(or[2]).toHaveProperty('geoCountryCode');
+    });
+
+    it('whereLocality returns canonical OR raw geoLocality contains', () => {
+      const fragment = whereLocality('Heredia');
+      expect(fragment).toEqual({
+        OR: [
+          { geoCanonicalLocality: { contains: 'Heredia', mode: 'insensitive' } },
+          { geoLocality: { contains: 'Heredia', mode: 'insensitive' } },
+        ],
+      });
+    });
+
+    it('whereFavorite returns favorite flag', () => {
+      expect(whereFavorite(true)).toEqual({ favorite: true });
+      expect(whereFavorite(false)).toEqual({ favorite: false });
+    });
+
+    it('whereType casts value to type field', () => {
+      expect((whereType('photo') as any).type).toBe('photo');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildWhereFromFields
+// ---------------------------------------------------------------------------
+describe('buildWhereFromFields', () => {
+  it('always includes circleId and deletedAt:null', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {});
+    expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+  });
+
+  it('returns only baseline for empty filters', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {});
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+
+  it('throws BadRequestException for unknown filter key', () => {
+    expect(() =>
+      buildWhereFromFields(CIRCLE_ID, { badKey: 'x' }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('throws BadRequestException listing the unknown key in the message', () => {
+    expect(() =>
+      buildWhereFromFields(CIRCLE_ID, { unknownField: 'y' }),
+    ).toThrow(/unknownField/);
+  });
+
+  it('applies tag filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { tag: 'sunset' });
+    // AND-composition: contribution lives in where.AND[0]
+    expect(inAnd(where, 'mediaTags')).toMatchObject({
+      mediaTags: { some: { tag: { name: { equals: 'sunset', mode: 'insensitive' } } } },
+    });
+  });
+
+  it('applies country filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR' });
+    // AND-composition: the OR clause lives inside where.AND[0]
+    expect(Array.isArray(orInAnd(where, 'geoCountry').OR)).toBe(true);
+  });
+
+  it('applies locality filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { locality: 'San José' });
+    const and = (where as any).AND as any[];
+    const clause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoLocality' in e),
+    );
+    expect(clause).toBeDefined();
+    // The registry delegates straight to whereLocality, so it inherits
+    // canonical matching for free (Location Grouping, issue #374).
+    expect(clause.OR.some((e: any) => 'geoCanonicalLocality' in e)).toBe(true);
+  });
+
+  it('applies type filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { type: 'video' });
+    expect(inAnd(where, 'type').type).toBe('video');
+  });
+
+  it('applies favorite filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { favorite: true });
+    expect(inAnd(where, 'favorite').favorite).toBe(true);
+  });
+
+  it('skips null/undefined filter values', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { type: undefined as any, tag: null as any });
+    expect((where as any).type).toBeUndefined();
+    expect((where as any).mediaTags).toBeUndefined();
+  });
+
+  it('applies missingCapturedAt:true filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: true });
+    // AND-composition: capturedAt lives inside where.AND[0]
+    expect(inAnd(where, 'capturedAt').capturedAt).toBeNull();
+  });
+
+  it('applies missingCapturedAt:false filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: false });
+    expect(inAnd(where, 'capturedAt').capturedAt).toEqual({ not: null });
+  });
+
+  it('applies missingCamera:true filter via registry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: true });
+    // AND-composition: cameraMake/cameraModel live inside where.AND[0]
+    const clause = inAnd(where, 'cameraMake');
+    expect(clause.cameraMake).toBeNull();
+    expect(clause.cameraModel).toBeNull();
+  });
+
+  it('applies missingCamera:false filter via registry (OR clause)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { missingCamera: false });
+    // AND-composition: the OR clause lives inside where.AND[0]
+    const or = orInAnd(where, 'cameraMake').OR as unknown[];
+    expect(Array.isArray(or)).toBe(true);
+    expect(or).toEqual([{ cameraMake: { not: null } }, { cameraModel: { not: null } }]);
+  });
+
+  describe('non-drift guarantee: buildMediaWhere and buildWhereFromFields agree', () => {
+    it('tag filter produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { tag: 'landscape' });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { tag: 'landscape' });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('country filter produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { country: 'CR' });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { country: 'CR' });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('type filter produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { type: 'photo' });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { type: 'photo' });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('favorite filter produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { favorite: true });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { favorite: true });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('locality filter produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { locality: 'Heredia' });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { locality: 'Heredia' });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCapturedAt:true produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: true });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: true });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCapturedAt:false produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCapturedAt: false });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCapturedAt: false });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCamera:true produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCamera: true });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCamera: true });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+
+    it('missingCamera:false produces identical output from both functions', () => {
+      const fromBuilder = buildMediaWhere(CIRCLE_ID, { missingCamera: false });
+      const fromRegistry = buildWhereFromFields(CIRCLE_ID, { missingCamera: false });
+      expect(fromRegistry).toEqual(fromBuilder);
+    });
+  });
+
+  describe('SEARCHABLE_FIELDS registry integrity', () => {
+    it('contains known field keys', () => {
+      const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+      expect(keys).toContain('tag');
+      expect(keys).toContain('type');
+      expect(keys).toContain('country');
+      expect(keys).toContain('favorite');
+      expect(keys).toContain('locality');
+      expect(keys).toContain('cameraMake');
+      expect(keys).toContain('missingCapturedAt');
+      expect(keys).toContain('missingCamera');
+    });
+
+    it('every field has key, label, type, description, and buildWhere', () => {
+      for (const field of SEARCHABLE_FIELDS) {
+        expect(typeof field.key).toBe('string');
+        expect(typeof field.label).toBe('string');
+        expect(typeof field.type).toBe('string');
+        expect(typeof field.description).toBe('string');
+        expect(typeof field.buildWhere).toBe('function');
+      }
+    });
+
+    it('contains the people field with type person-set and optionsSource', () => {
+      const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+      expect(keys).toContain('people');
+
+      const peopleField = SEARCHABLE_FIELDS.find((f) => f.key === 'people')!;
+      expect(peopleField.type).toBe('person-set');
+      expect(peopleField.optionsSource).toBe('people');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereNear — bounding-box radius filter
+// ---------------------------------------------------------------------------
+import { whereNear } from '../media/index.js';
+
+describe('whereNear', () => {
+  // Equator: cos(0) = 1, so lngDelta === latDelta
+  it('latDelta equals radiusKm / 111.32', () => {
+    const result = whereNear(0, 0, 100) as any;
+    const expectedDelta = 100 / 111.32;
+    expect(result.takenLat.gte).toBeCloseTo(-expectedDelta, 4);
+    expect(result.takenLat.lte).toBeCloseTo(expectedDelta, 4);
+  });
+
+  it('at the equator lngDelta equals latDelta (cos(0)=1)', () => {
+    const result = whereNear(0, 0, 100) as any;
+    const delta = 100 / 111.32;
+    expect(result.takenLng.lte).toBeCloseTo(delta, 4);
+    expect(result.takenLng.gte).toBeCloseTo(-delta, 4);
+  });
+
+  // San José, Costa Rica ≈ (9.93°, -84.09°), 50 km radius
+  it('returns correct gte/lte bounds for typical coordinates (San José, 50 km)', () => {
+    const lat = 9.93;
+    const lng = -84.09;
+    const radiusKm = 50;
+    const result = whereNear(lat, lng, radiusKm) as any;
+
+    const latDelta = radiusKm / 111.32;
+    const cosLat = Math.cos((lat * Math.PI) / 180);
+    const lngDelta = radiusKm / (111.32 * cosLat);
+
+    expect(result.takenLat.gte).toBeCloseTo(lat - latDelta, 4);
+    expect(result.takenLat.lte).toBeCloseTo(lat + latDelta, 4);
+    expect(result.takenLng.gte).toBeCloseTo(lng - lngDelta, 4);
+    expect(result.takenLng.lte).toBeCloseTo(lng + lngDelta, 4);
+  });
+
+  it('lngDelta is larger than latDelta for latitudes closer to poles (higher cos adjustment)', () => {
+    // At lat=60°, cos(60°)=0.5, so lngDelta = 2 × latDelta
+    const lat = 60;
+    const result = whereNear(lat, 0, 100) as any;
+    const latDelta = 100 / 111.32;
+    const cosLat = Math.cos((lat * Math.PI) / 180); // ~0.5
+    const lngDelta = 100 / (111.32 * cosLat); // ~2 × latDelta
+
+    // Compare the half-widths (deltas), not the absolute gte/lte values
+    const computedLatDelta = result.takenLat.lte - lat;
+    const computedLngDelta = result.takenLng.lte - 0; // lng centered at 0
+
+    expect(computedLatDelta).toBeCloseTo(latDelta, 3);
+    expect(computedLngDelta).toBeCloseTo(lngDelta, 3);
+
+    // At 60° lat, lngDelta ≈ 2× latDelta
+    expect(computedLngDelta).toBeGreaterThan(computedLatDelta);
+  });
+
+  it('clamps lngDelta to 180 when cosLat approaches 0 (near-pole lat=89.9)', () => {
+    const result = whereNear(89.9, 0, 50) as any;
+    // Without clamping, radiusKm / (111.32 * cos(89.9°)) would be astronomical
+    const lngMin = result.takenLng.gte;
+    const lngMax = result.takenLng.lte;
+    const lngDelta = (lngMax - lngMin) / 2;
+    expect(lngDelta).toBeLessThanOrEqual(180);
+    // The gte/lte should be symmetric: 0 - 180 and 0 + 180
+    expect(lngMin).toBeCloseTo(-180, 1);
+    expect(lngMax).toBeCloseTo(180, 1);
+  });
+
+  it('returned object shape has takenLat and takenLng with gte and lte', () => {
+    const result = whereNear(20, 40, 10) as any;
+    expect(result).toHaveProperty('takenLat.gte');
+    expect(result).toHaveProperty('takenLat.lte');
+    expect(result).toHaveProperty('takenLng.gte');
+    expect(result).toHaveProperty('takenLng.lte');
+  });
+
+  it('lte > gte for both lat and lng', () => {
+    const result = whereNear(20, 40, 25) as any;
+    expect(result.takenLat.lte).toBeGreaterThan(result.takenLat.gte);
+    expect(result.takenLng.lte).toBeGreaterThan(result.takenLng.gte);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AND-composition survival: buildWhereFromFields
+// ---------------------------------------------------------------------------
+
+describe('buildWhereFromFields — AND-composition collision survival', () => {
+  it('two OR-emitting fields produce AND array with both entries', () => {
+    // country emits { OR: [geoCountry, geoCountryCode] }
+    // missingCamera:false emits { OR: [cameraMake not null, cameraModel not null] }
+    // Old Object.assign would collapse these — the AND array prevents that
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'Costa Rica', missingCamera: false });
+
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+
+    // Country clause: OR with the canonical column, geoCountry and geoCountryCode
+    const countryClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause).toBeDefined();
+    expect(countryClause.OR).toHaveLength(3);
+
+    // missingCamera:false clause: OR with cameraMake/cameraModel not-null checks
+    const cameraClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'cameraMake' in e),
+    );
+    expect(cameraClause).toBeDefined();
+    expect(cameraClause.OR).toHaveLength(2);
+  });
+
+  it('neither clause overwrites the other (both OR arrays have correct lengths)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'Costa Rica', missingCamera: false });
+    const and = (where as any).AND as any[];
+
+    // country OR must have exactly 3 entries (canonical + raw + code)
+    const countryClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause.OR).toHaveLength(3);
+
+    // camera OR must have exactly 2 entries
+    const cameraClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'cameraMake' in e),
+    );
+    expect(cameraClause.OR).toHaveLength(2);
+  });
+
+  it('two geo OR-emitting filters (country + location) both survive', () => {
+    // Clauses are identified by a DISTINGUISHING KEY rather than by OR length:
+    // Location Grouping (issue #374) widened both fragments (country 2→3,
+    // location 5→8), and an assertion keyed on length would have to be rewritten
+    // again the next time a geo column is added. `geoPlaceName` appears only in
+    // the location fragment, so it is a stable discriminator.
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+
+    const countryClause = and.find(
+      (c: any) =>
+        Array.isArray(c.OR) &&
+        !c.OR.some((e: any) => 'geoPlaceName' in e) &&
+        c.OR.some((e: any) => 'geoCountry' in e) &&
+        c.OR.some((e: any) => 'geoCanonicalCountry' in e) &&
+        c.OR.some((e: any) => 'geoCountryCode' in e),
+    );
+    expect(countryClause).toBeDefined();
+
+    const locationClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoPlaceName' in e),
+    );
+    expect(locationClause).toBeDefined();
+    // Every geo tier participates, canonical and raw alike.
+    expect(locationClause.OR).toHaveLength(8);
+  });
+
+  it('single filter still works — AND array has exactly one entry', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(1);
+    expect((and[0] as any).OR).toBeDefined();
+  });
+
+  it('empty filters object has no AND key (baseline only)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {});
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+
+  it('baseline circleId + deletedAt are always present alongside AND', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    expect(where).toMatchObject({ circleId: CIRCLE_ID, deletedAt: null });
+  });
+
+  it('null/undefined filter values are skipped (no empty AND entries)', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {
+      country: null as any,
+      location: undefined as any,
+    });
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AND-composition survival: buildMediaWhere
+// ---------------------------------------------------------------------------
+
+describe('buildMediaWhere — AND-composition collision survival', () => {
+  it('country + location both survive in AND array', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { country: 'CR', location: 'San José' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+
+    // Discriminated by geoPlaceName (location-only), not by OR length — see the
+    // buildWhereFromFields twin above.
+    const countryClause = and.find(
+      (c: any) =>
+        Array.isArray(c.OR) &&
+        !c.OR.some((e: any) => 'geoPlaceName' in e) &&
+        c.OR.some((e: any) => 'geoCountry' in e),
+    );
+    expect(countryClause).toBeDefined();
+
+    const locationClause = and.find(
+      (c: any) => Array.isArray(c.OR) && c.OR.some((e: any) => 'geoPlaceName' in e),
+    );
+    expect(locationClause).toBeDefined();
+  });
+
+  it('country + missingCamera:false produce AND array with exactly two entries', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { country: 'CR', missingCamera: false });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(2);
+  });
+
+  it('empty filters object has no AND key', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {});
+    expect((where as any).AND).toBeUndefined();
+    expect(Object.keys(where).sort()).toEqual(['circleId', 'deletedAt'].sort());
+  });
+
+  it('single filter goes into AND[0]', () => {
+    const where = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const and = (where as any).AND as any[];
+    expect(Array.isArray(and)).toBe(true);
+    expect(and).toHaveLength(1);
+    expect((and[0] as any).mediaTags).toBeDefined();
+  });
+
+  it('three filters produce AND array of length 3', () => {
+    const where = buildMediaWhere(CIRCLE_ID, {
+      country: 'CR',
+      location: 'San José',
+      favorite: true,
+    });
+    const and = (where as any).AND as any[];
+    expect(and).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereNoFaces — standalone helper
+// ---------------------------------------------------------------------------
+import { whereNoFaces } from '../media/index.js';
+
+describe('whereNoFaces', () => {
+  it('returns { faces: { none: {} } } when value is true', () => {
+    expect(whereNoFaces(true)).toEqual({ faces: { none: {} } });
+  });
+
+  it('returns {} when value is false', () => {
+    expect(whereNoFaces(false)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereMissingCapturedAt — standalone helper
+// ---------------------------------------------------------------------------
+import { whereMissingCapturedAt, whereMissingCamera } from '../media/index.js';
+
+describe('whereMissingCapturedAt', () => {
+  it('returns { capturedAt: null } when value is true', () => {
+    expect(whereMissingCapturedAt(true)).toEqual({ capturedAt: null });
+  });
+
+  it('returns { capturedAt: { not: null } } when value is false', () => {
+    expect(whereMissingCapturedAt(false)).toEqual({ capturedAt: { not: null } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereMissingCamera — standalone helper
+// ---------------------------------------------------------------------------
+describe('whereMissingCamera', () => {
+  it('returns { cameraMake: null, cameraModel: null } when value is true', () => {
+    expect(whereMissingCamera(true)).toEqual({ cameraMake: null, cameraModel: null });
+  });
+
+  it('returns OR clause with not-null entries when value is false', () => {
+    expect(whereMissingCamera(false)).toEqual({
+      OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// missingCapturedAt field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — missingCapturedAt field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'missingCapturedAt')!;
+  }
+
+  it('contains the missingCapturedAt key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('missingCapturedAt');
+  });
+
+  it('has label "Missing capture date"', () => {
+    const field = getField();
+    expect(field.label).toBe('Missing capture date');
+  });
+
+  it('has type "boolean"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('buildWhere(true) returns { capturedAt: null }', () => {
+    const field = getField();
+    expect(field.buildWhere(true)).toEqual({ capturedAt: null });
+  });
+
+  it('buildWhere(false) returns { capturedAt: { not: null } }', () => {
+    const field = getField();
+    expect(field.buildWhere(false)).toEqual({ capturedAt: { not: null } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// missingCamera field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — missingCamera field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'missingCamera')!;
+  }
+
+  it('contains the missingCamera key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('missingCamera');
+  });
+
+  it('has label "Missing camera info"', () => {
+    const field = getField();
+    expect(field.label).toBe('Missing camera info');
+  });
+
+  it('has type "boolean"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('buildWhere(true) returns { cameraMake: null, cameraModel: null }', () => {
+    const field = getField();
+    expect(field.buildWhere(true)).toEqual({ cameraMake: null, cameraModel: null });
+  });
+
+  it('buildWhere(false) returns the OR clause', () => {
+    const field = getField();
+    expect(field.buildWhere(false)).toEqual({
+      OR: [{ cameraMake: { not: null } }, { cameraModel: { not: null } }],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// noFaces field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — noFaces field', () => {
+  it('contains the noFaces key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('noFaces');
+  });
+
+  it('noFaces field has type "boolean"', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field).toBeDefined();
+    expect(field.type).toBe('boolean');
+  });
+
+  it('noFaces buildWhere returns faces.none clause for true', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field.buildWhere(true)).toEqual({ faces: { none: {} } });
+  });
+
+  it('noFaces buildWhere returns {} for false', () => {
+    const field = SEARCHABLE_FIELDS.find((f) => f.key === 'noFaces')!;
+    expect(field.buildWhere(false)).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wherePeople — standalone helper
+// ---------------------------------------------------------------------------
+import { wherePeople } from '../media/index.js';
+
+describe('wherePeople', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  it('returns {} for an empty ids array', () => {
+    expect(wherePeople([])).toEqual({});
+  });
+
+  it('returns {} for an empty ids array with explicit any mode', () => {
+    expect(wherePeople([], 'any')).toEqual({});
+  });
+
+  it('returns {} for an empty ids array with explicit all mode', () => {
+    expect(wherePeople([], 'all')).toEqual({});
+  });
+
+  it('defaults to all mode when mode is omitted', () => {
+    const result = wherePeople([ID_A]) as any;
+    // 'all' mode produces AND array
+    expect(Array.isArray(result.AND)).toBe(true);
+    expect(result.AND).toHaveLength(1);
+  });
+
+  it('produces faces.some.personId.in for any mode with multiple ids', () => {
+    const result = wherePeople([ID_A, ID_B], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A, ID_B] } } },
+    });
+  });
+
+  it('produces faces.some.personId.in for any mode with a single id', () => {
+    const result = wherePeople([ID_A], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+
+  it('produces AND array of faces.some for all mode with multiple ids', () => {
+    const result = wherePeople([ID_A, ID_B], 'all') as any;
+    expect(result).toEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+  });
+
+  it('produces a single-element AND array for all mode with one id', () => {
+    const result = wherePeople([ID_A], 'all') as any;
+    expect(result).toEqual({
+      AND: [{ faces: { some: { personId: ID_A } } }],
+    });
+  });
+
+  it('filters out empty-string ids', () => {
+    const result = wherePeople(['', ID_A, '  '], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+
+  it('filters out non-string ids (garbage input) and returns {} if none remain', () => {
+    const result = wherePeople([42 as any, null as any, undefined as any], 'any');
+    expect(result).toEqual({});
+  });
+
+  it('filters out non-string ids but keeps valid ones', () => {
+    const result = wherePeople([42 as any, ID_A], 'any') as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A] } } },
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// andWhere — people composition (issue #431)
+//
+// The regression this guards: `{ ...buildMediaWhere(...), ...wherePeople(ids,
+// 'all') }` overwrote the builder's AND array with the people one, so every
+// other filter vanished and the match set WIDENED. It reached both the gallery
+// and album add-by-filter, which writes the widened set into the album.
+// ---------------------------------------------------------------------------
+describe('andWhere — composing people with other filters', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  it("keeps every other filter when peopleMatch is 'all'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, {
+      tag: 'beach',
+      country: 'Costa Rica',
+      cameraMake: 'Apple',
+    });
+    const baseCount = ((base as any).AND as unknown[]).length;
+    expect(baseCount).toBeGreaterThan(0);
+
+    const where = andWhere(base, wherePeople([ID_A, ID_B], 'all')) as any;
+
+    // Nothing was replaced: the builder's fragments survive alongside people.
+    expect(where.AND).toHaveLength(baseCount + 1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+    expect(where.deletedAt).toBeNull();
+    expect(where.AND).toContainEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+    expect(JSON.stringify(where)).toContain('beach');
+    expect(JSON.stringify(where)).toContain('Costa Rica');
+    expect(JSON.stringify(where)).toContain('Apple');
+  });
+
+  it("keeps every other filter when peopleMatch is 'any'", () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(base, wherePeople([ID_A], 'any')) as any;
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual({ faces: { some: { personId: { in: [ID_A] } } } });
+  });
+
+  it('composes onto a base that has no AND array yet', () => {
+    const base = buildMediaWhere(CIRCLE_ID, {});
+    expect((base as any).AND).toBeUndefined();
+    const where = andWhere(base, wherePeople([ID_A], 'all')) as any;
+    expect(where.AND).toHaveLength(1);
+    expect(where.circleId).toBe(CIRCLE_ID);
+  });
+
+  it('returns the base untouched when there is no people filter', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    expect(andWhere(base, undefined)).toBe(base);
+    expect(andWhere(base, {})).toBe(base);
+  });
+
+  it('appends rather than replaces when several fragments are supplied', () => {
+    const base = buildMediaWhere(CIRCLE_ID, { tag: 'beach' });
+    const where = andWhere(
+      base,
+      wherePeople([ID_A], 'all'),
+      wherePeople([ID_B], 'all'),
+    ) as any;
+    expect(where.AND).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereCreatedAtRange — standalone helper (upload date range on createdAt)
+// ---------------------------------------------------------------------------
+import { whereCreatedAtRange } from '../media/index.js';
+
+describe('whereCreatedAtRange', () => {
+  it('treats a midnight upper bound as exclusive next-midnight', () => {
+    // Issue #446: a bare `YYYY-MM-DD` from the AI agent or a workflow arrives
+    // as that day's midnight, and an inclusive `lte` against it matched only an
+    // item timestamped exactly 00:00:00.000 — silently dropping the end day.
+    const from = new Date('2023-01-01');
+    const to = new Date('2023-12-31');
+    expect(whereCreatedAtRange(from, to)).toEqual({
+      createdAt: { gte: from, lt: new Date('2024-01-01T00:00:00.000Z') },
+    });
+  });
+
+  it('keeps an explicit non-midnight upper bound inclusive', () => {
+    const to = new Date('2023-12-31T12:00:00.000Z');
+    const result = whereCreatedAtRange(undefined, to) as any;
+    expect(result.createdAt).toEqual({ lte: to });
+  });
+
+  it('keeps an explicit end-of-day upper bound inclusive', () => {
+    // What the web client sends. It must not be widened by another day.
+    const to = new Date('2023-12-31T23:59:59.999Z');
+    const result = whereCreatedAtRange(undefined, to) as any;
+    expect(result.createdAt).toEqual({ lte: to });
+  });
+
+  it('returns only gte when only from is provided', () => {
+    const from = new Date('2023-06-01');
+    const result = whereCreatedAtRange(from) as any;
+    expect(result.createdAt).toMatchObject({ gte: from });
+    expect(result.createdAt.lte).toBeUndefined();
+    expect(result.createdAt.lt).toBeUndefined();
+  });
+
+  it('returns {} when no bounds are provided', () => {
+    expect(whereCreatedAtRange()).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// whereDateRange — the same end-day rule on capturedAt (issue #446)
+// ---------------------------------------------------------------------------
+describe('whereDateRange — end-day normalisation', () => {
+  it('covers the whole end day for a bare calendar bound', () => {
+    const where = whereDateRange(
+      new Date('2026-06-01'),
+      new Date('2026-06-30'),
+    ) as any;
+    expect(where.capturedAt.gte).toEqual(new Date('2026-06-01T00:00:00.000Z'));
+    expect(where.capturedAt.lt).toEqual(new Date('2026-07-01T00:00:00.000Z'));
+
+    // The photo the old `lte` bound excluded.
+    const june30 = new Date('2026-06-30T23:59:59.000Z');
+    expect(june30.getTime()).toBeLessThan(where.capturedAt.lt.getTime());
+  });
+
+  it('leaves a precise instant bound exactly as given', () => {
+    const to = new Date('2026-06-30T12:00:00.000Z');
+    expect((whereDateRange(undefined, to) as any).capturedAt).toEqual({ lte: to });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// uploadedAt field in SEARCHABLE_FIELDS registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS — uploadedAt field', () => {
+  function getField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'uploadedAt')!;
+  }
+
+  it('contains the uploadedAt key', () => {
+    const keys = SEARCHABLE_FIELDS.map((f) => f.key);
+    expect(keys).toContain('uploadedAt');
+  });
+
+  it('has label "Upload date range" and type "date-range"', () => {
+    const field = getField();
+    expect(field).toBeDefined();
+    expect(field.label).toBe('Upload date range');
+    expect(field.type).toBe('date-range');
+  });
+
+  it('buildWhere with from/to produces createdAt bounds covering the end day', () => {
+    const field = getField();
+    const result = field.buildWhere({
+      from: '2023-01-01T00:00:00.000Z',
+      to: '2023-12-31T00:00:00.000Z',
+    }) as any;
+    expect(result.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
+    expect(result.createdAt.lt).toEqual(new Date('2024-01-01T00:00:00.000Z'));
+  });
+
+  it('buildWhere rejects a malformed bound with a 400 instead of Invalid Date', () => {
+    // The workflow path already threw here; the search path silently produced
+    // `Invalid Date` and failed deep inside Prisma (#446).
+    const field = getField();
+    expect(() => field.buildWhere({ from: 'not-a-date' })).toThrow(BadRequestException);
+    expect(() => field.buildWhere({ from: 42 })).toThrow(BadRequestException);
+    expect(() => field.buildWhere('2023-01-01')).toThrow(BadRequestException);
+  });
+
+  it('buildWhere with no bounds returns {}', () => {
+    const field = getField();
+    expect(field.buildWhere({})).toEqual({});
+  });
+});
+
+describe('buildWhereFromFields — uploadedAt filter', () => {
+  it('produces an AND fragment containing createdAt gte/lte', () => {
+    const where = buildWhereFromFields(CIRCLE_ID, {
+      uploadedAt: { from: '2023-01-01T00:00:00.000Z', to: '2023-12-31T00:00:00.000Z' },
+    });
+    const clause = inAnd(where, 'createdAt');
+    expect(clause.createdAt.gte).toEqual(new Date('2023-01-01T00:00:00.000Z'));
+    expect(clause.createdAt.lt).toEqual(new Date('2024-01-01T00:00:00.000Z'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// people field buildWhere via registry
+// ---------------------------------------------------------------------------
+describe('SEARCHABLE_FIELDS people field buildWhere', () => {
+  const ID_A = '11111111-1111-1111-1111-111111111111';
+  const ID_B = '22222222-2222-2222-2222-222222222222';
+
+  function getPeopleField() {
+    return SEARCHABLE_FIELDS.find((f) => f.key === 'people')!;
+  }
+
+  it('returns {} when value is undefined', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere(undefined)).toEqual({});
+  });
+
+  it('returns {} when value is null', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere(null)).toEqual({});
+  });
+
+  it('returns {} when ids is empty array', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere({ ids: [] })).toEqual({});
+  });
+
+  it('returns {} when ids is not an array', () => {
+    const field = getPeopleField();
+    expect(field.buildWhere({ ids: 'not-an-array' })).toEqual({});
+  });
+
+  it('defaults mode to all when mode is omitted', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A] }) as any;
+    // all mode → AND array
+    expect(Array.isArray(result.AND)).toBe(true);
+  });
+
+  it('uses all mode when mode is all', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A, ID_B], mode: 'all' }) as any;
+    expect(result).toEqual({
+      AND: [
+        { faces: { some: { personId: ID_A } } },
+        { faces: { some: { personId: ID_B } } },
+      ],
+    });
+  });
+
+  it('uses any mode when mode is any', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A, ID_B], mode: 'any' }) as any;
+    expect(result).toEqual({
+      faces: { some: { personId: { in: [ID_A, ID_B] } } },
+    });
+  });
+
+  it('falls back to all mode for an unrecognised mode value', () => {
+    const field = getPeopleField();
+    const result = field.buildWhere({ ids: [ID_A], mode: 'unknown' }) as any;
+    expect(Array.isArray(result.AND)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DTO validation — peopleFilterValueSchema and searchQuerySchema
+// ---------------------------------------------------------------------------
+import { peopleFilterValueSchema, searchQuerySchema } from './dto/search-query.dto';
+
+describe('peopleFilterValueSchema', () => {
+  const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+  const VALID_UUID_2 = '550e8400-e29b-41d4-a716-446655440001';
+
+  it('accepts valid {ids:[uuid], mode:"all"}', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'all' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts valid {ids:[uuid], mode:"any"}', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'any' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts multiple valid UUIDs', () => {
+    const result = peopleFilterValueSchema.safeParse({
+      ids: [VALID_UUID, VALID_UUID_2],
+      mode: 'all',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('defaults mode to "all" when mode is omitted', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID] });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.mode).toBe('all');
+    }
+  });
+
+  it('rejects when ids is an empty array (min 1)', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [], mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when ids contains a non-UUID string', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: ['not-a-uuid'], mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when mode is an invalid value', () => {
+    const result = peopleFilterValueSchema.safeParse({ ids: [VALID_UUID], mode: 'both' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects when ids is missing entirely', () => {
+    const result = peopleFilterValueSchema.safeParse({ mode: 'all' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('searchQuerySchema — people filter validation', () => {
+  const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+
+  function makeBaseQuery(overrides: Record<string, unknown> = {}) {
+    return {
+      circleId: '550e8400-e29b-41d4-a716-446655440099',
+      filters: {},
+      ...overrides,
+    };
+  }
+
+  it('accepts a valid people filter within filters', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [VALID_UUID], mode: 'all' } } }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts omitted people filter (no people key in filters)', () => {
+    const result = searchQuerySchema.safeParse(makeBaseQuery({ filters: {} }));
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects people filter with empty ids array', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [], mode: 'all' } } }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects people filter with an invalid UUID in ids', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: ['not-a-uuid'] } } }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects people filter with an invalid mode', () => {
+    const result = searchQuerySchema.safeParse(
+      makeBaseQuery({ filters: { people: { ids: [VALID_UUID], mode: 'wrong' } } }),
+    );
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DTO validation — date-range filters (issue #446)
+//
+// `filters` is typed `z.record(z.string(), z.unknown())`, so before this the
+// two date-range filters had NO shape validation at all and a malformed
+// `{from,to}` reached `new Date()` untyped.
+// ---------------------------------------------------------------------------
+describe('searchQuerySchema — date-range filter validation', () => {
+  function query(filters: Record<string, unknown>) {
+    return searchQuerySchema.safeParse({
+      circleId: '550e8400-e29b-41d4-a716-446655440099',
+      filters,
+    });
+  }
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a bare calendar day for %s', (key) => {
+    expect(query({ [key]: { from: '2026-06-01', to: '2026-06-30' } }).success).toBe(true);
+  });
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a full ISO instant for %s', (key) => {
+    expect(
+      query({ [key]: { from: '2026-06-01T00:00:00.000Z', to: '2026-06-30T23:59:59.999Z' } })
+        .success,
+    ).toBe(true);
+  });
+
+  it.each(['capturedAt', 'uploadedAt'])('accepts a one-sided range for %s', (key) => {
+    expect(query({ [key]: { from: '2026-06-01' } }).success).toBe(true);
+    expect(query({ [key]: { to: '2026-06-30' } }).success).toBe(true);
+  });
+
+  it('rejects an unparseable bound', () => {
+    expect(query({ capturedAt: { from: 'yesterday' } }).success).toBe(false);
+  });
+
+  it('rejects a non-object filter value', () => {
+    expect(query({ capturedAt: '2026-06-01' }).success).toBe(false);
+    expect(query({ uploadedAt: ['2026-06-01'] }).success).toBe(false);
+  });
+
+  it('rejects an empty range and unknown keys', () => {
+    expect(query({ capturedAt: {} }).success).toBe(false);
+    expect(query({ capturedAt: { from: '2026-06-01', between: true } }).success).toBe(false);
+  });
+
+  it('leaves an absent date filter alone', () => {
+    expect(query({}).success).toBe(true);
+  });
+});

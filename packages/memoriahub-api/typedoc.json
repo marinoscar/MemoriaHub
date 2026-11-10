@@ -16,6 +16,10 @@
     "./src/dedup/testing/index.ts",
     "./src/face/index.ts",
     "./src/face/testing/index.ts",
+    "./src/tagging/index.ts",
+    "./src/tagging/testing/index.ts",
+    "./src/search/index.ts",
+    "./src/search/testing/index.ts",
     "./src/review-runs/index.ts",
     "./src/review-runs/testing/index.ts"
   ],

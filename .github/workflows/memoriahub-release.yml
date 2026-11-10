@@ -1,0 +1,117 @@
+name: MemoriaHub packages release
+
+# Packs the @marinoscar/memoriahub-* packages and, only on an explicit manual
+# request, publishes them. READ docs/runbooks/release-memoriahub-packages.md.
+#
+# SAFETY CONTRACT (the owner has not chosen a registry; nothing may publish by default):
+#
+#   - the ONLY trigger is workflow_dispatch: no push, no tag, no pull_request, no schedule;
+#   - the default run is a DRY RUN: build, check, `npm pack`, upload the tarballs as an
+#     artifact. It never contacts a registry with a credential and has no secret;
+#   - the `publish` job runs only when the dispatch sets `publish` to true AND `confirm` to
+#     the word `publish`. It also needs the repository secret MEMORIAHUB_REGISTRY_TOKEN,
+#     which this repository does NOT define and this workflow never creates; without it the
+#     job stops in its first step;
+#   - the packages are still "private": true (and UNLICENSED), which makes `npm publish`
+#     refuse every one of them (EPRIVATE). Opening the gate is the owner's decision
+#     (runbook, "The publish gate");
+#   - every publish uses the `next` dist-tag and provenance; there is no `latest`.
+#
+# No secret value appears in this file or is ever printed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to the registry (default false = dry run: pack only)'
+        type: boolean
+        default: false
+      confirm:
+        description: 'Type the word publish to confirm a publish (ignored for a dry run)'
+        type: string
+        default: ''
+
+concurrency:
+  group: memoriahub-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Build, check and pack (dry run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build:memoriahub-packages
+      - run: npm run check:memoriahub-pack
+      - run: npm run check:memoriahub-lean-install
+
+      - name: Pack the tarballs
+        run: |
+          mkdir -p tarballs
+          for pkg in compute contract db api web; do
+            npm pack -w "@marinoscar/memoriahub-$pkg" --pack-destination tarballs
+          done
+          ls -l tarballs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memoriahub-package-tarballs
+          path: tarballs/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to the registry (manual, gated)
+    needs: dry-run
+    # Both inputs, explicitly. A dry run (the default) skips this job.
+    if: ${{ inputs.publish == true && inputs.confirm == 'publish' }}
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Never defined by this repository's tooling; the owner configures it when a registry is chosen.
+      NODE_AUTH_TOKEN: ${{ secrets.MEMORIAHUB_REGISTRY_TOKEN }}
+      NPM_CONFIG_PROVENANCE: 'true'
+    steps:
+      - name: Require a configured registry credential
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "MEMORIAHUB_REGISTRY_TOKEN is not configured. No registry has been chosen; nothing was published." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build:memoriahub-packages
+      - run: npm run check:memoriahub-pack
+
+      - name: Publish the fixed group under the next dist-tag
+        run: |
+          # `npm publish` refuses a package that still has "private": true, so this step cannot
+          # publish until the owner removes it (runbook, "The publish gate").
+          for pkg in compute contract db api web; do
+            npm publish -w "@marinoscar/memoriahub-$pkg" --tag next --provenance --access public
+          done

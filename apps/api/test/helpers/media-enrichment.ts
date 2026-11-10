@@ -22,7 +22,7 @@ import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichm
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { registerSocialMediaUploadEnrichment } from '../../src/social-media/social-media-upload-enrichment';
-import { registerTaggingUploadEnrichment } from '../../src/tagging/tagging-upload-enrichment';
+import { registerTaggingUploadEnrichment } from '@marinoscar/memoriahub-api/tagging';
 
 /** Builds the service with every slice's upload fan-out registered, over the given collaborators. */
 export function buildMediaEnrichment(
@@ -46,7 +46,21 @@ export function buildMediaEnrichment(
     new UploadEnrichmentService(registry, settingsPort as never),
   );
 
-  registerTaggingUploadEnrichment(registry, jobs, prisma);
+  // The tagging slice enqueues through the jobs port; the fan-out specs read the legacy facade's calls,
+  // so the port's input is translated back to them (the subject is the media item, the circle rides in the payload).
+  const taggingJobsPort = {
+    enqueue: async (input: { type: string; reason?: string; subjectId?: string; payload: Record<string, unknown>; priority?: number }) => {
+      const job = await jobs.enqueue({
+        type: input.type,
+        mediaItemId: input.subjectId ?? null,
+        circleId: (input.payload['circleId'] as string | undefined) ?? null,
+        reason: input.reason as JobReason,
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      });
+      return { id: job.id, deduplicated: false };
+    },
+  };
+  registerTaggingUploadEnrichment(registry, taggingJobsPort as never, prisma as never);
   registerFaceUploadEnrichment(registry, jobs, prisma);
   registerSocialMediaUploadEnrichment(registry, jobs, prisma, (item) =>
     service.enqueueVideoPostDetectionEnrichment(item as never, JobReason.upload),

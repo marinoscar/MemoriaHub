@@ -1,36 +1,21 @@
 import { Module } from '@nestjs/common';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { AiPortModule } from '../ai-port/ai-port.module';
-import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { PrismaModule } from '../prisma/prisma.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
-import { TaggingUploadEnrichment } from './tagging-upload-enrichment';
-import { VideoInputResolver } from '../media/enrichment/video-input.service';
-import { AutoTaggingHandler } from './auto-tagging.handler';
-import { AutoTaggingService } from './auto-tagging.service';
-import { VideoAutoTaggingHandler } from './video-auto-tagging.handler';
-import { VideoAutoTaggingService } from './video-auto-tagging.service';
-import { TaggingController } from './tagging.controller';
-import { TagLabelsController } from './tag-labels.controller';
-import { TagLabelsService } from './tag-labels.service';
-import { TaggingBackfillService } from './tagging-backfill.service';
-import { AdminTaggingController } from './admin-tagging.controller';
+import {
+  AdminTaggingController,
+  TaggingController,
+  TaggingModule as TaggingCoreModule,
+  TagLabelsController,
+} from '@marinoscar/memoriahub-api/tagging';
 
+/**
+ * Tagging (RETRO-J7, #618). The auto-tagging and video-tagging handlers and services, the tag
+ * vocabulary, the backfill and the photo upload fan-out registration live in
+ * `@marinoscar/memoriahub-api/tagging`; they reach the platform only through the ports bound in
+ * `platform-memoriahub/`. This module mounts the slice's controllers where the old ones sat (the
+ * OpenAPI document follows module order) and re-exports the packaged slice.
+ */
 @Module({
-  imports: [EnrichmentModule, AiPortModule, MediaProcessingModule, PrismaModule, OwnerAccessModule, MediaCoreModule.forRoot()],
+  imports: [TaggingCoreModule.forRoot()],
   controllers: [TaggingController, TagLabelsController, AdminTaggingController],
-  providers: [
-    AutoTaggingHandler,
-    AutoTaggingService,
-    VideoAutoTaggingHandler,
-    VideoAutoTaggingService,
-    VideoInputResolver,
-    TagLabelsService,
-    TaggingBackfillService,
-    // The photo upload fan-out, registered with the media slice (RETRO-J5).
-    TaggingUploadEnrichment,
-  ],
-  exports: [AutoTaggingService, VideoAutoTaggingService],
+  exports: [TaggingCoreModule.forRoot()],
 })
 export class TaggingModule {}
