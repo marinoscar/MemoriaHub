@@ -1,0 +1,41 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "extends": ["../../typedoc.base.json"],
+  "tsconfig": "./tsconfig.esm.json",
+  "entryPoints": [
+      "./src/index.ts",
+      "./src/image/index.ts",
+      "./src/geo/index.ts",
+      "./src/rate-limit/index.ts",
+      "./src/clip/index.ts",
+      "./src/dhash/index.ts",
+      "./src/ffmpeg/index.ts",
+      "./src/dto/index.ts",
+      "./src/face-compreface/index.ts",
+      "./src/face-video/index.ts",
+      "./src/ocr/index.ts",
+      "./src/metadata/index.ts",
+      "./src/social/index.ts",
+      "./src/video/index.ts"
+  ],
+  "entryPointStrategy": "resolve",
+  "name": "@marinoscar/memoriahub-compute",
+  "out": "./docs-api/html",
+  "json": "./docs-api/api.json",
+  // The shared list minus "Property". The package's option and result
+  // interfaces carry their meaning in the TSDoc of the interface and of the
+  // function that takes or returns them; every exported declaration still
+  // needs TSDoc and `@stability`.
+  "requiredToBeDocumented": [
+    "Namespace",
+    "Enum",
+    "EnumMember",
+    "Variable",
+    "Function",
+    "Class",
+    "Interface",
+    "Method",
+    "Accessor",
+    "TypeAlias"
+  ]
+}
