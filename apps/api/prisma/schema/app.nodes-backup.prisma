@@ -59,7 +59,10 @@ model NodeBackupConfig {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  node MhLegacyWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  // PLATFORM-ADOPTION-SHIM(RETRO-SEAM-WORKERNODE-EXTENSIBLE): `node_id` references the PLATFORM's
+  // `worker_nodes` (ON DELETE CASCADE, in migration 20261109300000), but the relation is not modelled:
+  // `WorkerNode` is not `// @extensible`, so the back-relation cannot be added. Same shape as
+  // `MediaSyncDevice.patId`. The node is read through the platform NodesService.
 
   @@index([nextRunAt])
   @@map("node_backup_configs")
@@ -97,7 +100,10 @@ model NodeBackupRun {
   cursorEndId          String?   @map("cursor_end_id") @db.Uuid
 
   // Relations
-  node MhLegacyWorkerNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  // PLATFORM-ADOPTION-SHIM(RETRO-SEAM-WORKERNODE-EXTENSIBLE): `node_id` references the PLATFORM's
+  // `worker_nodes` (ON DELETE CASCADE, in migration 20261109300000), but the relation is not modelled:
+  // `WorkerNode` is not `// @extensible`, so the back-relation cannot be added. Same shape as
+  // `MediaSyncDevice.patId`. The node is read through the platform NodesService.
 
   @@index([nodeId, startedAt(sort: Desc)])
   @@index([status])
