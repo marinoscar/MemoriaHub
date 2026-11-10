@@ -1,10 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import type { UserPrincipal } from '@marinoscar/platform-api/core';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 import {
+  GroupsService,
   SHARING_EVENTS,
   type GroupInviteAutoAcceptedPayload,
   type GroupMemberEventPayload,
+  type GroupEventPayload,
 } from '@marinoscar/platform-api/sharing';
 import { CircleRole } from '@prisma/client';
 
@@ -54,7 +57,47 @@ export class GroupMemberMirrorListener {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly groups: GroupsService,
   ) {}
+
+  /**
+   * A group created through `/api/groups` (RETRO-I6, #684): create the circle of the same id
+   * and its creator's `circle_admin` membership. Without the circle, every content row's
+   * `circle_id` foreign key (and `OwnerAccessService.resolveOwner`) would refuse the group.
+   * Idempotent. The RETRO-I2 trigger `mh_circle_mirror_group` then finds the group already
+   * there (`ON CONFLICT DO NOTHING`) and `mh_circle_member_mirror` re-writes the creator's
+   * `group_members` row with the same role, so nothing loops. The creator's membership is
+   * written HERE rather than left to the `member_added` event that follows, because the two
+   * listeners run concurrently and that one skips a circle that does not exist yet.
+   *
+   * `groups` is read through the slice's `GroupsService` (the `no-direct-access` rule), `circles`
+   * and `circle_members` are the app's own tables.
+   * A group DELETE is not mirrored: `mh_group_mirror_guard` refuses deleting a group whose
+   * circle exists (delete the circle instead, as for every mirrored group), and the slice has
+   * no rename event, so a rename through `/api/groups` does not reach the circle's name.
+   */
+  @OnEvent(SHARING_EVENTS.GROUP_CREATED)
+  async onGroupCreated(event: GroupEventPayload): Promise<void> {
+    try {
+      // Through the slice (`GroupsService.get`, as the creator who is its first admin).
+      const group = await this.groups.get(creatorPrincipal(event), event.groupId).catch(() => null);
+      if (!group) return;
+      const ownerId = group.createdById ?? event.actorUserId;
+      if (!ownerId) return;
+      await this.prisma.circle.upsert({
+        where: { id: event.groupId },
+        update: {},
+        create: { id: event.groupId, name: group.name, description: group.description, ownerId, isPersonal: false },
+      });
+      await this.prisma.circleMember.upsert({
+        where: { circleId_userId: { circleId: event.groupId, userId: ownerId } },
+        update: { role: CircleRole.circle_admin },
+        create: { circleId: event.groupId, userId: ownerId, role: CircleRole.circle_admin },
+      });
+    } catch (err) {
+      this.logger.warn(`Mirroring the creation of group ${event.groupId} into a circle failed: ${describe(err)}`);
+    }
+  }
 
   @OnEvent(SHARING_EVENTS.MEMBER_ADDED)
   async onMemberAdded(event: GroupMemberEventPayload): Promise<void> {
@@ -120,6 +163,19 @@ export class GroupMemberMirrorListener {
     });
     return circle && !circle.isPersonal ? circle : null;
   }
+}
+
+/** The creator of a just-created group, as the principal that may read it (single organization mode). */
+function creatorPrincipal(event: GroupEventPayload): UserPrincipal {
+  return {
+    kind: 'user',
+    userId: event.actorUserId,
+    email: '',
+    credential: 'session',
+    roles: [],
+    permissions: [],
+    activeOrgId: event.orgId,
+  };
 }
 
 function describe(err: unknown): string {
