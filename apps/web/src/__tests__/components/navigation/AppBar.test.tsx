@@ -30,10 +30,12 @@ vi.mock('../../../contexts/SearchContext', () => ({
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('../../../components/search/SearchPanel', () => ({ SearchPanel: vi.fn(() => null) }));
-vi.mock('../../../components/media/MediaUploadDialog', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   MediaUploadDialog: vi.fn(({ open }: { open: boolean }) =>
     open ? <div data-testid="upload-dialog" /> : null,
   ),
+
 }));
 vi.mock('../../../components/notifications/NotificationBell', () => ({
   NotificationBell: () => <button type="button" aria-label="Notifications" />,

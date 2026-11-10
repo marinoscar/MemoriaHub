@@ -70,9 +70,11 @@ export default [
     files: MEMORIAHUB_PACKAGE_SOURCE_FILES,
     languageOptions: {
       parser: tseslint.parser,
-      parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+      parserOptions: { ecmaVersion: 'latest', sourceType: 'module', ecmaFeatures: { jsx: true } },
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
+    // The React slices (memoriahub-web) carry the same `eslint-disable` directives the app's code did.
+    plugins: APP_LEGACY_RULE_STUBS,
     rules: {
       'no-restricted-imports': [
         'error',

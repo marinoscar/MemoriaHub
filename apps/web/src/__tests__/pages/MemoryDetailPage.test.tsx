@@ -39,8 +39,10 @@ vi.mock('../../services/memories', () => ({
   saveMemoryAsAlbum: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
+
 }));
 
 import MemoryDetailPage from '../../pages/Memories/MemoryDetailPage';
@@ -50,7 +52,7 @@ import {
   markMemorySeen,
   saveMemoryAsAlbum,
 } from '../../services/memories';
-import { getMedia } from '../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 import { resetSeenSession } from '../../hooks/useMemoryActions';
 
 const mockFlags = vi.mocked(useFeatureFlags);

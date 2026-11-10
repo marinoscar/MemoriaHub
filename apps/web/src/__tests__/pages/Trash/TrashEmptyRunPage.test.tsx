@@ -49,8 +49,10 @@ vi.mock('../../../hooks/useTrashEmptyRunItems', () => ({
   useTrashEmptyRunItems: vi.fn(),
 }));
 
-vi.mock('../../../services/trashEmptyRuns', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   cancelTrashEmptyRun: vi.fn().mockResolvedValue({ runId: 'run-1', status: 'cancelled' }),
+
 }));
 
 const mockNavigate = vi.fn();
@@ -71,7 +73,7 @@ import TrashEmptyRunPage from '../../../pages/Trash/TrashEmptyRunPage';
 import { useOwnerScope } from '../../../hooks/useOwnerScope';
 import { useTrashEmptyRun } from '../../../hooks/useTrashEmptyRun';
 import { useTrashEmptyRunItems } from '../../../hooks/useTrashEmptyRunItems';
-import type { TrashEmptyRunDetail } from '../../../types/trashEmptyRuns';
+import type { TrashEmptyRunDetail } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseTrashEmptyRun = vi.mocked(useTrashEmptyRun);

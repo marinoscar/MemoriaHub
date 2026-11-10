@@ -1,7 +1,7 @@
 // Stateless SSE client for the /api/search/agent endpoint.
 // Sends the FULL message history each call; backend is stateless.
 import { api } from './api';
-import type { MediaItem, MediaListMeta } from '../types/media';
+import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
 import { rewriteBody } from './ownerScopeParams';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';

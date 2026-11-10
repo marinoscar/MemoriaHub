@@ -1,0 +1,150 @@
+{
+  "name": "@marinoscar/memoriahub-web",
+  "version": "0.0.0",
+  "description": "The React side of the MemoriaHub domain: pages, components and hooks, one headless and one ui entry per slice, plus the host interface, the shell destinations and the brand (ESM). Host-neutral: imports no @marinoscar/platform-* package.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marinoscar/MemoriaHub.git",
+    "directory": "packages/memoriahub-web"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "exports": {
+    "./core/headless": {
+      "types": "./dist/core/headless/index.d.ts",
+      "default": "./dist/core/headless/index.js"
+    },
+    "./core/ui": {
+      "types": "./dist/core/ui/index.d.ts",
+      "default": "./dist/core/ui/index.js"
+    },
+    "./core/testing": {
+      "types": "./dist/core/testing/index.d.ts",
+      "default": "./dist/core/testing/index.js"
+    },
+    "./brand": {
+      "types": "./dist/brand/index.d.ts",
+      "default": "./dist/brand/index.js"
+    },
+    "./brand/assets/mark.svg": "./dist/brand/assets/mark.svg",
+    "./brand/assets/favicon.ico": "./dist/brand/assets/favicon.ico",
+    "./brand/assets/favicon-16x16.png": "./dist/brand/assets/favicon-16x16.png",
+    "./brand/assets/favicon-32x32.png": "./dist/brand/assets/favicon-32x32.png",
+    "./brand/assets/apple-touch-icon.png": "./dist/brand/assets/apple-touch-icon.png",
+    "./brand/assets/android-chrome-192x192.png": "./dist/brand/assets/android-chrome-192x192.png",
+    "./brand/assets/android-chrome-512x512.png": "./dist/brand/assets/android-chrome-512x512.png",
+    "./brand/assets/icon-192.png": "./dist/brand/assets/icon-192.png",
+    "./brand/assets/icon-512.png": "./dist/brand/assets/icon-512.png",
+    "./brand/assets/icon-maskable-192.png": "./dist/brand/assets/icon-maskable-192.png",
+    "./brand/assets/icon-maskable-512.png": "./dist/brand/assets/icon-maskable-512.png",
+    "./brand/assets/badge-72.png": "./dist/brand/assets/badge-72.png",
+    "./brand/assets/app-logo.png": "./dist/brand/assets/app-logo.png",
+    "./shell": {
+      "types": "./dist/shell/index.d.ts",
+      "default": "./dist/shell/index.js"
+    },
+    "./media/headless": {
+      "types": "./dist/media/headless/index.d.ts",
+      "default": "./dist/media/headless/index.js"
+    },
+    "./media/ui": {
+      "types": "./dist/media/ui/index.d.ts",
+      "default": "./dist/media/ui/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepack": "node ../../scripts/memoriahub-packages/copy-license.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node scripts/copy-brand-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "docs": "typedoc --options typedoc.json",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "brand:sync": "node scripts/sync-brand-identity.mjs",
+    "brand:check": "node scripts/sync-brand-identity.mjs --check"
+  },
+  "peerDependencies": {
+    "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
+    "@mui/icons-material": "^9.1.0",
+    "@mui/material": "^9.1.0",
+    "@testing-library/react": "^16.3.2",
+    "hash-wasm": "^4.12.0",
+    "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.17.0"
+  },
+  "peerDependenciesMeta": {
+    "@marinoscar/memoriahub-contract": {
+      "optional": true
+    },
+    "@mui/icons-material": {
+      "optional": true
+    },
+    "@mui/material": {
+      "optional": true
+    },
+    "@testing-library/react": {
+      "optional": true
+    },
+    "hash-wasm": {
+      "optional": true
+    },
+    "leaflet": {
+      "optional": true
+    },
+    "leaflet.markercluster": {
+      "optional": true
+    },
+    "react-leaflet": {
+      "optional": true
+    },
+    "react-router-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.1.1",
+    "@mui/material": "^9.1.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/leaflet": "^1.9.21",
+    "@types/leaflet.markercluster": "^1.5.6",
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "hash-wasm": "^4.12.0",
+    "jsdom": "^29.1.1",
+    "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.17.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

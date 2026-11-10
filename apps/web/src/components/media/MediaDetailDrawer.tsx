@@ -45,7 +45,7 @@ import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import type { MediaItem, PatchMediaDto } from '../../types/media';
+import type { MediaItem, PatchMediaDto } from '@marinoscar/memoriahub-web/media/headless';
 import {
   patchMedia as patchMediaApi,
   getMedia,
@@ -54,20 +54,20 @@ import {
   bulkArchive,
   bulkUnarchive,
   bulkDelete,
-} from '../../services/media';
+} from '@marinoscar/memoriahub-web/media/headless';
 import { VideoPlayer } from './VideoPlayer';
-import { LocationMiniMap } from './LocationMiniMap';
-import { LocationSearchPicker } from './LocationSearchPicker';
-import { TagAutocomplete } from './TagAutocomplete';
+import { LocationMiniMap } from '@marinoscar/memoriahub-web/media/ui';
+import { LocationSearchPicker } from '@marinoscar/memoriahub-web/media/ui';
+import { TagAutocomplete } from '@marinoscar/memoriahub-web/media/ui';
 import { FaceThumbnails } from './FaceThumbnails';
 import { VideoFacePanel } from './VideoFacePanel';
 import { FaceMarkerStrip } from './FaceMarkerStrip';
 import { useMediaFaces } from '../../hooks/useMediaFaces';
 import { useMediaTags } from '../../hooks/useMediaTags';
 import type { MediaTagStatusType } from '../../services/tagging';
-import { useMediaMetadata } from '../../hooks/useMediaMetadata';
-import type { MediaMetadataStatusType } from '../../services/metadata';
-import { rerunThumbnail } from '../../services/thumbnail';
+import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaMetadataStatusType } from '@marinoscar/memoriahub-web/media/headless';
+import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
 import {
   useSuggestLocation,
   useItemAutoAppliedSuggestion,
@@ -78,7 +78,7 @@ import {
   civilInputToIso,
   formatCivilDateTime,
   isoToCivilInput,
-} from '../../utils/civilDate';
+} from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Helpers

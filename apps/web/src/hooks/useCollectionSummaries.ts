@@ -24,8 +24,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getExploreLocations, listAlbums } from '../services/media';
-import type { ExploreLocationItem } from '../services/media';
+import { getExploreLocations, listAlbums } from '@marinoscar/memoriahub-web/media/headless';
+import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../services/face';
 import type { PersonListItem } from '../services/face';
 import { listMemories } from '../services/memories';

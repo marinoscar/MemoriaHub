@@ -1,0 +1,5 @@
+---
+"@marinoscar/memoriahub-web": minor
+---
+
+Add `@marinoscar/memoriahub-web` (private): the React side of the MemoriaHub domain, one `headless` and one `ui` entry per slice. This first release carries `core` (the `MemoriahubWebHost` interface, its provider, the headless hooks over it and a fake host in `core/testing`), `brand` (the identity values of `packages/shared/identity.json`, the mark and the favicon and PWA icon assets), `shell` (the route prefixes and settings cards the domain contributes to the app's registries, as data) and `media` (the gallery, bulk toolbars and dialogs, albums, the map, places, archive and trash pages, the civil date utilities and the media clients over the host's API client). The package imports no `@marinoscar/platform-*`; the components of slices that have not moved yet (lightbox, detail drawer, enhancement, people pickers, the location-merge dialog) reach the pages through host slots. The web app provides the host in `apps/web/src/platform-memoriahub/` and mounts the packaged pages on the same routes; nothing changes for users.

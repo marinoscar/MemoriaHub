@@ -18,7 +18,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { MediaEnhancementDrawer } from '../../../components/media/MediaEnhancementDrawer';
-import type { MediaItem } from '../../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import type { EnhancementDto } from '../../../services/enhance';
 
 // ---------------------------------------------------------------------------

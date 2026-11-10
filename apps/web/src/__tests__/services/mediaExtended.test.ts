@@ -38,7 +38,7 @@ import {
   searchPlaces,
   getDashboard,
   uploadPart,
-} from '../../services/media';
+} from '@marinoscar/memoriahub-web/media/headless';
 import type {
   MediaItem,
   MediaKeysetResponse,
@@ -47,7 +47,7 @@ import type {
   Album,
   AlbumDetail,
   DashboardResponse,
-} from '../../types/media';
+} from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Shared mock data

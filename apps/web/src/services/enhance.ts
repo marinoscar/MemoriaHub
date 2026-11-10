@@ -1,7 +1,7 @@
 import type { ApplyEnhancement, EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
 import { api, ApiError } from './api';
 import type { BaseRun } from '../types/runs';
-import type { BulkEnhanceSkipped } from './media';
+import type { BulkEnhanceSkipped } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Types — AI Picture Enhancer (see docs/specs/picture-enhancer.md §4.1, §8)

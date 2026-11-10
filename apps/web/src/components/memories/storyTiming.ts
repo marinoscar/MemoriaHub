@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type { MemoryDetailItem } from '../../types/memories';
-import { formatCivilDate } from '../../utils/civilDate';
+import { formatCivilDate } from '@marinoscar/memoriahub-web/media/headless';
 
 /** The title card holds before the first photo. Issue #313 specifies 2.5s. */
 export const TITLE_CARD_DURATION_MS = 2500;

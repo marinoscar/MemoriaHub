@@ -12,7 +12,7 @@ import { useOwnerScope } from '../hooks/useOwnerScope';
 import { streamAgent } from '../services/searchAgentStream';
 import type { ChatMsg } from '../services/searchAgentStream';
 import type { SearchRequest } from '../services/search';
-import type { MediaItem, MediaListMeta } from '../types/media';
+import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Types

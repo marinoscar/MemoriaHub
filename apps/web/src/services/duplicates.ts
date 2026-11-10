@@ -3,7 +3,7 @@ import { api } from './api';
 import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
 import type { GroupBulkResolveResult } from './bursts';
 import type { CreateReviewRunResponse } from '../types/reviewRuns';
-import type { SortOrder } from '../types/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 
 /** Max page size the list endpoint accepts; used when collecting all ids. */
 const LIST_MAX_PAGE_SIZE = 100;

@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { OwnerScopeProvider } from './contexts/OwnerScopeContext';
+import { MemoriahubHostBinding } from './platform-memoriahub/HostBinding';
 // The packaged shell theme (RETRO-F1, #571): `ShellRoot` is the theme-mode
 // provider plus MUI's ThemeProvider and CssBaseline, under the same
 // `theme_mode` key.
@@ -44,7 +45,18 @@ import { APP_NAME } from './constants/app';
 
 // Pages (lazy loaded)
 import { Suspense, lazy } from 'react';
+import type { ComponentType } from 'react';
 import { LoadingSpinner } from './components/common/LoadingSpinner';
+
+// The media pages are the packaged `media` slice's (`@marinoscar/memoriahub-web/media/ui`); each
+// route lazy-loads the slice entry and picks its page, so the page stays out of the main chunk.
+type MediaUiModule = typeof import('@marinoscar/memoriahub-web/media/ui');
+const lazyMediaPage = <K extends keyof MediaUiModule>(name: K) =>
+  lazy(() =>
+    import('@marinoscar/memoriahub-web/media/ui').then((m) => ({
+      default: m[name] as unknown as ComponentType<any>,
+    })),
+  );
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const UserSettingsHubPage = lazy(() => import('./pages/UserSettingsHubPage'));
@@ -57,8 +69,8 @@ const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage
 const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
-const MediaLibraryPage = lazy(() => import('./pages/MediaLibrary'));
-const MediaMapPage = lazy(() => import('./pages/MediaMapPage'));
+const MediaLibraryPage = lazyMediaPage('MediaLibraryPage');
+const MediaMapPage = lazyMediaPage('MediaMapPage');
 // RETRO-I6 (#588): circles are platform groups; the packaged pages manage them.
 const GroupsPage = lazy(() =>
   import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.GroupsPage })),
@@ -140,11 +152,11 @@ const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettings
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
-const AlbumsPage = lazy(() => import('./pages/Albums'));
-const AlbumPage = lazy(() => import('./pages/Albums/AlbumPage'));
+const AlbumsPage = lazyMediaPage('AlbumsPage');
+const AlbumPage = lazyMediaPage('AlbumPage');
 const TagsBrowsePage = lazy(() => import('./pages/Tags'));
-const PlacesOverviewPage = lazy(() => import('./pages/Places'));
-const LevelBrowsePage = lazy(() => import('./pages/Places/LevelBrowsePage'));
+const PlacesOverviewPage = lazyMediaPage('PlacesOverviewPage');
+const LevelBrowsePage = lazyMediaPage('LevelBrowsePage');
 const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
 const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
 const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
@@ -156,9 +168,9 @@ const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
 const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
-const ArchivePage = lazy(() => import('./pages/Archive/ArchivePage'));
+const ArchivePage = lazyMediaPage('ArchivePage');
 const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
-const TrashPage = lazy(() => import('./pages/Trash/TrashPage'));
+const TrashPage = lazyMediaPage('TrashPage');
 const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));
 // RETRO-I4 (#578): public links are the sharing slice's; the page resolves `/s#lnk_...` and
@@ -768,7 +780,11 @@ export default function App() {
             <JobsWebAdaptersProvider adapters={appJobsAdapters}>
               <TelemetryWebAdaptersProvider adapters={appTelemetryAdapters}>
                 <OwnerScopeProvider>
-                  <AppRoutes />
+                  {/* RETRO-J11 (#626): the host the packaged `@marinoscar/memoriahub-web`
+                      slices read (API client, principal, features, owner scope, slots). */}
+                  <MemoriahubHostBinding>
+                    <AppRoutes />
+                  </MemoriahubHostBinding>
                 </OwnerScopeProvider>
               </TelemetryWebAdaptersProvider>
             </JobsWebAdaptersProvider>

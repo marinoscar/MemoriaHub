@@ -34,16 +34,16 @@ import TagIcon from '@mui/icons-material/LocalOffer';
 import { useOwnerScope } from '../hooks/useOwnerScope';
 import { usePeople } from '../hooks/usePeople';
 import { performSearch } from '../services/search';
-import { getExploreLocations, getExploreTags } from '../services/media';
-import type { ExploreItem, ExploreLocations } from '../services/media';
+import { getExploreLocations, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
+import type { ExploreItem, ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListItem } from '../services/face';
-import { MediaGallery } from '../components/media/MediaGallery';
+import { MediaGallery } from '@marinoscar/memoriahub-web/media/ui';
 import { PersonAvatar } from '../components/people/PersonAvatar';
 import { useSearch } from '../contexts/SearchContext';
-import { ExploreCarousel } from '../components/search/ExploreCarousel';
+import { ExploreCarousel } from '@marinoscar/memoriahub-web/media/ui';
 import { PageSearchBarSection } from '../components/search/PageSearchBar';
-import { renderLocationTile } from './Places/LocationTile';
-import type { ExploreLocationItem } from '../services/media';
+import { renderLocationTile } from '@marinoscar/memoriahub-web/media/ui';
+import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Tile renderers (presentational helpers)

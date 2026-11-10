@@ -21,8 +21,8 @@ import FolderSharedIcon from '@mui/icons-material/FolderShared';
 import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
 
 import { MediaLightbox } from '../../components/media/MediaLightbox';
-import { listSharedAlbums, listSharedMedia } from '../../services/media';
-import type { Album, MediaItem } from '../../types/media';
+import { listSharedAlbums, listSharedMedia } from '@marinoscar/memoriahub-web/media/headless';
+import type { Album, MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 
 const ALBUMS_PAGE_SIZE = 50;
 const MEDIA_PAGE_SIZE = 60;

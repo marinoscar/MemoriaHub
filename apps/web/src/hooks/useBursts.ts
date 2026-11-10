@@ -10,7 +10,7 @@ import {
   dismissBurstGroup,
 } from '../services/bursts';
 import { useIsMounted } from './useIsMounted';
-import type { SortOrder } from '../types/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   BurstGroupStatus,
   BurstSortBy,

@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { Avatar, Box } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import { FaceCrop } from './FaceCrop';
-import { getMedia } from '../../services/media';
-import type { MediaItem } from '../../types/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListItem } from '../../services/face';
 
 // ---------------------------------------------------------------------------

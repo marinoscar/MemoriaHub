@@ -11,7 +11,7 @@ import {
   Stack,
 } from '@mui/material';
 import EditLocationAltIcon from '@mui/icons-material/EditLocationAlt';
-import { LocationSearchPicker } from '../../components/media/LocationSearchPicker';
+import { LocationSearchPicker } from '@marinoscar/memoriahub-web/media/ui';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
 

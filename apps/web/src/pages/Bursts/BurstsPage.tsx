@@ -38,8 +38,8 @@ import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
 import { startRunErrorMessage } from '../../services/reviewRuns';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import type { BurstGroupSummary, BurstSortBy, GroupResolveAction } from '../../services/bursts';
-import type { SortOrder } from '../../types/media';
-import { formatCivilDateTime } from '../../utils/civilDate';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
+import { formatCivilDateTime } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Sort model. The API defaults to `capturedAt` / `asc`, so those two values are

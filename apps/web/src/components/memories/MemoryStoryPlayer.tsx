@@ -69,8 +69,8 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
-import { getMedia } from '../../services/media';
-import type { MediaItem } from '../../types/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryDetail, MemoryDetailItem } from '../../types/memories';
 import { memoryTypeMeta } from './memoryTypeMeta';
 import {

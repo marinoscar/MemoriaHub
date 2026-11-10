@@ -2,6 +2,9 @@ import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { server } from './mocks/server';
+import { setActiveMemoriahubHost } from '@marinoscar/memoriahub-web/core/headless';
+import type { MemoriahubWebHost } from '@marinoscar/memoriahub-web/core/headless';
+import { api as staticApi, rewriteEndpoint, API_BASE_URL } from '../services/api';
 
 // Set base URL for fetch
 const BASE_URL = 'http://localhost:3000';
@@ -171,4 +174,39 @@ afterEach(() => {
 
 afterAll(() => {
   server.close();
+});
+
+// ---------------------------------------------------------------------------
+// The packaged slices' headless clients (RETRO-J11, #626) send through the active
+// host. Outside a rendered tree (a service test, a hook test) no provider binds
+// one, so every test file starts with this transport bound: each call resolves
+// `services/api` when it is MADE, so a test that mocks it with `vi.mock` is
+// honoured exactly as it was before the clients moved into the package.
+// ---------------------------------------------------------------------------
+const lateApi =
+  (method: 'get' | 'post' | 'put' | 'patch' | 'delete') =>
+  async (...args: unknown[]) => {
+    const { api } = await import('../services/api');
+    return (api as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[method](...args);
+  };
+
+const testHost = {
+  apiClient: {
+    get: lateApi('get'),
+    post: lateApi('post'),
+    put: lateApi('put'),
+    patch: lateApi('patch'),
+    delete: lateApi('delete'),
+    refreshToken: async () => {
+      const { api } = await import('../services/api');
+      return api.refreshToken();
+    },
+    rewriteEndpoint,
+    getAccessToken: () => staticApi.getAccessToken(),
+    baseUrl: API_BASE_URL,
+  },
+} as unknown as MemoriahubWebHost;
+
+beforeEach(() => {
+  setActiveMemoriahubHost(testHost);
 });
