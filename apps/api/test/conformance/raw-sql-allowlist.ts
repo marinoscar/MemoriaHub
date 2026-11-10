@@ -28,6 +28,8 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'platform/sharing/record-access.ts', why: "Grants on media items and albums (RETRO-I3, #573): above 1,000 shared records `accessibleWhere` returns the sharing slice's EXISTS condition (`accessibleSql`, the only sanctioned raw access to `grants`), resolved here to a bounded id list (LIMIT 10,000) inside the caller's org-scoped transaction. The table name is a fixed constant, every value a bound parameter." },
   { file: 'prisma/prisma.service.ts', why: 'Connection bootstrap and health probes.' },
   { file: 'semantic-search.service.ts', why: 'pgvector KNN scoped by circle id. In the search slice package (packages/memoriahub-api/src/search).' },
+  { file: 'testing/fake-tagging-db.ts', why: 'In-memory fake of the tagging slice database (packages/memoriahub-api/src/tagging/testing): the raw-SQL members are no-op stubs, no SQL runs.' },
+  { file: 'testing/fake-search-db.ts', why: 'In-memory fake of the search slice database (packages/memoriahub-api/src/search/testing): the raw-SQL members are stubs that answer a seeded list, no SQL runs.' },
   { file: 'auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id. In the tagging slice package (packages/memoriahub-api/src/tagging).' },
   { file: 'workflows/runs/workflow-evaluate-item.handler.ts', why: 'Rolling micro-run append with row locks, scoped by workflow id.' },
 ];
