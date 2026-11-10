@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
-import { z } from 'zod';
+import { createTagLabelSchema, updateTagLabelSchema } from '@marinoscar/memoriahub-contract/tagging';
 import { stringify as csvStringify } from 'csv-stringify/sync';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaTouchService } from '../media/media-touch.service';
@@ -14,17 +14,9 @@ import { MediaTouchService } from '../media/media-touch.service';
 // DTOs
 // ---------------------------------------------------------------------------
 
-export const createTagLabelSchema = z.object({
-  name: z.string().min(1).max(100),
-});
+export { createTagLabelSchema, updateTagLabelSchema };
 
 export class CreateTagLabelDto extends createZodDto(createTagLabelSchema) {}
-
-export const updateTagLabelSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  enabled: z.boolean().optional(),
-  // .default({}) so a bodyless request parses as {} — see issue #289 (app.module.ts).
-}).default({});
 
 export class UpdateTagLabelDto extends createZodDto(updateTagLabelSchema) {}
 
