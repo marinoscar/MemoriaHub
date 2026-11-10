@@ -22,10 +22,9 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PeopleService } from '@marinoscar/memoriahub-api/face';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { FACE_PERMISSIONS as PERMISSIONS } from '../host/face-permissions.js';
+import { PeopleService } from '../people.service.js';
 import {
   ListPeopleQueryDto,
   CreatePersonDto,
@@ -36,9 +35,14 @@ import {
   BulkPeopleDto,
   BulkFacesDto,
   PurgeArchivedFacesDto,
-} from './dto/people.dto';
-import { MergePeopleDto } from './dto/merge-people.dto';
+} from './people.dto.js';
+import { MergePeopleDto } from './merge-people.dto.js';
 
+/**
+ * The `/people` routes: people, faces, clustering, merge, hide, unhide and purge. Mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('People')
 @ApiBearerAuth('JWT-auth')
 @Controller('people')
@@ -55,7 +59,7 @@ export class PeopleController {
    * Requires circle_admin role in the target circle.
    */
   @Post('cluster')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cluster unknown faces into provisional Person records (circle_admin)',
@@ -68,7 +72,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (circle_admin required)' })
   async clusterUnknowns(
     @Body() dto: ClusterDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.clusterUnknowns(
       dto.circleId,
@@ -83,7 +87,7 @@ export class PeopleController {
    * Source is soft-deleted with mergedIntoId set for audit.
    */
   @Post('merge')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Merge two people into one (collaborator+)',
@@ -96,7 +100,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async mergePeople(
     @Body() dto: MergePeopleDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.mergePeople(dto, user.id, user.permissions);
   }
@@ -106,7 +110,7 @@ export class PeopleController {
    * List Person records in a circle (paginated).
    */
   @Get()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List people in a circle (paginated)' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'includeUnlabeled', required: false, type: Boolean, description: 'Include unlabeled (name=null) people' })
@@ -117,7 +121,7 @@ export class PeopleController {
   @ApiResponse({ status: 200, description: 'Paginated people list' })
   async listPeople(
     @Query() query: ListPeopleQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.listPeople(query, user.id, user.permissions);
   }
@@ -128,7 +132,7 @@ export class PeopleController {
    * NOTE: Must be declared BEFORE GET :id to prevent Fastify treating "unassigned" as a param.
    */
   @Get('unassigned')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List unassigned (personId=null) faces in a circle (paginated)' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'archived', required: false, type: Boolean, description: 'When true, return only archived (hidden) unassigned faces instead of the live unassigned pool' })
@@ -138,7 +142,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async listUnassignedFaces(
     @Query() query: ListUnassignedFacesQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.listUnassignedFaces(user.id, user.permissions, query);
   }
@@ -148,7 +152,7 @@ export class PeopleController {
    * Bulk hide people (set hiddenAt). Requires collaborator role in the circle.
    */
   @Patch('bulk/hide')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk hide people (collaborator+)',
@@ -160,7 +164,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async hidePeople(
     @Body() dto: BulkPeopleDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.hidePeople(dto, user.id, user.permissions);
   }
@@ -170,7 +174,7 @@ export class PeopleController {
    * Bulk unhide people (clear hiddenAt). Requires collaborator role in the circle.
    */
   @Patch('bulk/unhide')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk unhide people (collaborator+)',
@@ -180,7 +184,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async unhidePeople(
     @Body() dto: BulkPeopleDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.unhidePeople(dto, user.id, user.permissions);
   }
@@ -190,7 +194,7 @@ export class PeopleController {
    * Permanent hard-delete of Person rows + their Face rows. Requires media:delete permission.
    */
   @Post('bulk/purge')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Permanently purge people and their face data (media:delete + collaborator)',
@@ -203,7 +207,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
   async purgePeople(
     @Body() dto: BulkPeopleDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.purgePeople(dto, user.id, user.permissions);
   }
@@ -215,7 +219,7 @@ export class PeopleController {
    * and before the :id/faces param routes to avoid Fastify route shadowing.
    */
   @Patch('faces/bulk/hide')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk archive (hide) unassigned faces (collaborator+)',
@@ -228,7 +232,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async hideFaces(
     @Body() dto: BulkFacesDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.hideFaces(dto, user.id, user.permissions);
   }
@@ -238,7 +242,7 @@ export class PeopleController {
    * Bulk unarchive (clear hiddenAt) individual unassigned faces. Requires collaborator role.
    */
   @Patch('faces/bulk/unhide')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk unarchive (unhide) unassigned faces (collaborator+)',
@@ -248,7 +252,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async unhideFaces(
     @Body() dto: BulkFacesDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.unhideFaces(dto, user.id, user.permissions);
   }
@@ -258,7 +262,7 @@ export class PeopleController {
    * Permanent hard-delete of individual Face rows. Requires media:delete permission.
    */
   @Post('faces/bulk/purge')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Permanently purge individual faces (media:delete + collaborator)',
@@ -270,7 +274,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
   async purgeFaces(
     @Body() dto: BulkFacesDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.purgeFaces(dto, user.id, user.permissions);
   }
@@ -281,7 +285,7 @@ export class PeopleController {
    * Requires media:delete permission.
    */
   @Post('faces/purge-archived')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Permanently purge ALL archived unassigned faces in a circle (media:delete + collaborator)',
@@ -295,7 +299,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator + media:delete required)' })
   async purgeArchivedFaces(
     @Body() dto: PurgeArchivedFacesDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.purgeArchivedFaces(dto, user.id, user.permissions);
   }
@@ -305,7 +309,7 @@ export class PeopleController {
    * Get a Person with their associated faces.
    */
   @Get(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get a person with associated faces' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Person returned' })
@@ -313,7 +317,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async getPerson(
     @Param('id') id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.getPerson(id, user.id, user.permissions);
   }
@@ -323,13 +327,13 @@ export class PeopleController {
    * Create a new Person (optionally with initial faces).
    */
   @Post()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Create a new person (collaborator+)' })
   @ApiResponse({ status: 201, description: 'Person created' })
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async createPerson(
     @Body() dto: CreatePersonDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.createPerson(dto, user.id, user.permissions);
   }
@@ -339,7 +343,7 @@ export class PeopleController {
    * Rename or set coverFaceId for a Person.
    */
   @Patch(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Update person name, cover face, or favorite flag (collaborator+)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Person updated' })
@@ -348,7 +352,7 @@ export class PeopleController {
   async updatePerson(
     @Param('id') id: string,
     @Body() dto: UpdatePersonDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.updatePerson(id, dto, user.id, user.permissions);
   }
@@ -358,7 +362,7 @@ export class PeopleController {
    * Assign faces to a Person (manually).
    */
   @Post(':id/faces')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Assign faces to a person (collaborator+)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -368,7 +372,7 @@ export class PeopleController {
   async assignFaces(
     @Param('id') id: string,
     @Body() dto: AssignFacesDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.peopleService.assignFaces(id, dto, user.id, user.permissions);
   }
@@ -379,7 +383,7 @@ export class PeopleController {
    * NOTE: Declared before DELETE :id to avoid Fastify route shadowing.
    */
   @Delete(':id/faces/:faceId')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unassign a face from a person (collaborator+)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'Person ID' })
@@ -390,7 +394,7 @@ export class PeopleController {
   async unassignFace(
     @Param('id') id: string,
     @Param('faceId') faceId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.peopleService.unassignFace(id, faceId, user.id, user.permissions);
   }
@@ -400,7 +404,7 @@ export class PeopleController {
    * Soft-delete a Person; release faces back to unknown pool.
    */
   @Delete(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a person (collaborator+)',
@@ -414,7 +418,7 @@ export class PeopleController {
   @ApiResponse({ status: 403, description: 'Access denied (collaborator required)' })
   async deletePerson(
     @Param('id') id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.peopleService.deletePerson(id, user.id, user.permissions);
   }

@@ -5,13 +5,14 @@
  * No real HTTP, no database.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { MemoriahubAuthGuard } from '../../../src/core/index.js';
 import { Reflector } from '@nestjs/core';
 import { RequestMethod } from '@nestjs/common';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
-import { PeopleController } from './people.controller';
-import { PeopleService } from '@marinoscar/memoriahub-api/face';
-import { RequestUser, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS } from '../common/constants/roles.constants';
+import { PeopleController } from '../../../src/face/http/people.controller.js';
+import { PeopleService } from '../../../src/face/people.service.js';
+import { MEMORIAHUB_PERMISSIONS_KEY as PERMISSIONS_KEY, type MemoriahubRequestUser as RequestUser } from '../../../src/core/index.js';
+import { FACE_PERMISSIONS as PERMISSIONS } from '../../../src/face/host/face-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Mock PeopleService
@@ -44,10 +45,9 @@ const mockPeopleService = {
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 'user-1',
-    email: 'user@example.com',
     roles: ['admin'],
     permissions: ['media:read', 'media:write', 'media:delete'],
-    isActive: true,
+    activeOrgId: null,
     ...overrides,
   };
 }
@@ -68,7 +68,7 @@ describe('PeopleController — bulk hide/unhide/purge', () => {
         { provide: PeopleService, useValue: mockPeopleService },
       ],
     })
-      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
+      .overrideGuard(MemoriahubAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

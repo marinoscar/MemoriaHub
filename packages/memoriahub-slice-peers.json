@@ -236,8 +236,10 @@
     "face": {
       "peers": [
         "@nestjs/common",
+        "@nestjs/swagger",
         "@marinoscar/memoriahub-compute",
         "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
         "zod"
       ]
     }

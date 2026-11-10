@@ -6,8 +6,9 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { FaceSettingsController } from './face-settings.controller';
-import { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
+import { MemoriahubAuthGuard } from '../../../src/core/index.js';
+import { FaceSettingsController } from '../../../src/face/http/face-settings.controller.js';
+import { FaceSettingsService } from '../../../src/face/face-settings.service.js';
 
 // ---------------------------------------------------------------------------
 // Mock FaceSettingsService
@@ -35,7 +36,7 @@ describe('FaceSettingsController', () => {
       ],
     })
       // Override guards to allow testing without auth infrastructure
-      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
+      .overrideGuard(MemoriahubAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

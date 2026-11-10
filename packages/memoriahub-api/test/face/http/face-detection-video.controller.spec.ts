@@ -11,15 +11,15 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { MemoriahubAuthGuard } from '../../../src/core/index.js';
 import { NotFoundException } from '@nestjs/common';
-import { FaceDetectionController } from './face-detection.controller';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PeopleService } from '@marinoscar/memoriahub-api/face';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '@marinoscar/platform-api/identity';
+import { FaceDetectionController } from '../../../src/face/http/face-detection.controller.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA } from '../../../src/ports/index.js';
+import { FaceJobs } from '../../../src/face/host/face-jobs.js';
+import { PeopleService } from '../../../src/face/people.service.js';
+import { MediaThumbnailService } from '../../../src/media/index.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from '../support/mock-prisma.js';
+import type { MemoriahubRequestUser as RequestUser } from '../../../src/core/index.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -39,10 +39,9 @@ const mockMediaThumbnailService = {
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 'user-1',
-    email: 'user@example.com',
     roles: [],
     permissions: ['media:read', 'media:write'],
-    isActive: true,
+    activeOrgId: null,
     ...overrides,
   };
 }
@@ -97,14 +96,14 @@ describe('FaceDetectionController — video face fields', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FaceDetectionController],
       providers: [
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockOwnerAccessService },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
         { provide: PeopleService, useValue: mockPeopleService },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
-      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
+      .overrideGuard(MemoriahubAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

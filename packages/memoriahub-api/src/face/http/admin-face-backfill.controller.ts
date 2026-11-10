@@ -14,15 +14,24 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { FEATURE_KEYS } from '../settings/feature-gates';
-import { FaceBackfillService } from '@marinoscar/memoriahub-api/face';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { MemoriahubAuth } from '../../core/index.js';
+import { FaceBackfillService } from '../face-backfill.service.js';
+import { FACE_PERMISSIONS as PERMISSIONS, FACE_ROLES as ROLES } from '../host/face-permissions.js';
+import { FaceSystemSettings } from '../host/face-system-settings.js';
 import { adminFaceBackfillSchema } from '@marinoscar/memoriahub-contract/face';
 
-class AdminFaceBackfillDto extends createZodDto(adminFaceBackfillSchema) {}
+/**
+ * The body of the admin face backfill routes.
+ *
+ * @stability experimental
+ */
+export class AdminFaceBackfillDto extends createZodDto(adminFaceBackfillSchema) {}
 
+/**
+ * The `/admin/face` backfill routes (Admin): face detection across every library and the auto-archive sweep. Mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Face Recognition')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/face')
@@ -31,17 +40,18 @@ export class AdminFaceBackfillController {
 
   constructor(
     private readonly faceBackfillService: FaceBackfillService,
-    private readonly systemSettingsService: AppSystemSettingsService,
+    private readonly systemSettingsService: FaceSystemSettings,
   ) {}
 
+  /** Backfill face detection across ALL circles (Admin). */
   @Post('backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Backfill face detection across ALL circles (Admin)' })
   @ApiResponse({ status: 201, description: 'Backfill jobs enqueued' })
   @ApiResponse({ status: 400, description: 'Face recognition is disabled globally' })
   async backfillAllCircles(@Body() dto: AdminFaceBackfillDto) {
-    const enabled = await this.systemSettingsService.isFeatureEnabled(FEATURE_KEYS.FACE_RECOGNITION);
+    const enabled = await this.systemSettingsService.isFeatureEnabled('faceRecognition');
     if (!enabled) {
       throw new BadRequestException('Face recognition is disabled globally');
     }
@@ -53,8 +63,9 @@ export class AdminFaceBackfillController {
     return { data: result };
   }
 
+  /** Backfill face auto-archive across ALL circles (Admin). */
   @Post('auto-archive/backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Backfill face auto-archive across ALL circles (Admin)',
@@ -64,7 +75,7 @@ export class AdminFaceBackfillController {
   @ApiResponse({ status: 201, description: 'Auto-archive sweep jobs enqueued' })
   @ApiResponse({ status: 400, description: 'Face auto-archive is disabled globally' })
   async autoArchiveBackfillAllCircles() {
-    const enabled = await this.systemSettingsService.isFeatureEnabled(FEATURE_KEYS.FACE_AUTO_ARCHIVE);
+    const enabled = await this.systemSettingsService.isFeatureEnabled('faceAutoArchive');
     if (!enabled) {
       throw new BadRequestException('Face auto-archive is disabled globally');
     }

@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,32 +22,34 @@ import {
   ApiProperty,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsUUID } from 'class-validator';
-import { MediaType } from '@prisma/client';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { MediaThumbnailService } from '../../media/index.js';
 import {
-  JobReason,
-  MediaFaceStatusType,
-} from '@prisma/client';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PeopleService } from '@marinoscar/memoriahub-api/face';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubScopeRole,
+} from '../../ports/index.js';
+import type { FaceDb } from '../host/face-db.js';
+import { JobReason, MediaFaceStatusType, MediaType } from '../host/face-enums.js';
+import { FACE_PERMISSIONS as PERMISSIONS } from '../host/face-permissions.js';
+import { FaceJobs } from '../host/face-jobs.js';
+import { PeopleService } from '../people.service.js';
 
 // ---------------------------------------------------------------------------
 // DTOs
 // ---------------------------------------------------------------------------
 
-class AddPersonToMediaDto {
+/**
+ * The body of `POST /media/:id/people`: exactly one of `personId` and `name`.
+ *
+ * @stability experimental
+ */
+export class AddPersonToMediaDto {
   @ApiProperty({
     description: 'Existing person ID (UUID); mutually exclusive with name',
     required: false,
   })
-  @IsOptional()
-  @IsUUID()
   personId?: string;
 
   @ApiProperty({
@@ -54,8 +57,6 @@ class AddPersonToMediaDto {
       'Person name; finds or creates a person in the circle; mutually exclusive with personId',
     required: false,
   })
-  @IsOptional()
-  @IsString()
   name?: string;
 }
 
@@ -63,6 +64,11 @@ class AddPersonToMediaDto {
 // Controller
 // ---------------------------------------------------------------------------
 
+/**
+ * The face routes on media items and the biometric erase: `/media/:id/faces`, `/media/:id/people`, `/face/biometrics`. Mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Face Detection')
 @ApiBearerAuth('JWT-auth')
 @Controller()
@@ -70,9 +76,9 @@ export class FaceDetectionController {
   private readonly logger = new Logger(FaceDetectionController.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: FaceDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
+    private readonly enrichmentJobService: FaceJobs,
     private readonly peopleService: PeopleService,
     private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
@@ -81,14 +87,15 @@ export class FaceDetectionController {
   // GET /api/media/:id/faces
   // --------------------------------------------------------------------------
 
+  /** List detected faces for a media item. */
   @Get('media/:id/faces')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List detected faces for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 200, description: 'List of detected faces (includes videoTimestampMs, videoTimestamps, faceThumbnailUrl for video faces)' })
   async listFaces(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.assertMediaItemAccess(mediaItemId, user);
 
@@ -142,14 +149,15 @@ export class FaceDetectionController {
   // GET /api/media/:id/faces/status
   // --------------------------------------------------------------------------
 
+  /** Get face detection status for a media item. */
   @Get('media/:id/faces/status')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get face detection status for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 200, description: 'Face detection status' })
   async getFaceStatus(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.assertMediaItemAccess(mediaItemId, user);
 
@@ -186,14 +194,15 @@ export class FaceDetectionController {
   // POST /api/media/:id/faces/rerun
   // --------------------------------------------------------------------------
 
+  /** Re-run face detection for a media item. */
   @Post('media/:id/faces/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run face detection for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 201, description: 'Face detection job queued' })
   async rerunFaceDetection(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     // rerun requires collaborator role or higher
     const mediaItem = await this.assertMediaItemAccess(
@@ -235,15 +244,17 @@ export class FaceDetectionController {
       `Rerun ${jobType} job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
     );
 
-    return { data: { jobId: job.id, status: job.status } };
+    // A freshly queued job is `pending`; the queue facade reported the row's status the same way.
+    return { data: { jobId: job.id, status: 'pending' } };
   }
 
   // --------------------------------------------------------------------------
   // DELETE /api/face/biometrics?circleId=
   // --------------------------------------------------------------------------
 
+  /** Delete ALL biometric data for a circle (GDPR right to erase). */
   @Delete('face/biometrics')
-  @Auth({ permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Delete ALL biometric data for a circle (GDPR right to erase)',
@@ -259,7 +270,7 @@ export class FaceDetectionController {
   @ApiResponse({ status: 404, description: 'Circle not found' })
   async deleteAllBiometrics(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     if (!circleId) {
       throw new BadRequestException('circleId query parameter is required');
@@ -288,7 +299,7 @@ export class FaceDetectionController {
       await tx.person.deleteMany({ where: { circleId } });
 
       // 3. Delete EnrichmentJob rows for face_detection type in this circle
-      // (the circle of a media-item job lives in `payload.circleId`; see EnrichmentJobService)
+      // (the circle of a media-item job lives in `payload.circleId`; see FaceJobs)
       await tx.job.deleteMany({
         where: {
           type: 'face_detection',
@@ -332,8 +343,9 @@ export class FaceDetectionController {
   // POST /api/media/:id/people
   // --------------------------------------------------------------------------
 
+  /** Manually associate a person with a media item (no bounding box required). */
   @Post('media/:id/people')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Manually associate a person with a media item (no bounding box required)',
@@ -346,7 +358,7 @@ export class FaceDetectionController {
   async addPersonToMedia(
     @Param('id') mediaItemId: string,
     @Body() dto: AddPersonToMediaDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     if (!dto.personId && !dto.name) {
       throw new BadRequestException('Provide either personId or name');
@@ -367,8 +379,9 @@ export class FaceDetectionController {
   // DELETE /api/media/:id/people/:personId
   // --------------------------------------------------------------------------
 
+  /** Remove manual person association from a media item. */
   @Delete('media/:id/people/:personId')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove manual person association from a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
@@ -379,7 +392,7 @@ export class FaceDetectionController {
   async removePersonFromMedia(
     @Param('id') mediaItemId: string,
     @Param('personId') personId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.peopleService.removePersonFromMedia(
       mediaItemId,
@@ -395,8 +408,8 @@ export class FaceDetectionController {
 
   private async assertMediaItemAccess(
     mediaItemId: string,
-    user: RequestUser,
-    requiredRole: OwnerRole = 'viewer',
+    user: MemoriahubRequestUser,
+    requiredRole: MemoriahubScopeRole = 'viewer',
   ): Promise<{ id: string; circleId: string; type: MediaType }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },

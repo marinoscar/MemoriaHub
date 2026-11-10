@@ -4,6 +4,11 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export { mergePeopleSchema };
 
+/**
+ * The `MergePeopleDto` request or response shape, built from its contract schema.
+ *
+ * @stability experimental
+ */
 export class MergePeopleDto extends createZodDto(mergePeopleSchema) {
   @ApiProperty({ description: 'Person to merge from (will be soft-deleted)' })
   sourceId!: string;

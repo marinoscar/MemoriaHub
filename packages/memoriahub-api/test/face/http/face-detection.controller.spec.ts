@@ -10,16 +10,16 @@
  * No real HTTP or database.
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { MemoriahubAuthGuard } from '../../../src/core/index.js';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { FaceDetectionController } from './face-detection.controller';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PeopleService } from '@marinoscar/memoriahub-api/face';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { JobReason, MhLegacyJobStatus, MediaFaceStatusType, MediaType } from '@prisma/client';
-import { RequestUser } from '@marinoscar/platform-api/identity';
+import { FaceDetectionController } from '../../../src/face/http/face-detection.controller.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA } from '../../../src/ports/index.js';
+import { FaceJobs } from '../../../src/face/host/face-jobs.js';
+import { PeopleService } from '../../../src/face/people.service.js';
+import { MediaThumbnailService } from '../../../src/media/index.js';
+import { createMockPrisma as createMockPrismaService, type MockPrisma as MockPrismaService } from '../support/mock-prisma.js';
+import { JobReason, MediaFaceStatusType, MediaType } from '../../../src/face/host/face-enums.js';
+import type { MemoriahubRequestUser as RequestUser } from '../../../src/core/index.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -49,10 +49,9 @@ const mockMediaThumbnailService = {
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 'user-1',
-    email: 'user@example.com',
     roles: [],
     permissions: ['media:read', 'media:write'],
-    isActive: true,
+    activeOrgId: null,
     ...overrides,
   };
 }
@@ -90,7 +89,7 @@ describe('FaceDetectionController', () => {
     // Default: enqueue returns a minimal job
     mockEnrichmentJobService.enqueue.mockResolvedValue({
       id: 'job-1',
-      status: MhLegacyJobStatus.pending,
+      status: 'pending',
     });
 
     // Default: no representative frame thumbnail (not exercised by existing fixtures)
@@ -99,14 +98,14 @@ describe('FaceDetectionController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FaceDetectionController],
       providers: [
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockOwnerAccessService },
+        { provide: FaceJobs, useValue: mockEnrichmentJobService },
         { provide: PeopleService, useValue: mockPeopleService },
         { provide: MediaThumbnailService, useValue: mockMediaThumbnailService },
       ],
     })
-      .overrideGuard(require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object)
+      .overrideGuard(MemoriahubAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 
@@ -284,7 +283,7 @@ describe('FaceDetectionController', () => {
     it('enqueues a job and returns { data: { jobId, status } }', async () => {
       const mockJob = {
         id: 'job-1',
-        status: MhLegacyJobStatus.pending,
+        status: 'pending',
       };
 
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
@@ -294,14 +293,14 @@ describe('FaceDetectionController', () => {
       const result = await controller.rerunFaceDetection('media-1', makeUser());
 
       expect(result.data.jobId).toBe('job-1');
-      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
+      expect(result.data.status).toBe('pending');
     });
 
     it('calls enrichmentJobService.enqueue with reason: rerun and type: face_detection', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.photo }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: 'pending' });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       await controller.rerunFaceDetection('media-1', makeUser());
@@ -319,7 +318,7 @@ describe('FaceDetectionController', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.video }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-vid-1', status: MhLegacyJobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-vid-1', status: 'pending' });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const result = await controller.rerunFaceDetection('media-1', makeUser());
@@ -334,7 +333,7 @@ describe('FaceDetectionController', () => {
         }),
       );
       expect(result.data.jobId).toBe('job-vid-1');
-      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
+      expect(result.data.status).toBe('pending');
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { mediaItemId: 'media-1' },
@@ -348,7 +347,7 @@ describe('FaceDetectionController', () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(
         makeMediaItem({ type: MediaType.photo }),
       );
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-photo-1', status: MhLegacyJobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-photo-1', status: 'pending' });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const result = await controller.rerunFaceDetection('media-1', makeUser());
@@ -363,7 +362,7 @@ describe('FaceDetectionController', () => {
         }),
       );
       expect(result.data.jobId).toBe('job-photo-1');
-      expect(result.data.status).toBe(MhLegacyJobStatus.pending);
+      expect(result.data.status).toBe('pending');
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { mediaItemId: 'media-1' },
@@ -375,7 +374,7 @@ describe('FaceDetectionController', () => {
 
     it('calls circleMembershipService.requireOwnerRole with collaborator role', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: 'pending' });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       const user = makeUser();
@@ -399,7 +398,7 @@ describe('FaceDetectionController', () => {
 
     it('upserts MediaFaceStatus to pending on rerun', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(makeMediaItem());
-      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: MhLegacyJobStatus.pending });
+      mockEnrichmentJobService.enqueue.mockResolvedValue({ id: 'job-1', status: 'pending' });
       (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
       await controller.rerunFaceDetection('media-1', makeUser());

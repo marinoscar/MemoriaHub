@@ -15,7 +15,7 @@ Everything about faces that does not depend on the HTTP layer, written against `
 
 The job type strings (`face_detection`, `video_face_detection`, `face_auto_archive_sweep`), their execution profiles, the secret purpose `face_provider`, the settings (`features.faceRecognition`, `features.faceAutoArchive`, `face.*`) and the environment variable names are permanent: stored rows and deployments name them.
 
-**What is in the slice and what is left in the web app.** In the slice: every service, handler and the provider adapter above, `describeFaceSliceConformance` and an in-memory face store for the conformance run. Left in `apps/api/src/face` (the host binding): the four controllers (`FaceSettingsController`, `FaceDetectionController`, `PeopleController`, `AdminFaceBackfillController`) and their `nestjs-zod` DTO classes, because their guard and decorators are the web app's identity ones and the package-level guard has not landed yet (follow-up J6b). The controllers inject the services this slice exports.
+**What is in the slice and what is left in the web app.** In the slice: every service, handler and the provider adapter above, the four controllers (`FaceSettingsController`, `FaceDetectionController`, `PeopleController`, `AdminFaceBackfillController`, written over `@MemoriahubAuth` of the core slice, with their `nestjs-zod` DTO classes and `FACE_PERMISSIONS`), `describeFaceSliceConformance` and an in-memory face store for the conformance run. Left in `apps/api/src/face` (the host binding): `FaceModule`, which imports `FaceModule.forRoot` with the three host tokens and lists the four controllers so the routes, the OpenAPI document and the permission matrix are unchanged.
 
 ## Entry point
 
@@ -23,11 +23,11 @@ The job type strings (`face_detection`, `video_face_detection`, `face_auto_archi
 
 ## Peer dependencies
 
-`@nestjs/common` and `zod`, plus `@marinoscar/memoriahub-contract` (the people and credential wire types the services take). The media slice's own peer (`@nestjs/schedule`) comes with it. The compute libraries (`sharp`, `onnxruntime-node`) are `@marinoscar/memoriahub-compute` dependencies, exact-pinned, never peers of this package.
+`@nestjs/common`, `@nestjs/swagger`, `nestjs-zod` and `zod` (the controllers and their DTO classes), plus `@marinoscar/memoriahub-compute` (the sidecar client, frame sampling and image preparation) and `@marinoscar/memoriahub-contract` (the people and credential wire schemas). The core and media slices' own peers come with it. The compute libraries (`sharp`, `onnxruntime-node`) are `@marinoscar/memoriahub-compute` dependencies, exact-pinned, never peers of this package.
 
 ## Configuration
 
-`FaceModule.forRoot({ providers, imports?, videoJobTimeoutMs? })`. Import it once in the host.
+`FaceModule.forRoot({ providers, imports?, videoJobTimeoutMs? })`. Import it once in the host, and list the four controllers in the host module that serves the routes (`/api/face/*`, `/api/people/*`, `/api/media/:id/faces*`, `/api/media/:id/people*`, `/api/admin/face/*`).
 
 - `providers` binds the three tokens that are not ports. `FACE_CONFIG`: a reader over the deployment configuration (structurally Nest's `ConfigService`; `ENV_FACE_CONFIG` reads the process environment). It supplies `FACE_MATCH_THRESHOLD` (0.38), `FACE_CLUSTER_THRESHOLD` (0.45), `FACE_CLUSTER_MIN_SIZE` (2), `FACE_VECTOR_BACKEND` (`pgvector` or `app`), `FACE_MATCH_KNN_CANDIDATES` (40), `FACE_ARCHIVE_MATCH_THRESHOLD` (0.45) and `FACE_ARCHIVE_MAX_CANDIDATES` (5000). `FACE_PERSON_AVATARS`: the host's account-avatar code (an account can be linked to a person and show that person's picture). `FACE_STORAGE_ORG`: the organization a video face frame is stamped with.
 - `videoJobTimeoutMs` is the execution budget of `video_face_detection` (default 20 minutes).

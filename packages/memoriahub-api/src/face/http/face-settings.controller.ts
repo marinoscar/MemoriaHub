@@ -23,16 +23,20 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
+import { MemoriahubAuth, MemoriahubCurrentUser } from '../../core/index.js';
+import { FaceSettingsService } from '../face-settings.service.js';
+import { FACE_PERMISSIONS as PERMISSIONS, FACE_ROLES as ROLES } from '../host/face-permissions.js';
 import {
   UpsertFaceCredentialsDto,
   TestFaceProviderDto,
   SetDetectionFeatureDto,
-} from './dto/face-credentials.dto';
+} from './face-credentials.dto.js';
 
+/**
+ * The `/face` settings routes (Admin): provider settings, credentials, connection test, models and the detection feature. Mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Face Settings')
 @Controller('face')
 export class FaceSettingsController {
@@ -42,8 +46,9 @@ export class FaceSettingsController {
   // GET face/settings
   // ---------------------------------------------------------------------------
 
+  /** Get face provider settings and detection feature configuration (Admin). */
   @Get('settings')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
   @ApiOperation({
     summary: 'Get face provider settings and detection feature configuration (Admin)',
   })
@@ -59,8 +64,9 @@ export class FaceSettingsController {
   // PUT face/credentials/:provider
   // ---------------------------------------------------------------------------
 
+  /** Configure face provider credentials (Admin). */
   @Put('credentials/:provider')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Configure face provider credentials (Admin)' })
   @ApiParam({
     name: 'provider',
@@ -71,7 +77,7 @@ export class FaceSettingsController {
   async upsertCredentials(
     @Param('provider') provider: string,
     @Body() dto: UpsertFaceCredentialsDto,
-    @CurrentUser('id') userId: string,
+    @MemoriahubCurrentUser('id') userId: string,
   ) {
     return this.faceSettingsService.upsertCredential(provider, dto, userId);
   }
@@ -80,14 +86,15 @@ export class FaceSettingsController {
   // DELETE face/credentials/:provider
   // ---------------------------------------------------------------------------
 
+  /** Remove face provider credentials (Admin). */
   @Delete('credentials/:provider')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Remove face provider credentials (Admin)' })
   @ApiParam({ name: 'provider', description: 'Provider key' })
   @ApiResponse({ status: 200, description: 'Credential removed' })
   async deleteCredentials(
     @Param('provider') provider: string,
-    @CurrentUser('id') userId: string,
+    @MemoriahubCurrentUser('id') userId: string,
   ) {
     await this.faceSettingsService.deleteCredential(provider, userId);
     return { deleted: true, provider };
@@ -97,8 +104,9 @@ export class FaceSettingsController {
   // POST face/test
   // ---------------------------------------------------------------------------
 
+  /** Test face provider connectivity (Admin). */
   @Post('test')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
   @ApiOperation({ summary: 'Test face provider connectivity (Admin)' })
   @ApiResponse({
     status: 200,
@@ -112,8 +120,9 @@ export class FaceSettingsController {
   // GET face/models
   // ---------------------------------------------------------------------------
 
+  /** List available model versions for a face provider (Admin). */
   @Get('models')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_READ] })
   @ApiOperation({ summary: 'List available model versions for a face provider (Admin)' })
   @ApiQuery({
     name: 'provider',
@@ -129,15 +138,16 @@ export class FaceSettingsController {
   // PUT face/features/detection
   // ---------------------------------------------------------------------------
 
+  /** Set active provider and model for the face detection feature (Admin). */
   @Put('features/detection')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.FACE_SETTINGS_WRITE] })
   @ApiOperation({
     summary: 'Set active provider and model for the face detection feature (Admin)',
   })
   @ApiResponse({ status: 200, description: 'Detection feature config updated' })
   async setDetectionFeature(
     @Body() dto: SetDetectionFeatureDto,
-    @CurrentUser('id') userId: string,
+    @MemoriahubCurrentUser('id') userId: string,
   ) {
     return this.faceSettingsService.setDetectionFeature(dto, userId);
   }

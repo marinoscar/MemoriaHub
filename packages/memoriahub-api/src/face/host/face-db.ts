@@ -38,6 +38,8 @@ export interface FaceModels {
   storageObject: MediaDelegate;
   /** `audit_events`: written inside the transaction of the action it records. */
   auditEvent: MediaDelegate;
+  /** `jobs`: only the biometric erase deletes face jobs of a library. */
+  job: MediaDelegate;
 }
 
 /**
