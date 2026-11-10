@@ -575,9 +575,13 @@ addressed by `(purpose, name)` and encrypted with AES-256-GCM under a **per-purp
 - **Blank preserves.** Saving without retyping a key keeps the stored one; removal is the delete route.
 - **Non-secret half is a setting.** `enabled` and `baseUrl` of a provider are `face.providers.*` / `geo.google` in
   the settings document (the settings registry forbids secret-named fields), so no secret ever shares a document with config.
-- **No node receives a provider key (RETRO-C2).** The per-job credential route is deleted and `geocode` (like the two
-  AI tagging types) runs on the server until RETRO-C6 returns it to node eligibility through the platform
-  `nodeSecretBroker` (`POST /api/nodes/:id/jobs/:jobId/secret`, a handle in `job_node_secrets`, never material).
+- **No node receives an AI key; the Google geocode key reaches a node only through the per-job secret
+  (RETRO-C2, RETRO-C6).** The old per-job credential route is deleted. `geocode` is node-eligible with a
+  `nodeSecretBroker` (`GoogleGeocodeKeyBroker`, kind `geo.google`): `POST /api/nodes/:id/jobs/:jobId/secret`, bound to a
+  live lease and claim token, material returned once and held in node memory, a handle (never the key) in
+  `job_node_secrets`. It is off by default (`nodes.jobSecretBrokerEnabled`) and only usable while the active provider is
+  Google with a stored key; otherwise the server runs the job. A Google key cannot be revoked per job: restrict it in
+  Google Cloud and rotate it after a node compromise ([runbook](runbooks/geocoding-key.md)). AI keys never go to a node.
 - **Legacy cipher.** `apps/api/src/legacy/legacy-secret-cipher.ts` (the pre-platform envelope, no purpose binding)
   is read-only legacy: the migration command and the slices not yet migrated use it. RETRO-E3 removes it.
   Moving rows: [credentials-migration runbook](runbooks/credentials-migration.md).

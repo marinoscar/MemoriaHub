@@ -172,6 +172,8 @@ Then, **outside** the transaction, a `geocode` enrichment job is enqueued (prior
 
 ---
 
+> **Job handler (RETRO-C6, #600).** `LocationInferenceHandler` is a native, server-only platform `JobHandler` with the profile `{ maxRuntimeMs: 900_000, maxAttempts: 3 }` (sized for the sweep; per-item is far cheaper but shares the type). It dispatches on the job's subject: a `media_item` subject is the per-item inference (`reason: rerun` forces past the rejected-suggestion skip), a `circle` subject is the sweep (`payload: { mode: 'sweep', from?, to?, force? }`). A subject that no longer exists settles as a no-op. It writes no organization (row-level-security) table, so it needs no `JobScope`. The two deprecated `location_suggestion_run_*` types still have thin native handlers delegating to the review-run engine (see `docs/platform-adoption/local-exceptions.md`).
+
 ## 4. Sweep Architecture
 
 The sweep (`LocationInferenceService.sweepCircle`) is the backfill mechanism: **one job per circle**, pure in-memory computation over a single narrow DB read followed by chunked writes — not one job per media item (see §5 for why).

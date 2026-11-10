@@ -1,9 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob, LocationGroupLevel, Prisma } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { LocationGroupLevel, Prisma } from '@prisma/client';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { whereNear } from '../search/media-where.builder';
 import { haversineKm } from '../common/geo/haversine.util';
@@ -41,11 +45,12 @@ const LEVEL_COLUMNS: Record<
  * by LocationGroupRebuildService after any group mutation.
  *
  * SERVER-ONLY BY OMISSION: no `nodeResultSchema` / `persistNodeResult` pair, so
- * EnrichmentHandlerRegistry.serverOnlyTypes() picks it up automatically and it
- * becomes ENRICHMENT_WORKER_MODE=system eligible with no explicit pinning —
- * the face_auto_archive_sweep / duplicate_confidence_backfill precedent. There
- * is nothing for a node to do: this is a set-based SQL sweep with no media
- * bytes and no per-item unit of work.
+ * the platform registry derives it server-only and the `system` worker mode runs
+ * it (RETRO-C6, #600: a native platform `JobHandler`). There is nothing for a
+ * node to do: this is a set-based SQL sweep with no media bytes and no per-item
+ * unit of work. It writes only app tables (no organization row-level-security
+ * table), so it needs no `JobScope`. Enqueued WITHOUT `skipDedup`: a burst of
+ * admin edits collapses into one rebuild.
  *
  * ─── Three passes, in this order: RESET → RADIUS → ALIAS ────────────────────
  *
@@ -65,13 +70,16 @@ const LEVEL_COLUMNS: Record<
  * raw value — which is precisely how disabling the feature takes effect.
  */
 @Injectable()
-export class LocationGroupRebuildHandler implements EnrichmentHandler, OnModuleInit {
+export class LocationGroupRebuildHandler implements JobHandler, OnModuleInit {
   readonly type = LOCATION_GROUP_REBUILD_TYPE;
+  readonly label = 'Location Group Rebuild';
+  /** Set-based passes over the whole library: 30 minutes, and a second attempt only once. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_800_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(LocationGroupRebuildHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
     private readonly prisma: PrismaService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly scopes: OwnerScopeSweepService,
@@ -81,7 +89,7 @@ export class LocationGroupRebuildHandler implements EnrichmentHandler, OnModuleI
     this.registry.register(this);
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
+  async process(job: Job): Promise<void> {
     const payload = (job.payload as unknown as LocationGroupRebuildPayload | null) ?? {};
     const circleId = typeof payload.circleId === 'string' ? payload.circleId : null;
     const groupIds =

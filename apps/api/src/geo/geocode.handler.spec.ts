@@ -2,8 +2,8 @@
  * Unit tests for GeocodeHandler.
  *
  * Tests:
- *   - skips/no-ops when job.mediaItemId is null
- *   - sets status to failed when mediaItem not found or soft-deleted
+ *   - refuses a job that is not about a media item; a gone media item is a no-op
+ *   - sets status to failed when mediaItem is soft-deleted
  *   - when takenLat/takenLng is null: marks status processed without calling geocoder
  *   - on success: writes geo* columns + geocodedAt + geoSource and sets status processed
  *   - on provider exception: sets status failed + lastError and re-throws
@@ -11,9 +11,16 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { MediaMetadataStatusType } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  ProviderThrottleService,
+  RateLimitError as PlatformRateLimitError,
+} from '@marinoscar/platform-api/jobs';
 import { GeocodeHandler } from './geocode.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
+import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
+import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
+import { mediaItemJob } from '../../test/helpers/platform-job';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
@@ -23,31 +30,13 @@ import { LocationGroupResolverService } from '../location-groups/location-group-
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'geocode',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.backfill,
-    priority: 100,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 1,
-    lastError: null,
-    startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+function makeJob(): ReturnType<typeof mediaItemJob> {
+  return mediaItemJob('geocode', 'media-1', 'circle-1', { id: 'job-1', reason: 'backfill', priority: 100 });
+}
+
+/** What the persist half reads of a job: its id and its media item. */
+function ctx(overrides: { mediaItemId?: string | null } = {}) {
+  return { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1', ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -59,11 +48,16 @@ describe('GeocodeHandler', () => {
   let mockPrisma: MockPrismaService;
   let mockGeoLocationService: { reverseGeocode: jest.Mock };
   let mockLocationGroupResolver: { resolve: jest.Mock };
+  let registry: { register: jest.Mock };
+  let throttle: { registerProviderKey: jest.Mock };
+  const broker = { kind: 'geo.google' } as unknown as GoogleGeocodeKeyBroker;
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
     mockPrisma = createMockPrismaService();
+    registry = { register: jest.fn() };
+    throttle = { registerProviderKey: jest.fn() };
     mockGeoLocationService = { reverseGeocode: jest.fn() };
     // Default: the identity resolver (feature off / no groups configured).
     mockLocationGroupResolver = {
@@ -79,7 +73,9 @@ describe('GeocodeHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GeocodeHandler,
-        EnrichmentHandlerRegistry,
+        { provide: JobHandlerRegistry, useValue: registry },
+        { provide: ProviderThrottleService, useValue: throttle },
+        { provide: GoogleGeocodeKeyBroker, useValue: broker },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: GeoLocationService, useValue: mockGeoLocationService },
         { provide: LocationGroupResolverService, useValue: mockLocationGroupResolver },
@@ -107,21 +103,19 @@ describe('GeocodeHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('onModuleInit', () => {
-    it('registers itself in the EnrichmentHandlerRegistry', async () => {
-      const module = await Test.createTestingModule({
-        providers: [
-          GeocodeHandler,
-          EnrichmentHandlerRegistry,
-          { provide: PrismaService, useValue: mockPrisma },
-          { provide: GeoLocationService, useValue: mockGeoLocationService },
-        { provide: LocationGroupResolverService, useValue: mockLocationGroupResolver },
-        ],
-      }).compile();
+    it('registers itself with the platform registry and the geocode throttle key', () => {
+      expect(registry.register).toHaveBeenCalledWith(handler);
+      expect(throttle.registerProviderKey).toHaveBeenCalledWith('geocode', 'geocode');
+    });
+  });
 
-      await module.init();
-
-      const registry = module.get<EnrichmentHandlerRegistry>(EnrichmentHandlerRegistry);
-      expect(registry.get('geocode')).toBeDefined();
+  describe('platform contract', () => {
+    it('declares a label, the 60 s profile, the node pair and the Google key broker', () => {
+      expect(handler.label).toBe('Geocoding');
+      expect(handler.profile).toEqual({ maxRuntimeMs: 60_000, maxAttempts: 3 });
+      expect(handler.nodeResultSchema).toBeDefined();
+      expect(typeof handler.persistNodeResult).toBe('function');
+      expect(handler.nodeSecretBroker).toBe(broker);
     });
   });
 
@@ -129,11 +123,11 @@ describe('GeocodeHandler', () => {
   // No-op when mediaItemId is null
   // -------------------------------------------------------------------------
 
-  describe('when job.mediaItemId is null', () => {
-    it('returns without touching the DB or geocoder', async () => {
-      const job = makeJob({ mediaItemId: null });
+  describe('when the job is not about a media item', () => {
+    it('is refused without touching the DB or geocoder', async () => {
+      const job = { ...makeJob(), subjectType: null, subjectId: null } as never;
 
-      await handler.process(job);
+      await expect(handler.process(job)).rejects.toThrow('not about a media item');
 
       expect(mockPrisma.mediaItem.findUnique).not.toHaveBeenCalled();
       expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
@@ -146,15 +140,12 @@ describe('GeocodeHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('when mediaItem is not found', () => {
-    it('upserts status=failed and returns without throwing', async () => {
+    it('settles as a no-op: nothing is written and the geocoder is not called', async () => {
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
-      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
 
       await handler.process(makeJob());
 
-      const upsertCall = mockPrisma.mediaGeocodeStatus.upsert.mock.calls[0][0];
-      expect(upsertCall.create.status).toBe(MediaMetadataStatusType.failed);
-      expect(upsertCall.create.lastError).toBeTruthy();
+      expect(mockPrisma.mediaGeocodeStatus.upsert).not.toHaveBeenCalled();
       expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
     });
   });
@@ -439,6 +430,32 @@ describe('GeocodeHandler', () => {
     });
   });
 
+  describe('when the provider signals quota exhaustion', () => {
+    beforeEach(() => {
+      mockPrisma.mediaItem.findUnique.mockResolvedValue({
+        id: 'media-1',
+        takenLat: 9.9281,
+        takenLng: -84.0907,
+        circleId: 'circle-1',
+        deletedAt: null,
+      } as any);
+      mockPrisma.mediaGeocodeStatus.upsert.mockResolvedValue({} as any);
+    });
+
+    it.each([
+      ['a legacy RateLimitError', () => new LegacyRateLimitError('OVER_QUERY_LIMIT', 30_000)],
+      ['an HTTP 429', () => Object.assign(new Error('Too Many Requests'), { status: 429 })],
+    ])('throws the platform RateLimitError for %s and leaves the item pending, never processed', async (_n, make) => {
+      mockGeoLocationService.reverseGeocode.mockRejectedValue(make());
+
+      await expect(handler.process(makeJob())).rejects.toBeInstanceOf(PlatformRateLimitError);
+
+      const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
+      expect(calls[calls.length - 1][0].update.status).toBe(MediaMetadataStatusType.pending);
+      expect(mockPrisma.mediaItem.update).not.toHaveBeenCalled();
+    });
+  });
+
   // -------------------------------------------------------------------------
   // nodeResultSchema — node-eligibility surface
   // -------------------------------------------------------------------------
@@ -453,12 +470,12 @@ describe('GeocodeHandler', () => {
   // -------------------------------------------------------------------------
   // persistGeocode — direct / node-result path.
   //
-  // A distributed worker node resolves transient provider credentials via
-  // POST /nodes/:id/jobs/:jobId/credentials, calls the provider's HTTP API
+  // A distributed worker node obtains the Google key through the per-job secret
+  // (POST /nodes/:id/jobs/:jobId/secret), calls the provider's HTTP API
   // directly using @memoriahub/enrichment-compute/geo's fetch*/map* helpers,
   // and submits the resulting GeocodeResult via
-  // POST /nodes/:id/jobs/:jobId/result. NodesService.submitJobResult calls
-  // GeocodeHandler.persistNodeResult -> this.persistGeocode(job, parsed) with
+  // POST /nodes/:id/jobs/:jobId/result. The platform calls
+  // GeocodeHandler.persistNodeResult -> this.persistGeocode(ctx, parsed) with
   // NO preloaded MediaItem (unlike process() above, which passes one to avoid
   // a redundant query) — these tests exercise that reload-from-scratch path
   // directly and assert it writes the IDENTICAL geo columns as the in-process
@@ -489,7 +506,7 @@ describe('GeocodeHandler', () => {
     });
 
     it('reloads the MediaItem itself when no preloaded item is passed', async () => {
-      await handler.persistGeocode(makeJob(), canned);
+      await handler.persistGeocode(ctx(), canned);
 
       expect(mockPrisma.mediaItem.findUnique).toHaveBeenCalledWith({
         where: { id: 'media-1' },
@@ -506,7 +523,7 @@ describe('GeocodeHandler', () => {
     });
 
     it('writes all geo columns identically to the in-process path', async () => {
-      await handler.persistGeocode(makeJob(), canned);
+      await handler.persistGeocode(ctx(), canned);
 
       const updateCall = mockPrisma.mediaItem.update.mock.calls[0][0];
       expect(updateCall.data.geoCountry).toBe('Costa Rica');
@@ -520,7 +537,7 @@ describe('GeocodeHandler', () => {
     });
 
     it('upserts media_geocode_status to processed', async () => {
-      await handler.persistGeocode(makeJob(), canned);
+      await handler.persistGeocode(ctx(), canned);
 
       const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
       const finalCall = calls[calls.length - 1][0];
@@ -528,7 +545,7 @@ describe('GeocodeHandler', () => {
     });
 
     it('does not write geo columns when the result is all-null (provider found nothing)', async () => {
-      await handler.persistGeocode(makeJob(), {
+      await handler.persistGeocode(ctx(), {
         country: null,
         countryCode: null,
         admin1: null,
@@ -545,14 +562,14 @@ describe('GeocodeHandler', () => {
 
     it('throws when job.mediaItemId is missing', async () => {
       await expect(
-        handler.persistGeocode(makeJob({ mediaItemId: null }), canned),
+        handler.persistGeocode(ctx({ mediaItemId: null }), canned),
       ).rejects.toThrow(/missing mediaItemId/);
     });
 
     it('throws when the MediaItem no longer exists', async () => {
       mockPrisma.mediaItem.findUnique.mockResolvedValue(null);
 
-      await expect(handler.persistGeocode(makeJob(), canned)).rejects.toThrow(/not found or deleted/);
+      await expect(handler.persistGeocode(ctx(), canned)).rejects.toThrow(/not found or deleted/);
     });
 
     it('throws when the MediaItem is soft-deleted', async () => {
@@ -561,11 +578,11 @@ describe('GeocodeHandler', () => {
         deletedAt: new Date(),
       } as any);
 
-      await expect(handler.persistGeocode(makeJob(), canned)).rejects.toThrow(/not found or deleted/);
+      await expect(handler.persistGeocode(ctx(), canned)).rejects.toThrow(/not found or deleted/);
     });
 
     it('performs no geocoder call — the node already computed the result', async () => {
-      await handler.persistGeocode(makeJob(), canned);
+      await handler.persistGeocode(ctx(), canned);
 
       expect(mockGeoLocationService.reverseGeocode).not.toHaveBeenCalled();
     });
@@ -648,7 +665,7 @@ describe('GeocodeHandler', () => {
         geoCanonicalLocality: 'San José',
       });
 
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       const data = mockPrisma.mediaItem.update.mock.calls[0][0].data;
       expect(data.geoCanonicalCountry).toBe('Costa Rica');
@@ -663,7 +680,7 @@ describe('GeocodeHandler', () => {
         geoCanonicalLocality: 'San José',
       });
 
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       // The raw columns keep the geocoder's own strings verbatim. This is the
       // whole reason canonical names live in separate columns: persistGeocode
@@ -682,9 +699,9 @@ describe('GeocodeHandler', () => {
       });
 
       // First pass (e.g. right after a rebuild established the groups) …
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
       // … and a second, identical rerun.
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       const second = mockPrisma.mediaItem.update.mock.calls[1][0].data;
       expect(second.geoCanonicalAdmin1).toBe('Heredia');
@@ -693,7 +710,7 @@ describe('GeocodeHandler', () => {
     });
 
     it('passes the item coordinates to the resolver so radius capture can apply', async () => {
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       expect(mockLocationGroupResolver.resolve).toHaveBeenCalledWith(
         expect.objectContaining({ geoAdmin1: 'Provincia de Heredia' }),
@@ -710,14 +727,14 @@ describe('GeocodeHandler', () => {
         takenLng: null,
       } as never);
 
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       expect(mockLocationGroupResolver.resolve).toHaveBeenCalledWith(expect.anything(), null);
     });
 
     it('with grouping OFF (identity resolver) canonical equals raw verbatim', async () => {
       // mockLocationGroupResolver defaults to the identity implementation.
-      await handler.persistGeocode(makeJob(), result);
+      await handler.persistGeocode(ctx(), result);
 
       const data = mockPrisma.mediaItem.update.mock.calls[0][0].data;
       expect(data.geoCanonicalCountry).toBe(data.geoCountry);

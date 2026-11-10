@@ -11,16 +11,16 @@ The worker-node fleet (registration, claim, credentials, the admin routes, the f
 | `/admin/settings/nodes` | `/admin/settings/workers` (the old address redirects) |
 | `NodeStaleOfflineTask`, `NodeOfflinePruneTask` crons | the jobs `nodes.fleet.sweep` and `nodes.fleet.prune` (kill-switches `NODE_STALE_OFFLINE_ENABLED`, `NODE_OFFLINE_PRUNE_ENABLED`) |
 | `NODE_HEARTBEAT_STALE_SECONDS`, `NODE_OFFLINE_STALE_MULTIPLIER`, `NODE_OFFLINE_RETENTION_DAYS` | still read, but only as the DEFAULTS of the `nodes` settings namespace; save the namespace in the admin UI to override |
-| `POST /api/nodes/:id/jobs/:jobId/credentials` handed a node the AI or geocode key | deleted. **No provider key reaches a node.** |
+| `POST /api/nodes/:id/jobs/:jobId/credentials` handed a node the AI or geocode key | deleted. **No AI key reaches a node**; the Google geocode key reaches one only through `POST /api/nodes/:id/jobs/:jobId/secret` (opt-in). |
 
-## AI and geocode compute runs on the server
+## AI compute is server-only; geocode runs on the server unless you opt in
 
-`auto_tagging`, `video_auto_tagging` and `geocode` are server-only until RETRO-C4 (the two AI tagging types become native server handlers) and RETRO-C6 (geocode returns to node eligibility through the platform `nodeSecretBroker`, `POST /api/nodes/:id/jobs/:jobId/secret`, behind the `nodes.jobSecretBrokerEnabled` switch, off). Consequences:
+`auto_tagging`, `video_auto_tagging` (and the two enhancement types) are server-only for good (AI rule 3): their provider key never goes to a node. `geocode` is node-eligible again since RETRO-C6, but its Google key reaches a node only through the platform per-job secret (`POST /api/nodes/:id/jobs/:jobId/secret`), which is **off by default** (`nodes.jobSecretBrokerEnabled`, the Workers settings card). Consequences:
 
-- The API's `JOBS_WORKER_MODE` must be `all` (the default) or `system`. **`off` leaves these three types unclaimed**, because no node may run them. `system` claims every server-only type, so it is safe for them; it also leaves the other node-eligible types to the fleet.
+- With the switch off, no active Google provider or no stored Google key, the platform withholds `geocode` from nodes and the server's own worker runs it: nothing fails for want of a secret. The API's `JOBS_WORKER_MODE` must be `all` (the default) or `system` (`system` claims every type no node may take right now, geocode included). **`off` leaves the AI types unclaimed.**
+- To geocode on the fleet: select Google at `/admin/settings/geo`, store the key, switch on the broker at `/admin/settings/workers`. The node asks for the key per job, keeps it in memory only and never writes it to disk, env or argv. See [the geocoding runbook](geocoding-key.md).
 - A fleet keeps serving the other node-eligible types: `face_detection`, `video_face_detection`, `duplicate_detection`, `metadata_extraction`, `social_media_detection`, `thumbnail_regen`, `workflow_execute_batch`.
-- The server needs the AI provider key and, for Google reverse geocoding, the Google key: they are configured in the admin UI (`/admin/settings/ai`, `/admin/settings/geo`) as before; nothing changes there.
-- Nodes need no provider key and have none to rotate. A node that still sends the old credentials request gets a 404.
+- A node that still sends the old `POST /api/nodes/:id/jobs/:jobId/credentials` request gets a 404.
 
 ## Until the CLI engine moves (RETRO-C10)
 

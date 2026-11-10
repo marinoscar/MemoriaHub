@@ -11,37 +11,10 @@
  *  - job.mediaItemId null + circleId null -> warns and does NOT call sweepCircle
  */
 
-import { EnrichmentJob, JobReason, MhLegacyJobStatus } from '@prisma/client';
+import type { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 import { LocationInferenceHandler } from './location-inference.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { LocationInferenceService } from './location-inference.service';
-
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'location_inference',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  } as EnrichmentJob;
-}
+import { circleJob, mediaItemJob, subjectPrisma, systemJob } from '../../test/helpers/platform-job';
 
 describe('LocationInferenceHandler', () => {
   let handler: LocationInferenceHandler;
@@ -56,46 +29,52 @@ describe('LocationInferenceHandler', () => {
     };
 
     handler = new LocationInferenceHandler(
-      mockRegistry as unknown as EnrichmentHandlerRegistry,
+      mockRegistry as unknown as JobHandlerRegistry,
+      subjectPrisma({ mediaItems: { 'media-1': 'circle-1' }, circles: ['circle-1', 'circle-xyz', 'circle-from-job'] }) as never,
       mockLocationInferenceService as unknown as LocationInferenceService,
     );
   });
 
-  it('registers itself with the EnrichmentHandlerRegistry on module init', () => {
+  it('registers itself with the platform registry on module init', () => {
     handler.onModuleInit();
 
     expect(mockRegistry.register).toHaveBeenCalledWith(handler);
   });
 
-  it('exposes type "location_inference"', () => {
+  it('exposes type "location_inference", a label and the 15-minute profile; it is server-only (no node pair)', () => {
     expect(handler.type).toBe('location_inference');
+    expect(handler.label).toBe('Location inference');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 900_000, maxAttempts: 3 });
+    expect((handler as { nodeResultSchema?: unknown }).nodeResultSchema).toBeUndefined();
+    expect((handler as { persistNodeResult?: unknown }).persistNodeResult).toBeUndefined();
   });
 
-  it('mediaItemId set + reason=upload -> inferForItem(mediaItemId, false)', async () => {
-    const job = makeJob({ mediaItemId: 'media-1', reason: JobReason.upload });
-
-    await handler.process(job);
+  it('media item subject + reason=upload -> inferForItem(mediaItemId, false)', async () => {
+    await handler.process(mediaItemJob('location_inference', 'media-1', 'circle-1', { reason: 'upload' }));
 
     expect(mockLocationInferenceService.inferForItem).toHaveBeenCalledWith('media-1', false);
     expect(mockLocationInferenceService.sweepCircle).not.toHaveBeenCalled();
   });
 
-  it('mediaItemId set + reason=rerun -> inferForItem(mediaItemId, true) — forces past the rejected-skip rule', async () => {
-    const job = makeJob({ mediaItemId: 'media-1', reason: JobReason.rerun });
-
-    await handler.process(job);
+  it('media item subject + reason=rerun -> inferForItem(mediaItemId, true) — forces past the rejected-skip rule', async () => {
+    await handler.process(mediaItemJob('location_inference', 'media-1', 'circle-1', { reason: 'rerun' }));
 
     expect(mockLocationInferenceService.inferForItem).toHaveBeenCalledWith('media-1', true);
   });
 
-  it('mediaItemId null + circleId set -> sweepCircle(circleId, {from,to,force}) read from job.payload', async () => {
-    const job = makeJob({
-      mediaItemId: null,
-      circleId: 'circle-xyz',
-      payload: { mode: 'sweep', from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z', force: true },
-    });
+  it('a media item deleted since the job was queued settles as a no-op', async () => {
+    await handler.process(mediaItemJob('location_inference', 'media-gone', 'circle-1'));
 
-    await handler.process(job);
+    expect(mockLocationInferenceService.inferForItem).not.toHaveBeenCalled();
+  });
+
+  it('circle subject -> sweepCircle(circleId, {from,to,force}) read from job.payload', async () => {
+    await handler.process(
+      circleJob('location_inference', 'circle-xyz', {
+        reason: 'backfill',
+        payload: { mode: 'sweep', from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z', force: true },
+      }),
+    );
 
     expect(mockLocationInferenceService.sweepCircle).toHaveBeenCalledWith('circle-xyz', {
       from: '2026-01-01T00:00:00.000Z',
@@ -105,22 +84,24 @@ describe('LocationInferenceHandler', () => {
     expect(mockLocationInferenceService.inferForItem).not.toHaveBeenCalled();
   });
 
-  it('circleId always comes from job.circleId, not from a circleId field inside the payload', async () => {
-    const job = makeJob({
-      mediaItemId: null,
-      circleId: 'circle-from-job',
-      payload: { mode: 'sweep', circleId: 'circle-from-payload-should-be-ignored' } as any,
-    });
-
-    await handler.process(job);
+  it('the circle always comes from the job subject, not from a circleId field inside the payload', async () => {
+    await handler.process(
+      circleJob('location_inference', 'circle-from-job', {
+        payload: { mode: 'sweep', circleId: 'circle-from-payload-should-be-ignored' },
+      }),
+    );
 
     expect(mockLocationInferenceService.sweepCircle).toHaveBeenCalledWith('circle-from-job', expect.anything());
   });
 
-  it('mediaItemId null + circleId null -> warns and does not call sweepCircle', async () => {
-    const job = makeJob({ mediaItemId: null, circleId: null });
+  it('a circle deleted since the sweep was queued settles as a no-op', async () => {
+    await handler.process(circleJob('location_inference', 'circle-gone'));
 
-    await expect(handler.process(job)).resolves.toBeUndefined();
+    expect(mockLocationInferenceService.sweepCircle).not.toHaveBeenCalled();
+  });
+
+  it('a job with no subject warns and calls nothing', async () => {
+    await expect(handler.process(systemJob('location_inference'))).resolves.toBeUndefined();
 
     expect(mockLocationInferenceService.sweepCircle).not.toHaveBeenCalled();
     expect(mockLocationInferenceService.inferForItem).not.toHaveBeenCalled();

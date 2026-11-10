@@ -97,7 +97,11 @@ Calls `https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key=
 
 ### 3.2 Enrichment Job Type: `geocode`
 
-`geocode` is a job type in the `enrichment_jobs` queue, handled by `GeocodeHandler` (`apps/api/src/geo/geocode.handler.ts`). It self-registers with `EnrichmentHandlerRegistry` via `onModuleInit`.
+`geocode` is a job type in the platform queue (`jobs`), handled by `GeocodeHandler` (`apps/api/src/geo/geocode.handler.ts`), a native platform `JobHandler` since RETRO-C6 (#600): it registers with `JobHandlerRegistry` and the `geocode` throttle key on `onModuleInit`, with the profile `{ maxRuntimeMs: 60_000, maxAttempts: 3 }`. A quota signal (Google `OVER_QUERY_LIMIT` / `RESOURCE_EXHAUSTED`, Nominatim 429/5xx) is the platform `RateLimitError` (the queue defers the job; the item's status stays `pending`, never `processed` without geo data).
+
+#### Node path (RETRO-C6)
+
+`geocode` is node-eligible: it carries `nodeResultSchema` (the shared `geocodeResultSchema`) and `persistNodeResult`, which writes the geo and canonical columns and the status row and **calls no provider**. It declares `nodeSecretBroker = GoogleGeocodeKeyBroker` (`apps/api/src/geo/google-geocode-key.broker.ts`, kind `geo.google`). A node asks `POST /api/nodes/:id/jobs/:jobId/secret` for the Google key (live lease, claim token), keeps it in memory for the one job and never writes it to disk, env or argv; `job_node_secrets` stores a handle only. `usable()` is false (the platform withholds `geocode` from nodes and the server runs it, so no job fails for want of a secret) unless the active reverse provider is `google`, the provider is switched on and a key is stored; the platform also withholds it while `nodes.jobSecretBrokerEnabled` is off (default). Because the broker is only usable under the Google provider, a node that holds a `geocode` job always geocodes with Google (it requests the secret unconditionally; a refusal means the provider changed, and the node reports a failure so the server re-runs the job). The persistent node-side credential cache is a later opt-in and is not used. See the [Google geocoding key runbook](../runbooks/geocoding-key.md).
 
 **Processing flow:**
 

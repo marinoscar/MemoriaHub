@@ -53,18 +53,12 @@ export const MEMORIAHUB_AI_JOB_TYPES: readonly string[] = [
 /**
  * The job types the legacy handlers serve, and the label each shows. A native
  * handler declares its own `label` and is not listed (RETRO-C3: the six
- * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C4: the four AI-bound types; RETRO-C8:
+ * media/face types; RETRO-C5: the five dedup/burst/social types; RETRO-C4: the four AI-bound types; RETRO-C6:
+ * geocode, location_inference, location_group_rebuild; RETRO-C8:
  * memory_generation, memory_digest and storage_insights; RETRO-D3 retired
  * broadcast_start, broadcast_chunk and notification_purge, listed below).
  */
 export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
-  // Media enrichment (per-item compute)
-  geocode: 'Geocoding',
-  location_inference: 'Location inference',
-  // Deprecated aliases kept so already-queued rows still render a friendly label;
-  // superseded by review_run_* below (issue #190).
-  location_suggestion_run_evaluate: 'Location suggestion run evaluate',
-  location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
   // Storage / system
   storage_migration: 'Storage migration',
   trash_purge: 'Trash purge',
@@ -79,8 +73,6 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
   workflow_evaluate_item: 'Workflow evaluate (item)',
   workflow_execute_batch: 'Workflow execute batch',
   workflow_history_purge: 'Workflow history purge',
-  // Location Grouping (issue #373)
-  location_group_rebuild: 'Location Group Rebuild',
 };
 
 /**
@@ -97,6 +89,10 @@ export const APP_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
  *   notifications slice's purges and broadcast jobs replace them; same no-op rule.
  */
 export const RETIRED_JOB_TYPE_LABELS: Readonly<Record<string, string>> = {
+  // RETRO-C6 (#600): superseded by review_run_* (issue #190). Native shim handlers still drain pending
+  // rows (see docs/platform-adoption/local-exceptions.md); the labels are kept for the admin list.
+  location_suggestion_run_evaluate: 'Location suggestion run evaluate',
+  location_suggestion_run_execute_batch: 'Location suggestion run execute batch',
   job_history_purge: 'Job history purge (retired)',
   // RETRO-D3 (#576): replaced by the notifications slice's retention purges and its
   // `admin.broadcast.start` / `admin.broadcast.chunk`; no-op handlers in

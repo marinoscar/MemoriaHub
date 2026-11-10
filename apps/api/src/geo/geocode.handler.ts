@@ -1,51 +1,79 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { classifyRateLimit, RateLimitError } from '../enrichment/rate-limit.error';
-import { EnrichmentJob, MediaMetadataStatusType } from '@prisma/client';
+import {
+  JobHandlerRegistry,
+  ProviderThrottleService,
+  RateLimitError as PlatformRateLimitError,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { MediaMetadataStatusType } from '@prisma/client';
+import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { geocodeResultSchema, type GeocodeResult } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
+import { resolveMediaItemJob, withPlatformRateLimits, type MediaJobContext } from '../platform/jobs/media-item-job';
+import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
 
+/**
+ * `geocode`: a native platform `JobHandler` (RETRO-C6, #600).
+ *
+ * NODE-ELIGIBLE, with the Google key delivered only through the platform's per-job secret
+ * (`nodeSecretBroker`, `POST /api/nodes/:id/jobs/:jobId/secret`): held in node memory for the one job,
+ * never persisted (`job_node_secrets` stores a handle). A node computes the reverse lookup itself and
+ * submits the shared DTO (`@memoriahub/enrichment-compute/dto`); `persistNodeResult` only writes the
+ * geo columns (canonicalised by the location-group resolver) and the status row, and calls no provider.
+ * The broker is `usable()` only while the active provider is `google` with a stored key and the
+ * `nodes` broker switch (off by default) is on; otherwise the platform withholds `geocode` from nodes
+ * and the server runs it, so a missing key or switch never fails a job.
+ *
+ * Quota signals (Google `OVER_QUERY_LIMIT` / `RESOURCE_EXHAUSTED`, Nominatim 429/5xx) become the platform
+ * `RateLimitError`, so the queue defers the job and the status stays `pending`, never `processed` without geo data.
+ */
 @Injectable()
-export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
+export class GeocodeHandler implements JobHandler, OnModuleInit {
   readonly type = 'geocode';
+  readonly label = 'Geocoding';
+  /** One coordinate lookup: a minute covers a slow provider; the throttle gate spaces the calls. */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 60_000, maxAttempts: 3 };
 
-  /**
-   * Node-eligibility (distributed workers): the payload a node submits via
-   * POST /api/nodes/:id/jobs/:jobId/result for this job type — the shared
-   * contract from @memoriahub/enrichment-compute/dto. A node fetches
-   * transient provider credentials via
-   * POST /api/nodes/:id/jobs/:jobId/credentials (NodesService.getJobCredentials)
-   * and calls the provider's HTTP API directly — the offline GeoNames
-   * dataset provider is not node-eligible (a node declines that job).
-   */
+  /** The payload a node submits: the shared contract from `@memoriahub/enrichment-compute/dto`. */
   readonly nodeResultSchema = geocodeResultSchema;
+
+  /** The one secret a node may ask for this job: the Google key (see `GoogleGeocodeKeyBroker`). */
+  readonly nodeSecretBroker: GoogleGeocodeKeyBroker;
 
   private readonly logger = new Logger(GeocodeHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly throttle: ProviderThrottleService,
     private readonly geoLocationService: GeoLocationService,
     private readonly prisma: PrismaService,
     private readonly locationGroupResolver: LocationGroupResolverService,
+    broker: GoogleGeocodeKeyBroker,
     // App metrics (RETRO-T3, #628): `app.media.geocoded`. Optional for hand-built tests.
     @Optional() private readonly metrics?: AppMetricsService,
-  ) {}
+  ) {
+    this.nodeSecretBroker = broker;
+  }
 
   onModuleInit(): void {
     this.registry.register(this);
+    // The geocoder's quota: a cooldown on one geocode job holds the others.
+    this.throttle.registerProviderKey(this.type, 'geocode');
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    if (!job.mediaItemId) {
-      this.logger.debug(`Geocode job ${job.id} has no mediaItemId; skipping`);
-      return;
-    }
+  async process(job: Job): Promise<void> {
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
+    await withPlatformRateLimits(() => this.processMediaItem(context));
+  }
 
-    const mediaItemId = job.mediaItemId;
+  private async processMediaItem(job: MediaJobContext): Promise<void> {
+    const mediaItemId = job.mediaItemId as string;
 
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -73,7 +101,7 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
       }
 
       // COMPUTE half — same seam a distributed worker node uses locally
-      // (with transiently-fetched provider credentials) via
+      // (with the per-job Google key from the secret broker) via
       // @memoriahub/enrichment-compute/geo's fetch*/map* helpers.
       // Number.isFinite above guarantees non-null finite numbers at runtime, but
       // it does not narrow the `number | null` types, so the cast is safe here.
@@ -90,10 +118,19 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
       });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Geocode job ${job.id} failed for MediaItem ${mediaItemId}: ${error}`);
-      await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.failed, undefined, error);
+      // A quota signal defers the job (the queue re-runs it): the item is still waiting, not failed.
+      const deferred =
+        err instanceof PlatformRateLimitError || err instanceof LegacyRateLimitError || classifyRateLimit(err) !== null;
+      if (deferred) this.logger.warn(`Geocode job ${job.id} deferred for MediaItem ${mediaItemId}: ${error}`);
+      else this.logger.error(`Geocode job ${job.id} failed for MediaItem ${mediaItemId}: ${error}`);
+      await this.upsertStatus(
+        mediaItemId,
+        circleId,
+        deferred ? MediaMetadataStatusType.pending : MediaMetadataStatusType.failed,
+        undefined,
+        error,
+      );
       // The provider is resolved inside the geo service, so a failed lookup reports it as `other`.
-      const deferred = err instanceof RateLimitError || classifyRateLimit(err) !== null;
       this.metrics?.add('mediaGeocoded', 1, { provider: 'other', outcome: deferred ? 'deferred' : 'failed' });
       throw err;
     }
@@ -107,9 +144,8 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
   // node-result DTO shape. A distributed worker node runs the equivalent
   // lookup locally via @memoriahub/enrichment-compute/geo's
   // fetchNominatim/fetchGoogleReverse + mapNominatimResponse/mapGoogleResponse
-  // against transiently-fetched credentials (see
-  // NodesService.getJobCredentials), and submits the resulting DTO directly —
-  // bypassing this method and the offline provider entirely (not node-eligible).
+  // against the per-job Google key (see GoogleGeocodeKeyBroker), and submits
+  // the resulting DTO directly — bypassing this method.
   // ---------------------------------------------------------------------------
 
   async computeGeocode(lat: number, lng: number): Promise<GeocodeResult> {
@@ -135,7 +171,7 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
   // ---------------------------------------------------------------------------
 
   async persistGeocode(
-    job: EnrichmentJob,
+    job: MediaJobContext,
     result: GeocodeResult,
     preloadedMediaItem?: {
       id: string;
@@ -232,9 +268,11 @@ export class GeocodeHandler implements EnrichmentHandler, OnModuleInit {
    * nodeResultSchema by the ingestion endpoint; re-parsed here for type
    * narrowing, mirroring DuplicateDetectionHandler's precedent).
    */
-  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
+  async persistNodeResult(job: Job, result: unknown): Promise<void> {
     const parsed = geocodeResultSchema.parse(result);
-    await this.persistGeocode(job, parsed);
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
+    await this.persistGeocode(context, parsed);
   }
 
   private async upsertStatus(

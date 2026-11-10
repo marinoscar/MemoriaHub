@@ -321,7 +321,7 @@ Three details the implementation settled that the plan above left open:
 | Payload | `{ circleId?: string, groupIds?: string[] }` — both optional; absent ⇒ whole library |
 | Node-claimable | **No** — server-only |
 
-**Server-only by omission.** The handler implements no `nodeResultSchema` / `persistNodeResult` pair, so `EnrichmentHandlerRegistry.serverOnlyTypes()` picks it up automatically and it becomes `ENRICHMENT_WORKER_MODE=system` eligible with no explicit pinning — the same inference that covers `face_auto_archive_sweep` and the `location_inference` sweep.
+**Server-only by omission.** The handler is a native platform `JobHandler` (RETRO-C6, #600; profile `{ maxRuntimeMs: 1_800_000, maxAttempts: 2 }`) and implements no `nodeResultSchema` / `persistNodeResult` pair, so the platform registry derives it server-only and the `system` worker mode runs it, like `face_auto_archive_sweep` and the `location_inference` sweep. It writes only app tables, so it needs no `JobScope`. It is still enqueued without `skipDedup`.
 
 ### 8.1 Algorithm — set-based, O(groups) statements
 

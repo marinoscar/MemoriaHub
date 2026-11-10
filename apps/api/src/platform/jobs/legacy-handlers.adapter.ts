@@ -49,9 +49,9 @@ import { videoJobTimeoutMs } from './legacy-env';
 //     (HTTP 429/529 shapes, AWS throttle names), is rethrown as the platform's
 //     `RateLimitError(retryAfterMs)`, because the queue defers a job on that
 //     class and nothing else.
-//   * the provider throttle keys (`auto_tagging` / `video_auto_tagging` ->
-//     `tagging`, `geocode` -> `geocode`) are registered with the platform
-//     `ProviderThrottleService`, which replaces the app's gate.
+//   * the provider throttle keys of a legacy handler are registered with the
+//     platform `ProviderThrottleService`, which replaces the app's gate (none is
+//     left: the native handlers register their own).
 //
 // CONVERTED (no longer here): RETRO-C3 (#585) made `face_detection`,
 // `video_face_detection`, `face_auto_archive_sweep`, `metadata_extraction`,
@@ -64,6 +64,10 @@ import { videoJobTimeoutMs } from './legacy-env';
 // itself). RETRO-C4 (#590) did the same for the four AI-bound types
 // (`auto_tagging`, `video_auto_tagging`, `picture_enhancement`,
 // `picture_enhancement_purge`), which are server-only permanently (AI rule 3).
+// RETRO-C6 (#600) did the same for `geocode` (node-eligible, its Google key
+// delivered only through the platform `nodeSecretBroker`), `location_inference`,
+// `location_group_rebuild` and the two deprecated `location_suggestion_run_*`
+// shims, and removed the provider-key server-only shim.
 //
 // The orchestration (claim, lease, retry, deferral, settle) is the platform's;
 // none of it is reimplemented here.
@@ -71,8 +75,7 @@ import { videoJobTimeoutMs } from './legacy-env';
 
 /** Job types that call a rate-limited provider -> the throttle bucket they draw on. */
 export const LEGACY_THROTTLE_KEYS: Readonly<Record<string, string>> = {
-  // auto_tagging and video_auto_tagging (RETRO-C4) register the shared `tagging` key themselves.
-  geocode: 'geocode',
+  // auto_tagging and video_auto_tagging (RETRO-C4) and geocode (RETRO-C6) register their keys themselves.
 };
 
 /**
@@ -160,29 +163,9 @@ async function runLegacy(handler: EnrichmentHandler, job: Job, subjectExists?: S
 
 const logger = new Logger('LegacyEnrichmentHandlerAdapter');
 
-/**
- * The legacy job types whose compute needs a PROVIDER KEY, which no node is handed (RETRO-C2, #581).
- *
- * MemoriaHub's old node plane issued a transient provider credential per job
- * (`POST /api/nodes/:id/jobs/:jobId/credentials`, deleted with the legacy node plane). The platform
- * nodes slice does not deliver provider keys: a key a node needs goes through the `nodeSecretBroker`
- * (`POST /api/nodes/:id/jobs/:jobId/secret`, a handle in `job_node_secrets`, switched on by
- * `nodes.jobSecretBrokerEnabled`), and AI keys never go to a node at all (RETRO-C4 made the AI
- * tagging and enhancement types native, server-only handlers). `geocode` is the one legacy class that
- * still carries a node pair and needs a key: it runs on the server until RETRO-C6 converts it and
- * returns it to node eligibility through the broker. The pair its class carries is NOT forwarded, so
- * the platform derives it as server-only.
- *
- * PLATFORM-ADOPTION-SHIM(RETRO-C6): delete the entry when the native geocode handler lands.
- */
-export const PROVIDER_KEY_SERVER_ONLY_TYPES: ReadonlySet<string> = new Set(['geocode']);
-
 /** The platform `JobHandler` for one legacy handler. */
 export function toPlatformHandler(handler: EnrichmentHandler, subjectExists?: SubjectExists): JobHandler {
-  const nodeEligible =
-    handler.nodeResultSchema !== undefined &&
-    typeof handler.persistNodeResult === 'function' &&
-    !PROVIDER_KEY_SERVER_ONLY_TYPES.has(handler.type);
+  const nodeEligible = handler.nodeResultSchema !== undefined && typeof handler.persistNodeResult === 'function';
 
   return {
     type: handler.type,

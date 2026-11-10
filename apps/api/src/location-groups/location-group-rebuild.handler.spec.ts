@@ -1,5 +1,4 @@
-import { EnrichmentJob } from '@prisma/client';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
+import type { Job, JobHandler } from '@marinoscar/platform-api/jobs';
 import { LocationGroupRebuildHandler } from './location-group-rebuild.handler';
 
 /** One recorded write, so pass ORDER can be asserted. */
@@ -86,10 +85,10 @@ function makeHandler(opts: {
   };
 }
 
-const job = { id: 'job-1', payload: null } as unknown as EnrichmentJob;
+const job = { id: 'job-1', payload: null } as unknown as Job;
 
 describe('LocationGroupRebuildHandler', () => {
-  it('registers itself with the enrichment registry on module init', () => {
+  it('registers itself with the platform registry on module init', () => {
     const { handler, registry } = makeHandler({});
     handler.onModuleInit();
     expect(registry.register).toHaveBeenCalledWith(handler);
@@ -97,14 +96,16 @@ describe('LocationGroupRebuildHandler', () => {
 
   it('is SERVER-ONLY by omission: no node-result pair', () => {
     const { handler } = makeHandler({});
-    // Read through the EnrichmentHandler interface: the concrete class does not
+    // Read through the JobHandler interface: the concrete class does not
     // even DECLARE these members, which is the point — their absence is what
-    // EnrichmentHandlerRegistry.serverOnlyTypes() keys off, picking the type up
+    // JobHandlerRegistry.serverOnlyTypes() keys off, picking the type up
     // automatically with no explicit pinning.
-    const asHandler = handler as EnrichmentHandler;
+    const asHandler = handler as JobHandler;
     expect(asHandler.nodeResultSchema).toBeUndefined();
     expect(asHandler.persistNodeResult).toBeUndefined();
     expect(handler.type).toBe('location_group_rebuild');
+    expect(handler.label).toBe('Location Group Rebuild');
+    expect(handler.profile).toEqual({ maxRuntimeMs: 1_800_000, maxAttempts: 2 });
   });
 
   it('resets canonical columns to their raw counterparts, per circle', async () => {
@@ -115,7 +116,7 @@ describe('LocationGroupRebuildHandler', () => {
 
   it('scopes the reset to one circle when payload.circleId is given', async () => {
     const { handler, prisma } = makeHandler({});
-    await handler.process({ id: 'j', payload: { circleId: 'c9' } } as unknown as EnrichmentJob);
+    await handler.process({ id: 'j', payload: { circleId: 'c9' } } as unknown as Job);
 
     expect(prisma.circle.findMany).not.toHaveBeenCalled();
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
