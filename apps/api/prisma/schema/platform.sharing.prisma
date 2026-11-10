@@ -56,7 +56,7 @@ model Group {
 
   // The target of the members' and invites' composite foreign keys.
 
-  // composed from app:ownership.prisma
+  // composed from app:memoriahub.ownership.prisma
   ownedMediaItems             MediaItem[]             @relation("MediaItemOwnerGroup")
   ownedMediaItemEmbeddings    MediaItemEmbedding[]    @relation("MediaItemEmbeddingOwnerGroup")
   ownedAlbums                 Album[]                 @relation("AlbumOwnerGroup")

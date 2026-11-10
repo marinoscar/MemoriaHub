@@ -45,8 +45,10 @@ model StorageObject {
   // check bypasses row-level security (ADR 0002 D5).
 
   // composed from app:identity-extensions.prisma
-  mediaItem            MediaItem?
   legacyMigrationItems MhLegacyStorageMigrationItem[] @relation("MhLegacyStorageMigrationItemObject")
+
+  // composed from app:memoriahub.identity.prisma
+  mediaItem MediaItem?
 
   @@unique([id, orgId])
   @@index([uploadedById])
