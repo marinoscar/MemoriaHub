@@ -74,6 +74,7 @@ export class WorkflowScheduleTickHandler implements MemoriahubJobHandler, OnModu
     private readonly runService: WorkflowRunService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
     this.jobs.registerHandler(this);
   }

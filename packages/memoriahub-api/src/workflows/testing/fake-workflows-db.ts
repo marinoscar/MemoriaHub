@@ -1,4 +1,5 @@
 import type { WorkflowsDb } from '../data/workflows-db.js';
+import type { MediaDelegate } from '../../media/index.js';
 import { FakeMemoriahubPrisma } from '../../testing/index.js';
 
 type Row = Record<string, any>;
@@ -61,33 +62,33 @@ class FakeTable {
  * @stability experimental
  */
 export class FakeWorkflowsDb extends FakeMemoriahubPrisma {
-  readonly workflow = new FakeTable();
+  readonly workflow: MediaDelegate & any = new FakeTable();
 
-  readonly workflowRun = new FakeTable();
+  readonly workflowRun: MediaDelegate & any = new FakeTable();
 
-  readonly workflowRunItem = new FakeTable();
+  readonly workflowRunItem: MediaDelegate & any = new FakeTable();
 
-  readonly mediaItem = new FakeTable();
+  readonly mediaItem: MediaDelegate & any = new FakeTable();
 
-  readonly mediaTagStatus = new FakeTable();
+  readonly mediaTagStatus: MediaDelegate & any = new FakeTable();
 
-  readonly mediaFaceStatus = new FakeTable();
+  readonly mediaFaceStatus: MediaDelegate & any = new FakeTable();
 
-  readonly locationSuggestion = new FakeTable();
+  readonly locationSuggestion: MediaDelegate & any = new FakeTable();
 
-  readonly job = new FakeTable();
+  readonly job: MediaDelegate & any = new FakeTable();
 
-  readonly auditEvent = new FakeTable();
+  readonly auditEvent: MediaDelegate & any = new FakeTable();
 
-  readonly user = new FakeTable();
+  readonly user: MediaDelegate & any = new FakeTable();
 
   /**
    * Stores a run.
    *
    * @param run - the run row (an `id` and a `status` at least).
    */
-  seedRun(run: { id: string; status: string } & Row): void {
-    this.workflowRun.rows.set(run.id, run);
+  seedRun(run: { id: string; status: string; [column: string]: unknown }): void {
+    (this.workflowRun as FakeTable).rows.set(run.id, run);
   }
 
   /** The database seen as the slice's narrowed client. */

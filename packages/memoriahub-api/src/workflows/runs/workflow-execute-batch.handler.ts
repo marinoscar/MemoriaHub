@@ -116,6 +116,7 @@ export class WorkflowExecuteBatchHandler implements MemoriahubJobHandler, OnModu
     @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
     this.jobs.registerHandler(this);
   }

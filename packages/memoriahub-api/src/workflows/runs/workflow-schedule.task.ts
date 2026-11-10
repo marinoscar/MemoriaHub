@@ -30,6 +30,11 @@ import { isWorkflowsEnabled, readWorkflowSettings } from '../settings/workflows-
 import { WORKFLOW_SCHEDULE_TICK_TYPE, WORKFLOW_TICK_PRIORITY } from './workflow-cron-jobs.constants.js';
 import { dueScheduledWorkflowsWhere } from './workflow-schedule-tick.handler.js';
 
+/**
+ * The every-minute cron that enqueues `workflows.schedule_tick` when a scheduled workflow is due.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class WorkflowScheduleTask {
   private readonly logger = new Logger(WorkflowScheduleTask.name);
@@ -40,6 +45,7 @@ export class WorkflowScheduleTask {
     @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /** The minute tick: decides a scheduled workflow is due and enqueues the tick job. */
   @Cron(CronExpression.EVERY_MINUTE)
   async handleTick(): Promise<void> {
     try {

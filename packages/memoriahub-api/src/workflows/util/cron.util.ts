@@ -46,6 +46,11 @@ function isValidFieldPart(part: string, min: number, max: number): boolean {
   return isValidNumber(base, min, max);
 }
 
+/**
+ * Whether a string is a valid classic 5-field cron expression (`minute hour day-of-month month day-of-week`).
+ *
+ * @stability experimental
+ */
 export function isValidCron(expr: string): boolean {
   if (typeof expr !== 'string') return false;
   const fields = expr.trim().split(/\s+/);

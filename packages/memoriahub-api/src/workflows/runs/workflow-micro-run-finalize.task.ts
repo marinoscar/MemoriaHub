@@ -29,6 +29,11 @@ import type { WorkflowsDb } from '../data/workflows-db.js';
 import { WORKFLOW_MICRO_RUN_FINALIZE_TYPE, WORKFLOW_TICK_PRIORITY } from './workflow-cron-jobs.constants.js';
 import { dueMicroRunsWhere } from './workflow-micro-run-finalize.handler.js';
 
+/**
+ * The every-minute cron that enqueues `workflows.micro_run_finalize` when a micro-run window has closed.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class WorkflowMicroRunFinalizeTask {
   private readonly logger = new Logger(WorkflowMicroRunFinalizeTask.name);
@@ -38,6 +43,7 @@ export class WorkflowMicroRunFinalizeTask {
     @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /** The minute tick: decides a micro-run is due and enqueues the finalize job. */
   @Cron(CronExpression.EVERY_MINUTE)
   async handleTick(): Promise<void> {
     try {

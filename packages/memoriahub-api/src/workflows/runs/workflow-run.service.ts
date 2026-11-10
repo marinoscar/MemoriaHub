@@ -85,6 +85,7 @@ export class WorkflowRunService {
   // Lifecycle
   // ---------------------------------------------------------------------------
 
+  /** Starts a manual run: authorizes the actor, enforces the concurrency gate and queues `workflow_evaluate`. */
   async createRun(
     workflowId: string,
     body: { maxItems?: number },
@@ -226,6 +227,7 @@ export class WorkflowRunService {
     return { runId: run.id };
   }
 
+  /** Approves an `awaiting_approval` run: re-checks the gated actions and queues the execute batches. */
   async approveRun(
     runId: string,
     body: { excludedItemIds?: string[]; confirmation?: string },
@@ -313,6 +315,7 @@ export class WorkflowRunService {
     return { runId: run.id, status: WORKFLOW_RUN_STATUS.running };
   }
 
+  /** Cancels a non-terminal run. */
   async cancelRun(
     runId: string,
     user: RequestUser,
@@ -714,7 +717,7 @@ export class WorkflowRunService {
   /**
    * Enforce every action's system-permission + feature-flag + cross-circle
    * requirements for the acting user. Base media:write is already covered by the
-   * @Auth guard + collaborator role, but destructive/gated variants are
+   * the auth guard + collaborator role, but destructive/gated variants are
    * re-asserted explicitly here.
    */
   private async checkGatedActionPermissions(

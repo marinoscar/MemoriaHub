@@ -80,6 +80,7 @@ export class WorkflowEvaluateHandler implements MemoriahubJobHandler, OnModuleIn
     @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
     this.jobs.registerHandler(this);
   }

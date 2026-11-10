@@ -21,6 +21,11 @@ const resolveAction = z.enum(['archive', 'trash']);
 // No-param actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Params of an action that takes none (strict empty object).
+ *
+ * @stability experimental
+ */
 export const emptyParamsSchema = z.object({}).strict();
 
 // ---------------------------------------------------------------------------
@@ -39,12 +44,27 @@ export const addToAlbumParamsSchema = z
     { message: 'Provide exactly one of albumId or createAlbumNamed' },
   );
 
+/**
+ * Params of `remove_from_album`.
+ *
+ * @stability experimental
+ */
 export const removeFromAlbumParamsSchema = z
   .object({ albumId: z.string().uuid() })
   .strict();
 
+/**
+ * Params of `add_tags`.
+ *
+ * @stability experimental
+ */
 export const addTagsParamsSchema = z.object({ names: tagNames }).strict();
 
+/**
+ * Params of `remove_tags`.
+ *
+ * @stability experimental
+ */
 export const removeTagsParamsSchema = z
   .object({
     names: tagNames,
@@ -58,6 +78,11 @@ export const removeTagsParamsSchema = z
   })
   .strict();
 
+/**
+ * Params of `set_favorite`.
+ *
+ * @stability experimental
+ */
 export const setFavoriteParamsSchema = z.object({ value: z.boolean() }).strict();
 
 /**
@@ -99,10 +124,25 @@ export const setCapturedAtParamsSchema = z
     }
   });
 
+/**
+ * Params of `assign_person`.
+ *
+ * @stability experimental
+ */
 export const assignPersonParamsSchema = z.object({ personId: z.string().uuid() }).strict();
 
+/**
+ * Params of `remove_person`.
+ *
+ * @stability experimental
+ */
 export const removePersonParamsSchema = z.object({ personId: z.string().uuid() }).strict();
 
+/**
+ * Params of `set_location`.
+ *
+ * @stability experimental
+ */
 export const setLocationParamsSchema = z
   .object({
     lat: z.number().min(-90).max(90),
@@ -128,11 +168,22 @@ export const moveTargetSchema = z.discriminatedUnion('kind', [
   // A shared library: a platform group id (a former shared circle's id).
   z.object({ kind: z.literal('group'), groupId: z.string().uuid() }).strict(),
 ]);
+
+/**
+ * Where a move action sends an item: the actor's personal library or a shared library (a group).
+ *
+ * @stability experimental
+ */
 export type MoveTarget = z.infer<typeof moveTargetSchema>;
 
 /** move_to_owner (RETRO-I6 #588): the owner-scope name of move_to_circle. */
 export const moveToOwnerParamsSchema = z.object({ target: moveTargetSchema }).strict();
 
+/**
+ * Params of `rerun_enrichment` (the enrichment kinds to re-run).
+ *
+ * @stability experimental
+ */
 export const rerunEnrichmentParamsSchema = z
   .object({
     kinds: z
@@ -145,8 +196,18 @@ export const rerunEnrichmentParamsSchema = z
 // Review-queue actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Params of `resolve_burst_group`.
+ *
+ * @stability experimental
+ */
 export const resolveBurstGroupParamsSchema = z.object({ action: resolveAction }).strict();
 
+/**
+ * Params of `resolve_duplicate_group`.
+ *
+ * @stability experimental
+ */
 export const resolveDuplicateGroupParamsSchema = z.object({ action: resolveAction }).strict();
 
 // ---------------------------------------------------------------------------

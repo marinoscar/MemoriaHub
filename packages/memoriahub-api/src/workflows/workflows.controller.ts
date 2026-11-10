@@ -48,6 +48,7 @@ export class WorkflowsController {
     private readonly runService: WorkflowRunService,
   ) {}
 
+  /** Creates a workflow. */
   @Post()
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Create a workflow (circle collaborator)' })
@@ -58,6 +59,7 @@ export class WorkflowsController {
     return this.workflowsService.createWorkflow(dto, user);
   }
 
+  /** Lists the workflows of a circle. */
   @Get()
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List workflows in a circle (paginated)' })
@@ -70,6 +72,7 @@ export class WorkflowsController {
   }
 
   // Static routes declared before ':id' so they are not captured as a workflow id.
+  /** Returns the per-Subject catalog. */
   @Get('subjects')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -80,6 +83,7 @@ export class WorkflowsController {
     return this.workflowsService.getSubjects();
   }
 
+  /** Previews what a definition matches. */
   @Post('preview')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @HttpCode(HttpStatus.OK)
@@ -92,6 +96,7 @@ export class WorkflowsController {
     return this.workflowsService.preview(dto, user);
   }
 
+  /** Reads a workflow. */
   @Get(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get a workflow by id' })
@@ -102,6 +107,7 @@ export class WorkflowsController {
     return this.workflowsService.getWorkflow(id, user);
   }
 
+  /** Updates a workflow. */
   @Patch(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Update a workflow (circle collaborator)' })
@@ -117,6 +123,7 @@ export class WorkflowsController {
     return this.workflowsService.updateWorkflow(id, dto, user);
   }
 
+  /** Deletes a workflow. */
   @Delete(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -132,6 +139,7 @@ export class WorkflowsController {
   // Runs
   // ---------------------------------------------------------------------------
 
+  /** Starts a run. */
   @Post(':id/run')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
@@ -148,6 +156,7 @@ export class WorkflowsController {
     return this.runService.createRun(id, dto, user);
   }
 
+  /** Lists a workflow's runs. */
   @Get(':id/runs')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List a workflow’s run history (paginated)' })

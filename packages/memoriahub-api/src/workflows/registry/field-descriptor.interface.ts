@@ -104,6 +104,11 @@ export type WorkflowDependency =
   | 'duplicates'
   | 'locationSuggestions';
 
+/**
+ * One condition field of a Subject: its operators, value type, enrichment dependency and the pure `buildWhere` that compiles a leaf into a Prisma where fragment.
+ *
+ * @stability experimental
+ */
 export interface WorkflowFieldDescriptor {
   /** Stable field key referenced by a definition's `{ field }`. */
   key: string;
@@ -134,6 +139,7 @@ export interface WorkflowFieldDescriptor {
    * the Phase-2 executor — the bounding predicate is used in the meantime.
    */
   refinementSelect?: Record<string, unknown>;
+  /** Factory of the exact in-process predicate over a fetched row, for a `readTimeRefinement` field. */
   refinementPredicate?: (op: WorkflowOperator, value: unknown) => (row: any) => boolean;
   /**
    * Compile a single leaf condition into a Prisma where fragment. Pure — no I/O.

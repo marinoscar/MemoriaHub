@@ -33,6 +33,7 @@ import { WorkflowRunService } from './workflow-run.service.js';
 export class WorkflowRunsController {
   constructor(private readonly runService: WorkflowRunService) {}
 
+  /** Reads a run. */
   @Get(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get a workflow run (counts + action summary)' })
@@ -43,6 +44,7 @@ export class WorkflowRunsController {
     return this.runService.getRunDetail(id, user);
   }
 
+  /** Lists a run's items. */
   @Get(':id/items')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List a run’s items (paginated, signed thumbnails)' })
@@ -59,6 +61,7 @@ export class WorkflowRunsController {
     return this.runService.listRunItems(id, query, user);
   }
 
+  /** Approves a run. */
   @Post(':id/approve')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
@@ -75,6 +78,7 @@ export class WorkflowRunsController {
     return this.runService.approveRun(id, dto, user);
   }
 
+  /** Cancels a run. */
   @Post(':id/cancel')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)

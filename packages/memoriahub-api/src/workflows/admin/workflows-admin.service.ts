@@ -66,6 +66,7 @@ export class WorkflowsAdminService {
   // GET /admin/workflows
   // ---------------------------------------------------------------------------
 
+  /** Lists every workflow across every circle with its last run and lifetime totals. */
   async listWorkflows(query: {
     page: number;
     pageSize: number;
@@ -184,6 +185,7 @@ export class WorkflowsAdminService {
   // GET /admin/workflows/stats — KPI strip aggregate
   // ---------------------------------------------------------------------------
 
+  /** The KPI strip of the last seven days. */
   async getStats() {
     await this.assertFeatureEnabled();
 
@@ -216,6 +218,7 @@ export class WorkflowsAdminService {
   // GET /admin/workflow-runs
   // ---------------------------------------------------------------------------
 
+  /** Lists every run across every circle. */
   async listRuns(query: {
     page: number;
     pageSize: number;
@@ -261,6 +264,7 @@ export class WorkflowsAdminService {
   // POST /admin/workflows/:id/disable — admin override
   // ---------------------------------------------------------------------------
 
+  /** Force-disables a workflow regardless of circle membership. */
   async disableWorkflow(id: string, actorUserId: string) {
     await this.assertFeatureEnabled();
 
@@ -296,6 +300,7 @@ export class WorkflowsAdminService {
   // POST /admin/workflow-runs/:id/cancel — admin override (Phase 2 cancel path)
   // ---------------------------------------------------------------------------
 
+  /** Cancels a runaway run app-wide. */
   async cancelRun(runId: string, user: { id: string }) {
     await this.assertFeatureEnabled();
     return this.runService.adminCancelRun(runId, user.id);

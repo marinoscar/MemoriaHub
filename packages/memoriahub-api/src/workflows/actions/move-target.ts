@@ -19,6 +19,11 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import type { MemoriahubAccessPort } from '../../ports/index.js';
 
+/**
+ * The action type of a move between libraries (`move_to_circle` is its deprecated alias).
+ *
+ * @stability experimental
+ */
 export const MOVE_TO_OWNER_ACTION = 'move_to_owner';
 /** Deprecated name, accepted at validation and execution only. */
 export const MOVE_TO_CIRCLE_ACTION = 'move_to_circle';

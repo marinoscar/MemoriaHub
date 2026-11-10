@@ -40,6 +40,7 @@ export class WorkflowsAdminController {
   // GET /admin/workflows/stats  (declared before the :id route for clarity)
   // -------------------------------------------------------------------------
 
+  /** The KPI strip. */
   @Get('workflows/stats')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
   @ApiOperation({ summary: 'Workflow KPI aggregate for the admin dashboard strip (Admin)' })
@@ -56,6 +57,7 @@ export class WorkflowsAdminController {
   // GET /admin/workflows
   // -------------------------------------------------------------------------
 
+  /** Lists every workflow. */
   @Get('workflows')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
   @ApiOperation({ summary: 'List every workflow across all circles (Admin, paginated)' })
@@ -77,6 +79,7 @@ export class WorkflowsAdminController {
   // GET /admin/workflow-runs
   // -------------------------------------------------------------------------
 
+  /** Lists every run. */
   @Get('workflow-runs')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [PERMISSIONS.JOBS_READ] })
   @ApiOperation({ summary: 'List workflow runs across all circles for oversight (Admin, paginated)' })
@@ -94,6 +97,7 @@ export class WorkflowsAdminController {
   // POST /admin/workflows/:id/disable — admin override
   // -------------------------------------------------------------------------
 
+  /** Force-disables a workflow. */
   @Post('workflows/:id/disable')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.OK)
@@ -114,6 +118,7 @@ export class WorkflowsAdminController {
   // POST /admin/workflow-runs/:id/cancel — cancel a runaway run app-wide
   // -------------------------------------------------------------------------
 
+  /** Cancels a run. */
   @Post('workflow-runs/:id/cancel')
   @MemoriahubAuth({ roles: [ADMIN_ROLE], permissions: [PERMISSIONS.JOBS_WRITE] })
   @HttpCode(HttpStatus.OK)

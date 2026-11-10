@@ -72,6 +72,7 @@ export class WorkflowMicroRunFinalizeHandler implements MemoriahubJobHandler, On
     private readonly runService: WorkflowRunService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
     this.jobs.registerHandler(this);
   }

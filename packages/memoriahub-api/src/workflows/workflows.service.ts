@@ -30,6 +30,11 @@ const DEFAULT_SCHEDULE_MIN_INTERVAL_MINUTES = 60;
 /** Max sample items returned by the preview. */
 const PREVIEW_SAMPLE_SIZE = 12;
 
+/**
+ * Workflow CRUD, preview and the Subject catalog (issue #139): the feature gate, circle-role checks and definition validation live here.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class WorkflowsService {
   private readonly logger = new Logger(WorkflowsService.name);
@@ -47,6 +52,7 @@ export class WorkflowsService {
   // CRUD
   // ---------------------------------------------------------------------------
 
+  /** Creates a workflow in a circle. */
   async createWorkflow(dto: CreateWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
     await this.circleMembership.requireOwnerRole(
@@ -103,6 +109,7 @@ export class WorkflowsService {
     return this.serialize(workflow);
   }
 
+  /** Lists the workflows of a circle. */
   async listWorkflows(query: ListWorkflowsQueryDto, user: RequestUser) {
     await this.assertFeatureEnabled();
     await this.circleMembership.requireOwnerRole(
@@ -134,6 +141,7 @@ export class WorkflowsService {
     };
   }
 
+  /** Reads one workflow. */
   async getWorkflow(id: string, user: RequestUser) {
     await this.assertFeatureEnabled();
     const workflow = await this.findWorkflowOrThrow(id);
@@ -146,6 +154,7 @@ export class WorkflowsService {
     return this.serialize(workflow);
   }
 
+  /** Updates a workflow, re-validating the resulting definition. */
   async updateWorkflow(id: string, dto: UpdateWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
     const existing = await this.findWorkflowOrThrow(id);
@@ -211,6 +220,7 @@ export class WorkflowsService {
     return this.serialize(workflow);
   }
 
+  /** Deletes a workflow (its runs and items cascade). */
   async deleteWorkflow(id: string, user: RequestUser): Promise<void> {
     await this.assertFeatureEnabled();
     const existing = await this.findWorkflowOrThrow(id);
@@ -232,6 +242,7 @@ export class WorkflowsService {
   // Preview (stateless)
   // ---------------------------------------------------------------------------
 
+  /** Stateless builder feedback: the bounded match count and a sample of the matching items. */
   async preview(dto: PreviewWorkflowDto, user: RequestUser) {
     const settings = await this.assertFeatureEnabled();
     await this.circleMembership.requireOwnerRole(
@@ -311,6 +322,7 @@ export class WorkflowsService {
   // Subjects registry
   // ---------------------------------------------------------------------------
 
+  /** The per-Subject registry that drives the builder form. */
   async getSubjects() {
     await this.assertFeatureEnabled();
     return {

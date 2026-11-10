@@ -91,6 +91,7 @@ export class WorkflowEvaluateItemHandler implements MemoriahubJobHandler, OnModu
     private readonly compiler: WorkflowConditionCompiler,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
     this.jobs.registerHandler(this);
   }

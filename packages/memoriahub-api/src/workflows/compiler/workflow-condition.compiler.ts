@@ -22,9 +22,15 @@ export interface CompiledRefinement {
   field: string;
   /** Extra columns the predicate needs selected on the fetched row. */
   select: Record<string, unknown>;
+  /** The exact predicate a fetched row must satisfy. */
   predicate: (row: any) => boolean;
 }
 
+/**
+ * The result of compiling a definition: the Prisma `where`, the enrichment dependencies it reads and the read-time refinements to apply to fetched rows.
+ *
+ * @stability experimental
+ */
 export interface CompiledWorkflow {
   /** Prisma where, scoped `{ circleId, deletedAt: null }` + compiled conditions. */
   where: Record<string, unknown>;
