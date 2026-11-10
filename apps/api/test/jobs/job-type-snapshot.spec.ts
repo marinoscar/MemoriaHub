@@ -30,10 +30,7 @@ import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platfor
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import type { EnrichmentHandler } from '../../src/enrichment/enrichment-handler.interface';
-import {
-  LegacyEnrichmentHandlerAdapter,
-  PROVIDER_KEY_SERVER_ONLY_TYPES,
-} from '../../src/platform/jobs/legacy-handlers.adapter';
+import { LegacyEnrichmentHandlerAdapter } from '../../src/platform/jobs/legacy-handlers.adapter';
 import {
   RETIRED_NOTIFICATION_JOB_TYPES,
   RetiredNotificationJobTypes,
@@ -118,23 +115,9 @@ describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
     expect(platform.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 
-  // RETRO-C2 (#581): no provider key is delivered to a node. `geocode`, whose legacy class still
-  // carries the node pair, is server-only on the platform until its native handler lands (RETRO-C6,
-  // back to nodes through the secret broker). The AI types are RETRO-C4's native, server-only handlers.
-  const PLATFORM_NODE_ELIGIBLE_TYPES = EXPECTED_NODE_ELIGIBLE_TYPES.filter(
-    (type) => !PROVIDER_KEY_SERVER_ONLY_TYPES.has(type),
-  );
-
-  it('pins the provider-key types that are server-only for now', () => {
-    expect([...PROVIDER_KEY_SERVER_ONLY_TYPES].sort()).toEqual(['geocode']);
-    const serverOnly = platform.serverOnlyTypes();
-    for (const type of PROVIDER_KEY_SERVER_ONLY_TYPES) {
-      expect(serverOnly).toContain(type);
-      const handler = platform.get(type)!;
-      expect(handler.nodeResultSchema).toBeUndefined();
-      expect(handler.persistNodeResult).toBeUndefined();
-    }
-  });
+  // RETRO-C6 (#600): `geocode` is node-eligible again (the pair is forwarded); its Google key reaches
+  // a node only through the platform `nodeSecretBroker`. The AI types are RETRO-C4's native, server-only handlers.
+  const PLATFORM_NODE_ELIGIBLE_TYPES = EXPECTED_NODE_ELIGIBLE_TYPES;
 
   it('keeps node eligibility: the platform derives the complement of the node-eligible set', () => {
     const expected = EXPECTED_JOB_TYPES.filter((type) => !PLATFORM_NODE_ELIGIBLE_TYPES.includes(type)).sort();
