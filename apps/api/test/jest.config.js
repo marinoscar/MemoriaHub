@@ -27,6 +27,7 @@ module.exports = {
   transformIgnorePatterns: [
     '/node_modules/(?!(cookie|@fastify/cookie)/)',
     '/packages/memoriahub-compute/dist/',
+    '/packages/memoriahub-api/dist/',
   ],
   collectCoverageFrom: [
     'src/**/*.ts',
