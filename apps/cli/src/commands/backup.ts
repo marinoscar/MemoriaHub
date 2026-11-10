@@ -28,13 +28,7 @@ import { loadConfig, requireConfig, saveConfig, type CliConfig } from '../config
 import { ApiClient, ApiError } from '../api.js';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { registerWorkerNode } from '../node/register.js';
-import {
-  enrollNode,
-  defaultNodeCredentialName,
-  NodeEnrollmentUnsupportedError,
-} from '../node/enroll.js';
-import { runDeviceLogin } from '../device-login.js';
+import { NODE_JOB_TYPES } from '../executors/index.js';
 import { runBackupInit, BackupRootConflictError } from '../backup/init-backup.js';
 import { RunAlreadyActiveError } from '../backup/backup-engine.js';
 import { CatalogOpenError, openCatalogDb } from '../backup/catalog-db.js';
@@ -76,7 +70,7 @@ import {
 } from '../backup/run-via-daemon.js';
 import { collectBackupStatus, type BackupStatusReport } from '../backup/status-report.js';
 import { CATALOG_DB_REL_PATH } from '../backup/layout.js';
-import { connectToDaemon, isDaemonRunning } from '../node/ipc-client.js';
+import { connectToDaemon, isDaemonRunning } from '../backup/ipc-client.js';
 import { renderBackupHeadless, formatBytes } from '../render/headless-backup.js';
 import { ui, isTTY } from '../ui.js';
 
@@ -99,52 +93,18 @@ function parseCircleIds(csv: string | undefined): string[] {
 }
 
 /**
- * When the stored token is NOT a durable node credential (`nod_`) and stdin is
- * interactive, offer the `node enroll` flow so the backup node runs on a
- * least-privilege, never-expiring credential instead of a PAT that will
- * expire. Returns the (possibly refreshed) config.
+ * When the stored token is NOT a durable node credential (`nod_`), suggest `memoriahub node enroll`
+ * (a never-expiring, node-scoped credential) instead of a PAT that will expire. Backups run
+ * unattended. Returns the config unchanged.
  */
-async function maybeOfferEnroll(cfg: CliConfig): Promise<CliConfig> {
-  if (cfg.pat.startsWith('nod_') || !isTTY || !process.stdin.isTTY) return cfg;
-
-  ui.info(
-    'Your stored token is a personal access token (PAT). Backups run unattended, ' +
-      'so a durable node credential is recommended.',
-  );
-  const rl = readline.createInterface({ input, output });
-  let answer: string;
-  try {
-    answer = (await rl.question('Mint a node credential now (opens browser login)? [y/N] ')).trim();
-  } finally {
-    rl.close();
-  }
-  if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-    ui.dim('Keeping the existing PAT.');
-    return cfg;
-  }
-
-  try {
-    const result = await enrollNode(
-      { serverUrl: cfg.serverUrl, name: defaultNodeCredentialName(), cfg },
-      {
-        deviceLogin: (url) => runDeviceLogin(url, 'MemoriaHub Backup Enrollment'),
-        makeApi: (o) => new ApiClient(o),
-        saveConfigFn: saveConfig,
-      },
+function maybeOfferEnroll(cfg: CliConfig): CliConfig {
+  if (!cfg.pat.startsWith('nod_') && isTTY) {
+    ui.info(
+      'Your stored token is a personal access token (PAT). Backups run unattended: run ' +
+        '`memoriahub node enroll` once for a durable node credential.',
     );
-    ui.success(`Node credential minted: ${result.credential.name}`);
-  } catch (err) {
-    if (err instanceof NodeEnrollmentUnsupportedError) {
-      ui.warn(err.message);
-      ui.dim('Continuing with the existing PAT.');
-      return cfg;
-    }
-    throw err;
   }
-
-  // enrollNode persisted the new token — re-read the config.
-  const refreshed = loadConfig();
-  return refreshed ?? cfg;
+  return cfg;
 }
 
 function initCmd(): Command {
@@ -167,13 +127,7 @@ function initCmd(): Command {
     .action(async (opts: { dest: string; nodeName?: string; circles?: string }) => {
       let cfg = requireConfig();
 
-      // Offer the least-privilege enroll flow before any API call.
-      try {
-        cfg = await maybeOfferEnroll(cfg);
-      } catch (err) {
-        ui.error(`Enrollment failed: ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      }
+      cfg = maybeOfferEnroll(cfg);
 
       const api = new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat });
       const settings = new SettingsRepo(getDb());
@@ -195,17 +149,16 @@ function initCmd(): Command {
             settings,
             registerNode: async (name) => {
               ui.step(`Registering this machine as worker node "${name}"…`);
-              const reg = await registerWorkerNode({
-                cfg,
-                api,
+              const reg = await api.registerNode({
                 name,
-                concurrency: cfg.node?.concurrency ?? 1,
-                requestedTypes: cfg.node?.eligibleTypes ?? [],
-                faceProvider: cfg.node?.faceProvider ?? 'compreface',
-                comprefaceUrl: cfg.node?.comprefaceUrl,
+                hostname: os.hostname(),
+                platform: os.platform(),
                 cliVersion: cliVersion(),
+                eligibleTypes: [...NODE_JOB_TYPES],
+                concurrency: cfg.node?.concurrency ?? 1,
               });
-              return { nodeId: reg.nodeId, reattached: reg.reattached };
+              saveConfig({ ...cfg, nodeId: reg.nodeId });
+              return { nodeId: reg.nodeId, reattached: reg.reattached === true };
             },
           },
         );

@@ -30,7 +30,7 @@ import type { CliConfig } from '../config.js';
 import { ApiClient } from '../api.js';
 import { getDb } from '../db/database.js';
 import { SettingsRepo } from '../repo/settings.js';
-import { isDaemonRunning } from '../node/ipc-client.js';
+import { isDaemonRunning } from '../backup/ipc-client.js';
 import { executeRun } from '../backup/execute-run.js';
 import { resolveRunKind } from '../backup/reconcile.js';
 import {

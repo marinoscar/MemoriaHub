@@ -132,3 +132,27 @@ export async function isDaemonRunning(socketPath: string = backupSocketPath()): 
     return false;
   }
 }
+
+/**
+ * Sends one command to the backup control socket over a short-lived connection and resolves with the
+ * acknowledgement (or error) frame, or `null` when none arrives in time.
+ */
+export async function sendBackupCommand(
+  command: Record<string, unknown>,
+  options: { socketPath?: string | undefined; timeoutMs?: number | undefined; connect?: typeof connectToDaemon } = {},
+): Promise<DaemonMessage | null> {
+  let client: DaemonClient;
+  try {
+    client = await (options.connect ?? connectToDaemon)(options.socketPath, 2000);
+  } catch {
+    return null;
+  }
+  try {
+    client.send(command);
+    return await client.waitFor((m) => m.kind === 'ack' || m.kind === 'error', options.timeoutMs ?? 2000);
+  } catch {
+    return null;
+  } finally {
+    client.close();
+  }
+}

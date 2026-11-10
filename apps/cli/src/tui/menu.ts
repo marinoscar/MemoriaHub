@@ -45,11 +45,11 @@ function entry(
 
 /**
  * The platform's own screens MemoriaHub's menu does not show: its Login keeps the app fields of the
- * config file (`memoriahub-login`), its node group is the 1.3 one until RETRO-C10, and its job
+ * config file (`memoriahub-login`), and its job
  * monitor is its own (`jobs-monitor`). `createCli({ tuiHiddenScreens })` keeps them off the root
  * menu; they stay routable, but no entry opens them. `deploy` stays listed.
  */
-export const PLATFORM_HIDDEN_SCREENS = ['login', 'invoke', 'status', 'jobs', 'node', 'logout'] as const;
+export const PLATFORM_HIDDEN_SCREENS = ['login', 'invoke', 'status', 'jobs', 'logout'] as const;
 
 /**
  * Root order: Login (logged out only), then the 1.3 root rows, then the platform's
@@ -77,19 +77,9 @@ export const APP_TUI_MENU: readonly TuiMenuNode[] = [
   // A single leaf straight into the dashboard: run / verify / settings are reachable from inside it.
   entry('backup', undefined, 'Backup', 4, 'backup-dashboard'),
 
-  section('node', undefined, 'Worker Node', 5, { subtitle: 'Daily operations first; first-run setup below' }),
-  entry('node-dashboard', 'node', 'Node dashboard', 1, 'node-dashboard'),
-  entry('node-start', 'node', 'Start worker (background)', 2, 'node-start'),
-  entry('node-stop', 'node', 'Stop worker', 3, 'node-stop'),
-  entry('node-logs', 'node', 'Node logs', 4, 'node-logs'),
-  entry('node-doctor', 'node', 'Node doctor', 5, 'node-doctor'),
-  // ---- first-run setup ----
-  entry('node-enroll', 'node', 'Enroll node (login + credential)', 6, 'node-enroll'),
-  entry('node-install-deps', 'node', 'Install dependencies (Linux)', 7, 'node-install-deps'),
-  entry('node-register', 'node', 'Register node', 8, 'node-register'),
-  entry('node-config', 'node', 'Node config', 9, 'node-config'),
-  entry('node-list', 'node', 'List nodes', 10, 'node-list'),
-  entry('node-service', 'node', 'Node service (systemd)', 11, 'node-service'),
+  // The worker node screen is the platform's (RETRO-C10, #616): dashboard, doctor, logs, register and
+  // enroll. Start, stop, install-deps, service and list are the `memoriahub node ...` commands.
+  entry('node', undefined, 'Worker Node', 5, 'node'),
 
   // The report registry, plus the live job-queue monitor (a live report over the server queue).
   section('reports', undefined, 'Reports', 6),
