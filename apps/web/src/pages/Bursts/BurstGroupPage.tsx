@@ -26,7 +26,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import type { BurstGroupMember, GroupResolveAction } from '../../services/bursts';
-import { formatCivilDateTime } from '../../utils/civilDate';
+import { formatCivilDateTime } from '@marinoscar/memoriahub-web/media/headless';
 
 interface MemberCardProps {
   member: BurstGroupMember;

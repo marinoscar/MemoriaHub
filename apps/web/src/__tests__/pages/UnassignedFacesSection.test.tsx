@@ -29,13 +29,15 @@ vi.mock('../../hooks/useUnassignedFaces', () => ({
   useUnassignedFaces: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
   getMedia: vi.fn().mockResolvedValue({
     id: 'media-1',
     thumbnailUrl: 'https://example.com/thumb.jpg',
     downloadUrl: 'https://example.com/full.jpg',
   }),
+
 }));
 
 vi.mock('../../services/face', () => ({

@@ -10,7 +10,7 @@ import {
   dismissDuplicateGroup,
 } from '../services/duplicates';
 import { useIsMounted } from './useIsMounted';
-import type { SortOrder } from '../types/media';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   DuplicateGroupStatus,
   DuplicateGroupKind,

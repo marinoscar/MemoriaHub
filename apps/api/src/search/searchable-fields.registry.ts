@@ -36,7 +36,7 @@ import {
   whereExcludeArchived,
   wherePeople,
   whereNear,
-} from './media-where.builder';
+} from '@marinoscar/memoriahub-api/media';
 
 export type SearchFieldType = 'string' | 'enum' | 'date-range' | 'boolean' | 'geo' | 'person-set' | 'geo-radius';
 

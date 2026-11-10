@@ -29,12 +29,12 @@ import CloseIcon from '@mui/icons-material/Close';
 import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { PersonMultiSelect } from './PersonMultiSelect';
-import { LocationPickerMap } from '../media/LocationPickerMap';
+import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
 import type { SearchRequest } from '../../services/search';
-import { getExploreTags, getLocationFacets } from '../../services/media';
-import type { LocationCountry } from '../../services/media';
-import type { ExploreItem } from '../../services/media';
-import { civilDayRange, instantDayRange } from '../../utils/dateRangeBounds';
+import { getExploreTags, getLocationFacets } from '@marinoscar/memoriahub-web/media/headless';
+import type { LocationCountry } from '@marinoscar/memoriahub-web/media/headless';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import { civilDayRange, instantDayRange } from '@marinoscar/memoriahub-web/media/headless';
 import { useAuth } from '../../contexts/AuthContext';
 
 // ---------------------------------------------------------------------------

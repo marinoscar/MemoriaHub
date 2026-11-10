@@ -17,7 +17,7 @@ import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';
 import { useTrashEmptyRunItems } from '../../hooks/useTrashEmptyRunItems';
 import { useRunPolling } from '../../hooks/useRunPolling';
-import { cancelTrashEmptyRun } from '../../services/trashEmptyRuns';
+import { cancelTrashEmptyRun } from '@marinoscar/memoriahub-web/media/headless';
 import RunProgressPanel from '../../components/runs/RunProgressPanel';
 import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
 import {
@@ -34,7 +34,7 @@ import {
   runStatusColor,
   runStatusLabel,
 } from '../../utils/runFormat';
-import type { TrashEmptyRunDetail, TrashEmptyRunItem } from '../../types/trashEmptyRuns';
+import type { TrashEmptyRunDetail, TrashEmptyRunItem } from '@marinoscar/memoriahub-web/media/headless';
 
 /**
  * Persistence key for the failed-items table's column/density choices

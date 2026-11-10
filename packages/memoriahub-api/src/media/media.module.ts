@@ -26,6 +26,10 @@ export interface MediaModuleOptions {
  * the upload fan-out registry and service, the sidecar touch service, the `upload_completed`
  * producer and the Media Sync device service.
  *
+ * The slice's controllers (`MediaSyncController`, ...) are exported classes, not mounted by
+ * `forRoot()`: the host lists them in the `controllers` of the module where its routes belong, so
+ * the order of its OpenAPI document (which follows module order) stays the host's decision.
+ *
  * Import it ONCE in the host (the registry is a singleton) and re-export it from the
  * host's own media module.
  *

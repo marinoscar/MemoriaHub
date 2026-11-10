@@ -21,7 +21,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render, flushPendingAsyncWork } from '../../utils/test-utils';
 import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
-import type { MediaItem } from '../../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Mock react-router-dom's useNavigate (keep everything else real).
@@ -38,7 +38,8 @@ vi.mock('react-router-dom', async () => {
 // ---------------------------------------------------------------------------
 // Mock media service — mirrors MediaDetailDrawerArchive.test.tsx's set.
 // ---------------------------------------------------------------------------
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   patchMedia: vi.fn(),
   getMedia: vi.fn(),
   bulkArchive: vi.fn(),
@@ -47,9 +48,17 @@ vi.mock('../../../services/media', () => ({
   bulkUpdateMedia: vi.fn(),
   bulkTags: vi.fn(),
   listTags: vi.fn().mockResolvedValue([]),
+
+  getMediaMetadataStatus: vi.fn().mockResolvedValue({
+    status: 'not_processed',
+    processedAt: null,
+    lastError: null,
+  }),
+  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
+
 }));
 
-import { getMedia } from '../../../services/media';
+import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockGetMedia = vi.mocked(getMedia);
 
@@ -93,14 +102,7 @@ vi.mock('../../../services/tagging', () => ({
   rerunMediaTags: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
 }));
 
-vi.mock('../../../services/metadata', () => ({
-  getMediaMetadataStatus: vi.fn().mockResolvedValue({
-    status: 'not_processed',
-    processedAt: null,
-    lastError: null,
-  }),
-  rerunMediaMetadata: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
-}));
+
 
 // ---------------------------------------------------------------------------
 // Mock VideoPlayer and LocationMiniMap (avoid heavy deps in tests)
@@ -109,19 +111,16 @@ vi.mock('../../../components/media/VideoPlayer', () => ({
   VideoPlayer: ({ src }: any) => <div data-testid="video-player" data-src={src} />,
 }));
 
-vi.mock('../../../components/media/LocationMiniMap', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   LocationMiniMap: ({ lat, lng }: any) => (
     <div data-testid="location-mini-map" data-lat={lat} data-lng={lng} />
   ),
-}));
 
-vi.mock('../../../components/media/LocationPickerMap', () => ({
   LocationPickerMap: ({ onChange }: any) => (
     <div data-testid="location-picker-map" onClick={() => onChange({ lat: 10, lng: 20 })} />
   ),
-}));
 
-vi.mock('../../../components/media/TagAutocomplete', () => ({
   TagAutocomplete: ({ label, value, onChange }: any) => (
     <div data-testid={`tag-autocomplete-${label.toLowerCase().replace(/\s/g, '-')}`}>
       <input
@@ -131,7 +130,12 @@ vi.mock('../../../components/media/TagAutocomplete', () => ({
       />
     </div>
   ),
+
 }));
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Factories

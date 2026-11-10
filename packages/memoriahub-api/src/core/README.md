@@ -4,7 +4,7 @@ The runtime a host and every slice share: the module that binds the ports, the d
 
 ## Purpose and scope
 
-`MemoriahubPortsModule.forRoot({ ports })` is a global Nest module that provides every port token from the host's bindings and fails at start-up, naming every missing required port. Around it: the no-op audit, webhook and metrics ports and the in-process event emitter a host that binds nothing gets; the `Prisma.sql|raw|join` helper (from the optional `@prisma/client-runtime-utils` peer, loaded on first use); `MemoriahubError` (a domain refusal with a machine-readable `reason`); `asJobError` and `aiRateLimit` (an AI rate limit becomes the queue's deferral); and `isFeatureEnabled` (a `features.<flag>` setting AND its kill switch). Status: experimental until the first published release.
+`MemoriahubPortsModule.forRoot({ ports })` is a global Nest module that provides every port token from the host's bindings and fails at start-up, naming every missing required port. Around it: the no-op audit, webhook and metrics ports and the in-process event emitter a host that binds nothing gets; the `Prisma.sql|raw|join` helper (from the optional `@prisma/client-runtime-utils` peer, loaded on first use); `MemoriahubError` (a domain refusal with a machine-readable `reason`); `asJobError` and `aiRateLimit` (an AI rate limit becomes the queue's deferral); `isFeatureEnabled` (a `features.<flag>` setting AND its kill switch), and the identity-backed guard: `@MemoriahubAuth({ permissions?, roles?, anyPermissions?, credentials?, public? })`, `@MemoriahubPublic()`, `@MemoriahubCurrentUser()` and `@MemoriahubAuthCredential()` over the `MEMORIAHUB_IDENTITY` port, so a slice's controllers live in the package without importing the host. The decorator writes the metadata keys and the OpenAPI `x-rbac` extension the web edition's `@Auth()` writes, and the guard refuses with the same messages; `describeMemoriahubAuthGuardConformance` (in `/testing`) proves a binding does. Status: experimental until the first published release.
 
 ## Entry point
 
@@ -12,7 +12,7 @@ The runtime a host and every slice share: the module that binds the ports, the d
 
 ## Peer dependencies
 
-`@nestjs/common`, and the optional `@prisma/client-runtime-utils` (only when a slice builds raw SQL).
+`@nestjs/common`, and the optional `@prisma/client-runtime-utils` (only when a slice builds raw SQL), `@nestjs/core` and `@nestjs/swagger` (only the guard and its decorators).
 
 ## Configuration
 
@@ -20,4 +20,4 @@ The runtime a host and every slice share: the module that binds the ports, the d
 
 ## Extension-point catalog
 
-`MemoriahubPortsModule` and `MemoriahubPortBindings` are the one extension point: the host's choice of binding for each port.
+`MemoriahubPortsModule` and `MemoriahubPortBindings`: the host's choice of binding for each port. `MemoriahubAuthGuard`: it decides every protected route of a slice, over whatever the host binds to `MEMORIAHUB_IDENTITY`.

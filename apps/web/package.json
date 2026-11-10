@@ -20,6 +20,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@marinoscar/memoriahub-contract": "*",
+    "@marinoscar/memoriahub-web": "*",
     "@marinoscar/platform-contract": "0.1.0-next.29",
     "@marinoscar/platform-web": "0.1.0-next.29",
     "@mui/icons-material": "^9.1.1",

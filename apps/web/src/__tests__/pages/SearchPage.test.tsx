@@ -33,15 +33,19 @@ vi.mock('../../hooks/usePeople', () => ({
   usePeople: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getExploreLocations: vi
     .fn()
     .mockResolvedValue({ countries: [], regions: [], cities: [] }),
   getExploreTags: vi.fn().mockResolvedValue([]),
+
 }));
 
-vi.mock('../../components/media/MediaGallery', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
+
 }));
 
 vi.mock('../../components/search/SearchPanel', () => ({
@@ -177,7 +181,7 @@ describe('SearchPage', () => {
     });
 
     it('shows "See all places" button for the Countries section when countries are loaded', async () => {
-      const { getExploreLocations } = await import('../../services/media');
+      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
         regions: [],
@@ -192,7 +196,7 @@ describe('SearchPage', () => {
     });
 
     it('navigates to /places when "See all places" is clicked', async () => {
-      const { getExploreLocations } = await import('../../services/media');
+      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
         regions: [],
@@ -209,7 +213,7 @@ describe('SearchPage', () => {
     });
 
     it('shows "View all" button for the Tags section when tags are loaded', async () => {
-      const { getExploreTags } = await import('../../services/media');
+      const { getExploreTags } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreTags).mockResolvedValue([
         { name: 'sunset', count: 7, coverThumbnailUrl: null },
       ]);
@@ -378,7 +382,7 @@ describe('SearchPage', () => {
   // -------------------------------------------------------------------------
   describe('Explore data', () => {
     it('shows Countries from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('../../services/media');
+      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
         regions: [],
@@ -393,7 +397,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Regions from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('../../services/media');
+      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [],
         regions: [{ name: 'Provence', count: 6, coverThumbnailUrl: null }],
@@ -408,7 +412,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Cities from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('../../services/media');
+      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [],
         regions: [],
@@ -423,7 +427,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Tags from the explore endpoint', async () => {
-      const { getExploreTags } = await import('../../services/media');
+      const { getExploreTags } = await import('@marinoscar/memoriahub-web/media/headless');
       vi.mocked(getExploreTags).mockResolvedValue([
         { name: 'beach', count: 5, coverThumbnailUrl: null },
       ]);

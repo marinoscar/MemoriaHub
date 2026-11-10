@@ -25,12 +25,14 @@ vi.mock('../../hooks/useUnassignedFaces', () => ({
   useUnassignedFaces: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn().mockResolvedValue({
     id: 'media-1',
     thumbnailUrl: 'https://example.com/thumb.jpg',
     downloadUrl: null,
   }),
+
 }));
 
 const mockNavigate = vi.fn();

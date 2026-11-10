@@ -24,13 +24,14 @@ import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../__tests__/utils/test-utils';
 import { MediaLightbox } from '../MediaLightbox';
-import type { MediaItem } from '../../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared before any import of the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
   patchMedia: vi.fn(),
   // Other exports used by unrelated pages — include stubs so the module resolves
@@ -41,6 +42,7 @@ vi.mock('../../../services/media', () => ({
   registerMedia: vi.fn(),
   listAlbums: vi.fn(),
   exportMedia: vi.fn(),
+
 }));
 
 // Stub out VideoPlayer — Vidstack pulls in heavy DOM internals that break jsdom.
@@ -54,7 +56,7 @@ vi.mock('../VideoPlayer', () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { getMedia, patchMedia } from '../../../services/media';
+import { getMedia, patchMedia } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockGetMedia = vi.mocked(getMedia);
 const mockPatchMedia = vi.mocked(patchMedia);

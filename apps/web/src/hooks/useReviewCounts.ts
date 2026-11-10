@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-import type { ReviewCountsResponse } from '../types/media';
-import { getReviewCounts } from '../services/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
+import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
 import { useOwnerScope } from './useOwnerScope';
 import { useIsMounted } from './useIsMounted';
 

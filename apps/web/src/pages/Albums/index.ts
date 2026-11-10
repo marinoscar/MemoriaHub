@@ -1,1 +1,1 @@
-export { default } from './AlbumsPage';
+export { default } from '@marinoscar/memoriahub-web/media/ui';

@@ -44,8 +44,8 @@ import type {
   DuplicateResolveAction,
   DuplicateSortBy,
 } from '../../services/duplicates';
-import type { SortOrder } from '../../types/media';
-import { formatCivilDateTime } from '../../utils/civilDate';
+import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
+import { formatCivilDateTime } from '@marinoscar/memoriahub-web/media/headless';
 
 const KIND_LABELS: Record<DuplicateGroupKind, string> = {
   exact_variant: 'Exact copy',

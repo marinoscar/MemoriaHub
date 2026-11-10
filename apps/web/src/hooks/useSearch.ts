@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { getSearchFields, performSearch } from '../services/search';
 import { useIsMounted } from './useIsMounted';
 import type { SearchField, SearchRequest, SearchResponse } from '../services/search';
-import type { MediaItem, MediaListMeta } from '../types/media';
+import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
 
 export function useSearch() {
   const [fields, setFields] = useState<SearchField[]>([]);

@@ -31,7 +31,7 @@ export function errorReason(err: unknown): string | null {
 }
 
 export const ANDROID_APP_SETTINGS_PATH = '/settings/android-app';
-export const MEDIA_SYNC_SETTINGS_PATH = '/settings/media-sync';
+export { MEDIA_SYNC_SETTINGS_PATH } from '@marinoscar/memoriahub-web/shell';
 export const ANDROID_APP_ADMIN_PATH = '/admin/settings/android';
 
 /** Whether an error is the latest-release route's "nothing published". */

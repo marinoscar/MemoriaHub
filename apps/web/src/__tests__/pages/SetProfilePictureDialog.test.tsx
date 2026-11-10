@@ -28,9 +28,11 @@ vi.mock('../../hooks/useUnassignedFaces', () => ({
   useUnassignedFaces: vi.fn(),
 }));
 
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn(),
   getMedia: vi.fn(),
+
 }));
 
 vi.mock('../../services/face', () => ({
@@ -64,7 +66,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 import PeoplePage from '../../pages/People/PeoplePage';
 import { usePeople, usePerson } from '../../hooks/usePeople';
 import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
-import * as mediaService from '../../services/media';
+import * as mediaService from '@marinoscar/memoriahub-web/media/headless';
 import * as faceService from '../../services/face';
 import type { PersonListItem, PersonDetail } from '../../services/face';
 

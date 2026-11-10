@@ -1,5 +1,5 @@
 import { Box } from '@mui/material';
-import { MediaSelectionCheckbox } from '../media/MediaSelectionCheckbox';
+import { MediaSelectionCheckbox } from '@marinoscar/memoriahub-web/media/ui';
 
 interface SelectionCheckboxOverlayProps {
   checked: boolean;

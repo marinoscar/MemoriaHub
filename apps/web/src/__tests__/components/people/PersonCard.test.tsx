@@ -20,12 +20,14 @@ vi.mock('../../../components/people/PersonAvatar', () => ({
 
 // PersonCard doesn't call getMedia directly any more, but mock it just in case
 // a transitive import resolves it.
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn().mockResolvedValue({
     id: 'media-1',
     thumbnailUrl: 'https://example.com/thumb.jpg',
     downloadUrl: 'https://example.com/full.jpg',
   }),
+
 }));
 
 // ---------------------------------------------------------------------------

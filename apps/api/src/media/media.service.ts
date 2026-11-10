@@ -45,7 +45,7 @@ import {
   type RecordAction,
   type RecordType,
 } from '../platform/sharing/record-access';
-import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
+import { andWhere, buildMediaWhere, wherePeople } from '@marinoscar/memoriahub-api/media';
 import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from './geo/geo-location-provider.interface';
 import { LocationGroupResolverService } from '../location-groups/location-group-resolver.service';
 import { fold } from '../location-groups/normalize-location-name';

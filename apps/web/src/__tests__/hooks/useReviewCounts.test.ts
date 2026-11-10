@@ -5,13 +5,15 @@ import {
   refreshReviewCounts,
   __resetReviewCountsForTests,
 } from '../../hooks/useReviewCounts';
-import type { ReviewCountsResponse } from '../../types/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------
 // Mock getReviewCounts service
 // ---------------------------------------------------------------------------
-vi.mock('../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getReviewCounts: vi.fn(),
+
 }));
 
 // ---------------------------------------------------------------------------
@@ -21,7 +23,7 @@ vi.mock('../../hooks/useOwnerScope', () => ({
   useOwnerScope: vi.fn(),
 }));
 
-import { getReviewCounts } from '../../services/media';
+import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 
 const mockGetReviewCounts = vi.mocked(getReviewCounts);

@@ -3,6 +3,8 @@ import {
   reportMaintenanceBlock,
 } from '@marinoscar/platform-web/host/headless';
 
+import { MemoriahubApiError } from '@marinoscar/memoriahub-web/core/headless';
+
 import { rewriteBody, rewriteEndpoint } from './ownerScopeParams';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -233,14 +235,11 @@ class ApiService {
   }
 }
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public code?: string,
-    public details?: unknown,
-  ) {
-    super(message);
+// Extends the packaged error so a packaged slice's `instanceof` check recognises
+// what this client throws (`@marinoscar/memoriahub-web/core/headless`).
+export class ApiError extends MemoriahubApiError {
+  constructor(message: string, status: number, code?: string, details?: unknown) {
+    super(message, status, code, details);
     this.name = 'ApiError';
   }
 }
@@ -262,6 +261,9 @@ export class MaintenanceError extends ApiError {
 }
 
 export const api = new ApiService();
+
+/** The owner-scope rewrite of an endpoint, for the packaged calls that bypass this client (an export download). */
+export { rewriteEndpoint };
 
 // Import types
 import type {

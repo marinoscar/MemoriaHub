@@ -26,8 +26,8 @@ vi.mock('../../../hooks/useWorkflowMutations', () => ({ useWorkflowMutations: vi
 // a real (debounced) network call or leaves a dangling timer — preview
 // behavior itself is covered by WorkflowPreviewPanel.test.tsx.
 vi.mock('../../../hooks/useWorkflowPreview', () => ({ useWorkflowPreview: vi.fn() }));
-vi.mock('../../../services/media', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../services/media')>();
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>();
   return {
     ...actual,
     getExploreTags: vi.fn().mockResolvedValue([]),

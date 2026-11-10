@@ -23,7 +23,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import type { MediaItem } from '../../types/media';
+import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 import { useMediaEnhance } from '../../hooks/useMediaEnhance';
 import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
 import { BeforeAfterSlider } from './BeforeAfterSlider';

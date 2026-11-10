@@ -20,9 +20,10 @@
 import type { ShellProvider } from '@marinoscar/platform-web/shell/headless';
 import { NotificationProvider } from '@marinoscar/platform-web/notifications/headless';
 import { AiConfigProvider } from '@marinoscar/platform-web/ai/headless';
-import { MediaRefreshProvider } from '../contexts/MediaRefreshContext';
-import { MediaPreviewProvider } from '../contexts/MediaPreviewContext';
+import { MediaRefreshProvider } from '@marinoscar/memoriahub-web/media/headless';
+import { MediaPreviewProvider } from '@marinoscar/memoriahub-web/media/headless';
 import { SearchProvider } from '../contexts/SearchContext';
+import { MemoriahubSearchBridge } from '../platform-memoriahub/HostBinding';
 
 export const APP_SHELL_PROVIDERS: readonly ShellProvider[] = [
   NotificationProvider,
@@ -30,4 +31,6 @@ export const APP_SHELL_PROVIDERS: readonly ShellProvider[] = [
   MediaPreviewProvider,
   SearchProvider,
   AiConfigProvider,
+  // RETRO-J11 (#626): adds the search surface to the packaged slices' host (needs `SearchProvider`).
+  MemoriahubSearchBridge,
 ];

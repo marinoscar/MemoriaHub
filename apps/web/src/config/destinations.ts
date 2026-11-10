@@ -22,6 +22,8 @@
  */
 
 import { resolveActiveDestination as resolveShellDestination } from '@marinoscar/platform-web/shell/headless';
+// RETRO-J11 (#626): the prefixes the packaged pages own, as data.
+import { memoriahubDestinationRoutes } from '@marinoscar/memoriahub-web/shell';
 
 export type DestinationKey = 'photos' | 'collections' | 'search' | 'review' | 'console';
 
@@ -38,18 +40,15 @@ export { owns } from '@marinoscar/platform-web/shell/headless';
  * do not need their own entries.
  */
 export const DESTINATION_ROUTES: Record<DestinationKey, readonly string[]> = {
-  photos: ['/', '/media'],
+  photos: [...memoriahubDestinationRoutes.photos],
   collections: [
     '/collections',
-    '/albums',
     '/people',
-    '/places',
     '/memories',
-    '/map',
-    '/archive',
-    '/trash',
     '/tags',
     '/shared',
+    // '/albums', '/places', '/map', '/archive' and '/trash' are the packaged media pages'.
+    ...memoriahubDestinationRoutes.collections,
   ],
   search: ['/search'],
   review: [

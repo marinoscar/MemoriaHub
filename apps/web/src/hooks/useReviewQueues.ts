@@ -29,7 +29,7 @@
  */
 
 import { useMemo } from 'react';
-import type { ReviewCountsResponse } from '../types/media';
+import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { ReviewQueueDef, ReviewQueueFlag } from '../config/reviewQueues';
 import { REVIEW_QUEUES } from '../config/reviewQueues';
 import { useFeatureFlags } from './useFeatureFlags';

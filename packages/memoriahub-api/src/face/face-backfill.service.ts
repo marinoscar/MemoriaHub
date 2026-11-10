@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA, type MemoriahubAccessPort } from '../ports/index.js';
-import { whereCapturedAtRange } from './host/captured-at-range.js';
+import { whereDateRange } from '../media/index.js';
 import type { FaceDb } from './host/face-db.js';
 import { JobReason, MediaFaceStatusType, MediaType } from './host/face-enums.js';
 import { FaceJobs } from './host/face-jobs.js';
@@ -30,7 +30,7 @@ export class FaceBackfillService {
 
     const from = opts.from ? new Date(opts.from) : undefined;
     const to = opts.to ? new Date(opts.to) : undefined;
-    const dateWhere = whereCapturedAtRange(from, to);
+    const dateWhere = whereDateRange(from, to);
 
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {

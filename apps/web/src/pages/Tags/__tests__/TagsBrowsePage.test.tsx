@@ -21,8 +21,10 @@ vi.mock('../../../hooks/useOwnerScope', () => ({
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../../services/media', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getExploreTags: vi.fn(),
+
 }));
 
 const mockNavigate = vi.fn();
@@ -40,7 +42,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 import TagsBrowsePage from '../TagsBrowsePage';
 import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { getExploreTags } from '../../../services/media';
+import { getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetExploreTags = vi.mocked(getExploreTags);

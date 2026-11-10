@@ -21,7 +21,7 @@ import { RequestUser } from '@marinoscar/platform-api/identity';
 import { EnhanceParams } from './dto/enhance-params.dto';
 import { BulkEnhance } from './dto/bulk-enhance.dto';
 import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
-import { andWhere, buildMediaWhere, wherePeople } from '../search/media-where.builder';
+import { andWhere, buildMediaWhere, wherePeople } from '@marinoscar/memoriahub-api/media';
 import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
 import {
   ListEnhancementsQuery,

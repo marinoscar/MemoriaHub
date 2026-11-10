@@ -11,8 +11,8 @@ import {
 } from '@mui/material';
 import DeleteOutlined from '@mui/icons-material/DeleteOutlined';
 import { ConditionValueEditor } from './ConditionValueEditor';
-import type { ExploreItem } from '../../../services/media';
-import type { Album } from '../../../types/media';
+import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import type { Album } from '@marinoscar/memoriahub-web/media/headless';
 import type {
   WorkflowFieldDescriptor,
   WorkflowLeafCondition,
