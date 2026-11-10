@@ -53,3 +53,7 @@ worktrees/
 .cache/
 nul
 openapi.json
+
+# Generated package artifacts (RETRO-J1)
+packages/*/docs-api/
+packages/memoriahub-*/LICENSE

@@ -1,0 +1,5 @@
+{
+  "name": "memoriahub-packages-fixture",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

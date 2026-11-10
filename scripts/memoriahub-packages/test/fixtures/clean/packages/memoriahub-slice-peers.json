@@ -1,0 +1,7 @@
+{
+  "$universal": { "memoriahub-api": ["core"], "memoriahub-web": ["core"] },
+  "$implies": { "react-dom": ["react"] },
+  "$hostOnly": { "memoriahub-api": ["@marinoscar/platform-api"] },
+  "memoriahub-api": { "core": { "peers": ["zod"] } },
+  "memoriahub-web": { "core": { "peers": ["react", "react-dom"] } }
+}
