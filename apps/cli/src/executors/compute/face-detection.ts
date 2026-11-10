@@ -31,8 +31,7 @@ import {
   COMPREFACE_PROVIDER_KEY,
 } from '@memoriahub/enrichment-compute/face-compreface';
 
-import { loadConfig } from '../../config.js';
-import { DEFAULT_COMPREFACE_URL, type ComputeFn } from '../capabilities.js';
+import { comprefaceUrl as resolveComprefaceUrl, type ComputeFn } from '../support.js';
 
 /**
  * Downscale ceiling before detection — MUST match the server's
@@ -45,10 +44,7 @@ const FACE_MAX_IMAGE_DIM = 2000;
 
 const computeFaceDetection: ComputeFn = async (inputPath, _params) => {
   const buffer = fs.readFileSync(inputPath);
-  const cfg = loadConfig();
-  // A genuinely unset provider (node never explicitly configured one)
-  // defaults to CompreFace — the only supported provider.
-  const comprefaceUrl = cfg?.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
+  const comprefaceUrl = resolveComprefaceUrl();
 
   // Same EXIF-orientation + downscale step the server runs before detection.
   const prepared = await prepareImageForProcessing(buffer, { maxDim: FACE_MAX_IMAGE_DIM });

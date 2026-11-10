@@ -22,7 +22,7 @@
  * `{ runId: string, items: [{ mediaItemId, actionResults?: [{ type, status }] }] }`.
  */
 
-import { CapabilityUnavailableError, type ComputeFn } from '../capabilities.js';
+import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
 
 interface FrozenAction {
   type?: unknown;

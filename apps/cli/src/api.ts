@@ -527,6 +527,7 @@ export interface NodeRegisterBody {
 }
 
 export interface NodeRegisterResult {
+  /** The node's id (the platform answers `{ node: { id } }`; the 1.3 answer was `{ nodeId }`). */
   nodeId: string;
   /** True when the server re-attached to an existing (owner, name) node row
    * instead of creating a new one. Optional for older-server compatibility. */
@@ -1183,7 +1184,9 @@ export class ApiClient {
 
   /** Register this machine as a worker node; returns the assigned nodeId. */
   registerNode(body: NodeRegisterBody): Promise<NodeRegisterResult> {
-    return this.post<NodeRegisterResult>('/api/nodes/register', body);
+    return this.post<{ nodeId?: string; node?: { id?: string }; reattached?: boolean }>('/api/nodes/register', body).then(
+      (res) => ({ nodeId: res.node?.id ?? res.nodeId ?? '', reattached: res.reattached }),
+    );
   }
 
   /** Deregister a worker node (called on graceful shutdown). */

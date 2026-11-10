@@ -15,7 +15,7 @@
  * BackupTypedEmitter proxy until the run-finished event arrives.
  */
 
-import type { DaemonClient, DaemonMessage } from '../node/ipc-client.js';
+import type { DaemonClient, DaemonMessage } from './ipc-client.js';
 import {
   BACKUP_EV,
   BackupTypedEmitter,

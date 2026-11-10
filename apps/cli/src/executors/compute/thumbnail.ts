@@ -50,12 +50,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { extractPosterFrame } from '@memoriahub/enrichment-compute/video';
-import {
-  CapabilityUnavailableError,
-  type ComputeFn,
-} from '../capabilities.js';
-import { ApiClient } from '../../api.js';
-import { loadConfig } from '../../config.js';
+import { CapabilityUnavailableError, putToPresignedUrl, type ComputeFn } from '../support.js';
 
 /** Mirrors ThumbnailProcessor's THUMBNAIL_MAX_DIM default (env-configurable server-side). */
 const THUMBNAIL_MAX_DIM = 800;
@@ -136,27 +131,11 @@ const computeThumbnail: ComputeFn = async (inputPath, _params, ctx): Promise<Thu
     }
   }
 
-  // --- 2. Job context required to request an upload URL — see file header ---
-  if (!ctx) {
-    throw new Error(
-      'job context not provided — thumbnail compute needs { nodeId, jobId } to request an ' +
-        'upload URL via ComputeDispatcher.compute(); the running node engine always supplies ' +
-        'this, so seeing this error means the dispatcher was invoked directly without it ' +
-        '(e.g. from a test harness) — see ../capabilities.ts',
-    );
-  }
+  // --- 2. Ask the server where to PUT the bytes (it chooses the key), then upload directly ---
+  const target = await ctx.api.uploadUrl(ctx.nodeId, ctx.jobId, 'image/jpeg', ctx.claimToken);
+  await putToPresignedUrl(target.url, jpegBuffer, 'image/jpeg');
 
-  // --- 3. Ask the server where to PUT the bytes, then upload directly ---
-  const config = loadConfig();
-  if (!config) {
-    throw new Error('not logged in — no CLI config found (run `memoriahub login`)');
-  }
-  const client = new ApiClient({ serverUrl: config.serverUrl, pat: config.pat });
-
-  const { url, storageKey } = await client.getJobUploadUrl(ctx.nodeId, ctx.jobId);
-  await client.putRaw(url, jpegBuffer, 'image/jpeg');
-
-  return { storageKey, width, height, bytes: jpegBuffer.length };
+  return { storageKey: target.key, width, height, bytes: jpegBuffer.length };
 };
 
 export default computeThumbnail;

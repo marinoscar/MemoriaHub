@@ -7,7 +7,7 @@
  */
 
 import * as net from 'node:net';
-import { nodeSocketPath } from '../paths.js';
+import { backupSocketPath } from './socket-path.js';
 import { NdjsonParser, encodeNdjson } from './ndjson.js';
 
 /** Any frame received from the daemon (kind discriminates). */
@@ -33,7 +33,7 @@ export interface DaemonClient {
 
 /** Connect to the daemon socket; rejects when nothing is listening. */
 export function connectToDaemon(
-  socketPath: string = nodeSocketPath(),
+  socketPath: string = backupSocketPath(),
   timeoutMs = 2000,
 ): Promise<DaemonClient> {
   return new Promise((resolve, reject) => {
@@ -123,7 +123,7 @@ export function connectToDaemon(
 }
 
 /** Probe whether a daemon is accepting connections on the socket. */
-export async function isDaemonRunning(socketPath: string = nodeSocketPath()): Promise<boolean> {
+export async function isDaemonRunning(socketPath: string = backupSocketPath()): Promise<boolean> {
   try {
     const client = await connectToDaemon(socketPath, 500);
     client.close();

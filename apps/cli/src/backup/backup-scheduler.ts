@@ -30,7 +30,7 @@
  */
 
 import type { NodeBackupConfigResult } from '../api.js';
-import type { NodeLogger } from '../node/logger.js';
+import type { BackupLogger } from './logger.js';
 
 /** Normal poll cadence. */
 export const SCHEDULER_POLL_INTERVAL_MS = 60_000;
@@ -53,7 +53,7 @@ export interface BackupSchedulerOpts {
 
 export interface BackupSchedulerDeps {
   api: BackupSchedulerApi;
-  logger: NodeLogger;
+  logger: BackupLogger;
   /** True while a local backup run is active — a due schedule is skipped. */
   isRunActive: () => boolean;
   /**

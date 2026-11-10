@@ -14,7 +14,6 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
 
 import {
   createClipSession,
@@ -25,10 +24,10 @@ import {
 } from '@memoriahub/enrichment-compute/clip';
 import { computeDHash } from '@memoriahub/enrichment-compute/dhash';
 
-import { modelsDir } from '../../paths.js';
-import { CapabilityUnavailableError, type ComputeFn } from '../capabilities.js';
-
-const CLIP_MODEL_FILENAME = 'clip-vit-b32-vision-quantized.onnx';
+import { clipStats } from './clip-state.js';
+import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
+import { clipModelPath } from '../models.js';
+import { appWorkerEnv } from '../../worker-env.js';
 
 /** Session type derived from the factory so onnxruntime-node types aren't imported directly. */
 type ClipSession = Awaited<ReturnType<typeof createClipSession>>;
@@ -40,7 +39,7 @@ type ClipSession = Awaited<ReturnType<typeof createClipSession>>;
  * overrides; `0` disables. See `DEFAULT_CLIP_RECYCLE_AFTER`.
  */
 function resolveRecycleAfter(): number {
-  const env = process.env['MEMORIAHUB_CLIP_RECYCLE_AFTER'];
+  const env = process.env[appWorkerEnv.clipRecycleAfter];
   if (env !== undefined && env.trim() !== '') {
     const n = Number.parseInt(env, 10);
     if (Number.isFinite(n) && n >= 0) return n;
@@ -69,10 +68,10 @@ let holderLoadPromise: Promise<SessionHolder> | null = null;
 function getHolder(): Promise<SessionHolder> {
   if (currentHolder) return Promise.resolve(currentHolder);
   if (!holderLoadPromise) {
-    const modelPath = path.join(process.env.MODELS_DIR ?? modelsDir(), CLIP_MODEL_FILENAME);
+    const modelPath = clipModelPath();
     if (!fs.existsSync(modelPath)) {
       throw new CapabilityUnavailableError(
-        'CLIP model not present — run `node doctor`/`node start` to download models',
+        'CLIP model not present — run `memoriahub node models pull`',
         'onnxruntime',
       );
     }
@@ -107,6 +106,8 @@ function maybeRetire(holder: SessionHolder, recycleAfter: number): void {
   if (recycleAfter <= 0) return;
   if (!holder.retiring && holder.useCount >= recycleAfter) {
     holder.retiring = true;
+    clipStats.recycles += 1;
+    clipStats.sessionEmbeds = 0;
     if (currentHolder === holder) currentHolder = null;
   }
   if (holder.retiring && holder.inFlight === 0 && !holder.released) {
@@ -124,6 +125,8 @@ async function embedWithRecycling(buffer: Buffer): Promise<number[] | null> {
   } finally {
     holder.inFlight -= 1;
     holder.useCount += 1;
+    clipStats.embeds += 1;
+    clipStats.sessionEmbeds = holder.useCount;
     maybeRetire(holder, recycleAfter);
   }
 }

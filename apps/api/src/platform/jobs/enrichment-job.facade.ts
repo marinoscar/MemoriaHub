@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import type { EnrichmentJob, JobReason } from '@prisma/client';
 import {
@@ -9,6 +9,7 @@ import {
 } from '@marinoscar/platform-api/jobs';
 
 import { DefaultOrgId } from '../../common/tenancy/default-org-id';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   ENRICHMENT_JOB_SETTLED_EVENT,
   EnrichmentJobSettledEvent,
@@ -82,6 +83,7 @@ export class EnrichmentJobService {
   constructor(
     private readonly jobs: JobsService,
     private readonly defaultOrg: DefaultOrgId,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   async enqueue(input: EnqueueInput): Promise<EnrichmentJob> {
@@ -99,9 +101,11 @@ export class EnrichmentJobService {
     } = input;
 
     const subjectType = mediaItemId ? 'media_item' : circleId ? 'circle' : null;
+    const geocodePayload = type === 'geocode' && mediaItemId ? await this.geocodeCoordinates(mediaItemId) : undefined;
     const subjectId = mediaItemId ?? circleId ?? null;
+    const withCoordinates = geocodePayload ? { ...(payload ?? {}), ...geocodePayload } : payload;
     const storedPayload =
-      mediaItemId && circleId ? { ...(payload ?? {}), circleId } : (payload ?? undefined);
+      mediaItemId && circleId ? { ...(withCoordinates ?? {}), circleId } : (withCoordinates ?? undefined);
 
     const job = await this.jobs.enqueue({
       type,
@@ -124,6 +128,27 @@ export class EnrichmentJobService {
         `reason="${reason}" priority=${priority ?? 0} id=${job.id}`,
     );
     return toEnrichmentJob(job);
+  }
+
+  /**
+   * A `geocode` job carries the item's coordinates (RETRO-C10, #616): a worker node holds no database
+   * access, so the payload is the only place it can learn where to look up. The handler still re-reads
+   * the item when it runs on the server. Best-effort: a failed read enqueues the job without them.
+   */
+  private async geocodeCoordinates(mediaItemId: string): Promise<{ lat: number; lng: number } | undefined> {
+    if (!this.prisma) return undefined;
+    try {
+      const item = await this.prisma.mediaItem.findUnique({
+        where: { id: mediaItemId },
+        select: { takenLat: true, takenLng: true },
+      });
+      if (item && Number.isFinite(item.takenLat) && Number.isFinite(item.takenLng)) {
+        return { lat: item.takenLat as number, lng: item.takenLng as number };
+      }
+    } catch (err) {
+      this.logger.warn(`Could not read coordinates for geocode job of ${mediaItemId}: ${String(err)}`);
+    }
+    return undefined;
   }
 
   /**

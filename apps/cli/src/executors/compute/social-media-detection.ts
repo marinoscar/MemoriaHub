@@ -48,8 +48,8 @@ import {
 import { extractFramesAt } from '@memoriahub/enrichment-compute/video';
 import { createOcrEngine, type OcrEngine } from '@memoriahub/enrichment-compute/ocr';
 
-import { modelsDir } from '../../paths.js';
-import { loadNativeModule, NATIVE_MODULES, type ComputeFn } from '../capabilities.js';
+import { resolveModelsDirectory } from '../models.js';
+import { loadNativeModule, NATIVE_MODULES, type ComputeFn } from '../support.js';
 
 const DEFAULT_MIN_CONFIDENCE = 0.8;
 const DEFAULT_OCR_MAX_FRAMES = 4;
@@ -68,7 +68,7 @@ let enginePromise: Promise<OcrEngine | null> | null = null;
 let engineLanguages: string[] = [];
 
 function tessDir(): string {
-  return path.join(process.env['MODELS_DIR'] ?? modelsDir(), 'tesseract');
+  return path.join(resolveModelsDirectory(), 'tesseract');
 }
 
 function getOcrEngine(languages: string[]): Promise<OcrEngine | null> {

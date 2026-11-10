@@ -17,17 +17,19 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { logsDir } from '../paths.js';
-import { NODE_EV, type NodeEventName } from './node-events.js';
-import type { NodeEngine } from './node-engine.js';
+import { nodeStateDirectory } from '../executors/state-dir.js';
 
-export type NodeLogLevel = 'debug' | 'info' | 'warn' | 'error';
+function logsDir(): string {
+  return path.join(nodeStateDirectory(), 'logs');
+}
 
-export interface NodeLogger {
+export type BackupLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface BackupLogger {
   /** Absolute path of the active log file. */
   readonly logPath: string;
   /** Write one structured line: { ts, level, ...fields } (redacted). */
-  log(level: NodeLogLevel, fields: Record<string, unknown>): void;
+  log(level: BackupLogLevel, fields: Record<string, unknown>): void;
   info(msg: string, payload?: Record<string, unknown>): void;
   warn(msg: string, payload?: Record<string, unknown>): void;
   error(msg: string, payload?: Record<string, unknown>): void;
@@ -39,7 +41,7 @@ export interface NodeLogger {
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
 /** Base name of the worker-node log file. */
-export const NODE_LOG_FILENAME = 'node.log';
+export const NODE_LOG_FILENAME = 'backup.log';
 
 /**
  * Field names that must never be logged. Matches the exact name `pat` (so
@@ -166,7 +168,7 @@ export function followLog(onLine: (line: string) => void, dir?: string): () => v
 }
 
 /** Create a JSONL file logger writing node.log under `opts.dir` (default logsDir()). */
-export function createNodeLogger(opts: { dir?: string; maxBytes?: number } = {}): NodeLogger {
+export function createBackupLogger(opts: { dir?: string; maxBytes?: number } = {}): BackupLogger {
   const dir = opts.dir ?? logsDir();
   fs.mkdirSync(dir, { recursive: true });
   const maxBytes = Math.max(1024, opts.maxBytes ?? DEFAULT_MAX_BYTES);
@@ -179,7 +181,7 @@ export function createNodeLogger(opts: { dir?: string; maxBytes?: number } = {})
     size = 0;
   }
 
-  const write = (level: NodeLogLevel, fields: Record<string, unknown>): void => {
+  const write = (level: BackupLogLevel, fields: Record<string, unknown>): void => {
     const scrubbed = redactSensitive(fields) as Record<string, unknown>;
     let line: string;
     try {
@@ -215,32 +217,4 @@ export function createNodeLogger(opts: { dir?: string; maxBytes?: number } = {})
     error: (msg, payload) => write('error', { msg, ...payload }),
     tail: (n) => readLastLines(n, dir),
   };
-}
-
-/** Per-event log level (default 'info'). */
-const LEVEL_BY_EVENT: Partial<Record<NodeEventName, NodeLogLevel>> = {
-  [NODE_EV.JOB_ERROR]: 'error',
-  [NODE_EV.HEARTBEAT_FAIL]: 'warn',
-  [NODE_EV.IDLE]: 'debug',
-  [NODE_EV.LEASE_RENEW]: 'debug',
-  [NODE_EV.JOB_PROGRESS]: 'debug',
-};
-
-/**
- * Subscribe the logger to every NODE_EV.* event, writing one structured line
- * per event: { ts, level, ev, ...payload } (payload redacted by the logger).
- */
-export function attachEngineLogging(logger: NodeLogger, engine: NodeEngine): void {
-  const emitter = engine as unknown as {
-    on(event: string, listener: (payload: unknown) => void): void;
-  };
-  for (const ev of Object.values(NODE_EV)) {
-    emitter.on(ev, (payload) => {
-      const fields =
-        payload !== null && typeof payload === 'object'
-          ? (payload as Record<string, unknown>)
-          : { payload };
-      logger.log(LEVEL_BY_EVENT[ev] ?? 'info', { ev, ...fields });
-    });
-  }
 }

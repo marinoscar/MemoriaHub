@@ -2,7 +2,6 @@ import { createCli, EXIT, exitCodeFor, formatError } from '@marinoscar/platform-
 import { Command } from 'commander';
 
 import { APP_CLI_OPTIONS } from './app.js';
-import { nodeCommand } from './commands/node.js';
 import {
   applyEnvCompat,
   mergeAfterPlatformLogin,
@@ -11,8 +10,8 @@ import {
   snapshotAppFields,
 } from './extensions/config-compat.js';
 import { translateLegacyArgs } from './extensions/legacy-flags.js';
-import { printBanner } from './ui.js';
-import { readVersion } from './version.js';
+import { applyLegacyWorkerEnv } from './worker-env.js';
+import { legacyDaemonNotice } from './extensions/legacy-daemon-notice.js';
 
 // =============================================================================
 // One invocation of the CLI  (issue #577, RETRO-F3)
@@ -24,7 +23,7 @@ import { readVersion } from './version.js';
 //
 //   1. environment and config compatibility (MEMORIAHUB_URL, pat -> token),
 //   2. `translateLegacyArgs` (extensions/legacy-flags.ts),
-//   3. the `node` group, which stays the 1.3 command until RETRO-C10,
+//   3. the worker's 1.3 environment names and a leftover 1.3 daemon (RETRO-C10),
 //   4. after `login`, restores the app's fields the platform's login replaced,
 //
 // It returns the exit code and never calls `process.exit()` itself.
@@ -48,29 +47,6 @@ export interface RunAppOptions {
   env?: NodeJS.ProcessEnv | undefined;
   /** Builds the CLI; tests substitute a fake. */
   createCli?: typeof createCli | undefined;
-  /** Runs the 1.3 `node` command group; tests substitute a fake. */
-  runLegacyNode?: ((argv: string[]) => Promise<number>) | undefined;
-}
-
-/**
- * Runs the 1.3 `node` command group (`node start`, `node doctor`, ...) unchanged.
- * PLATFORM-ADOPTION-SHIM(RETRO-C10): the platform `node` cannot run MemoriaHub's
- * executors yet. Commander runs it exactly as the 1.3 entry did: its commands
- * set the exit status themselves (`process.exit`) where they always did.
- */
-async function runLegacyNodeGroup(argv: string[]): Promise<number> {
-  const program = new Command();
-  program
-    .name('memoriahub')
-    .description('Import and sync photos/videos into MemoriaHub')
-    .version(readVersion(), '-V, --version', 'Print the installed version');
-  program.addHelpText('beforeAll', () => {
-    printBanner(readVersion());
-    return '';
-  });
-  program.addCommand(nodeCommand());
-  await program.parseAsync(argv, { from: 'user' });
-  return EXIT.OK;
 }
 
 /**
@@ -98,9 +74,11 @@ export async function runApp(argv: string[], options: RunAppOptions = {}): Promi
     return EXIT.USAGE;
   }
 
-  // 3. The 1.3 `node` group.
-  if (plan.legacyNode) {
-    return (options.runLegacyNode ?? runLegacyNodeGroup)(plan.argv);
+  // 3. The worker's 1.3 variable names and a 1.3 daemon still running (RETRO-C10).
+  for (const note of applyLegacyWorkerEnv(env)) stderr.write(`memoriahub: ${note}\n`);
+  if (plan.argv[0] === 'node') {
+    const notice = legacyDaemonNotice();
+    if (notice !== undefined) stderr.write(`${notice}\n`);
   }
 
   let cli: ReturnType<typeof createCli>;

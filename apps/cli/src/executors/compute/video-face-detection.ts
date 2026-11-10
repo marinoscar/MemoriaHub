@@ -69,9 +69,7 @@ import {
   type ClusterableDetection,
 } from '@memoriahub/enrichment-compute/face-video';
 
-import { loadConfig } from '../../config.js';
-import { ApiClient } from '../../api.js';
-import { DEFAULT_COMPREFACE_URL, type ComputeFn } from '../capabilities.js';
+import { comprefaceUrl as resolveComprefaceUrl, putToPresignedUrl, type ComputeFn } from '../support.js';
 
 /**
  * Downscale ceiling before detection — MUST match the photo path's
@@ -117,11 +115,7 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
     );
   }
 
-  const cfg = loadConfig();
-  // Thumbnail upload is best-effort per cluster (see step 5 below) — a node
-  // not logged in simply submits clusters without frameThumbnailKey rather
-  // than failing the whole job.
-  const client = cfg ? new ApiClient({ serverUrl: cfg.serverUrl, pat: cfg.pat }) : null;
+  const comprefaceUrl = resolveComprefaceUrl();
 
   const p = params as Record<string, unknown>;
   const sampleIntervalSeconds =
@@ -153,7 +147,6 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
     const prepared = await prepareImageForProcessing(frame.buffer, { maxDim: FACE_MAX_IMAGE_DIM });
     const frameBuffer = prepared.width > 0 && prepared.height > 0 ? prepared.buffer : frame.buffer;
 
-    const comprefaceUrl = cfg?.node?.comprefaceUrl ?? DEFAULT_COMPREFACE_URL;
     // No catch-and-fallback here: an unreachable sidecar must surface as a
     // normal compute error, routed through the engine's existing /failure +
     // retry/backoff path — never a silent degrade to another provider
@@ -226,14 +219,14 @@ const computeVideoFaceDetection: ComputeFn = async (inputPath, params, ctx) => {
     const rep = cluster.representative;
 
     let frameThumbnailKey: string | undefined;
-    if (client) {
+    {
       try {
         const thumbBuffer = await buildFaceCropThumbnail(rep.payload.frameBuffer, {
           boundingBox: rep.boundingBox,
         });
-        const { url, storageKey } = await client.getJobUploadUrl(ctx.nodeId, ctx.jobId);
-        await client.putRaw(url, thumbBuffer, 'image/jpeg');
-        frameThumbnailKey = storageKey;
+        const target = await ctx.api.uploadUrl(ctx.nodeId, ctx.jobId, 'image/jpeg', ctx.claimToken);
+        await putToPresignedUrl(target.url, thumbBuffer, 'image/jpeg');
+        frameThumbnailKey = target.key;
       } catch {
         // Non-fatal: this cluster is still submitted, just without a
         // frameThumbnailKey (schema field is optional for exactly this case).

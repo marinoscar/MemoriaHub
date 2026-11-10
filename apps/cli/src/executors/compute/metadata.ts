@@ -35,7 +35,7 @@ import {
   probeVideo,
   extractContainerMetadata,
 } from '@memoriahub/enrichment-compute/metadata';
-import { CapabilityUnavailableError, type ComputeFn } from '../capabilities.js';
+import { CapabilityUnavailableError, type ComputeFn } from '../support.js';
 
 /** Mirrors MetadataExtractionService.buildProbeEntry's shape exactly. */
 async function buildProbeEntry(filePath: string): Promise<Record<string, unknown>> {
@@ -69,8 +69,10 @@ async function buildProbeEntry(filePath: string): Promise<Record<string, unknown
   return metadata;
 }
 
-const computeMetadata: ComputeFn = async (inputPath, params) => {
-  const mimeType = params['mimeType'];
+const computeMetadata: ComputeFn = async (inputPath, params, ctx) => {
+  // The engine's input metadata (the stored object's type) first; the payload's `mimeType` is the
+  // 1.3 spelling.
+  const mimeType = ctx.mimeType ?? params['mimeType'];
   if (typeof mimeType !== 'string' || mimeType.length === 0) {
     throw new CapabilityUnavailableError(
       'metadata_extraction job payload is missing mimeType — cannot dispatch to image/video compute path (older job rows enqueued before this field existed are not node-eligible; re-enqueue via rerun or backfill)',
