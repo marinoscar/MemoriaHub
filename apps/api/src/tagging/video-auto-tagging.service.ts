@@ -45,7 +45,7 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { EnrichmentJob, MediaTagStatusType, MediaType } from '@prisma/client';
+import { MediaTagStatusType, MediaType } from '@prisma/client';
 import { extname } from 'path';
 import type { VideoAutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import {
@@ -72,6 +72,7 @@ import { prepareImageForProcessing } from '../media-processing/image-orientation
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { AutoTaggingService } from './auto-tagging.service';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 
 /** Long-edge cap per frame — same env var and default as the photo path. */
 const TAG_MAX_DIM = (): number => parseInt(process.env['TAG_MAX_IMAGE_DIM'] ?? '1568', 10);
@@ -126,7 +127,7 @@ export class VideoAutoTaggingService {
   // processMediaItem — in-process orchestration
   // ---------------------------------------------------------------------------
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  async processMediaItem(job: MediaJobContext): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('video_auto_tagging job missing mediaItemId');
     }
@@ -237,11 +238,6 @@ export class VideoAutoTaggingService {
     }
 
     await this.enrichmentJobService.recordModel(job.id, provider, model);
-    // recordModel writes the DB row only; keep the in-memory job object in
-    // sync since persistAutoTagging reads providerKey/modelVersion off this
-    // same reference without a re-fetch (identical to the photo path).
-    job.providerKey = provider;
-    job.modelVersion = model;
 
     let creds: AiProviderCredentials;
     try {
@@ -348,7 +344,11 @@ export class VideoAutoTaggingService {
 
       // PERSIST half — the SAME implementation the photo path uses, so
       // vocabulary validation cannot drift between the two.
-      await this.autoTaggingService.persistAutoTagging(job, { rawText: computed.rawText });
+      await this.autoTaggingService.persistAutoTagging(
+        job,
+        { rawText: computed.rawText },
+        { providerKey: provider, modelVersion: model },
+      );
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       await this.markFailed(job.mediaItemId, mediaItem.circleId, provider, model, errMsg);
@@ -485,27 +485,6 @@ export class VideoAutoTaggingService {
       system: VIDEO_AUTO_TAGGING_SYSTEM_PROMPT,
       prompt: buildVideoTaggingPrompt(labelNames, peopleNames, sampledTimestampsMs, transcript),
     };
-  }
-
-  /**
-   * Persist a NODE-computed result's transcript before the shared persist runs
-   * (issue #460). Called only from VideoAutoTaggingHandler.persistNodeResult;
-   * the in-process path persists its transcript inline in processMediaItem.
-   *
-   * Resolves the item's circleId itself, since a node-result call has no
-   * preloaded context — the same self-contained posture persistAutoTagging
-   * already takes.
-   */
-  async persistNodeTranscript(job: EnrichmentJob, result: VideoAutoTaggingResult): Promise<void> {
-    if (!result.transcript || !job.mediaItemId) return;
-
-    const mediaItem = await this.prisma.mediaItem.findUnique({
-      where: { id: job.mediaItemId },
-      select: { id: true, circleId: true },
-    });
-    if (!mediaItem) return;
-
-    await this.persistTranscript(mediaItem.id, mediaItem.circleId, result);
   }
 
   // ---------------------------------------------------------------------------

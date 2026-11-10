@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { EnrichmentJob, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
+import { MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { Readable } from 'stream';
 import { autoTaggingResultSchema, type AutoTaggingResult } from '@memoriahub/enrichment-compute/dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,6 +15,7 @@ import { StorageProviderResolver } from '../platform/storage/storage-provider.re
 import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
 import { detectImageMime } from './image-mime.util';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import type { MediaJobContext } from '../platform/jobs/media-item-job';
 import { RateLimitError, parseRetryAfterMs, classifyRateLimit } from '../enrichment/rate-limit.error';
 import { MediaTouchService } from '../media/media-touch.service';
 
@@ -63,7 +64,7 @@ export class AutoTaggingService {
     @Optional() private readonly metrics?: AppMetricsService,
   ) {}
 
-  async processMediaItem(job: EnrichmentJob): Promise<void> {
+  async processMediaItem(job: MediaJobContext): Promise<void> {
     // Guard: auto_tagging jobs must always have a mediaItemId (global/null jobs are not valid here)
     if (!job.mediaItemId) {
       throw new Error('auto_tagging job missing mediaItemId');
@@ -136,15 +137,6 @@ export class AutoTaggingService {
     }
 
     await this.enrichmentJobService.recordModel(job.id, provider, model);
-    // recordModel only writes the DB row — keep the in-memory job object
-    // (which persistAutoTagging reads providerKey/modelVersion from) in sync
-    // too, since this same `job` reference is passed to persistAutoTagging
-    // below without a re-fetch. The node path doesn't need this: by the time
-    // NodesService.submitJobResult re-fetches the job row (in
-    // assertJobHeldByNode), NodesService.getJobCredentials has already
-    // written providerKey/modelVersion via its own recordModel call.
-    job.providerKey = provider;
-    job.modelVersion = model;
 
     // e. Resolve credentials — non-throwing gate
     let creds: { apiKey: string; baseUrl?: string };
@@ -271,7 +263,7 @@ export class AutoTaggingService {
 
       // PERSIST half — identical whether the raw text came from this
       // in-process call or a node's POST /nodes/:id/jobs/:jobId/result.
-      await this.persistAutoTagging(job, { rawText });
+      await this.persistAutoTagging(job, { rawText }, { providerKey: provider, modelVersion: model });
     } catch (err) {
       // p. On unexpected error from step i onwards: mark failed and rethrow (let worker retry)
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -300,13 +292,9 @@ export class AutoTaggingService {
   // computeAutoTagging — COMPUTE half of the split.
   //
   // Thin wrapper around aiProvider.analyzeImage: base64-encodes the already-
-  // prepared image buffer and calls the vision provider, with the same
-  // 429/529 rate-limit detection the in-process path always had. A
-  // distributed worker node runs the equivalent call locally via
-  // @memoriahub/enrichment-compute/ai's callAnthropicVision (the same
-  // function AnthropicProvider.analyzeImage now delegates to) using a
-  // transiently-fetched API key, and submits the resulting { rawText }
-  // directly — bypassing this method entirely.
+  // prepared image buffer and calls the vision provider, with 429/529 mapped to
+  // RateLimitError (the handler hands it to the queue as the platform one).
+  // Server-only since RETRO-C4 (#590): AI rule 3, the key never leaves the API.
   // ---------------------------------------------------------------------------
 
   async computeAutoTagging(
@@ -363,13 +351,15 @@ export class AutoTaggingService {
   // persistAutoTagging — PERSIST half of the split.
   //
   // Self-contained: reloads the MediaItem, enabled TagLabel vocabulary, and
-  // assigned people names itself (the node-result path has no preloaded
-  // context to reuse), so a node's raw text is validated against the
-  // IDENTICAL vocabulary the in-process path would have used. Used by BOTH
-  // processMediaItem (above) and AutoTaggingHandler.persistNodeResult.
+  // assigned people names itself. Used by processMediaItem above and by
+  // VideoAutoTaggingService (one implementation of vocabulary validation).
   // ---------------------------------------------------------------------------
 
-  async persistAutoTagging(job: EnrichmentJob, result: AutoTaggingResult): Promise<void> {
+  async persistAutoTagging(
+    job: MediaJobContext,
+    result: AutoTaggingResult,
+    used: { providerKey: string; modelVersion: string },
+  ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error('auto_tagging job missing mediaItemId');
     }
@@ -382,16 +372,8 @@ export class AutoTaggingService {
       throw new Error(`MediaItem ${job.mediaItemId} not found`);
     }
 
-    // provider/model are recorded on the job row (via recordModel) by
-    // whichever path resolved them — processMediaItem (step d/e above) or
-    // NodesService.getJobCredentials for a node-computed result.
-    const provider = job.providerKey;
-    const model = job.modelVersion;
-    if (!provider || !model) {
-      throw new Error(
-        `auto_tagging job ${job.id} missing providerKey/modelVersion — recordModel must be called before persisting a result`,
-      );
-    }
+    const provider = used.providerKey;
+    const model = used.modelVersion;
 
     const tagLabels = await this.prisma.tagLabel.findMany({
       where: { enabled: true },

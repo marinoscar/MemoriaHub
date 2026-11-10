@@ -72,7 +72,7 @@ const registeredConfig: CliConfig = {
   node: {
     name: 'test-node',
     concurrency: 2,
-    eligibleTypes: ['auto_tagging', 'geocode'],
+    eligibleTypes: ['metadata_extraction', 'geocode'],
     pollIntervalMs: 5000,
   },
 };
@@ -199,7 +199,7 @@ describe('NodeStart — happy path', () => {
     const plain = stripAnsi(lastFrame()!);
     expect(plain).toContain('Concurrency');
     expect(plain).toContain('2'); // prefilled from config.node.concurrency
-    expect(plain).toContain('auto_tagging');
+    expect(plain).toContain('metadata_extraction');
     expect(plain).toContain('geocode');
     unmount();
   });
@@ -372,7 +372,7 @@ describe('NodeStart — form field editing', () => {
     await flushAsync();
 
     expect(spawnNodeStartDaemonMock).toHaveBeenCalledWith(
-      expect.objectContaining({ concurrency: 2, types: ['auto_tagging', 'geocode'] }),
+      expect.objectContaining({ concurrency: 2, types: ['metadata_extraction', 'geocode'] }),
     );
     unmount();
   });

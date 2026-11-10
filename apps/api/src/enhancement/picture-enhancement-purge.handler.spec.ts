@@ -11,39 +11,25 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaEnhancementStatus } from '@prisma/client';
-import type { EnrichmentJob } from '@prisma/client';
+import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
+import { platformJob } from '../../test/helpers/platform-job';
 import { PictureEnhancementPurgeHandler } from './picture-enhancement-purge.handler';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return platformJob({
     id: 'job-purge-1',
     type: 'picture_enhancement_purge',
-    mediaItemId: null,
-    circleId: null,
-    status: 'running' as any,
-    reason: 'backfill' as any,
+    status: 'running',
+    reason: 'backfill',
     priority: 100,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
     attempts: 1,
-    lastError: null,
     startedAt: new Date(),
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
     ...overrides,
-  } as EnrichmentJob;
+  });
 }
 
 function makeRow(overrides: Record<string, any> = {}) {
@@ -61,7 +47,7 @@ function makeRow(overrides: Record<string, any> = {}) {
 
 describe('PictureEnhancementPurgeHandler', () => {
   let handler: PictureEnhancementPurgeHandler;
-  let mockRegistry: jest.Mocked<Pick<EnrichmentHandlerRegistry, 'register'>>;
+  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
   let mockPrisma: MockPrismaService;
   let mockResolver: { getProviderFor: jest.Mock };
   let mockDeleteFn: jest.Mock;
@@ -84,7 +70,7 @@ describe('PictureEnhancementPurgeHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PictureEnhancementPurgeHandler,
-        { provide: EnrichmentHandlerRegistry, useValue: mockRegistry },
+        { provide: JobHandlerRegistry, useValue: mockRegistry },
         { provide: PrismaService, useValue: mockPrisma },
         { provide: StorageProviderResolver, useValue: mockResolver },
         { provide: AppSystemSettingsService, useValue: mockSettings },
@@ -102,7 +88,13 @@ describe('PictureEnhancementPurgeHandler', () => {
     expect(handler.type).toBe('picture_enhancement_purge');
   });
 
-  it('registers itself with the EnrichmentHandlerRegistry on module init', () => {
+  it('is server-only housekeeping with a 10-minute / 2-attempt profile', () => {
+    expect((handler as any).nodeResultSchema).toBeUndefined();
+    expect((handler as any).persistNodeResult).toBeUndefined();
+    expect(handler.profile).toEqual({ maxRuntimeMs: 600_000, maxAttempts: 2 });
+  });
+
+  it('registers itself with the JobHandlerRegistry on module init', () => {
     handler.onModuleInit();
     expect(mockRegistry.register).toHaveBeenCalledWith(handler);
   });

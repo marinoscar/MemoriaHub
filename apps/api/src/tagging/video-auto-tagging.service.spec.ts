@@ -451,19 +451,23 @@ describe('VideoAutoTaggingService', () => {
       const job = makeJob();
       await service.processMediaItem(job);
 
-      expect(mockAutoTaggingService.persistAutoTagging).toHaveBeenCalledWith(job, {
-        rawText: '{"tags":["Beach"],"description":"d"}',
-      });
+      expect(mockAutoTaggingService.persistAutoTagging).toHaveBeenCalledWith(
+        job,
+        { rawText: '{"tags":["Beach"],"description":"d"}' },
+        { providerKey: 'openai', modelVersion: 'gpt-4o' },
+      );
     });
 
-    it('records the provider/model on the job row AND the in-memory object before persisting', async () => {
+    it('records the provider/model on the job row and hands them to the persist half explicitly', async () => {
       const job = makeJob();
       await service.processMediaItem(job);
 
       expect(mockEnrichmentJobService.recordModel).toHaveBeenCalledWith('job-1', 'openai', 'gpt-4o');
-      // persistAutoTagging reads these off the same reference without re-fetching.
-      expect(job.providerKey).toBe('openai');
-      expect(job.modelVersion).toBe('gpt-4o');
+      expect(mockAutoTaggingService.persistAutoTagging).toHaveBeenCalledWith(
+        job,
+        expect.anything(),
+        { providerKey: 'openai', modelVersion: 'gpt-4o' },
+      );
     });
 
     it('marks the item failed and rethrows when the vision call errors, so the queue retries', async () => {

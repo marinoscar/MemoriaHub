@@ -1,64 +1,61 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { EnrichmentJob } from '@prisma/client';
-import { videoAutoTaggingResultSchema } from '@memoriahub/enrichment-compute/dto';
-import { EnrichmentHandler } from '../enrichment/enrichment-handler.interface';
-import { EnrichmentHandlerRegistry } from '../enrichment/enrichment-handler.registry';
-import { AutoTaggingService } from './auto-tagging.service';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  JobHandlerRegistry,
+  ProviderThrottleService,
+  type Job,
+  type JobExecutionProfile,
+  type JobHandler,
+} from '@marinoscar/platform-api/jobs';
+import { resolveMediaItemJob, withPlatformRateLimits } from '../platform/jobs/media-item-job';
+import { PrismaService } from '../prisma/prisma.service';
 import { VideoAutoTaggingService } from './video-auto-tagging.service';
 
 /**
- * `video_auto_tagging` — AI tags + description for videos (epic #452, #455).
+ * `video_auto_tagging`: AI tags + description for videos (epic #452), a native
+ * platform `JobHandler` (RETRO-C4, #590).
  *
- * A SEPARATE job type from `auto_tagging`, not a branch inside it. That is
- * required rather than stylistic, for three concrete reasons:
+ * A SEPARATE job type from `auto_tagging`: the execution profile differs (a video
+ * legitimately runs far longer), and the admin Jobs filters, labels and per-type
+ * insights key on the type. Everything downstream is shared (`tag_labels`,
+ * `media_tag_status`, `media_items.description`, the `media_item_embedding`
+ * upsert, through `AutoTaggingService.persistAutoTagging`).
  *
- *   1. The 20-minute ENRICHMENT_VIDEO_JOB_TIMEOUT_MS budget is applied by job
- *      TYPE (VIDEO_JOB_TYPES in enrichment-job.worker.ts). Branching inside
- *      `auto_tagging` would hand every photo-tagging job a 20-minute budget.
- *   2. Node capability requirements are per type — ['sharp'] for photos vs.
- *      ['sharp','ffmpeg','ffprobe'] here. A node without ffmpeg must not
- *      advertise the video type.
- *   3. /admin/settings/jobs filtering, job-type-labels, and per-type queue
- *      insights all key on type.
+ * SERVER-ONLY, permanently (AI rule 3): the provider keys (vision and the
+ * optional transcription provider) are resolved on the API and never brokered to
+ * a node, so there is no node pair. ffmpeg reads the video on the API host, from
+ * a presigned URL when the provider honours Range (`autoTagging.video.streamInput`,
+ * issue #456), else from a temp file the platform janitor sweeps
+ * (`memoriahub-job-` prefix).
  *
- * Everything DOWNSTREAM is shared: the tag_labels vocabulary,
- * media_tag_status, media_items.description, the MediaTagSource.ai write
- * semantics, and the media_item_embedding upsert.
+ * The resource ceiling is duration-independent: at most `autoTagging.video.maxFrames`
+ * frames and `leadSeconds` of audio regardless of runtime, so one profile fits.
+ * It shares the `tagging` provider gate with `auto_tagging`.
  */
 @Injectable()
-export class VideoAutoTaggingHandler implements EnrichmentHandler, OnModuleInit {
+export class VideoAutoTaggingHandler implements JobHandler, OnModuleInit {
   readonly type = 'video_auto_tagging';
+  readonly label = 'Video auto-tagging';
+  /** Frame sampling, optional transcription and one multi-image call: the video budget (20 minutes). */
+  readonly profile: JobExecutionProfile = { maxRuntimeMs: 1_200_000, maxAttempts: 3 };
 
-  /**
-   * Node-eligibility (distributed workers, issue #460): the payload a node
-   * submits via POST /api/nodes/:id/jobs/:jobId/result.
-   */
-  readonly nodeResultSchema = videoAutoTaggingResultSchema;
+  private readonly logger = new Logger(VideoAutoTaggingHandler.name);
 
   constructor(
-    private readonly registry: EnrichmentHandlerRegistry,
+    private readonly registry: JobHandlerRegistry,
+    private readonly throttle: ProviderThrottleService,
+    private readonly prisma: PrismaService,
     private readonly videoAutoTaggingService: VideoAutoTaggingService,
-    private readonly autoTaggingService: AutoTaggingService,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
+    // The same configured tagging provider as the photo path: one shared cooldown.
+    this.throttle.registerProviderKey(this.type, 'tagging');
   }
 
-  async process(job: EnrichmentJob): Promise<void> {
-    await this.videoAutoTaggingService.processMediaItem(job);
-  }
-
-  /**
-   * Persist a node-computed result.
-   *
-   * Parsing stays SERVER-side (it needs the DB-loaded TagLabel vocabulary), so
-   * this delegates to the very same persist half the photo path uses — one
-   * implementation of vocabulary validation for both job types.
-   */
-  async persistNodeResult(job: EnrichmentJob, result: unknown): Promise<void> {
-    const parsed = videoAutoTaggingResultSchema.parse(result);
-    await this.videoAutoTaggingService.persistNodeTranscript(job, parsed);
-    await this.autoTaggingService.persistAutoTagging(job, { rawText: parsed.rawText });
+  async process(job: Job): Promise<void> {
+    const context = await resolveMediaItemJob(this.prisma, job, this.logger);
+    if (!context) return;
+    await withPlatformRateLimits(() => this.videoAutoTaggingService.processMediaItem(context));
   }
 }

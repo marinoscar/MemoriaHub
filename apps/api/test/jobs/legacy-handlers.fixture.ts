@@ -55,7 +55,8 @@ import { NodeBackupStaleHandler } from '../../src/nodes/node-backup-stale.handle
  * `metadata_extraction`, `thumbnail_regen`, `thumbnail_repair`) that register
  * with `JobHandlerRegistry` themselves; RETRO-C5 (#594) added the five
  * dedup/burst/social types (`duplicate_detection`, `duplicate_detection_batch`,
- * `duplicate_confidence_backfill`, `burst_detection`, `social_media_detection`). They keep `type`, the node pair and
+ * `duplicate_confidence_backfill`, `burst_detection`, `social_media_detection`); RETRO-C4 (#590) the four AI-bound
+ * types (`auto_tagging`, `video_auto_tagging`, `picture_enhancement`, `picture_enhancement_purge`). They keep `type`, the node pair and
  * `canDelete` as plain members, so the snapshot reads the same facts off them.
  */
 export const ALL_HANDLER_CLASSES = [
@@ -159,14 +160,12 @@ export const EXPECTED_JOB_TYPES = [
  * mode pinned it). Its documented eligibility is unchanged: server-only.
  */
 export const EXPECTED_NODE_ELIGIBLE_TYPES = [
-  'auto_tagging',
   'duplicate_detection',
   'face_detection',
   'geocode',
   'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
-  'video_auto_tagging',
   'video_face_detection',
   'workflow_execute_batch',
 ];
@@ -175,6 +174,8 @@ export const EXPECTED_NODE_ELIGIBLE_TYPES = [
 export const EXPECTED_CAN_DELETE_TYPES = [
   // RETRO-C7: a pending evaluate/execute-batch job of an active run is the
   // only thing that moves the run on.
+  // RETRO-C4: a pending enhancement job of an active batch.
+  'picture_enhancement',
   'review_run_evaluate',
   'review_run_execute_batch',
   'trash_empty_evaluate',

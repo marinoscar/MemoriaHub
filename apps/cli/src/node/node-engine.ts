@@ -160,7 +160,6 @@ const INPUT_REQUIRED_TYPES = new Set<string>([
   'metadata_extraction',
   'social_media_detection',
   'thumbnail_regen',
-  'auto_tagging',
 ]);
 
 /**
@@ -174,7 +173,8 @@ const INPUT_REQUIRED_TYPES = new Set<string>([
  * skips both the download and the local-path assertion; the compute function
  * decides for itself whether to stream or fall back.
  */
-const URL_INPUT_TYPES = new Set<string>(['video_auto_tagging']);
+// Empty since RETRO-C4 (#590): `video_auto_tagging` is server-only. RETRO-C10 removes this.
+const URL_INPUT_TYPES = new Set<string>();
 
 type Resolved = Required<Pick<NodeEngineDeps, 'downloadFn' | 'detectFn' | 'tmpDir'>>;
 

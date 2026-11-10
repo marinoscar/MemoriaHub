@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
 │                                                                                                  │
-│   MemoriaHub CLI — Help  ·  v1.5.3                                                               │
+│   MemoriaHub CLI — Help  ·  v1.5.4                                                               │
 │                                                                                                  │
 │   Use the interactive menu to manage folders, scan, and run syncs.                               │
 │   Run `memoriahub` (no args) or `memoriahub menu` to open this UI.                               │
