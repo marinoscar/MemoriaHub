@@ -29,10 +29,7 @@ The key path to every screen is unchanged. A leaf's route is the 1.3 action id; 
 | Scan › Scan selected folders… | `scan-select` | `PickFolders` → `ScanScreen` |
 | Scan › View last scan report | `scan-report` | `ScanScreen` (view) |
 | Backup | `backup-dashboard` | `BackupDashboard` (→ `BackupVerify`, `BackupSettings`) |
-| Worker Node › Node dashboard | `node-dashboard` | `NodeDashboard` (→ `NodeConfig`) |
-| Worker Node › Start worker (background) | `node-start` | `NodeStart` (→ `NodeDashboard`) |
-| Worker Node › Stop worker / Node logs / Node doctor | `node-stop`, `node-logs`, `node-doctor` | `NodeStop`, `NodeLogs`, `NodeDoctor` |
-| Worker Node › Enroll node / Install dependencies / Register node / Node config / List nodes / Node service | `node-enroll`, `node-install-deps`, `node-register`, `node-config`, `node-list`, `node-service` | `NodeEnroll`, `NodeInstallDeps`, `NodeRegister`, `NodeConfig`, `NodeList`, `NodeService` |
+| Worker Node (one entry) | `node` | the platform's node screen (dashboard, doctor, logs, register, enroll; RETRO-C10). Start, stop, install-deps, service, config and list are `memoriahub node ...` commands only |
 | Reports › Overview / Runs / Storage / Duplicates | `report-<id>` (one per registered report) | `ReportView` |
 | Reports › Job queue monitor | `jobs-monitor` | `JobsDashboard` |
 | File Tools › Convert videos to MP4 › single file… / selected folders… / all | `convert-file`, `convert-select`, `convert-all` | `ConvertFileInput`/`PickFolders` → `ConvertScreen` |
