@@ -160,9 +160,29 @@ async function runLegacy(handler: EnrichmentHandler, job: Job, subjectExists?: S
 
 const logger = new Logger('LegacyEnrichmentHandlerAdapter');
 
+/**
+ * The legacy job types whose compute needs a PROVIDER KEY, which no node is handed (RETRO-C2, #581).
+ *
+ * MemoriaHub's old node plane issued a transient provider credential per job
+ * (`POST /api/nodes/:id/jobs/:jobId/credentials`, deleted with the legacy node plane). The platform
+ * nodes slice does not deliver provider keys: a key a node needs goes through the `nodeSecretBroker`
+ * (`POST /api/nodes/:id/jobs/:jobId/secret`, a handle in `job_node_secrets`, switched on by
+ * `nodes.jobSecretBrokerEnabled`), and AI keys never go to a node at all (RETRO-C4 made the AI
+ * tagging and enhancement types native, server-only handlers). `geocode` is the one legacy class that
+ * still carries a node pair and needs a key: it runs on the server until RETRO-C6 converts it and
+ * returns it to node eligibility through the broker. The pair its class carries is NOT forwarded, so
+ * the platform derives it as server-only.
+ *
+ * PLATFORM-ADOPTION-SHIM(RETRO-C6): delete the entry when the native geocode handler lands.
+ */
+export const PROVIDER_KEY_SERVER_ONLY_TYPES: ReadonlySet<string> = new Set(['geocode']);
+
 /** The platform `JobHandler` for one legacy handler. */
 export function toPlatformHandler(handler: EnrichmentHandler, subjectExists?: SubjectExists): JobHandler {
-  const nodeEligible = handler.nodeResultSchema !== undefined && typeof handler.persistNodeResult === 'function';
+  const nodeEligible =
+    handler.nodeResultSchema !== undefined &&
+    typeof handler.persistNodeResult === 'function' &&
+    !PROVIDER_KEY_SERVER_ONLY_TYPES.has(handler.type);
 
   return {
     type: handler.type,

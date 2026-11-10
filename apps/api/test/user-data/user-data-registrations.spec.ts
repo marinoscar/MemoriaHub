@@ -73,9 +73,10 @@ describe('MemoriaHub user-data registrations', () => {
 
   it('registers the factory reset steps ahead of the platform deployment steps', () => {
     const ids = factoryResetStepRegistry.list().map((step) => step.id);
-    expect(ids.slice(0, 4)).toEqual([
+    // The legacy worker-node step left with the legacy tables (RETRO-C2): the platform's
+    // `platform.nodes` step reassigns the fleet.
+    expect(ids.slice(0, 3)).toEqual([
       'memoriahub.content',
-      'memoriahub.legacy-nodes',
       'memoriahub.leftovers',
       'memoriahub.storage',
     ]);

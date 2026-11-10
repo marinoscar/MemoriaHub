@@ -183,27 +183,13 @@ runPlatformConformance({
     // `notifications.review_queue_reconcile`, `shares.expiring_sweep`,
     // `node_backup.stale_sweep`; test/jobs/cron-tasks.conformance.spec.ts). The three
     // permanent platform exemptions are not listed: the installed package ships no
-    // `.ts` sources to scan (test/jobs/cron-source-roots.ts). The two exemptions below
-    // are TEMPORARY, each with a local-exceptions row and the issue that removes it.
+    // `.ts` sources to scan (test/jobs/cron-source-roots.ts). The two temporary exemptions for the
+    // legacy worker-node crons left with RETRO-C2 (#581): the platform nodes slice's fleet crons
+    // only enqueue `nodes.fleet.sweep` / `nodes.fleet.prune`.
     cronEnqueueOnly: {
-      exempt: [
-        {
-          file: 'nodes/node-stale-offline.task.ts',
-          root: API_SOURCE_ROOT,
-          why:
-            'TEMPORARY until RETRO-C2 (#581): the legacy worker-node staleness sweep (inline updateMany) is ' +
-            'replaced by the platform nodes slice fleet sweep, which only enqueues; no app job type is invented for it.',
-        },
-        {
-          file: 'nodes/node-offline-prune.task.ts',
-          root: API_SOURCE_ROOT,
-          why:
-            'TEMPORARY until RETRO-C2 (#581): the legacy offline worker-node prune (inline deleteMany) is ' +
-            'replaced by the platform nodes slice fleet prune, which only enqueues; no app job type is invented for it.',
-        },
-      ],
-      // 14 cron files in apps/api/src at RETRO-C9; the floor is a vacuity guard.
-      minCronFiles: 14,
+      exempt: [],
+      // 12 cron files in apps/api/src after RETRO-C2 removed the two worker-node crons; the floor is a vacuity guard.
+      minCronFiles: 12,
     },
     // Since RETRO-D1 post-upload processing is the platform's `storage.object.process` job; the
     // object-processing listener that downloaded bytes is gone.

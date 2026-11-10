@@ -43,12 +43,17 @@ async function resolvePath(from: string): Promise<string> {
 }
 
 describe('v0 backup route retirement (#367)', () => {
-  it('/admin/settings/backup lands on /admin/settings/nodes', async () => {
-    expect(await resolvePath('/admin/settings/backup')).toBe('/admin/settings/nodes');
+  it('/admin/settings/backup lands on /admin/settings/workers', async () => {
+    expect(await resolvePath('/admin/settings/backup')).toBe('/admin/settings/workers');
   });
 
-  it('/admin/backup lands on /admin/settings/nodes in a single hop', async () => {
+  it('/admin/backup lands on /admin/settings/workers in a single hop', async () => {
     // Not /admin/settings/backup — the old two-hop chain is gone.
-    expect(await resolvePath('/admin/backup')).toBe('/admin/settings/nodes');
+    expect(await resolvePath('/admin/backup')).toBe('/admin/settings/workers');
+  });
+
+  // RETRO-C2 (#581): the Worker Nodes page is the platform's, at /admin/settings/workers.
+  it('/admin/settings/nodes lands on /admin/settings/workers', async () => {
+    expect(await resolvePath('/admin/settings/nodes')).toBe('/admin/settings/workers');
   });
 });

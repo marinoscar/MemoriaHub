@@ -117,6 +117,23 @@ export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExt
   STORAGE_SYSTEM_SETTINGS_EXTENSION,
 ];
 
+/** The legacy `NODE_*` variables as `nodes` defaults; an unset, non-numeric or out-of-range value is ignored. */
+export function legacyNodesDefaults(env: NodeJS.ProcessEnv = process.env): {
+  staleHeartbeatSeconds: number;
+  offlineStaleMultiplier: number;
+  offlineRetentionDays: number;
+} {
+  const read = (name: string, fallback: number, min: number, max: number): number => {
+    const value = Number(env[name]);
+    return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+  };
+  return {
+    staleHeartbeatSeconds: read('NODE_HEARTBEAT_STALE_SECONDS', 60, 5, 86400),
+    offlineStaleMultiplier: read('NODE_OFFLINE_STALE_MULTIPLIER', 10, 1, 100),
+    offlineRetentionDays: read('NODE_OFFLINE_RETENTION_DAYS', 14, 1, 3650),
+  };
+}
+
 /**
  * Defaults where this app differs from the platform's declaration.
  *
@@ -127,6 +144,15 @@ export const APP_SYSTEM_SETTINGS_EXTENSIONS: readonly SystemSettingsNamespaceExt
  * the platform's 120. A stored value always wins over a default.
  */
 export const APP_SYSTEM_SETTINGS_DEFAULTS: readonly SettingsDefaultsOverride[] = [
+  {
+    // RETRO-C2 (#581): the fleet policy keeps the values the hand-written node plane read from
+    // `NODE_HEARTBEAT_STALE_SECONDS` (60), `NODE_OFFLINE_STALE_MULTIPLIER` (10) and
+    // `NODE_OFFLINE_RETENTION_DAYS` (14). The variables only seed these DEFAULTS now (the
+    // `ENRICHMENT_STUCK_MINUTES` precedent); once the namespace is saved in the admin UI a stored
+    // value wins. The platform's own stale window is 90 s.
+    key: 'nodes',
+    defaults: legacyNodesDefaults(),
+  },
   {
     key: 'databaseBackup',
     defaults: { runStaleMinutes: 30, compressionLevel: 1, oldDatabaseRetentionHours: 168 },

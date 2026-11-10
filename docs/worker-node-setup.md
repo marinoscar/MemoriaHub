@@ -303,7 +303,7 @@ Unlike the CLIP ONNX model documented in §6 below, CompreFace isn't a downloada
 
 ## 6. Model Manifest & Downloads
 
-`GET /api/nodes/models/manifest` (`jobs:read` permission) returns a bare array of model entries the node should have locally to serve its `eligibleTypes` — each with a real, computed `sha256` and `bytes` value (`apps/api/src/nodes/nodes.service.ts`'s `getModelManifest()`). As of this writing the manifest lists a single file: the CLIP ONNX vision model (`clip-vit-b32-vision-quantized.onnx`). Face detection is served by the CompreFace sidecar over HTTP (§5) rather than a downloadable model file, so it has no manifest entry.
+`GET /api/nodes/models/manifest` (`nodes:read` permission; `jobs:read` before RETRO-C2) returns a bare array of model entries the node should have locally to serve its `eligibleTypes` — each with a real, computed `sha256` and `bytes` value (`apps/api/src/nodes/nodes.service.ts`'s `getModelManifest()`). As of this writing the manifest lists a single file: the CLIP ONNX vision model (`clip-vit-b32-vision-quantized.onnx`). Face detection is served by the CompreFace sidecar over HTTP (§5) rather than a downloadable model file, so it has no manifest entry.
 
 `ensureModels()` (`apps/cli/src/node/models.ts`) downloads and sha256-verifies each manifest entry into `~/.memoriahub/models/` (overridable via the `MODELS_DIR` environment variable), skipping any file already present and valid. It is called automatically by `node start`, `node doctor`, and the equivalent TUI flows — there is no separate "download models" command. On success it points `process.env.MODELS_DIR` at the local directory for the rest of the process's lifetime.
 

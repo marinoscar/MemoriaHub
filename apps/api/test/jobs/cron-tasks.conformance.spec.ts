@@ -27,8 +27,8 @@ import { WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@pris
 import { PictureEnhancementPurgeTask } from '../../src/enhancement/picture-enhancement-purge.task';
 import { ThumbnailRepairTask } from '../../src/media/thumbnail-repair.task';
 import { TrashPurgeTask } from '../../src/media/trash-purge.task';
-import { NodeBackupStaleHandler } from '../../src/nodes/node-backup-stale.handler';
-import { NodeBackupStaleTask } from '../../src/nodes/node-backup-stale.task';
+import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
+import { NodeBackupStaleTask } from '../../src/node-backup/node-backup-stale.task';
 import { NotificationReconcileTask } from '../../src/notification-producers/notification-reconcile.task';
 import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';

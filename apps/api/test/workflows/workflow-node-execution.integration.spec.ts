@@ -6,7 +6,7 @@
  *   1. `POST /api/nodes/:id/claim` — a registered node claims a job and
  *      receives the frozen action list via `params.actions`.
  *   2. `POST /api/nodes/:id/jobs/:jobId/result` — the node submits an
- *      (advisory) result, which routes through `NodesService.submitJobResult`
+ *      (advisory) result, which routes through the platform `NodesService.submitResult`
  *      -> the REAL, DI-registered `WorkflowExecuteBatchHandler.persistNodeResult`
  *      -> `EnrichmentTerminalService.completeSucceeded`, exactly as production
  *      does. Only PrismaService is mocked (jest-mock-extended) — every other
@@ -15,9 +15,9 @@
  *      pattern in workflow-runs.integration.spec.ts.
  *
  * NOTE: `mockPermissions` (test/fixtures/test-data.factory.ts) has no
- * `jobs:read` / `jobs:write` entries, so `createMockContributorUser` alone
+ * `nodes:read` / `nodes:write` entries, so `createMockContributorUser` alone
  * cannot authenticate against `/api/nodes/*` (every route there requires
- * `jobs:write`). `grantNodePermissions` below layers those two permissions
+ * `nodes:write`). `grantNodePermissions` below layers those two permissions
  * onto the JWT-resolved user row directly, without touching the shared
  * fixture (a real deployment would instead mint a dedicated `nod_`/PAT
  * credential for this — see docs/specs/distributed-nodes.md).
@@ -25,7 +25,7 @@
 
 import request from 'supertest';
 import { randomUUID } from 'crypto';
-import { EnrichmentJob } from '@prisma/client';
+import type { Job } from '@marinoscar/platform-api/jobs';
 import {
   TestContext,
   createTestApp,
@@ -106,8 +106,8 @@ function grantNodePermissions(context: TestContext, userId: string): void {
           ...ur.role,
           rolePermissions: [
             ...ur.role.rolePermissions,
-            { permission: { id: randomUUID(), name: 'jobs:write' } },
-            { permission: { id: randomUUID(), name: 'jobs:read' } },
+            { permission: { id: randomUUID(), name: 'nodes:write' } },
+            { permission: { id: randomUUID(), name: 'nodes:read' } },
           ],
         },
       })),
@@ -166,13 +166,14 @@ function makeNodeRow(ownerId: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** An enrichment_jobs row shaped like the one the run engine enqueues. */
-function makeWorkflowJob(overrides: Record<string, unknown> = {}): EnrichmentJob {
+/** A platform `jobs` row shaped like the one the run engine enqueues (the circle is the subject). */
+function makeWorkflowJob(overrides: Record<string, unknown> = {}): Job {
   return {
     id: randomUUID(),
     type: 'workflow_execute_batch',
-    mediaItemId: null,
-    circleId: CIRCLE_ID,
+    subjectType: 'circle',
+    subjectId: CIRCLE_ID,
+    orgId: null,
     status: 'running',
     reason: 'rerun',
     priority: 0,
@@ -191,7 +192,7 @@ function makeWorkflowJob(overrides: Record<string, unknown> = {}): EnrichmentJob
     leaseExpiresAt: new Date(Date.now() + 30 * 60_000),
     executor: 'node',
     ...overrides,
-  } as unknown as EnrichmentJob;
+  } as unknown as Job;
 }
 
 /** Wires the Prisma calls the real `set_favorite` action path needs:
@@ -240,7 +241,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');
       setupActorPermissions(context, ['media:write']);
-      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const itemId = randomUUID();
       const run = makeRunRow({ approvedById: nodeOwner.id, startedById: nodeOwner.id });
@@ -269,7 +270,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       // --- 1b. Node "computes" and submits a DELIBERATELY WRONG advisory ----
       // result (declares 'skipped'), proving persistNodeResult recomputes the
       // true outcome from job.payload rather than trusting the node.
-      context.prismaMock.enrichmentJob.findUnique.mockResolvedValue(job as any); // held-by-node guard
+      context.prismaMock.job.findUnique.mockResolvedValue(job as any); // held-by-node guard
       mockSetFavoriteAction(context, itemId);
       context.prismaMock.mediaItem.findFirst.mockResolvedValue({ id: itemId } as any); // drift revalidation: still matches
       context.prismaMock.workflowRunItem.updateMany.mockResolvedValue({ count: 1 } as any);
@@ -329,7 +330,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
     it('rejects a late node result submission once the job is no longer held by that node (already reaped/re-claimed/completed)', async () => {
       const nodeOwner = await createMockContributorUser(context);
       grantNodePermissions(context, nodeOwner.id);
-      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const itemId = randomUUID();
       const runId = randomUUID();
@@ -340,7 +341,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       // moved it past this node's ownership: claimedByNodeId is no longer
       // NODE_ID (requeued to the server / a different claimant) and the row is
       // no longer 'running' under this node's lease.
-      context.prismaMock.enrichmentJob.findUnique.mockResolvedValue(
+      context.prismaMock.job.findUnique.mockResolvedValue(
         makeWorkflowJob({
           id: jobId,
           payload: { runId, itemIds: [itemId] },
@@ -391,7 +392,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
       grantNodePermissions(context, nodeOwner.id);
       setupCircleMocks(context, nodeOwner.id, CIRCLE_ID, 'collaborator');
       setupActorPermissions(context, ['media:write']);
-      context.prismaMock.mhLegacyWorkerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
+      context.prismaMock.workerNode.findUnique.mockResolvedValue(makeNodeRow(nodeOwner.id) as any);
 
       const handler = context.module.get(WorkflowExecuteBatchHandler);
 
@@ -450,7 +451,7 @@ describe('Workflow Node Execution Integration (DB-gated, issue #144)', () => {
         .send({})
         .expect(201);
 
-      context.prismaMock.enrichmentJob.findUnique.mockResolvedValue(nodeJob as any);
+      context.prismaMock.job.findUnique.mockResolvedValue(nodeJob as any);
       mockSetFavoriteAction(context, nodeItemId);
       context.prismaMock.mediaItem.findFirst.mockResolvedValue({ id: nodeItemId } as any);
       context.prismaMock.workflowRunItem.updateMany.mockResolvedValue({ count: 1 } as any);
