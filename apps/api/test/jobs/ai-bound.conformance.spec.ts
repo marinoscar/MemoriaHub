@@ -32,8 +32,7 @@ import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 import { MEMORIAHUB_AI_JOB_TYPES } from '../../src/app-registrations/jobs';
 import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
 import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
-import { AutoTaggingHandler } from '../../src/tagging/auto-tagging.handler';
-import { VideoAutoTaggingHandler } from '../../src/tagging/video-auto-tagging.handler';
+import { AutoTaggingHandler, VideoAutoTaggingHandler } from '@marinoscar/memoriahub-api/tagging';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c401';
 const GONE_ID = '00000000-0000-4000-8000-00000000c4ff';
@@ -105,10 +104,31 @@ const taggingService = {
   },
 };
 
+/**
+ * The tagging handlers (RETRO-J7, #618) register through the jobs port, which the host adapts to the
+ * platform registry and the throttle (`PlatformMemoriahubJobsAdapter.registerHandler`). This is that
+ * adaptation reduced to what these specs read: the handler goes to the registry as it is, and the
+ * throttle bucket it names is registered for its type.
+ */
+const jobsPortOver = (reg: JobHandlerRegistry, t: ProviderThrottleService) => ({
+  registerHandler: (handler: JobHandler & { throttleKey?: string }) => {
+    reg.register(handler);
+    if (handler.throttleKey !== undefined) t.registerProviderKey(handler.type, handler.throttleKey);
+  },
+});
+
 const buildAutoTagging = () =>
-  new AutoTaggingHandler(registry, throttle, subjectLookups() as never, taggingService as never);
+  new AutoTaggingHandler(
+    jobsPortOver(registry, throttle) as never,
+    subjectLookups() as never,
+    taggingService as never,
+  ) as unknown as JobHandler;
 const buildVideoTagging = () =>
-  new VideoAutoTaggingHandler(registry, throttle, subjectLookups() as never, taggingService as never);
+  new VideoAutoTaggingHandler(
+    jobsPortOver(registry, throttle) as never,
+    subjectLookups() as never,
+    taggingService as never,
+  ) as unknown as JobHandler;
 
 function mediaItemScenarios() {
   return [
@@ -214,7 +234,7 @@ describe('picture_enhancement_purge', () => {
 // ---------------------------------------------------------------------------
 
 describe('the AI-bound types are server-only (EAB AI rule 3)', () => {
-  const handlers: JobHandler[] = [buildAutoTagging(), buildVideoTagging(), buildEnhancement(), buildPurge()];
+  const handlers = [buildAutoTagging(), buildVideoTagging(), buildEnhancement(), buildPurge()] as unknown as JobHandler[];
 
   it('lists exactly the four permanent type strings', () => {
     expect([...MEMORIAHUB_AI_JOB_TYPES].sort()).toEqual(
@@ -267,10 +287,11 @@ describe('the AI-bound types are server-only (EAB AI rule 3)', () => {
     const withGate = (build: (t: ProviderThrottleService) => { onModuleInit(): void }) => build(gate).onModuleInit();
     const reg = new JobHandlerRegistry();
     withGate(
-      (t) => new AutoTaggingHandler(reg, t, subjectLookups() as never, taggingService as never),
+      (t) => new AutoTaggingHandler(jobsPortOver(reg, t) as never, subjectLookups() as never, taggingService as never),
     );
     withGate(
-      (t) => new VideoAutoTaggingHandler(reg, t, subjectLookups() as never, taggingService as never),
+      (t) =>
+        new VideoAutoTaggingHandler(jobsPortOver(reg, t) as never, subjectLookups() as never, taggingService as never),
     );
     withGate(
       (t) =>

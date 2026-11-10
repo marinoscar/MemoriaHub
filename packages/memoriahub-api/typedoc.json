@@ -17,7 +17,11 @@
     "./src/memories/index.ts",
     "./src/memories/testing/index.ts",
     "./src/face/index.ts",
-    "./src/face/testing/index.ts"
+    "./src/face/testing/index.ts",
+    "./src/tagging/index.ts",
+    "./src/tagging/testing/index.ts",
+    "./src/search/index.ts",
+    "./src/search/testing/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-api",

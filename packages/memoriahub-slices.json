@@ -125,6 +125,19 @@
       "testing",
       "media"
     ],
+    "tagging": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "search": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "tagging"
+    ],
     "memories": [
       "ports",
       "core",

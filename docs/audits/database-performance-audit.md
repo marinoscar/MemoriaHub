@@ -123,7 +123,7 @@ Validate each candidate with `EXPLAIN (ANALYZE, BUFFERS)` against a production-r
 
 **VERIFIED**
 
-**Files:** `apps/api/src/media/media.service.ts:352-360`, `apps/api/src/search/search.service.ts:157-160`, `apps/api/src/enrichment/enrichment-admin.service.ts:232-259`
+**Files:** `apps/api/src/media/media.service.ts:352-360`, `packages/memoriahub-api/src/search/search.service.ts:157-160`, `apps/api/src/enrichment/enrichment-admin.service.ts:232-259`
 
 Every paginated list endpoint runs two parallel queries:
 
@@ -222,7 +222,7 @@ However, the index is a composite covering both columns; the planner may prefer 
 
 ### 2.3 Semantic-Search Superset Fetch
 
-**File:** `apps/api/src/search/search.service.ts:94-147`
+**File:** `packages/memoriahub-api/src/search/search.service.ts:94-147`
 
 The semantic search path fetches a superset of KNN candidates, then re-filters them in JavaScript:
 
@@ -336,7 +336,7 @@ The two `groupBy` queries must aggregate all rows, which grows with table size r
 
 **VERIFIED**
 
-**Files:** `apps/api/src/geo/geocode-backfill.service.ts:26-67`, `apps/api/src/tagging/tagging-backfill.service.ts:31-77`
+**Files:** `apps/api/src/geo/geocode-backfill.service.ts:26-67`, `packages/memoriahub-api/src/tagging/tagging-backfill.service.ts:31-77`
 
 Both backfill services follow the same pattern:
 

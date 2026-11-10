@@ -395,7 +395,15 @@ runPlatformConformance({
 describe('memoriahub-guarded routes', () => {
   it('finds the packaged controllers (a discovery mistake must not make this vacuous)', () => {
     expect(MEMORIAHUB_GUARDED_CONTROLLERS.map((controller) => controller.name)).toEqual(
-      expect.arrayContaining(['MediaSyncController', 'TrashEmptyRunsController']),
+      expect.arrayContaining([
+        'MediaSyncController',
+        'TrashEmptyRunsController',
+        'TaggingController',
+        'TagLabelsController',
+        'AdminTaggingController',
+        'SearchController',
+        'SearchAgentController',
+      ]),
     );
   });
 

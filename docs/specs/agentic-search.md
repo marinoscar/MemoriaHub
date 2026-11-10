@@ -1,5 +1,7 @@
 # Agentic Search Specification
 
+> **Where the code lives (RETRO-J7, #618).** The search slice is `@marinoscar/memoriahub-api/search` (`packages/memoriahub-api/src/search/`); it reaches the platform only through the host ports (AI through `MEMORIAHUB_AI`, the settings through `MEMORIAHUB_SETTINGS`, access through `MEMORIAHUB_ACCESS`). Routes, SSE events, job types and prompts are unchanged.
+
 | Field | Value |
 |-------|-------|
 | **Version** | 2.0 |
@@ -149,7 +151,7 @@ apps/api/src/
 
 ## 3. Searchable Field Registry
 
-**File:** `apps/api/src/search/searchable-fields.registry.ts`
+**File:** `packages/memoriahub-api/src/search/searchable-fields.registry.ts`
 
 The registry is the single source of truth for all media filter dimensions. Every field is a `SearchableField` object:
 
@@ -247,7 +249,7 @@ Credentials are retrieved from `ai_provider_credentials` (decrypted at query tim
 
 ## 5. Agent Tool-Calling Loop
 
-**File:** `apps/api/src/search/agent/search-agent.service.ts`
+**File:** `packages/memoriahub-api/src/search/agent/search-agent.service.ts`
 
 The `SearchAgentService.streamTurn()` method is an async generator that executes one conversational turn. Because search is stateless, the full message history is passed in by the caller on every request — the service never reads from or writes to a database conversation table.
 
@@ -390,7 +392,7 @@ No built-in rotation tooling exists today; it is a manual migration step.
 
 ### The One-File Rule
 
-Adding a new search dimension requires a single edit to `apps/api/src/search/searchable-fields.registry.ts`. Both the deterministic `POST /api/search` endpoint and the agent's `search_media` tool schema are derived from `SEARCHABLE_FIELDS` automatically on the next deploy. No other files change.
+Adding a new search dimension requires a single edit to `packages/memoriahub-api/src/search/searchable-fields.registry.ts`. Both the deterministic `POST /api/search` endpoint and the agent's `search_media` tool schema are derived from `SEARCHABLE_FIELDS` automatically on the next deploy. No other files change.
 
 ### Step-by-Step
 
@@ -429,7 +431,7 @@ import { wherePersonId } from './media-where.builder';
 
 When face recognition data is available, the enrichment pipeline produces `MediaPerson` rows linking a `media_item_id` to a `person_id`. The search integration is:
 
-**`apps/api/src/search/media-where.builder.ts`** — add one export:
+**`packages/memoriahub-api/src/media/where/media-where.builder.ts`** — add one export:
 
 ```typescript
 export function wherePersonId(personId: string): Prisma.MediaItemWhereInput {
@@ -437,7 +439,7 @@ export function wherePersonId(personId: string): Prisma.MediaItemWhereInput {
 }
 ```
 
-**`apps/api/src/search/searchable-fields.registry.ts`** — add one entry:
+**`packages/memoriahub-api/src/search/searchable-fields.registry.ts`** — add one entry:
 
 ```typescript
 {

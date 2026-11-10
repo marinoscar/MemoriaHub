@@ -56,7 +56,17 @@
     "memoriahub-api": [],
     "memoriahub-web": []
   },
-  "$hostPlugins": {},
+  "$hostPlugins": {
+    "memoriahub-api": {
+      "tagging": [
+        {
+          "name": "@fastify/multipart",
+          "range": "^10.0.0",
+          "why": "POST /api/tag-labels/import reads the CSV upload with request.file(); the host registers the plugin on its Fastify app"
+        }
+      ]
+    }
+  },
   "memoriahub-compute": {
     "ffmpeg": {
       "peers": []
@@ -263,6 +273,27 @@
         "@nestjs/common",
         "@marinoscar/memoriahub-compute",
         "onnxruntime-node"
+      ]
+    },
+    "tagging": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "csv-parse",
+        "csv-stringify",
+        "nestjs-zod",
+        "zod"
+      ]
+    },
+    "search": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "nestjs-zod",
+        "zod"
       ]
     },
     "memories": {

@@ -1,5 +1,7 @@
 # Semantic Search — End-to-End Reference
 
+> **Where the code lives (RETRO-J7, #618).** The search slice is `@marinoscar/memoriahub-api/search` (`packages/memoriahub-api/src/search/`); it reaches the platform only through the host ports (AI through `MEMORIAHUB_AI`, the settings through `MEMORIAHUB_SETTINGS`, access through `MEMORIAHUB_ACCESS`). Routes, SSE events, job types and prompts are unchanged.
+
 | Field | Value |
 |-------|-------|
 | **Version** | 1.0 |
