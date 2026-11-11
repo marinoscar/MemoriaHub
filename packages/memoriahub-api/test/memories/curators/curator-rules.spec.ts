@@ -19,7 +19,7 @@
  * test/memories/memories-periodic.integration.spec.ts.
  */
 
-import { MediaType } from '@prisma/client';
+import { MediaType } from '../../../src/memories/data/memories-enums.js';
 import { MAX_VIDEOS_PER_MEMORY, selectByBuckets } from '../../../src/memories/curation/memory-curation.service.js';
 import { MemoryCandidate, ScoredCandidate } from '../../../src/memories/curation/memory-curation.types.js';
 import { THEME_TAG_DENYLIST, rankTagsForPeriod } from '../../../src/memories/curators/theme.curator.js';

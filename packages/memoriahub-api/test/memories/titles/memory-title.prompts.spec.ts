@@ -13,7 +13,7 @@
  * privacy boundary holds (no ids of any kind reach the prompt).
  */
 
-import { MemoryType } from '@prisma/client';
+import { MemoryType } from '../../../src/memories/data/memories-enums.js';
 import {
   DESCRIPTION_MAX_CHARS,
   MAX_PROMPT_DESCRIPTIONS,

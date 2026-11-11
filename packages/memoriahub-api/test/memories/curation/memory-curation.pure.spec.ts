@@ -10,7 +10,7 @@
  * mocking would prove nothing.
  */
 
-import { MediaType } from '@prisma/client';
+import { MediaType } from '../../../src/memories/data/memories-enums.js';
 import {
   AI_CONTENT_BONUS,
   FAVORITE_BONUS,
