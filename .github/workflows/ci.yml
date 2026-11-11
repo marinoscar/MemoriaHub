@@ -146,6 +146,95 @@ jobs:
       # exactly-matching name, and there is no `pretest:ci`, so nothing to skip.
       - run: npm run test:ci --workspace=api -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # The real-Postgres tier (RETRO-J, #555). The *.db.spec.ts files skip when no
+  # database listens, so the API shards above never ran them. This job gives them
+  # one: pgvector Postgres, the application role (an ordinary NOSUPERUSER
+  # NOBYPASSRLS role that OWNS the tables, since row-level security is inert for a
+  # superuser), the migrations and the seed, then every *.db.spec.ts in one
+  # process (some are destructive and share the database, so never in parallel).
+  # The credentials are throwaway values for a service container that lives for
+  # this job only.
+  api-db-test:
+    name: API DB tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ci-bootstrap-only
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: memoriahub_app
+      POSTGRES_PASSWORD: ci-app-only
+      POSTGRES_DB: memoriahub_test
+      POSTGRES_SSL: 'false'
+      DATABASE_URL: postgresql://memoriahub_app:ci-app-only@localhost:5432/memoriahub_test
+      JWT_SECRET: ci-only-jwt-secret-minimum-32-characters-long
+      SECRETS_ENCRYPTION_KEY: Y2ktb25seS10aHJvd2F3YXkta2V5LTMyLWJ5dGVzISE=
+      INITIAL_ADMIN_EMAIL: admin@example.test
+      OTEL_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # onnxruntime-node's install script downloads from nuget; nothing in the
+      # DB tier loads it, and that download is a known flake.
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-api
+
+      - run: npx prisma generate
+        working-directory: apps/api
+
+      # The ordinary application role and its database, as
+      # infra/compose/postgres-init/10-app-role.sh does it: the bootstrap
+      # superuser creates the extensions and the role, and the role owns the
+      # database so it owns every table the migrations create.
+      - name: Create the application role and database
+        run: |
+          psql -v ON_ERROR_STOP=1 -d postgres <<'SQL'
+          CREATE ROLE memoriahub_app LOGIN PASSWORD 'ci-app-only' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;
+          ALTER ROLE memoriahub_app SET createrole_self_grant = 'inherit, set';
+          CREATE DATABASE memoriahub_test OWNER memoriahub_app;
+          SQL
+          psql -v ON_ERROR_STOP=1 -d memoriahub_test <<'SQL'
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS vector;
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
+          ALTER SCHEMA public OWNER TO memoriahub_app;
+          SQL
+
+      - run: npm run db:compose:check --workspace=api
+      - run: npm run prisma:migrate --workspace=api
+      - run: npm run prisma:seed --workspace=api
+      - run: npm run db:check:database --workspace=api
+
+      - run: npm run test:db --workspace=api
+
   web-test:
     name: Web Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
