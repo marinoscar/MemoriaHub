@@ -46,7 +46,7 @@ describe('geocode: the Google key through the per-job secret (RETRO-C6)', () => 
     context = await createTestApp({ useMockDatabase: true });
     const credentials = context.module.get(CredentialsService, { strict: false });
     jest.spyOn(credentials, 'describe').mockImplementation(async () =>
-      credentialStored ? ({ purpose: 'geo_provider', name: 'google', hint: '…9f2c' } as never) : null,
+      credentialStored ? ({ purpose: 'geo_provider', name: 'google', hint: '…9f2c', updatedAt: new Date() } as never) : null,
     );
     jest.spyOn(credentials, 'getSecret').mockImplementation(async () => (credentialStored ? FIXTURE_KEY : null));
     const appSettings = context.module.get(AppSystemSettingsService, { strict: false });
