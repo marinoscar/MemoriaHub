@@ -24,7 +24,7 @@ import { JobHandlerRegistry, enqueueHousekeepingJob, type JobHandler } from '@ma
 import { describeJobHandlerConformance } from '@marinoscar/platform-api/jobs/testing';
 import { WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 
-import { PictureEnhancementPurgeTask } from '../../src/enhancement/picture-enhancement-purge.task';
+import { PictureEnhancementPurgeTask } from '@marinoscar/memoriahub-api/enhancement';
 import { ThumbnailRepairTask } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeTask } from '@marinoscar/memoriahub-api/media';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
@@ -33,6 +33,7 @@ import { NotificationReconcileTask } from '../../src/notification-producers/noti
 import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
 import { ShareExpiringTask } from '../../src/notification-producers/share-expiring.task';
+import { configuredWorkerMode } from '../../src/platform/jobs/legacy-env';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import {
   WorkflowMicroRunFinalizeHandler,
@@ -105,7 +106,18 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
   {
     name: 'PictureEnhancementPurgeTask',
     type: 'picture_enhancement_purge',
-    tick: (w) => new PictureEnhancementPurgeTask(w.jobs as never, w.prisma as never).handleScheduledPurge(),
+    // The enhancement slice's cron asks the jobs port for the housekeeping job and the host says whether this
+    // instance runs a worker (RETRO-J10).
+    tick: (w) =>
+      new PictureEnhancementPurgeTask(
+        {
+          enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+            const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('PictureEnhancementPurgeTask'), type, what });
+            return job ? { id: job.id } : null;
+          },
+        } as never,
+        { housekeepingEnabled: () => configuredWorkerMode() !== 'off' },
+      ).handleScheduledPurge(),
     gate: { env: 'JOBS_WORKER_MODE', value: 'off' },
   },
   {

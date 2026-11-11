@@ -16,11 +16,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { MediaEnhancementService } from './media-enhancement.service';
-import { ListEnhancementBatchesQueryDto } from './dto/list-enhancement-batches-query.dto';
+
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { ENHANCEMENT_PERMISSIONS as PERMISSIONS } from '../constants.js';
+import { MediaEnhancementService } from '../media-enhancement.service.js';
+import { ListEnhancementBatchesQueryDto } from './enhancement.dto.js';
 
 /**
  * Bulk AI enhancement — batch inspection + cancel API (epic #420, issue #421).
@@ -32,6 +32,10 @@ import { ListEnhancementBatchesQueryDto } from './dto/list-enhancement-batches-q
  * The detail payload is deliberately BaseRun-shaped (the same field set as
  * trash-empty runs, workflow runs and review runs) so the web RunProgressPanel
  * and useRunPolling drive it with no new component.
+ *
+ * Mounted by the host in its own module.
+ *
+ * @stability experimental
  */
 @ApiTags('Picture Enhancement')
 @ApiBearerAuth('JWT-auth')
@@ -39,8 +43,9 @@ import { ListEnhancementBatchesQueryDto } from './dto/list-enhancement-batches-q
 export class EnhancementBatchesController {
   constructor(private readonly service: MediaEnhancementService) {}
 
+  /** Lists a library's bulk-enhancement batches, newest first. */
   @Get()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: "List a circle's bulk-enhancement batches (paginated, newest first)",
     description:
@@ -67,13 +72,14 @@ export class EnhancementBatchesController {
   @ApiResponse({ status: 403, description: 'Caller is not a viewer of the circle' })
   async list(
     @Query() query: ListEnhancementBatchesQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.listBatches(query, user);
   }
 
+  /** Reads one batch's progress. */
   @Get(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Get a bulk-enhancement batch (progress counters)',
     description:
@@ -90,12 +96,13 @@ export class EnhancementBatchesController {
   @ApiResponse({ status: 200, description: 'Batch returned' })
   @ApiResponse({ status: 403, description: 'Caller is not a viewer of the circle' })
   @ApiResponse({ status: 404, description: 'Batch not found' })
-  async get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async get(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.service.getBatch(id, user);
   }
 
+  /** Cancels a batch that is not finished. */
   @Post(':id/cancel')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel a non-terminal bulk-enhancement batch (collaborator)',
@@ -111,7 +118,7 @@ export class EnhancementBatchesController {
   @ApiResponse({ status: 400, description: 'Batch already finished' })
   @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
   @ApiResponse({ status: 404, description: 'Batch not found' })
-  async cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async cancel(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.service.cancelBatch(id, user);
   }
 }

@@ -8,43 +8,58 @@
 // discarded / already-expired rows are never touched. Mirrors TrashPurgeHandler.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { MediaEnhancementStatus } from '@prisma/client';
-import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import { ENHANCEMENT_JOB_TYPES, ENHANCEMENT_STATUS } from './constants.js';
+import type { EnhancementDb } from './data/enhancement-db.js';
+
+/**
+ * The `picture_enhancement_purge` job handler: reaps staged previews past the retention cutoff.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class PictureEnhancementPurgeHandler implements JobHandler, OnModuleInit {
-  readonly type = 'picture_enhancement_purge';
+export class PictureEnhancementPurgeHandler implements MemoriahubJobHandler, OnModuleInit {
+  readonly type = ENHANCEMENT_JOB_TYPES.purge;
   readonly label = 'AI picture enhancer purge';
   /** Housekeeping: a read, a few deletes per row. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 2 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 2 };
   private readonly logger = new Logger(PictureEnhancementPurgeHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: EnhancementDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly resolver: MemoriahubObjectStorePort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly systemSettings: MemoriahubSettingsPort,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(_job: Job): Promise<void> {
+  /**
+   * Expires the staged previews past the retention cutoff.
+   *
+   * @param _job - the housekeeping job (it carries no payload).
+   */
+  async process(_job: MemoriahubJob): Promise<void> {
     // Fallback mirrors settings.schema.ts / DEFAULT_SYSTEM_SETTINGS (168h = 7d).
     const retentionHours =
-      (await this.systemSettings.getSettingValue<number>(
-        'pictureEnhancement.retentionHours',
-      )) ?? 168;
+      (await this.systemSettings.readSystem<{ retentionHours?: number } | undefined>('pictureEnhancement')).value
+        ?.retentionHours ?? 168;
 
     const cutoff = new Date(Date.now() - retentionHours * 3_600_000);
 
@@ -54,7 +69,7 @@ export class PictureEnhancementPurgeHandler implements JobHandler, OnModuleInit 
 
     const rows = await this.prisma.mediaEnhancement.findMany({
       where: {
-        status: { in: [MediaEnhancementStatus.ready, MediaEnhancementStatus.failed] },
+        status: { in: [ENHANCEMENT_STATUS.ready, ENHANCEMENT_STATUS.failed] },
         updatedAt: { lt: cutoff },
       },
     });
@@ -75,7 +90,7 @@ export class PictureEnhancementPurgeHandler implements JobHandler, OnModuleInit 
       );
       if (stagedKeys.length > 0 && row.stagingProvider) {
         try {
-          const provider = await this.resolver.getProviderFor(
+          const provider = await this.resolver.forLocation(
             row.stagingProvider,
             row.stagingBucket,
           );
@@ -102,7 +117,7 @@ export class PictureEnhancementPurgeHandler implements JobHandler, OnModuleInit 
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
         data: {
-          status: MediaEnhancementStatus.expired,
+          status: ENHANCEMENT_STATUS.expired,
           stagingStorageKey: null,
           stagingThumbnailKey: null,
         },

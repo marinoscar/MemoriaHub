@@ -15,8 +15,7 @@ import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { MemoryDigestHandler } from '@marinoscar/memoriahub-api/memories';
 import { MemoryGenerationHandler } from '@marinoscar/memoriahub-api/memories';
 import { MetadataExtractionHandler } from '@marinoscar/memoriahub-api/media';
-import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
-import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
+import { PictureEnhancementHandler, PictureEnhancementPurgeHandler } from '@marinoscar/memoriahub-api/enhancement';
 import {
   LocationSuggestionRunEvaluateHandler,
   LocationSuggestionRunExecuteBatchHandler,

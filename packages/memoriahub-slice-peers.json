@@ -351,6 +351,16 @@
         "@nestjs/swagger",
         "nestjs-zod"
       ]
+    },
+    "enhancement": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@nestjs/swagger",
+        "nestjs-zod"
+      ]
     }
   },
   "memoriahub-web": {

@@ -18,21 +18,26 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { MediaEnhancementStatus } from '@prisma/client';
 import type { FastifyReply } from 'fastify';
-import { MediaEnhancementService } from './media-enhancement.service';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { EnhanceParamsDto } from './dto/enhance-params.dto';
-import { BulkEnhanceDto } from './dto/bulk-enhance.dto';
-import { BulkEnhanceByFilterDto } from './dto/bulk-enhance-by-filter.dto';
-import { ApplyEnhancementDto } from './dto/apply-enhancement.dto';
-import {
-  ENHANCEMENT_STATUS_ALIASES,
-  ListEnhancementsQueryDto,
-} from './dto/list-enhancements-query.dto';
 
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { ENHANCEMENT_PERMISSIONS as PERMISSIONS, ENHANCEMENT_STATUS } from '../constants.js';
+import { MediaEnhancementService } from '../media-enhancement.service.js';
+import {
+  ApplyEnhancementDto,
+  BulkEnhanceByFilterDto,
+  BulkEnhanceDto,
+  ENHANCEMENT_STATUS_ALIASES,
+  EnhanceParamsDto,
+  ListEnhancementsQueryDto,
+} from './enhancement.dto.js';
+
+/**
+ * The AI Picture Enhancer routes under `/api/media` (single and bulk start, list, poll, apply, discard);
+ * mounted by the host in its own module, after the media controller's static routes.
+ *
+ * @stability experimental
+ */
 @ApiTags('Picture Enhancement')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
@@ -58,7 +63,7 @@ export class MediaEnhancementController {
    * Declared in the static-routes block so it is never shadowed by @Get(':id').
    */
   @Get('enhancements')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: "List a circle's AI enhancements (paginated)",
     description:
@@ -76,7 +81,7 @@ export class MediaEnhancementController {
     name: 'status',
     required: false,
     enum: [
-      ...Object.values(MediaEnhancementStatus),
+      ...Object.values(ENHANCEMENT_STATUS),
       ...Object.keys(ENHANCEMENT_STATUS_ALIASES),
     ],
     description:
@@ -101,7 +106,7 @@ export class MediaEnhancementController {
   @ApiResponse({ status: 403, description: 'Caller is not a viewer of the circle' })
   async list(
     @Query() query: ListEnhancementsQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.listEnhancements(query, user);
   }
@@ -112,7 +117,7 @@ export class MediaEnhancementController {
    * as an :id param.
    */
   @Post('bulk/enhance')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Queue AI enhancements for a selection of photos (bulk)',
@@ -137,7 +142,7 @@ export class MediaEnhancementController {
   })
   @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
   @ApiResponse({ status: 404, description: 'One or more ids are not live items of the circle' })
-  async startBatch(@Body() dto: BulkEnhanceDto, @CurrentUser() user: RequestUser) {
+  async startBatch(@Body() dto: BulkEnhanceDto, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.service.startBatch(dto, user);
   }
 
@@ -147,7 +152,7 @@ export class MediaEnhancementController {
    * as `bulk/enhance` above: `bulk` must never be captured as an :id param.
    */
   @Post('bulk/enhance/by-filter')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Queue AI enhancements for every photo matching a filter (bulk)',
@@ -178,7 +183,7 @@ export class MediaEnhancementController {
   @ApiResponse({ status: 403, description: 'Caller is not a collaborator of the circle' })
   async startBatchByFilter(
     @Body() dto: BulkEnhanceByFilterDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.startBatchByFilter(dto, user);
   }
@@ -191,7 +196,7 @@ export class MediaEnhancementController {
    * POST /api/media/:id/enhance — start an AI enhancement.
    */
   @Post(':id/enhance')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Start an AI picture enhancement for a photo' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -201,7 +206,7 @@ export class MediaEnhancementController {
   async start(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: EnhanceParamsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.startEnhance(id, dto, user);
   }
@@ -210,13 +215,13 @@ export class MediaEnhancementController {
    * GET /api/media/:id/enhance — latest enhancement for the item (resume UI).
    */
   @Get(':id/enhance')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get the latest enhancement for a media item' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Latest enhancement (or null)' })
   async latest(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.getLatestEnhancement(id, user);
   }
@@ -225,7 +230,7 @@ export class MediaEnhancementController {
    * GET /api/media/:id/enhance/:enhancementId — poll status + compare payload.
    */
   @Get(':id/enhance/:enhancementId')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get an enhancement status and compare payload' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiParam({ name: 'enhancementId', type: String, format: 'uuid' })
@@ -234,7 +239,7 @@ export class MediaEnhancementController {
   async get(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('enhancementId', ParseUUIDPipe) enhancementId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.service.getEnhancement(id, enhancementId, user);
   }
@@ -243,7 +248,7 @@ export class MediaEnhancementController {
    * POST /api/media/:id/enhance/:enhancementId/apply — keep_both | replace.
    */
   @Post(':id/enhance/:enhancementId/apply')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Apply an enhancement (keep_both or replace)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiParam({ name: 'enhancementId', type: String, format: 'uuid' })
@@ -254,7 +259,7 @@ export class MediaEnhancementController {
     @Param('id', ParseUUIDPipe) id: string,
     @Param('enhancementId', ParseUUIDPipe) enhancementId: string,
     @Body() dto: ApplyEnhancementDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
     @Res({ passthrough: true }) res: FastifyReply,
   ) {
     const result = await this.service.applyEnhancement(id, enhancementId, dto.decision, user, {
@@ -268,7 +273,7 @@ export class MediaEnhancementController {
    * POST /api/media/:id/enhance/:enhancementId/discard — drop the staging bytes.
    */
   @Post(':id/enhance/:enhancementId/discard')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Discard an enhancement preview' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -277,7 +282,7 @@ export class MediaEnhancementController {
   async discard(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('enhancementId', ParseUUIDPipe) enhancementId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.service.discardEnhancement(id, enhancementId, user);
   }

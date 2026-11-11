@@ -1,42 +1,104 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { MediaType, MediaEnhancementBatch, MediaEnhancementStatus, MediaEnhancementDecision, MediaTagSource, JobReason, MediaFaceStatusType, Prisma } from '@prisma/client';
 import { Readable } from 'stream';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { isPictureEnhancementEnabled } from '../settings/feature-gates';
-import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { EnhanceParams } from './dto/enhance-params.dto';
-import { BulkEnhance } from './dto/bulk-enhance.dto';
-import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
-import { andWhere, buildMediaWhere, wherePeople } from '@marinoscar/memoriahub-api/media';
-import { ListEnhancementBatchesQuery } from './dto/list-enhancement-batches-query.dto';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
+
+import { streamToBuffer } from '../core/index.js';
 import {
-  ListEnhancementsQuery,
-  resolveStatusFilter,
-} from './dto/list-enhancements-query.dto';
+  MediaMetadataSyncService,
+  MediaThumbnailService,
+  UploadEnrichmentService,
+  andWhere,
+  buildMediaWhere,
+  enqueueEnrichmentJob,
+  wherePeople,
+  MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_THUMBNAIL_PRUNER,
+  type MediaObjectReprocessor,
+  type MediaThumbnailPruner,
+} from '../media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubObjectStore,
+  type MemoriahubObjectStorePort,
+  type MemoriahubScopeRole,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import type { MemoriahubRequestUser } from '../core/index.js';
+import {
+  ENHANCEMENT_DECISION,
+  ENHANCEMENT_JOB_REASON,
+  ENHANCEMENT_JOB_TYPES,
+  ENHANCEMENT_MEDIA_TYPE,
+  ENHANCEMENT_STATUS,
+  ENHANCEMENT_TAG_SOURCE,
+  type EnhancementStatus,
+} from './constants.js';
+import type { EnhancementDb, EnhancementTx } from './data/enhancement-db.js';
+import {
+  ENHANCEMENT_KEY_STATUS,
+  ENHANCEMENT_STORAGE_ORG,
+  type EnhancementKeyStatus,
+  type EnhancementStorageOrg,
+} from './enhancement-host-hooks.js';
 import {
   buildEnhancePrompt,
   closestSupportedSize,
   sizeToDims,
-} from './enhance-prompt.builder';
-import { randomUUID } from 'crypto';
-import { extname } from 'path';
-import { DefaultOrgId } from '../common/tenancy/default-org-id';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
+} from './enhance-prompt.builder.js';
+import {
+  resolveStatusFilter,
+  type BulkEnhance,
+  type BulkEnhanceByFilter,
+  type EnhanceParams,
+  type ListEnhancementBatchesQuery,
+  type ListEnhancementsQuery,
+} from './http/enhancement.dto.js';
+
+/** The acting user of a service call. */
+type RequestUser = MemoriahubRequestUser;
+
+/** A role a call requires of the caller in the item's library. */
+type OwnerRole = MemoriahubScopeRole;
+
+/** A `media_enhancements` row (the delegates are structural; the schema is the host's). */
+type EnhancementRow = any;
+
+/** A `media_enhancement_batches` row (the delegates are structural; the schema is the host's). */
+type MediaEnhancementBatch = any;
+
+/** The settings the service reads, one namespace each. */
+interface EnhancementSettings {
+  features?: Record<string, unknown>;
+  pictureEnhancement?: {
+    defaultQuality?: string;
+    defaultStrength?: string;
+    stampExif?: boolean;
+    allowReplace?: boolean;
+    blockReplaceOnDownscale?: boolean;
+    maxInputMegapixels?: number;
+    retentionHours?: number;
+    maxBatchSize?: number;
+  };
+  ai?: { features?: { enhance?: { provider?: string | null; model?: string | null } | null } };
+}
+
+/** `features.pictureEnhancement` and not `PICTURE_ENHANCEMENT_ENABLED=false`. */
+function isPictureEnhancementEnabled(settings: EnhancementSettings): boolean {
+  return settings.features?.['pictureEnhancement'] === true && process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false';
+}
 
 const SYSTEM_TAG = 'AI Enhanced';
 
@@ -63,31 +125,70 @@ interface CompareSection {
   size: string | null;
 }
 
+/**
+ * The AI Picture Enhancer service: starting, listing, applying and discarding single and bulk enhancements.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MediaEnhancementService {
   private readonly logger = new Logger(MediaEnhancementService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembership: OwnerAccessService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly recoveryService: ObjectReprocessService,
-    private readonly thumbnailPrune: ThumbnailPruneService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: EnhancementDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembership: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly resolver: MemoriahubObjectStorePort,
+    @Inject(MEDIA_OBJECT_REPROCESSOR) private readonly recoveryService: MediaObjectReprocessor,
+    @Inject(MEDIA_THUMBNAIL_PRUNER) private readonly thumbnailPrune: MediaThumbnailPruner,
     private readonly metadataSync: MediaMetadataSyncService,
-    private readonly mediaEnrichment: MediaEnrichmentService,
+    private readonly mediaEnrichment: UploadEnrichmentService,
     private readonly thumbnails: MediaThumbnailService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: AppSystemSettingsService,
-    private readonly defaultOrgId: DefaultOrgId,
-    private readonly aiKeys: AiDeploymentKeySource,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly systemSettings: MemoriahubSettingsPort,
+    @Inject(ENHANCEMENT_STORAGE_ORG) private readonly defaultOrgId: EnhancementStorageOrg,
+    @Inject(ENHANCEMENT_KEY_STATUS) private readonly aiKeys: EnhancementKeyStatus,
   ) {}
+
+  /** The three settings namespaces the service reads, as one document. */
+  private async readSettings(): Promise<EnhancementSettings> {
+    const [features, pictureEnhancement, ai] = await Promise.all([
+      this.systemSettings.readSystem<Record<string, unknown>>('features'),
+      this.systemSettings.readSystem<EnhancementSettings['pictureEnhancement']>('pictureEnhancement'),
+      this.systemSettings.readSystem<EnhancementSettings['ai']>('ai'),
+    ]);
+    return { features: features.value, pictureEnhancement: pictureEnhancement.value, ai: ai.value };
+  }
+
+  /** Enqueues a job through the jobs port and records the provider and model on its row. */
+  private async enqueueJob(
+    input: { mediaItemId: string; circleId: string; type: string; priority: number; skipDedup?: boolean; payload?: Record<string, unknown> },
+    provider?: string,
+    model?: string,
+  ): Promise<{ id: string }> {
+    const job = await enqueueEnrichmentJob(this.jobs, {
+      type: input.type,
+      mediaItemId: input.mediaItemId,
+      circleId: input.circleId,
+      reason: ENHANCEMENT_JOB_REASON.rerun,
+      priority: input.priority,
+      ...(input.skipDedup === true ? { skipDedup: true } : {}),
+      ...(input.payload !== undefined ? { payload: input.payload } : {}),
+    });
+    if (provider !== undefined || model !== undefined) {
+      await this.jobs.recordProvider?.(job.id, provider ?? null, model ?? null);
+    }
+    return job;
+  }
 
   // ---------------------------------------------------------------------------
   // GET /api/admin/memoriahub-ai/enhance/status (was /api/admin/ai/enhance/status; RETRO-E4 moved it off the AI slice's prefix)
   // ---------------------------------------------------------------------------
 
+  /**
+   * The enhancer's feature, provider and deployment-key status (backs the Doctor check and the admin page).
+   */
   async getAdminStatus() {
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
     const featureEnabled = isPictureEnhancementEnabled(settings);
     const enhanceCfg = settings.ai?.features?.enhance ?? null;
     const provider = enhanceCfg?.provider ?? null;
@@ -113,8 +214,16 @@ export class MediaEnhancementService {
   // POST /api/media/:id/enhance
   // ---------------------------------------------------------------------------
 
+  /**
+   * Starts one enhancement: a `media_enhancements` row and a `picture_enhancement` job at priority 0
+   * (any live enhancement of the item is superseded).
+   *
+   * @param mediaItemId - the photo.
+   * @param params - the preset, the adjustments and the per-run overrides.
+   * @param user - the caller (a collaborator of the item's library).
+   */
   async startEnhance(mediaItemId: string, params: EnhanceParams, user: RequestUser) {
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
 
     // Feature gate: system setting + env kill-switch (shared with GET /api/features).
     if (!isPictureEnhancementEnabled(settings)) {
@@ -147,7 +256,7 @@ export class MediaEnhancementService {
 
     // Photo-only guard (mirrors media-orientation-edit.service).
     if (
-      mediaItem.type !== MediaType.photo ||
+      mediaItem.type !== ENHANCEMENT_MEDIA_TYPE.photo ||
       !mediaItem.storageObject.mimeType.startsWith('image/')
     ) {
       throw new BadRequestException('Picture enhancement is only supported for photos');
@@ -180,14 +289,14 @@ export class MediaEnhancementService {
     // Compile the prompt deterministically at creation time (params + strength).
     const effectiveStrength =
       params.strength ?? settings.pictureEnhancement?.defaultStrength ?? 'balanced';
-    const prompt = buildEnhancePrompt(params, effectiveStrength);
+    const prompt = buildEnhancePrompt(params, effectiveStrength as NonNullable<EnhanceParams['strength']>);
 
     const row = await this.prisma.mediaEnhancement.create({
       data: {
         mediaItemId: mediaItem.id,
         circleId: mediaItem.circleId,
-        status: MediaEnhancementStatus.pending,
-        params: (params ?? {}) as Prisma.InputJsonValue,
+        status: ENHANCEMENT_STATUS.pending,
+        params: (params ?? {}),
         provider,
         model,
         prompt,
@@ -197,11 +306,10 @@ export class MediaEnhancementService {
       },
     });
 
-    const job = await this.enrichmentJobService.enqueue({
-      type: 'picture_enhancement',
+    const job = await this.enqueueJob({
+      type: ENHANCEMENT_JOB_TYPES.pictureEnhancement,
       mediaItemId: mediaItem.id,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
       priority: 0,
       // skipDedup is REQUIRED here, not an optimization. EnrichmentJobService
       // dedups on (type, mediaItemId, status in pending|running) and returns the
@@ -213,10 +321,8 @@ export class MediaEnhancementService {
       // The media_enhancements row (one live per item, enforced by
       // supersedeLive) is the real idempotency unit here — not the job row.
       skipDedup: true,
-      providerKey: provider,
-      modelVersion: model,
       payload: { enhancementId: row.id },
-    });
+    }, provider, model);
 
     this.logger.log(
       `Enqueued picture_enhancement job ${job.id} for enhancement ${row.id} (MediaItem ${mediaItem.id})`,
@@ -235,9 +341,9 @@ export class MediaEnhancementService {
         mediaItemId,
         status: {
           in: [
-            MediaEnhancementStatus.pending,
-            MediaEnhancementStatus.processing,
-            MediaEnhancementStatus.ready,
+            ENHANCEMENT_STATUS.pending,
+            ENHANCEMENT_STATUS.processing,
+            ENHANCEMENT_STATUS.ready,
           ],
         },
       },
@@ -248,7 +354,7 @@ export class MediaEnhancementService {
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
         data: {
-          status: MediaEnhancementStatus.discarded,
+          status: ENHANCEMENT_STATUS.discarded,
           stagingStorageKey: null,
           stagingThumbnailKey: null,
         },
@@ -278,7 +384,7 @@ export class MediaEnhancementService {
    * resolve its own id list server-side and reuse the rest verbatim.
    */
   async startBatch(dto: BulkEnhance, user: RequestUser) {
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
 
     // Feature gate: the SHARED helper (system setting + env kill-switch), never
     // a second hand-rolled gate that could drift from startEnhance's.
@@ -359,7 +465,7 @@ export class MediaEnhancementService {
    * an empty match set and gets the honest zero-match 400 below.
    */
   async startBatchByFilter(dto: BulkEnhanceByFilter, user: RequestUser) {
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
 
     // Same two gates, in the same order, as startBatch — via the SHARED helper.
     if (!isPictureEnhancementEnabled(settings)) {
@@ -429,7 +535,7 @@ export class MediaEnhancementService {
         deletedAt: null,
         archivedAt: null,
         // RULE 2 — photo-only in the SQL so the shown count is the run count.
-        type: MediaType.photo,
+        type: ENHANCEMENT_MEDIA_TYPE.photo,
       },
       filterWhere,
       peopleWhere,
@@ -498,7 +604,7 @@ export class MediaEnhancementService {
     filterSnapshot?: Record<string, unknown>,
   ) {
     // Cached (5 s TTL) — no extra DB read path.
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
 
     // Re-checked rather than assumed from the caller: this helper is the reuse
     // seam for #424's by-filter entry point, and a future caller that forgot the
@@ -530,9 +636,9 @@ export class MediaEnhancementService {
         mediaItemId: { in: ids },
         status: {
           in: [
-            MediaEnhancementStatus.pending,
-            MediaEnhancementStatus.processing,
-            MediaEnhancementStatus.ready,
+            ENHANCEMENT_STATUS.pending,
+            ENHANCEMENT_STATUS.processing,
+            ENHANCEMENT_STATUS.ready,
           ],
         },
       },
@@ -552,7 +658,7 @@ export class MediaEnhancementService {
       // not fail wholesale because one video slipped into a mixed selection —
       // the ineligible item is reported in `skipped` and the rest proceed.
       if (
-        item.type !== MediaType.photo ||
+        item.type !== ENHANCEMENT_MEDIA_TYPE.photo ||
         !item.storageObject ||
         !item.storageObject.mimeType.startsWith('image/')
       ) {
@@ -597,11 +703,11 @@ export class MediaEnhancementService {
         circleId,
         requestedCount: ids.length,
         queuedCount: 0,
-        skipped: skipped as unknown as Prisma.InputJsonValue,
+        skipped: skipped as unknown,
         params: {
           ...((params ?? {}) as Record<string, unknown>),
           ...(filterSnapshot ? { _filter: filterSnapshot } : {}),
-        } as Prisma.InputJsonValue,
+        },
         source,
         createdById: user.id,
       },
@@ -609,7 +715,7 @@ export class MediaEnhancementService {
 
     const effectiveStrength =
       params.strength ?? settings.pictureEnhancement?.defaultStrength ?? 'balanced';
-    const prompt = buildEnhancePrompt(params, effectiveStrength);
+    const prompt = buildEnhancePrompt(params, effectiveStrength as NonNullable<EnhanceParams['strength']>);
 
     let queued = 0;
     for (const item of eligible) {
@@ -618,8 +724,8 @@ export class MediaEnhancementService {
           mediaItemId: item.id,
           circleId: item.circleId,
           batchId: batch.id,
-          status: MediaEnhancementStatus.pending,
-          params: (params ?? {}) as Prisma.InputJsonValue,
+          status: ENHANCEMENT_STATUS.pending,
+          params: (params ?? {}),
           provider,
           model,
           prompt,
@@ -629,11 +735,10 @@ export class MediaEnhancementService {
         },
       });
 
-      await this.enrichmentJobService.enqueue({
-        type: 'picture_enhancement',
+      await this.enqueueJob({
+        type: ENHANCEMENT_JOB_TYPES.pictureEnhancement,
         mediaItemId: item.id,
         circleId: item.circleId,
-        reason: JobReason.rerun,
         // DIVERGENCE 3: a single-item enhance is an interactive request the user
         // is watching, so it jumps the queue at priority 0. A batch is bulk work
         // — it sits BELOW upload enrichment (5/10) and workflow evaluate (20) so
@@ -646,10 +751,8 @@ export class MediaEnhancementService {
         // and the alreadyLive skip above guarantees at most one live row (hence
         // at most one in-flight job) per item.
         skipDedup: true,
-        providerKey: provider,
-        modelVersion: model,
         payload: { enhancementId: row.id },
-      });
+      }, provider, model);
       queued++;
     }
 
@@ -690,7 +793,7 @@ export class MediaEnhancementService {
 
     // Served by the existing @@index([circleId, createdAt]); `id` tiebreak keeps
     // paging deterministic when two batches share a createdAt.
-    const where: Prisma.MediaEnhancementBatchWhereInput = { circleId };
+    const where: Record<string, unknown> = { circleId };
     const [batches, totalItems] = await this.prisma.$transaction([
       this.prisma.mediaEnhancementBatch.findMany({
         where,
@@ -751,7 +854,7 @@ export class MediaEnhancementService {
     });
 
     const pendingRows = await this.prisma.mediaEnhancement.findMany({
-      where: { batchId: batch.id, status: MediaEnhancementStatus.pending },
+      where: { batchId: batch.id, status: ENHANCEMENT_STATUS.pending },
       select: { id: true },
     });
 
@@ -775,9 +878,9 @@ export class MediaEnhancementService {
       const res = await this.prisma.mediaEnhancement.updateMany({
         where: {
           batchId: batch.id,
-          status: MediaEnhancementStatus.pending,
+          status: ENHANCEMENT_STATUS.pending,
         },
-        data: { status: MediaEnhancementStatus.cancelled },
+        data: { status: ENHANCEMENT_STATUS.cancelled },
       });
       cancelled = res.count;
     }
@@ -864,17 +967,17 @@ export class MediaEnhancementService {
    */
   private serializeBatch(batch: MediaEnhancementBatch, tally: BatchTally) {
     const c = tally.counts;
-    const n = (s: MediaEnhancementStatus) => c[s] ?? 0;
+    const n = (s: EnhancementStatus) => c[s] ?? 0;
 
-    const pending = n(MediaEnhancementStatus.pending);
-    const processing = n(MediaEnhancementStatus.processing);
+    const pending = n(ENHANCEMENT_STATUS.pending);
+    const processing = n(ENHANCEMENT_STATUS.processing);
     const succeededCount =
-      n(MediaEnhancementStatus.ready) +
-      n(MediaEnhancementStatus.applied) +
-      n(MediaEnhancementStatus.discarded) +
-      n(MediaEnhancementStatus.expired);
-    const failedCount = n(MediaEnhancementStatus.failed);
-    const skippedCount = n(MediaEnhancementStatus.cancelled);
+      n(ENHANCEMENT_STATUS.ready) +
+      n(ENHANCEMENT_STATUS.applied) +
+      n(ENHANCEMENT_STATUS.discarded) +
+      n(ENHANCEMENT_STATUS.expired);
+    const failedCount = n(ENHANCEMENT_STATUS.failed);
+    const skippedCount = n(ENHANCEMENT_STATUS.cancelled);
 
     const matchedCount = pending + processing + succeededCount + failedCount + skippedCount;
     const processedCount = succeededCount + failedCount + skippedCount;
@@ -998,7 +1101,7 @@ export class MediaEnhancementService {
 
     const statuses = resolveStatusFilter(query.status);
     // Served by the existing @@index([circleId, status]) on media_enhancements.
-    const where: Prisma.MediaEnhancementWhereInput = {
+    const where: Record<string, unknown> = {
       circleId,
       ...(statuses ? { status: { in: statuses } } : {}),
       // Optional batch narrowing (issue #421), served by @@index([batchId]).
@@ -1024,9 +1127,8 @@ export class MediaEnhancementService {
 
     // Read the retention setting ONCE for the whole page, not per row.
     const retentionHours =
-      (await this.systemSettings.getSettingValue<number>(
-        'pictureEnhancement.retentionHours',
-      )) ?? 168;
+      (await this.systemSettings.readSystem<EnhancementSettings['pictureEnhancement']>('pictureEnhancement')).value
+        ?.retentionHours ?? 168;
 
     // ONE query for every source item on the page.
     const mediaItemIds = [...new Set(rows.map((r) => r.mediaItemId))];
@@ -1056,7 +1158,7 @@ export class MediaEnhancementService {
     // Staged bytes: resolve each distinct provider|bucket once for the page.
     const providerCache = new Map<
       string,
-      Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>
+      MemoriahubObjectStore
     >();
     const signStaged = async (
       provider: string,
@@ -1067,7 +1169,7 @@ export class MediaEnhancementService {
       try {
         let resolved = providerCache.get(cacheKey);
         if (!resolved) {
-          resolved = await this.resolver.getProviderFor(provider, bucket);
+          resolved = await this.resolver.forLocation(provider, bucket);
           providerCache.set(cacheKey, resolved);
         }
         return await resolved.getSignedDownloadUrl(key);
@@ -1096,7 +1198,7 @@ export class MediaEnhancementService {
       // Only a `ready` row still owns staged bytes; every other status has had
       // them promoted, discarded, or reaped (mirrors buildComparePayload).
       const hasStaged =
-        row.status === MediaEnhancementStatus.ready &&
+        row.status === ENHANCEMENT_STATUS.ready &&
         !!row.stagingStorageKey &&
         !!row.stagingProvider;
 
@@ -1151,8 +1253,8 @@ export class MediaEnhancementService {
           row.enhancedWidth * row.enhancedHeight < originalWidth * originalHeight,
         // Only ready/failed rows are purge candidates, so only they expire.
         expiresAt:
-          row.status === MediaEnhancementStatus.ready ||
-          row.status === MediaEnhancementStatus.failed
+          row.status === ENHANCEMENT_STATUS.ready ||
+          row.status === ENHANCEMENT_STATUS.failed
             ? new Date(row.updatedAt.getTime() + retentionHours * 3_600_000)
             : null,
         lastError: row.lastError ?? null,
@@ -1186,6 +1288,13 @@ export class MediaEnhancementService {
   // GET /api/media/:id/enhance/:enhancementId  and  GET /api/media/:id/enhance
   // ---------------------------------------------------------------------------
 
+  /**
+   * One enhancement's status and compare payload.
+   *
+   * @param mediaItemId - the photo.
+   * @param enhancementId - the enhancement.
+   * @param user - the caller (a viewer of the item's library).
+   */
   async getEnhancement(
     mediaItemId: string,
     enhancementId: string,
@@ -1195,6 +1304,12 @@ export class MediaEnhancementService {
     return { data: await this.buildComparePayload(mediaItemId, row) };
   }
 
+  /**
+   * The latest enhancement of an item, to resume the review after a reload.
+   *
+   * @param mediaItemId - the photo.
+   * @param user - the caller (a viewer of the item's library).
+   */
   async getLatestEnhancement(mediaItemId: string, user: RequestUser) {
     const mediaItem = await this.assertItemAccess(mediaItemId, user, 'viewer');
     const row = await this.prisma.mediaEnhancement.findFirst({
@@ -1209,7 +1324,7 @@ export class MediaEnhancementService {
 
   private async buildComparePayload(
     mediaItemId: string,
-    row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
+    row: EnhancementRow,
   ) {
     const base: Record<string, unknown> = {
       id: row.id,
@@ -1218,12 +1333,12 @@ export class MediaEnhancementService {
       params: row.params ?? {},
     };
 
-    if (row.status === MediaEnhancementStatus.failed) {
+    if (row.status === ENHANCEMENT_STATUS.failed) {
       base['lastError'] = row.lastError ?? null;
     }
 
     // Signed URLs + dimension deltas only meaningful once ready.
-    if (row.status === MediaEnhancementStatus.ready && row.stagingStorageKey) {
+    if (row.status === ENHANCEMENT_STATUS.ready && row.stagingStorageKey) {
       const original = await this.signOriginal(mediaItemId);
       const enhanced = await this.signStaging(row);
       const downscaled =
@@ -1257,7 +1372,7 @@ export class MediaEnhancementService {
     if (!item?.storageObject) {
       return { url: null, width: item?.width ?? null, height: item?.height ?? null, size: null };
     }
-    const provider = await this.resolver.getProviderFor(
+    const provider = await this.resolver.forLocation(
       item.storageObject.storageProvider,
       item.storageObject.bucket,
     );
@@ -1271,7 +1386,7 @@ export class MediaEnhancementService {
   }
 
   private async signStaging(
-    row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
+    row: EnhancementRow,
   ): Promise<CompareSection> {
     if (!row.stagingStorageKey || !row.stagingProvider) {
       return {
@@ -1281,7 +1396,7 @@ export class MediaEnhancementService {
         size: row.enhancedSize != null ? row.enhancedSize.toString() : null,
       };
     }
-    const provider = await this.resolver.getProviderFor(row.stagingProvider, row.stagingBucket);
+    const provider = await this.resolver.forLocation(row.stagingProvider, row.stagingBucket);
     const url = await provider.getSignedDownloadUrl(row.stagingStorageKey);
     return {
       url,
@@ -1295,6 +1410,15 @@ export class MediaEnhancementService {
   // POST /api/media/:id/enhance/:enhancementId/apply
   // ---------------------------------------------------------------------------
 
+  /**
+   * Commits a ready enhancement: `keep_both` creates a new item, `replace` overwrites the original.
+   *
+   * @param mediaItemId - the photo.
+   * @param enhancementId - the enhancement.
+   * @param decision - what to keep.
+   * @param user - the caller (a collaborator of the item's library).
+   * @param options - the downscale acknowledgement of a replace.
+   */
   async applyEnhancement(
     mediaItemId: string,
     enhancementId: string,
@@ -1304,7 +1428,7 @@ export class MediaEnhancementService {
   ) {
     const row = await this.loadRowForItem(mediaItemId, enhancementId, user, 'editor');
 
-    if (row.status !== MediaEnhancementStatus.ready || !row.stagingStorageKey) {
+    if (row.status !== ENHANCEMENT_STATUS.ready || !row.stagingStorageKey) {
       throw new BadRequestException('Enhancement is not ready to apply');
     }
 
@@ -1316,7 +1440,7 @@ export class MediaEnhancementService {
 
   private async applyKeepBoth(
     mediaItemId: string,
-    row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
+    row: EnhancementRow,
     user: RequestUser,
   ) {
     const source = await this.prisma.mediaItem.findUnique({
@@ -1354,7 +1478,7 @@ export class MediaEnhancementService {
     }
 
     // Download the staged enhanced bytes.
-    const stagingProvider = await this.resolver.getProviderFor(
+    const stagingProvider = await this.resolver.forLocation(
       row.stagingProvider!,
       row.stagingBucket,
     );
@@ -1363,8 +1487,7 @@ export class MediaEnhancementService {
     // Promote the bytes to a fresh permanent object on the ACTIVE provider so
     // the new item owns its own storage (independent of the purge-swept staging
     // key).
-    const { id: activeProviderId, provider: activeProvider } =
-      await this.resolver.getActiveProvider();
+    const { id: activeProviderId, store: activeProvider } = await this.resolver.active();
     const enhancedFilename = this.suffixFilename(source.originalFilename);
     const storageKey = `uploads/${Date.now()}/${randomUUID()}.jpg`;
     await activeProvider.upload(storageKey, Readable.from(bytes), {
@@ -1411,7 +1534,7 @@ export class MediaEnhancementService {
         storageObjectId: newObject.id,
         addedById: user.id,
         circleId: source.circleId,
-        type: MediaType.photo,
+        type: ENHANCEMENT_MEDIA_TYPE.photo,
         source: source.source,
         originalFilename: enhancedFilename,
         capturedAt: source.capturedAt,
@@ -1441,7 +1564,7 @@ export class MediaEnhancementService {
         geocodedAt: source.geocodedAt,
         coordSource: source.coordSource,
         contentHash: null,
-        metadata: mergedMeta as Prisma.InputJsonValue,
+        metadata: mergedMeta,
       },
     });
 
@@ -1464,7 +1587,7 @@ export class MediaEnhancementService {
     // Standard upload-time enrichment (tagging/faces/etc), idempotent.
     await this.mediaEnrichment.enqueueUploadEnrichment({
       id: newItem.id,
-      type: MediaType.photo,
+      type: ENHANCEMENT_MEDIA_TYPE.photo,
       circleId: source.circleId,
       deletedAt: null,
     });
@@ -1474,8 +1597,8 @@ export class MediaEnhancementService {
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
       data: {
-        status: MediaEnhancementStatus.applied,
-        decision: MediaEnhancementDecision.keep_both,
+        status: ENHANCEMENT_STATUS.applied,
+        decision: ENHANCEMENT_DECISION.keep_both,
         resultMediaItemId: newItem.id,
         stagingStorageKey: null,
         stagingThumbnailKey: null,
@@ -1498,11 +1621,11 @@ export class MediaEnhancementService {
 
   private async applyReplace(
     mediaItemId: string,
-    row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
+    row: EnhancementRow,
     user: RequestUser,
     acknowledgeDownscale = false,
   ) {
-    const settings = await this.systemSettings.getSettings();
+    const settings = await this.readSettings();
     const enhCfg = settings.pictureEnhancement;
 
     // HARD policy — no acknowledgement can pass this one (issue #426).
@@ -1548,13 +1671,13 @@ export class MediaEnhancementService {
     const storageObject = source.storageObject;
 
     // Download staged bytes and overwrite the ORIGINAL key on its own provider.
-    const stagingProvider = await this.resolver.getProviderFor(
+    const stagingProvider = await this.resolver.forLocation(
       row.stagingProvider!,
       row.stagingBucket,
     );
     const bytes = await streamToBuffer(await stagingProvider.download(row.stagingStorageKey!));
 
-    const objectProvider = await this.resolver.getProviderFor(
+    const objectProvider = await this.resolver.forLocation(
       storageObject.storageProvider,
       storageObject.bucket,
     );
@@ -1588,7 +1711,7 @@ export class MediaEnhancementService {
           orientation: 1,
           width: row.enhancedWidth,
           height: row.enhancedHeight,
-          metadata: mergedMeta as Prisma.InputJsonValue,
+          metadata: mergedMeta,
         },
       }),
     ]);
@@ -1641,8 +1764,8 @@ export class MediaEnhancementService {
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
       data: {
-        status: MediaEnhancementStatus.applied,
-        decision: MediaEnhancementDecision.replace,
+        status: ENHANCEMENT_STATUS.applied,
+        decision: ENHANCEMENT_DECISION.replace,
         stagingStorageKey: null,
         stagingThumbnailKey: null,
       },
@@ -1670,6 +1793,13 @@ export class MediaEnhancementService {
   // POST /api/media/:id/enhance/:enhancementId/discard
   // ---------------------------------------------------------------------------
 
+  /**
+   * Discards an enhancement preview and its staged bytes.
+   *
+   * @param mediaItemId - the photo.
+   * @param enhancementId - the enhancement.
+   * @param user - the caller (a collaborator of the item's library).
+   */
   async discardEnhancement(
     mediaItemId: string,
     enhancementId: string,
@@ -1680,7 +1810,7 @@ export class MediaEnhancementService {
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
       data: {
-          status: MediaEnhancementStatus.discarded,
+          status: ENHANCEMENT_STATUS.discarded,
           stagingStorageKey: null,
           stagingThumbnailKey: null,
         },
@@ -1741,7 +1871,7 @@ export class MediaEnhancementService {
    * `stagingThumbnailKey` on the row afterwards.
    */
   private async deleteStaging(
-    row: Awaited<ReturnType<PrismaService['mediaEnhancement']['findUniqueOrThrow']>>,
+    row: EnhancementRow,
   ): Promise<void> {
     if (!row.stagingProvider) return;
     const keys = [row.stagingStorageKey, row.stagingThumbnailKey].filter(
@@ -1749,9 +1879,9 @@ export class MediaEnhancementService {
     );
     if (keys.length === 0) return;
 
-    let provider: Awaited<ReturnType<StorageProviderResolver['getProviderFor']>>;
+    let provider: MemoriahubObjectStore;
     try {
-      provider = await this.resolver.getProviderFor(
+      provider = await this.resolver.forLocation(
         row.stagingProvider,
         row.stagingBucket,
       );
@@ -1782,7 +1912,7 @@ export class MediaEnhancementService {
     circleId: string,
     addedById: string,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx: EnhancementTx) => {
       const tag = await tx.tag.upsert({
         where: { circleId_name: { circleId, name: SYSTEM_TAG } },
         create: { addedById, circleId, name: SYSTEM_TAG },
@@ -1790,12 +1920,12 @@ export class MediaEnhancementService {
       });
       await tx.mediaTag.upsert({
         where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId } },
-        create: { tagId: tag.id, mediaItemId, source: MediaTagSource.system },
+        create: { tagId: tag.id, mediaItemId, source: ENHANCEMENT_TAG_SOURCE.system },
         update: {},
       });
       await tx.mediaTag.updateMany({
-        where: { tagId: tag.id, mediaItemId, source: MediaTagSource.ai },
-        data: { source: MediaTagSource.system },
+        where: { tagId: tag.id, mediaItemId, source: ENHANCEMENT_TAG_SOURCE.ai },
+        data: { source: ENHANCEMENT_TAG_SOURCE.system },
       });
     });
   }
@@ -1805,22 +1935,16 @@ export class MediaEnhancementService {
     circleId: string,
   ): Promise<void> {
     try {
-      const settings = await this.systemSettings.getSettings();
+      const settings = await this.readSettings();
       const faceOn = settings.features?.['faceRecognition'] === true;
       const faceKilled = (process.env['FACE_AUTO_DETECT'] ?? 'true') === 'false';
       if (!faceOn || faceKilled) return;
 
-      await this.enrichmentJobService.enqueue({
-        type: 'face_detection',
-        mediaItemId,
-        circleId,
-        reason: JobReason.rerun,
-        priority: 0,
-      });
+      await this.enqueueJob({ type: 'face_detection', mediaItemId, circleId, priority: 0 });
       await this.prisma.mediaFaceStatus.upsert({
         where: { mediaItemId },
-        create: { mediaItemId, status: MediaFaceStatusType.pending, faceCount: 0 },
-        update: { status: MediaFaceStatusType.pending },
+        create: { mediaItemId, status: 'pending', faceCount: 0 },
+        update: { status: 'pending' },
       });
     } catch (err) {
       this.logger.warn(
@@ -1843,7 +1967,7 @@ export class MediaEnhancementService {
           action: 'media_enhancement:applied',
           targetType: 'media_item',
           targetId,
-          meta: meta as Prisma.InputJsonValue,
+          meta: meta,
         },
       });
     } catch (err) {
@@ -1860,7 +1984,9 @@ export class MediaEnhancementService {
   }
 
   // Re-exported for the handler so size/prompt resolution stays in one place.
+  /** The supported canvas closest to a photo's shape. */
   static resolveSize = closestSupportedSize;
+  /** The pixel dimensions of a supported canvas. */
   static sizeToDims = sizeToDims;
 }
 
@@ -1875,7 +2001,7 @@ export class MediaEnhancementService {
  * `InputJsonValue` does not accept a Date.
  */
 function snapshotFilter(dto: BulkEnhanceByFilter): Record<string, unknown> {
-  const { params: _params, ...filter } = dto as Record<string, unknown> & {
+  const { params: _params, ...filter } = dto as unknown as Record<string, unknown> & {
     params?: unknown;
   };
   void _params;

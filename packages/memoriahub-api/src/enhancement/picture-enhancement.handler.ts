@@ -1,80 +1,106 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { MediaType, MediaEnhancementStatus } from '@prisma/client';
-import {
-  JobHandlerRegistry,
-  ProviderThrottleService,
-  RateLimitError as PlatformRateLimitError,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Readable } from 'stream';
-import sharp from 'sharp';
-import { AiService } from '@marinoscar/platform-api/ai';
-import { MEMORIAHUB_AI_FEATURES } from '../ai-port/ai-features';
-import { aiRateLimit, systemScope } from '../ai-port/ai-calls';
-import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
-import {
-  renderThumbnailBuffer,
-  THUMBNAIL_CACHE_CONTROL,
-} from '../media-processing/thumbnail-render.util';
-import { StorageProvider } from '@marinoscar/platform-api/storage';
-import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
-import { ExifCarryoverService } from './exif-carryover.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 
+import { aiRateLimit, streamToBuffer } from '../core/index.js';
+import {
+  MEMORIAHUB_AI,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  MemoriahubRateLimitError,
+  type MemoriahubAiPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStore,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import {
+  ENHANCEMENT_AI_FEATURE,
+  ENHANCEMENT_JOB_TYPES,
+  ENHANCEMENT_MEDIA_TYPE,
+  ENHANCEMENT_STATUS,
+  ENHANCEMENT_THROTTLE_KEY,
+  ENHANCEMENT_THUMBNAIL_CACHE_CONTROL,
+} from './constants.js';
+import type { EnhancementDb } from './data/enhancement-db.js';
+import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder.js';
+import {
+  DEFAULT_RATE_LIMIT_MAX_HITS,
+  ENHANCEMENT_IMAGE_TOOLS,
+  ENHANCEMENT_OPTIONS,
+  type EnhancementImageTools,
+  type EnhancementModuleOptions,
+} from './enhancement-host-hooks.js';
+
+/** The job's payload: the enhancement row it renders. */
 interface PictureEnhancementPayload {
   enhancementId?: string;
 }
 
 /** `gpt-image-1` can take several minutes; the row-state machine below reads `maxAttempts`. */
-const PROFILE: JobExecutionProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+const PROFILE: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+
+/** The settings the handler reads. */
+interface PictureEnhancementSettings {
+  defaultQuality?: string;
+  defaultStrength?: string;
+  stampExif?: boolean;
+}
 
 /**
- * PictureEnhancementHandler: a native platform `JobHandler` (RETRO-C4, #590).
+ * PictureEnhancementHandler: the `picture_enhancement` job (RETRO-C4, #590; moved RETRO-J10, #624).
  *
- * Server-only, permanently (AI rule 3; no nodeResultSchema/persistNodeResult): it
+ * Server-only, permanently (AI rule 3; no nodeResultSchema/persistNodeResult; `usesAi`): it
  * needs the OpenAI credential and writes a staging object, so it never runs on a
- * distributed worker node. A 429/529 reaches the queue as the platform
- * `RateLimitError`, so the job is deferred without consuming an attempt.
+ * distributed worker node. A 429/529 reaches the queue as a rate-limit error, so the job is deferred
+ * without consuming an attempt.
  *
  * The row is created ahead of time (status=pending, params + compiled prompt
  * already stored) by MediaEnhancementService.startEnhance; this handler resolves
  * the row from job.payload.enhancementId, calls the provider's images.edit, and
  * stages the enhanced bytes for human review.
  */
+/**
+ * The `picture_enhancement` job handler.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
-  readonly type = 'picture_enhancement';
+export class PictureEnhancementHandler implements MemoriahubJobHandler, OnModuleInit {
+  readonly type = ENHANCEMENT_JOB_TYPES.pictureEnhancement;
   readonly label = 'AI picture enhancer';
-  readonly profile: JobExecutionProfile = PROFILE;
+  readonly profile: MemoriahubJobProfile = PROFILE;
+  /** OpenAI image-edit quota: its own gate, apart from tagging. */
+  readonly throttleKey = ENHANCEMENT_THROTTLE_KEY;
+  /** A model call: server-only, so it never declares the node result pair. */
+  readonly usesAi = true;
   private readonly logger = new Logger(PictureEnhancementHandler.name);
+  private readonly rateLimitMaxHits: number;
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly throttle: ProviderThrottleService,
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly ai: AiService,
-    private readonly systemSettings: AppSystemSettingsService,
-    // Optional by TYPE only — Nest always injects it (EnhancementModule provides
-    // it). Marked `?` so the metadata stamp is structurally non-essential: a
-    // handler constructed without it still produces a valid enhancement, just
-    // without carried-over EXIF.
-    private readonly exifCarryover?: ExifCarryoverService,
-    // App metrics (RETRO-T3, #628): `app.ai.images.generated`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
-  ) {}
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: EnhancementDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly resolver: MemoriahubObjectStorePort,
+    @Inject(MEMORIAHUB_AI) private readonly ai: MemoriahubAiPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly systemSettings: MemoriahubSettingsPort,
+    @Inject(ENHANCEMENT_IMAGE_TOOLS) private readonly imageTools: EnhancementImageTools,
+    @Optional() @Inject(ENHANCEMENT_OPTIONS) options?: EnhancementModuleOptions,
+    // Metrics: `app.ai.images.generated`. Optional for hand-built tests.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+  ) {
+    this.rateLimitMaxHits = options?.rateLimitMaxHits ?? DEFAULT_RATE_LIMIT_MAX_HITS;
+  }
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
-    // OpenAI image-edit quota: its own gate, apart from tagging.
-    this.throttle.registerProviderKey(this.type, 'enhance');
+    this.jobs.registerHandler(this);
   }
 
   /**
@@ -82,7 +108,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
    * make the row's (already requested, billed-on-run) render happen, and the
    * batch counters derive from the rows it advances. Cancel the batch instead.
    */
-  async canDelete(job: Job): Promise<string | null> {
+  async canDelete(job: MemoriahubJob): Promise<string | null> {
     if (job.status !== 'pending') return null;
     const enhancementId = (job.payload as PictureEnhancementPayload | null)?.enhancementId;
     if (!enhancementId) return null;
@@ -91,11 +117,11 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       select: { status: true, batchId: true, batch: { select: { cancelledAt: true } } },
     });
     if (!row?.batchId || row.batch?.cancelledAt) return null;
-    if (row.status !== MediaEnhancementStatus.pending) return null;
+    if (row.status !== ENHANCEMENT_STATUS.pending) return null;
     return `This job renders an enhancement of batch ${row.batchId}, which is still active: cancel the batch instead of deleting its job.`;
   }
 
-  async process(job: Job): Promise<void> {
+  async process(job: MemoriahubJob): Promise<void> {
     const payload = job.payload as PictureEnhancementPayload | null;
     const enhancementId = payload?.enhancementId;
     if (!enhancementId) {
@@ -115,8 +141,8 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
 
     // Only pending/processing rows are actionable (a superseded row is discarded).
     if (
-      row.status !== MediaEnhancementStatus.pending &&
-      row.status !== MediaEnhancementStatus.processing
+      row.status !== ENHANCEMENT_STATUS.pending &&
+      row.status !== ENHANCEMENT_STATUS.processing
     ) {
       this.logger.log(
         `picture_enhancement job ${job.id}: enhancement ${enhancementId} is ${row.status}; skipping`,
@@ -137,7 +163,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       if (batch?.cancelledAt) {
         await this.prisma.mediaEnhancement.update({
           where: { id: row.id },
-          data: { status: MediaEnhancementStatus.cancelled },
+          data: { status: ENHANCEMENT_STATUS.cancelled },
         });
         this.logger.log(
           `picture_enhancement job ${job.id}: batch ${row.batchId} was cancelled; skipping enhancement ${row.id}`,
@@ -148,7 +174,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
 
     await this.prisma.mediaEnhancement.update({
       where: { id: row.id },
-      data: { status: MediaEnhancementStatus.processing, lastError: null },
+      data: { status: ENHANCEMENT_STATUS.processing, lastError: null },
     });
 
     // The quality the run asked for, for `app.ai.images.generated` (set once it is resolved).
@@ -172,7 +198,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
         !mediaItem ||
         mediaItem.deletedAt ||
         !mediaItem.storageObject ||
-        mediaItem.type !== MediaType.photo ||
+        mediaItem.type !== ENHANCEMENT_MEDIA_TYPE.photo ||
         !mediaItem.storageObject.mimeType.startsWith('image/')
       ) {
         throw new Error(
@@ -181,7 +207,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       }
 
       // Download original bytes, then auto-orient (deterministic pre-pass).
-      const objectProvider = await this.resolver.getProviderFor(
+      const objectProvider = await this.resolver.forLocation(
         mediaItem.storageObject.storageProvider,
         mediaItem.storageObject.bucket,
       );
@@ -194,7 +220,9 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       const inputMime = prepared.width > 0 ? 'image/jpeg' : mediaItem.storageObject.mimeType;
 
       // Resolve OpenAI call params (spec §4.2).
-      const settings = await this.systemSettings.getSettings();
+      const { value: pictureSettings } =
+        await this.systemSettings.readSystem<PictureEnhancementSettings | undefined>('pictureEnhancement');
+      const settings = { pictureEnhancement: pictureSettings };
       const rawParams = (row.params as Record<string, unknown> | null) ?? {};
       // Per-run quality override takes precedence over the system setting.
       const quality =
@@ -217,7 +245,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       // organization's or the deployment's key. `input_fidelity` and `output_compression` have no
       // neutral field, so they ride the OpenAI `providerOptions` escape hatch.
       const edited = await this.ai
-        .forSystem(systemScope(MEMORIAHUB_AI_FEATURES.pictureEnhance, job.id))
+        .forSystem({ feature: ENHANCEMENT_AI_FEATURE, jobId: job.id })
         .editImageInline({
           provider: row.provider,
           model: row.model,
@@ -258,7 +286,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       let finalBuffer: Buffer = enhancedBuffer;
       if (stampExif) {
         try {
-          const stamped = await this.exifCarryover?.applyCarryover(
+          const stamped = await this.imageTools.carryOverMetadata(
             originalBuffer,
             enhancedBuffer,
             {
@@ -284,8 +312,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
         (await this.readDims(finalBuffer)) ?? outputDims;
 
       // Stage the enhanced bytes on the ACTIVE provider under a dedicated key.
-      const { id: activeProviderId, provider: activeProvider } =
-        await this.resolver.getActiveProvider();
+      const { id: activeProviderId, store: activeProvider } = await this.resolver.active();
       const stagingKey = `enhancements/${row.id}/result.jpg`;
       await activeProvider.upload(stagingKey, Readable.from(finalBuffer), {
         mimeType: 'image/jpeg',
@@ -305,7 +332,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       await this.prisma.mediaEnhancement.update({
         where: { id: row.id },
         data: {
-          status: MediaEnhancementStatus.ready,
+          status: ENHANCEMENT_STATUS.ready,
           stagingStorageKey: stagingKey,
           stagingThumbnailKey,
           stagingProvider: activeProviderId,
@@ -330,7 +357,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       // Classify the failure the SAME way EnrichmentTerminalService will, so
       // the row's next state always agrees with the job's next state.
       // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
-      const rl = err instanceof PlatformRateLimitError ? err : aiRateLimit(err);
+      const rl = err instanceof MemoriahubRateLimitError ? err : aiRateLimit(err, ENHANCEMENT_THROTTLE_KEY);
 
       // Does the queue requeue this job, or is this its last breath?
       //
@@ -344,7 +371,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
       //    `job.attempts < PROFILE.maxAttempts`, i.e. attempt 3 of 3 is
       //    terminal. Using `<` (not `<=`) here is what keeps the two in step.
       const queueWillRetry = rl
-        ? job.rateLimitHits + 1 < ENRICHMENT_RATELIMIT_MAX_HITS
+        ? (job.rateLimitHits ?? 0) + 1 < this.rateLimitMaxHits
         : job.attempts < PROFILE.maxAttempts;
 
       // A retryable failure must leave the row ACTIONABLE. process() early-returns
@@ -355,8 +382,8 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
         where: { id: row.id },
         data: {
           status: queueWillRetry
-            ? MediaEnhancementStatus.pending
-            : MediaEnhancementStatus.failed,
+            ? ENHANCEMENT_STATUS.pending
+            : ENHANCEMENT_STATUS.failed,
           // Informational while retrying (explains the current backoff), and the
           // surfaced failure reason once the queue gives up.
           lastError: msg,
@@ -402,15 +429,15 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
   private async uploadStagingThumbnail(
     enhancementId: string,
     bytes: Buffer,
-    provider: { upload: StorageProvider['upload'] },
+    provider: Pick<MemoriahubObjectStore, 'upload'>,
   ): Promise<string | null> {
     const key = `enhancements/${enhancementId}/thumb.jpg`;
     try {
-      const thumb = await renderThumbnailBuffer(bytes, { sourceFilename: 'result.jpg' });
+      const thumb = await this.imageTools.renderThumbnail(bytes, { sourceFilename: 'result.jpg' });
       await provider.upload(key, Readable.from(thumb), {
         mimeType: 'image/jpeg',
         contentLength: thumb.length,
-        cacheControl: THUMBNAIL_CACHE_CONTROL,
+        cacheControl: ENHANCEMENT_THUMBNAIL_CACHE_CONTROL,
       });
       return key;
     } catch (err) {
@@ -427,13 +454,7 @@ export class PictureEnhancementHandler implements JobHandler, OnModuleInit {
    * Never throws — the caller falls back to the requested canvas size.
    */
   private async readDims(buffer: Buffer): Promise<[number, number] | null> {
-    try {
-      const meta = await sharp(buffer).metadata();
-      if (meta.width && meta.height) return [meta.width, meta.height];
-    } catch {
-      // Not decodable here (e.g. a stub buffer in tests) — fall back.
-    }
-    return null;
+    return this.imageTools.readDimensions(buffer);
   }
 }
 

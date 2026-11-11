@@ -119,6 +119,14 @@
       "types": "./dist/social-media/testing/index.d.ts",
       "default": "./dist/social-media/testing/index.js"
     },
+    "./enhancement": {
+      "types": "./dist/enhancement/index.d.ts",
+      "default": "./dist/enhancement/index.js"
+    },
+    "./enhancement/testing": {
+      "types": "./dist/enhancement/testing/index.d.ts",
+      "default": "./dist/enhancement/testing/index.js"
+    },
     "./package.json": "./package.json",
     "./memories": {
       "types": "./dist/memories/index.d.ts",
@@ -146,6 +154,7 @@
     "workflows",
     "burst",
     "social-media",
+    "enhancement",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

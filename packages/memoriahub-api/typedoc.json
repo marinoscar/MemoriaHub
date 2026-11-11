@@ -29,7 +29,9 @@
     "./src/burst/index.ts",
     "./src/burst/testing/index.ts",
     "./src/social-media/index.ts",
-    "./src/social-media/testing/index.ts"
+    "./src/social-media/testing/index.ts",
+    "./src/enhancement/index.ts",
+    "./src/enhancement/testing/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-api",

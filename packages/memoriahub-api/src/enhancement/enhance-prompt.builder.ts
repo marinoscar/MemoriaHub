@@ -1,6 +1,7 @@
-import type { EnhanceParams } from './dto/enhance-params.dto';
+import type { EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
 
-type Strength = 'subtle' | 'balanced' | 'strong';
+/** How hard the correction pushes. */
+export type Strength = 'subtle' | 'balanced' | 'strong';
 
 type Preset = NonNullable<EnhanceParams['preset']>;
 
