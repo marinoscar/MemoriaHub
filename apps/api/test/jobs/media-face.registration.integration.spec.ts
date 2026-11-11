@@ -14,11 +14,9 @@ import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platfor
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
-import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
 const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [
-  ['metadata_extraction', MetadataExtractionHandler],
   ['thumbnail_regen', ThumbnailRegenHandler],
   ['thumbnail_repair', ThumbnailRepairHandler],
 ];
@@ -50,10 +48,16 @@ describe('media/face job handlers on the booted app (RETRO-C3)', () => {
     expect(registry.get(type)).toMatchObject({ type, label });
   });
 
+  // `metadata_extraction` is the packaged media slice's (RETRO-J5): same port adaptation.
+  it('metadata_extraction is registered by the media slice through the jobs port', () => {
+    expect(registry.get('metadata_extraction')).toMatchObject({ type: 'metadata_extraction', label: 'Metadata extraction' });
+  });
+
   it('none of the six goes through the legacy adapter', () => {
     const legacy = context.app.get(EnrichmentHandlerRegistry).types();
     for (const type of ['face_detection', 'video_face_detection', 'face_auto_archive_sweep']) expect(legacy).not.toContain(type);
     for (const [type] of NATIVE) expect(legacy).not.toContain(type);
+    expect(legacy).not.toContain('metadata_extraction');
   });
 
   it('derives face_auto_archive_sweep and thumbnail_repair as server-only, not the other four', () => {

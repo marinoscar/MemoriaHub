@@ -8,7 +8,7 @@
  * `undefined` + metatype. This file does the real-HTTP-round-trip form: it
  * mounts the REAL production controller (`AdminMetadataController`) on a REAL `NestFastifyApplication`, with the
  * REAL global `ZodValidationPipe` wired in via `APP_PIPE` (nestjs-zod) and
- * the REAL `RolesGuard`/`PermissionsGuard` — only `JwtAuthGuard` is stubbed,
+ * the `MemoriahubAuthGuard` stubbed (its decisions have their own conformance suite),
  * stamping a fake authenticated Admin user, mirroring
  * `notifications.controller.spec.ts` / `media-enhancement.controller.spec.ts`.
  * The underlying services (`MetadataBackfillService`)
@@ -25,7 +25,7 @@
  * This file additionally proves the `.prefault({})` half of the fix
  * end-to-end: `AdminMetadataController`'s body DTO (`AdminMetadataBackfillDto`
  * / `adminMetadataBackfillSchema`) is declared WITHOUT `export` in
- * `apps/api/src/metadata/admin-metadata.controller.ts`, so it cannot be
+ * `packages/memoriahub-api/src/media/metadata/admin-metadata.controller.ts`, so it cannot be
  * imported by name from a test file — but routing an actual bodyless HTTP
  * request through the actual mounted route exercises that exact schema via
  * Nest's own DTO-metatype resolution, without ever needing to name it. This
@@ -41,53 +41,20 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { APP_PIPE } from '@nestjs/core';
-import { Body, Controller, ExecutionContext, Post } from '@nestjs/common';
+import { Body, Controller, Post } from '@nestjs/common';
 import { ZodValidationPipe, createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import request from 'supertest';
 
-import { AdminMetadataController } from '../../metadata/admin-metadata.controller';
-import { MetadataBackfillService } from '../../metadata/metadata-backfill.service';
-import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../constants/roles.constants';
+import { AdminMetadataController, MetadataBackfillService } from '@marinoscar/memoriahub-api/media';
+import { MemoriahubAuthGuard } from '@marinoscar/memoriahub-api/core';
 
-/** Builds a minimal AuthenticatedUser-shaped fixture with the given roles/permissions. */
-function fakeAuthenticatedUser(
-  roleNames: string[],
-  permissionNames: string[],
-): Partial<AuthenticatedUser> {
-  return {
-    id: 'admin-1',
-    email: 'admin-1@example.com',
-    isActive: true,
-    userRoles: roleNames.map((name) => ({
-      role: {
-        id: `role-${name}`,
-        name,
-        description: `${name} role`,
-        rolePermissions: permissionNames.map((p) => ({
-          permission: { id: `perm-${p}`, name: p, description: p },
-        })),
-      } as any,
-    })),
-  };
-}
-
-/** JwtAuthGuard stub: always "authenticates", stamping the given user onto the request. */
-function stubJwtAuthGuard(user: Partial<AuthenticatedUser>) {
-  return {
-    canActivate: (ctx: ExecutionContext) => {
-      const req = ctx.switchToHttp().getRequest();
-      req.user = user;
-      return true;
-    },
-  };
-}
-
-const ADMIN = fakeAuthenticatedUser(
-  [ROLES.ADMIN],
-  [PERMISSIONS.JOBS_READ, PERMISSIONS.JOBS_WRITE, PERMISSIONS.SYSTEM_SETTINGS_WRITE],
-);
+/**
+ * `MemoriahubAuthGuard` stub: always lets the request through. The guard's role and permission
+ * decisions are covered by its own conformance suite (test/platform-memoriahub/auth-guard-conformance.spec.ts);
+ * this spec is about the body pipe.
+ */
+const allowAll = { canActivate: () => true };
 
 // ---------------------------------------------------------------------------
 // Contrast fixture: an UNFIXED body schema (no top-level .default({})),
@@ -126,13 +93,9 @@ describe('issue #289 — bodyless POST reaches the handler via the REAL ZodValid
         { provide: APP_PIPE, useClass: ZodValidationPipe },
       ],
     })
-      .overrideGuard(JwtAuthGuard)
-      .useValue(stubJwtAuthGuard(ADMIN))
+      .overrideGuard(MemoriahubAuthGuard)
+      .useValue(allowAll)
       .compile();
-    // NOTE: RolesGuard/PermissionsGuard are NOT overridden — they run for
-    // real, resolving the real @Auth() metadata via the real Reflector. The
-    // fake ADMIN user above carries every permission these three controllers'
-    // routes require, so 403 is never the reason a request fails here.
 
     const nestApp = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     await nestApp.init();

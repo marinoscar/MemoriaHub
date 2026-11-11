@@ -10,19 +10,25 @@
  * All guards are bypassed; no real HTTP or database.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
+import { MetadataController } from './metadata.controller.js';
+
+type MockPrismaService = ReturnType<typeof createMockPrismaService>;
+
+/** The slice of the database client the controller reads and writes. */
+function createMockPrismaService() {
+  return {
+    mediaItem: { findUnique: jest.fn() },
+    mediaMetadataStatus: { findUnique: jest.fn(), upsert: jest.fn() },
+  };
+}
+
+const MhLegacyJobStatus = { pending: 'pending' } as const;
+const JobReason = { rerun: 'rerun' } as const;
+const MediaMetadataStatusType = { pending: 'pending', processed: 'processed', not_processed: 'not_processed' } as const;
+
+import type { MemoriahubRequestUser as RequestUser } from '../../core/index.js';
 import { z } from 'zod';
-import { MetadataController } from './metadata.controller';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
-import { RequestUser } from '@marinoscar/platform-api/identity';
 
 // ---------------------------------------------------------------------------
 // Shared mock services
@@ -32,7 +38,7 @@ const mockOwnerAccessService = {
   requireOwnerRole: jest.fn(),
 };
 
-const mockEnrichmentJobService = {
+const mockJobs = {
   enqueue: jest.fn(),
 };
 
@@ -43,10 +49,9 @@ const mockEnrichmentJobService = {
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 'user-1',
-    email: 'user@example.com',
     roles: [],
     permissions: ['media:read', 'media:write'],
-    isActive: true,
+    activeOrgId: null,
     ...overrides,
   };
 }
@@ -80,26 +85,9 @@ describe('MetadataController', () => {
     mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
 
     // Default: enqueue returns a minimal pending job
-    mockEnrichmentJobService.enqueue.mockResolvedValue({
-      id: 'job-1',
-      status: MhLegacyJobStatus.pending,
-    });
+    mockJobs.enqueue.mockResolvedValue({ id: 'job-1', deduplicated: false });
 
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [MetadataController],
-      providers: [
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-      ],
-    })
-      .overrideGuard(
-        require('@marinoscar/platform-api/identity').JwtAuthGuard ?? Object,
-      )
-      .useValue({ canActivate: () => true })
-      .compile();
-
-    controller = module.get<MetadataController>(MetadataController);
+    controller = new MetadataController(mockPrisma as never, mockOwnerAccessService as never, mockJobs as never);
   });
 
   // -------------------------------------------------------------------------
@@ -123,10 +111,11 @@ describe('MetadataController', () => {
 
       await controller.rerunMetadata('media-1', makeUser());
 
-      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
+      expect(mockJobs.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'metadata_extraction',
-          mediaItemId: 'media-1',
+          subjectType: 'media_item',
+          subjectId: 'media-1',
           reason: JobReason.rerun,
           priority: 0,
         }),

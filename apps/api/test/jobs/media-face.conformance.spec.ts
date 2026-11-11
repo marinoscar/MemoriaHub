@@ -41,7 +41,7 @@ import {
 } from '@marinoscar/memoriahub-api/face';
 import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
 import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
-import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
+import { MetadataExtractionHandler } from '@marinoscar/memoriahub-api/media';
 import { mediaItemJob } from '../helpers/platform-job';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c301';
@@ -374,11 +374,10 @@ describe('face_auto_archive_sweep', () => {
 
 const buildMetadataExtraction = () =>
   new MetadataExtractionHandler(
-    registry,
-    jobScope as never,
+    { ...jobsPort, runInJobScope: jobScope.run } as never,
     subjectLookups() as never,
     { ...recordingService('processMediaItem'), ...recordingService('persistMetadata') } as never,
-  );
+  ) as unknown as JobHandler;
 
 describe('metadata_extraction', () => {
   staticContract('metadata_extraction', buildMetadataExtraction);

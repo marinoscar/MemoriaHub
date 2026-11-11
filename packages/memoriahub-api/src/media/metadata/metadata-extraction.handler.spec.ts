@@ -7,22 +7,36 @@
  * scope, the deleted-subject no-op, rejection propagation, and the node pair.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { JobHandlerRegistry, JobScope } from '@marinoscar/platform-api/jobs';
 import { metadataExtractionResultSchema } from '@marinoscar/memoriahub-compute/dto';
-import { MetadataExtractionHandler } from './metadata.handler';
-import { MetadataExtractionService } from './metadata.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { mediaItemJob, subjectPrisma, systemJob, TEST_ORG_ID } from '../../test/helpers/platform-job';
+import { MetadataExtractionHandler } from './metadata-extraction.handler.js';
 
-const makeJob = (mediaItemId = 'media-1') => mediaItemJob('metadata_extraction', mediaItemId);
+const TEST_ORG_ID = 'org-1';
+const job = (subjectType: string | null, subjectId: string | null, orgId: string | null = TEST_ORG_ID) => ({
+  id: 'job-1',
+  type: 'metadata_extraction',
+  subjectType,
+  subjectId,
+  payload: { circleId: 'circle-1' },
+  attempts: 1,
+  orgId,
+});
+const makeJob = (mediaItemId = 'media-1') => job('media_item', mediaItemId);
+const systemJob = () => job(null, null, null);
+/** The database port: `media-1` exists, anything else does not. */
+const subjectPrisma = () => ({
+  mediaItem: {
+    findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
+      where.id === 'media-1' ? { id: 'media-1', circleId: 'circle-1' } : null,
+    ),
+  },
+});
 const CONTEXT = { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1' };
 
 describe('MetadataExtractionHandler', () => {
   let handler: MetadataExtractionHandler;
-  let registry: JobHandlerRegistry;
+  let registered: unknown[];
+  let mockJobs: { registerHandler: jest.Mock; runInJobScope: jest.Mock };
   let mockMetadataExtractionService: { processMediaItem: jest.Mock; persistMetadata: jest.Mock };
-  let mockJobScope: { run: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -31,23 +45,14 @@ describe('MetadataExtractionHandler', () => {
       processMediaItem: jest.fn().mockResolvedValue(undefined),
       persistMetadata: jest.fn().mockResolvedValue(undefined),
     };
-    mockJobScope = { run: jest.fn(async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn('tx')) };
+    registered = [];
+    mockJobs = {
+      registerHandler: jest.fn((h: unknown) => registered.push(h)),
+      runInJobScope: jest.fn(async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn('tx')),
+    };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MetadataExtractionHandler,
-        JobHandlerRegistry,
-        { provide: JobScope, useValue: mockJobScope },
-        { provide: PrismaService, useValue: subjectPrisma() },
-        { provide: MetadataExtractionService, useValue: mockMetadataExtractionService },
-      ],
-    }).compile();
-
-    // NestJS calls onModuleInit automatically during init
-    await module.init();
-
-    handler = module.get<MetadataExtractionHandler>(MetadataExtractionHandler);
-    registry = module.get<JobHandlerRegistry>(JobHandlerRegistry);
+    handler = new MetadataExtractionHandler(mockJobs as never, subjectPrisma() as never, mockMetadataExtractionService as never);
+    handler.onModuleInit();
   });
 
   describe('contract', () => {
@@ -57,18 +62,18 @@ describe('MetadataExtractionHandler', () => {
       expect(handler.profile).toEqual({ maxRuntimeMs: 300_000, maxAttempts: 3 });
     });
 
-    it('registers itself with the platform registry on module init', () => {
-      expect(registry.get('metadata_extraction')).toBe(handler);
+    it('registers itself with the queue on module init', () => {
+      expect(registered).toEqual([handler]);
     });
 
-    it('is node-eligible: the platform does not list it server-only', () => {
-      expect(registry.serverOnlyTypes()).not.toContain('metadata_extraction');
+    it('is node-eligible: it declares the node pair', () => {
       expect(handler.nodeResultSchema).toBe(metadataExtractionResultSchema);
+      expect(typeof handler.persistNodeResult).toBe('function');
     });
   });
 
   describe('process', () => {
-    it('delegates to processMediaItem with the media-item context and a JobScope write scope', async () => {
+    it('delegates to processMediaItem with the media-item context and the write scope of the job', async () => {
       const job = makeJob();
 
       await handler.process(job);
@@ -76,11 +81,11 @@ describe('MetadataExtractionHandler', () => {
       expect(mockMetadataExtractionService.processMediaItem).toHaveBeenCalledWith(CONTEXT, expect.any(Function));
       const scope = mockMetadataExtractionService.processMediaItem.mock.calls[0][1];
       await expect(scope(async (tx: unknown) => tx)).resolves.toBe('tx');
-      expect(mockJobScope.run).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', orgId: TEST_ORG_ID }), expect.any(Function));
+      expect(mockJobs.runInJobScope).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', orgId: TEST_ORG_ID }), expect.any(Function));
     });
 
     it('still passes a write scope for a job with no organization (legacy row: the default organization, RETRO-D1)', async () => {
-      await handler.process(mediaItemJob('metadata_extraction', 'media-1', 'circle-1', { orgId: null }));
+      await handler.process(job('media_item', 'media-1', null));
       expect(mockMetadataExtractionService.processMediaItem).toHaveBeenCalledWith(CONTEXT, expect.any(Function));
     });
 
@@ -90,7 +95,7 @@ describe('MetadataExtractionHandler', () => {
     });
 
     it('throws for a job that is not about a media item', async () => {
-      await expect(handler.process(systemJob('metadata_extraction'))).rejects.toThrow('not about a media item');
+      await expect(handler.process(systemJob())).rejects.toThrow('not about a media item');
     });
 
     it('propagates rejection from MetadataExtractionService.processMediaItem', async () => {

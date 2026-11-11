@@ -1,19 +1,30 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { JobReason, MediaMetadataStatusType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '@marinoscar/memoriahub-api/media';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { enqueueEnrichmentJob } from '../jobs/enrichment-jobs.js';
+import { whereDateRange } from '../where/media-where.builder.js';
+
+/**
+ * Backfills metadata extraction: one `metadata_extraction` job per eligible item, per circle or
+ * across all of them.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MetadataBackfillService {
   private readonly logger = new Logger(MetadataBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
   /**
@@ -43,7 +54,7 @@ export class MetadataBackfillService {
                 { metadataStatus: null },
                 {
                   metadataStatus: {
-                    status: { notIn: [MediaMetadataStatusType.processed] },
+                    status: { notIn: ['processed'] },
                   },
                 },
               ],
@@ -54,11 +65,11 @@ export class MetadataBackfillService {
 
     let enqueued = 0;
     for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
+      await enqueueEnrichmentJob(this.jobs, {
         type: 'metadata_extraction',
         mediaItemId: item.id,
         circleId: item.circleId,
-        reason: JobReason.backfill,
+        reason: 'backfill',
         priority: 100,
         // See MetadataController.rerunMetadata for why mimeType rides in payload.
         payload: { mimeType: item.storageObject?.mimeType ?? 'application/octet-stream' },
@@ -69,10 +80,10 @@ export class MetadataBackfillService {
         create: {
           mediaItemId: item.id,
           circleId: item.circleId,
-          status: MediaMetadataStatusType.pending,
+          status: 'pending',
         },
         update: {
-          status: MediaMetadataStatusType.pending,
+          status: 'pending',
         },
       });
 
@@ -96,7 +107,7 @@ export class MetadataBackfillService {
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number }> {
     // Every shared library (a platform group) plus every personal library (RETRO-N29).
-    const allCircles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
+    const allCircles = (await this.access.allScopeIds()).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;
