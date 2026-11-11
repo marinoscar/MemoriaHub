@@ -20,15 +20,15 @@ import { MediaService } from './media.service';
 import { TrashEmptyRunService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard, PERMISSIONS_KEY, type RequestUser } from '@marinoscar/platform-api/identity';
-import type { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
-import type { BulkUpdateMediaDto } from './dto/bulk-update-media.dto';
-import type { BulkTagsDto } from './dto/bulk-tags.dto';
-import type { BulkDeleteDto } from './dto/bulk-delete.dto';
-import type { DashboardQueryDto } from './dto/dashboard-query.dto';
-import type { ReviewCountsQueryDto } from './dto/review-counts-query.dto';
-import type { ReverseGeocodeQueryDto } from './dto/reverse-geocode-query.dto';
-import type { GeoSearchQueryDto } from './dto/geo-search-query.dto';
-import type { AddAlbumItemsByFilterDto } from './dto/add-album-items-by-filter.dto';
+import type { MediaLocationsQueryDto } from '@marinoscar/memoriahub-api/media';
+import type { BulkUpdateMediaDto } from '@marinoscar/memoriahub-api/media';
+import type { BulkTagsDto } from '@marinoscar/memoriahub-api/media';
+import type { BulkDeleteDto } from '@marinoscar/memoriahub-api/media';
+import type { DashboardQueryDto } from '@marinoscar/memoriahub-api/media';
+import type { ReviewCountsQueryDto } from '@marinoscar/memoriahub-api/media';
+import type { ReverseGeocodeQueryDto } from '@marinoscar/memoriahub-api/media';
+import type { GeoSearchQueryDto } from '@marinoscar/memoriahub-api/media';
+import type { AddAlbumItemsByFilterDto } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
 
 // ---------------------------------------------------------------------------

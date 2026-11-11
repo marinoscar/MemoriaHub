@@ -25,12 +25,12 @@ import {
   type WorkflowActionInstance as WorkflowAction,
   type WorkflowActionItem,
 } from '@marinoscar/memoriahub-api/workflows';
-import { BulkDeleteDto } from '../../media/dto/bulk-delete.dto';
-import { BulkArchiveDto } from '../../media/dto/bulk-archive.dto';
-import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
-import { BulkUpdateMediaDto } from '../../media/dto/bulk-update-media.dto';
-import { AddAlbumItemsDto } from '../../media/dto/add-album-items.dto';
-import { CreateAlbumDto } from '../../media/dto/create-album.dto';
+import { BulkDeleteDto } from '@marinoscar/memoriahub-api/media';
+import { BulkArchiveDto } from '@marinoscar/memoriahub-api/media';
+import { BulkTagsDto } from '@marinoscar/memoriahub-api/media';
+import { BulkUpdateMediaDto } from '@marinoscar/memoriahub-api/media';
+import { AddAlbumItemsDto } from '@marinoscar/memoriahub-api/media';
+import { CreateAlbumDto } from '@marinoscar/memoriahub-api/media';
 
 /**
  * WorkflowActionsHandler — the web app's {@link WorkflowActionHandler}: applies a single Media-Item workflow action (the
