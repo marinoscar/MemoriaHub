@@ -16,7 +16,7 @@ import { randomUUID } from 'crypto';
 import { Logger } from '@nestjs/common';
 
 import { InsightsService } from '@marinoscar/memoriahub-api/insights';
-import { MemoryDigestService } from '../../src/memories/digest/memory-digest.service';
+import { MemoryDigestService } from '@marinoscar/memoriahub-api/memories';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
@@ -59,7 +59,7 @@ describeMaybeDb('Housekeeping jobs (DB_GATED: real PostgreSQL)', () => {
   });
 
   it('memory_digest watermark: the newest SUCCEEDED row of the circle, never a failed or running one', async () => {
-    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const digest = new MemoryDigestService(prisma, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     const subject = { subjectType: 'circle', subjectId: circleId };
 
     await expect(digest.lastDigestAt(circleId)).resolves.toBeNull();

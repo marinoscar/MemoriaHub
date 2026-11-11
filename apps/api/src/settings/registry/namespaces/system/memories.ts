@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_MEMORIES_SETTINGS } from '@marinoscar/memoriahub-api/memories';
 
 import { defineSystemNamespace } from '../../define-namespace';
 
@@ -45,16 +46,6 @@ export const MEMORIES_SYSTEM_SETTINGS = defineSystemNamespace({
   key: 'memories',
   description: 'Memories generation cadence, per-type curation thresholds, AI titling and the email digest.',
   schema,
-  defaults: {
-    generation: { intervalHours: 24 },
-    maxItemsPerMemory: 30,
-    aiTitles: { enabled: true },
-    onThisDay: { enabled: true, lookbackYears: 10, minItems: 3 },
-    trips: { enabled: true, minDays: 2, minItems: 10, minDistanceKm: 50, lookbackMonths: 18 },
-    people: { enabled: true, favoritesOnly: true, minItems: 8 },
-    themes: { enabled: true, minItems: 8, maxPerPeriod: 3 },
-    seasonal: { enabled: true, minItems: 12 },
-    yearInReview: { enabled: true, minItems: 15 },
-    digest: { enabled: true, frequency: 'weekly', sendHourUtc: 8, imageTokenTtlDays: 30 },
-  },
+  // One source of the defaults: the memories slice resolves a partial stored namespace over the same constant.
+  defaults: structuredClone(DEFAULT_MEMORIES_SETTINGS),
 });

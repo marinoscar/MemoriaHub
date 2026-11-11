@@ -34,12 +34,12 @@ import { describeMaybeDb } from '../helpers/db-probe.helper';
 import {
   MEMORY_GENERATION_JOB_TYPE,
   MemoriesGenerationTask,
-} from '../../src/memories/memories-generation.task';
-import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
+  MemoriesSettingsService,
+} from '@marinoscar/memoriahub-api/memories';
+import { PlatformMemoriahubJobsAdapter } from '../../src/platform-memoriahub/jobs/platform-memoriahub-jobs.adapter';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
-import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 
 function resolveDatabaseUrl(): string {
   if (process.env['DATABASE_URL']) return process.env['DATABASE_URL'] as string;
@@ -58,7 +58,9 @@ describeMaybeDb(
   () => {
     let prisma: PrismaClient;
     let task: MemoriesGenerationTask;
-    let settings: { getSettings: jest.Mock };
+    // The settings port the slice reads (`readSystem`): one value per namespace, replaced per test.
+    let settings: { readSystem: jest.Mock };
+    let values: Record<string, unknown>;
 
     const userId = randomUUID();
     const circleAId = randomUUID();
@@ -106,20 +108,28 @@ describeMaybeDb(
 
       // Real PrismaService/EnrichmentJobService; only the settings read is
       // stubbed, so every query in the path is genuine SQL.
-      settings = {
-        getSettings: jest.fn().mockResolvedValue({
-          features: { memories: true },
-          memories: { generation: { intervalHours: 24 } },
-        }),
+      values = {
+        features: { memories: true },
+        memories: { generation: { intervalHours: 24 } },
       };
-      task = new MemoriesGenerationTask(
+      settings = {
+        readSystem: jest.fn(async (name: string) => ({ value: values[name], version: 1 })),
+      };
+      // The jobs port over the REAL queue: the web app's adapter on the platform `JobsService`.
+      const jobsPort = new PlatformMemoriahubJobsAdapter(
+        new JobsService(prisma as never),
+        {} as never,
+        {} as never,
+        {} as never,
         prisma as unknown as PrismaService,
+        {} as never,
+        new DefaultOrgId(prisma as unknown as PrismaService),
+      );
+      task = new MemoriesGenerationTask(
+        prisma as never,
         sqlScopeDirectory(prisma as never) as never,
-        new EnrichmentJobService(
-          new JobsService(prisma as never),
-          new DefaultOrgId(prisma as unknown as PrismaService),
-        ),
-        settings as unknown as AppSystemSettingsService,
+        jobsPort,
+        new MemoriesSettingsService(settings as never, { digest: { signingKey: () => Buffer.alloc(32) } }),
       );
     });
 
@@ -303,7 +313,7 @@ describeMaybeDb(
     // -----------------------------------------------------------------------
 
     it('writes NOTHING when features.memories is off (the default)', async () => {
-      settings.getSettings.mockResolvedValue({ features: {} });
+      values['features'] = {};
 
       await task.handleScheduledGeneration();
 
@@ -316,7 +326,7 @@ describeMaybeDb(
       await task.handleScheduledGeneration();
 
       expect(await ourJobs()).toHaveLength(0);
-      expect(settings.getSettings).not.toHaveBeenCalled();
+      expect(settings.readSystem).not.toHaveBeenCalled();
     });
   },
 );
