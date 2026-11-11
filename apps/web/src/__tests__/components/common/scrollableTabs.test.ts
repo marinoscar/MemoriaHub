@@ -26,6 +26,13 @@ import { scrollableTabsProps } from '../../../components/common/tabs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC_ROOT = join(HERE, '..', '..', '..');
+// RETRO-J11: the packaged domain slices' tab bars are swept too.
+const WEB_PACKAGE_SRC = join(HERE, '..', '..', '..', '..', '..', '..', 'packages', 'memoriahub-web', 'src');
+const SWEEP_ROOTS = [SRC_ROOT, WEB_PACKAGE_SRC];
+
+function sweptFiles(): Array<{ root: string; file: string }> {
+  return SWEEP_ROOTS.flatMap((root) => tsxFiles(root).map((file) => ({ root, file })));
+}
 
 function tsxFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -80,13 +87,13 @@ describe('scrollableTabsProps', () => {
   it('is spread into every tab bar in the app that is not fullWidth', () => {
     const offenders: string[] = [];
 
-    for (const file of tsxFiles(SRC_ROOT)) {
+    for (const { root, file } of sweptFiles()) {
       const source = readFileSync(file, 'utf-8');
       for (const tag of tabsOpeningTags(source)) {
         const guarded =
           tag.includes('...scrollableTabsProps') || tag.includes('variant="fullWidth"');
         if (!guarded) {
-          offenders.push(`${relative(SRC_ROOT, file)}: ${tag.split('\n')[0]}`);
+          offenders.push(`${relative(root, file)}: ${tag.split('\n')[0]}`);
         }
       }
     }
@@ -95,8 +102,8 @@ describe('scrollableTabsProps', () => {
   });
 
   it('finds tab bars at all, so the sweep above cannot pass vacuously', () => {
-    const total = tsxFiles(SRC_ROOT).reduce(
-      (n, file) => n + tabsOpeningTags(readFileSync(file, 'utf-8')).length,
+    const total = sweptFiles().reduce(
+      (n, { file }) => n + tabsOpeningTags(readFileSync(file, 'utf-8')).length,
       0,
     );
 

@@ -5,7 +5,7 @@
  */
 import { Alert } from '@mui/material';
 import { MemoriesSettings } from '../../components/settings/MemoriesSettings';
-import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
+import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { UserSettingsCardPage } from './UserSettingsCardPage';
 
 export default function MemoriesPreferencesPage() {

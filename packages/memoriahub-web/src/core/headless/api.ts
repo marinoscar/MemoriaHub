@@ -56,6 +56,7 @@ export const api: MemoriahubApiClient = {
     getActiveMemoriahubHost().apiClient.delete<T>(endpoint, options),
   refreshToken: () => getActiveMemoriahubHost().apiClient.refreshToken(),
   rewriteEndpoint: (endpoint: string) => getActiveMemoriahubHost().apiClient.rewriteEndpoint(endpoint),
+  rewriteBody: (endpoint: string, body: unknown) => getActiveMemoriahubHost().apiClient.rewriteBody(endpoint, body),
   getAccessToken: () => getActiveMemoriahubHost().apiClient.getAccessToken(),
   get baseUrl() {
     return getActiveMemoriahubHost().apiClient.baseUrl;

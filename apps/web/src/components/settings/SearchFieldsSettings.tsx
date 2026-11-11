@@ -13,8 +13,8 @@ import {
   Alert,
   Divider,
 } from '@mui/material';
-import { getSearchFields } from '../../services/search';
-import type { SearchField } from '../../services/search';
+import { getSearchFields } from '@marinoscar/memoriahub-web/search/headless';
+import type { SearchField } from '@marinoscar/memoriahub-web/search/headless';
 import type { UserSettings } from '../../types';
 
 interface SearchFieldsSettingsProps {

@@ -1,0 +1,347 @@
+/**
+ * SearchPage — results view + Explore (People / Places / Tags).
+ *
+ * Two mutually-exclusive result paths:
+ *   - Deterministic (advanced) search: SearchContext holds a `searchRequest`;
+ *     the result grid renders via MediaGallery in FEED mode (infinite scroll),
+ *     where the gallery's fetcher owns paging.
+ *   - Agentic (AI chat) search: SearchContext holds a single `results` batch;
+ *     the grid renders via MediaGallery in controlled mode.
+ *
+ * When neither is set (and no in-flight search), falls back to the Explore
+ * browse rows (People / Places / Tags), which existed before.
+ *
+ * The page owns its own search input (`PageSearchBar`), mounted at the top of
+ * ALL FOUR render branches below. That is load-bearing, not cosmetic: the
+ * AppBar's `TopbarSearch` is gated to `md`+ (spec §4.1), so below 900px this bar
+ * is the only entry point to free-text/agentic search AND the only opener of
+ * `SearchPanel`. Removing it from any branch re-creates the issue #400 outage.
+ */
+
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Box,
+  Typography,
+  Button,
+  CircularProgress,
+  Alert,
+} from '@mui/material';
+import PlaceIcon from '@mui/icons-material/Place';
+import PublicIcon from '@mui/icons-material/Public';
+import TagIcon from '@mui/icons-material/LocalOffer';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { SearchPeopleExploreSlot } from '../slots.js';
+import { performSearch } from '../../headless/services/search.js';
+import { getExploreLocations, getExploreTags } from '../../../media/headless/index.js';
+import type { ExploreItem, ExploreLocations } from '../../../media/headless/index.js';
+import { MediaGallery } from '../../../media/ui/index.js';
+import { useSearch } from '../contexts/SearchContext.js';
+import { ExploreCarousel } from '../../../media/ui/index.js';
+import { PageSearchBarSection } from '../components/PageSearchBar.js';
+import { renderLocationTile } from '../../../media/ui/index.js';
+import type { ExploreLocationItem } from '../../../media/headless/index.js';
+
+// ---------------------------------------------------------------------------
+// Tile renderers (presentational helpers)
+// ---------------------------------------------------------------------------
+
+function renderTagTile(
+  tag: ExploreItem,
+  navigate: ReturnType<typeof useNavigate>,
+) {
+  return (
+    <Box
+      onClick={() => navigate(`/media?tag=${encodeURIComponent(tag.name)}`)}
+      sx={{
+        flexShrink: 0,
+        width: 96,
+        cursor: 'pointer',
+        borderRadius: 2,
+        overflow: 'hidden',
+        '&:hover': { opacity: 0.85 },
+      }}
+      role="button"
+      aria-label={`Browse photos tagged ${tag.name}`}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ')
+          navigate(`/media?tag=${encodeURIComponent(tag.name)}`);
+      }}
+    >
+      <Box
+        sx={{
+          width: 96,
+          height: 96,
+          bgcolor: 'action.hover',
+          borderRadius: 2,
+          overflow: 'hidden',
+        }}
+      >
+        {tag.coverThumbnailUrl ? (
+          <Box
+            component="img"
+            src={tag.coverThumbnailUrl}
+            alt={tag.name}
+            sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : (
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <TagIcon sx={{ color: 'text.disabled', fontSize: 32 }} />
+          </Box>
+        )}
+      </Box>
+      <Typography
+        variant="caption"
+        sx={{
+          display: 'block',
+          mt: 0.5,
+          px: 0.5,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {tag.name}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ px: 0.5 }}>
+        {tag.count}
+      </Typography>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SearchPage
+// ---------------------------------------------------------------------------
+
+/**
+ * Search Page.
+ *
+ * @stability experimental
+ */
+export function SearchPage() {
+  const navigate = useNavigate();
+  const { activeCircle, activeCircleRole } = useOwnerScope();
+  const { results, searchRequest, isSearching, error, clearSearch } = useSearch();
+
+  // Explore data (shown when no results)
+  const [locations, setLocations] = useState<ExploreLocations>({
+    countries: [],
+    regions: [],
+    cities: [],
+  });
+  const [tags, setTags] = useState<ExploreItem[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [tagsLoading, setTagsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeCircle) return;
+    const id = activeCircle.id;
+
+    setLocationsLoading(true);
+    getExploreLocations(id)
+      .then((data) => setLocations(data))
+      .catch(() => setLocations({ countries: [], regions: [], cities: [] }))
+      .finally(() => setLocationsLoading(false));
+
+    setTagsLoading(true);
+    getExploreTags(id)
+      .then((data) => setTags(data))
+      .catch(() => setTags([]))
+      .finally(() => setTagsLoading(false));
+  }, [activeCircle]);
+
+  if (!activeCircle) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        {/* Rendered (disabled — PageSearchBar derives that from the absent
+            circle) so the destination looks and measures the same before and
+            after a circle is picked, and the alert reads as an explanation of
+            the greyed-out field directly above it rather than as the whole
+            page. */}
+        <PageSearchBarSection />
+        <Alert severity="info">Select a circle to search your photos.</Alert>
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Deterministic (advanced) search — FEED mode (infinite scroll).
+  // MediaGallery's fetcher owns paging; the stored request is page-agnostic.
+  // -------------------------------------------------------------------------
+  if (searchRequest !== null) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+        <PageSearchBarSection />
+
+        {/* Header row */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            mb: 2,
+          }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            Search results
+          </Typography>
+          <Button size="small" onClick={clearSearch} sx={{ minHeight: 36 }}>
+            Clear
+          </Button>
+        </Box>
+
+        <MediaGallery
+          mode="home"
+          circleId={searchRequest.circleId}
+          activeCircleRole={activeCircleRole}
+          fetcher={(cursor, pageSize) => {
+            // Search is still offset-paginated; encode the page as the cursor.
+            const page = cursor ? Number(cursor) : 1;
+            return performSearch({ ...searchRequest, page, pageSize }).then((r) => ({
+              items: r.items,
+              nextCursor: page < r.meta.totalPages ? String(page + 1) : null,
+            }));
+          }}
+          queryKey={`search:${JSON.stringify(searchRequest)}`}
+          emptyState={
+            <Typography variant="body2" color="text.secondary">
+              No results found.
+            </Typography>
+          }
+          onChange={clearSearch}
+        />
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Agentic (AI chat) results — controlled single batch
+  // -------------------------------------------------------------------------
+  if (results !== null || isSearching) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+        <PageSearchBarSection />
+
+        {/* Header row */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          {results !== null ? (
+            <Typography variant="body2" color="text.secondary">
+              {results.meta.totalItems} result{results.meta.totalItems !== 1 ? 's' : ''}
+            </Typography>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Searching…
+            </Typography>
+          )}
+          <Button size="small" onClick={clearSearch} sx={{ minHeight: 36 }}>
+            Clear
+          </Button>
+        </Box>
+
+        {/* Searching spinner (before first results arrive) */}
+        {isSearching && results === null && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {/* Error */}
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {/* Result grid */}
+        {results !== null && (
+          <MediaGallery
+            items={results.items}
+            isLoading={isSearching}
+            circleId={activeCircle.id}
+            activeCircleRole={activeCircleRole}
+            emptyState={
+              <Typography variant="body2" color="text.secondary">
+                No results found.
+              </Typography>
+            }
+            onChange={clearSearch}
+          />
+        )}
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Explore view (no results, no active search)
+  // -------------------------------------------------------------------------
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900, mx: 'auto' }}>
+      <PageSearchBarSection />
+
+      {/* People (a slot: the people slice has not moved into the package) */}
+      <SearchPeopleExploreSlot circleId={activeCircle.id} />
+
+      {/* Countries */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Countries"
+        icon={<PublicIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.countries}
+        itemWidth={96}
+        gap={12}
+        keyOf={(c) => c.name}
+        renderItem={(c) => renderLocationTile(c, navigate, 'country')}
+        viewAllLabel="See all places"
+        onViewAll={() => navigate('/places')}
+      />
+
+      {/* Regions */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Regions"
+        icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.regions}
+        itemWidth={96}
+        gap={12}
+        keyOf={(r) => r.name}
+        renderItem={(r) => renderLocationTile(r, navigate, 'region')}
+      />
+
+      {/* Cities */}
+      <ExploreCarousel<ExploreLocationItem>
+        title="Cities"
+        icon={<PlaceIcon sx={{ color: 'text.secondary' }} />}
+        loading={locationsLoading}
+        items={locations.cities}
+        itemWidth={96}
+        gap={12}
+        keyOf={(c) => c.name}
+        renderItem={(c) => renderLocationTile(c, navigate, 'locality')}
+      />
+
+      {/* Tags */}
+      <ExploreCarousel<ExploreItem>
+        title="Tags"
+        icon={<TagIcon sx={{ color: 'text.secondary' }} />}
+        loading={tagsLoading}
+        items={tags}
+        itemWidth={96}
+        gap={12}
+        keyOf={(t) => t.name}
+        renderItem={(t) => renderTagTile(t, navigate)}
+        viewAllLabel="View all"
+        onViewAll={() => navigate('/tags')}
+      />
+    </Box>
+  );
+}

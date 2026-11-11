@@ -60,6 +60,38 @@
       "types": "./dist/media/ui/index.d.ts",
       "default": "./dist/media/ui/index.js"
     },
+    "./memories/headless": {
+      "types": "./dist/memories/headless/index.d.ts",
+      "default": "./dist/memories/headless/index.js"
+    },
+    "./memories/ui": {
+      "types": "./dist/memories/ui/index.d.ts",
+      "default": "./dist/memories/ui/index.js"
+    },
+    "./search/headless": {
+      "types": "./dist/search/headless/index.d.ts",
+      "default": "./dist/search/headless/index.js"
+    },
+    "./search/ui": {
+      "types": "./dist/search/ui/index.d.ts",
+      "default": "./dist/search/ui/index.js"
+    },
+    "./tagging/headless": {
+      "types": "./dist/tagging/headless/index.d.ts",
+      "default": "./dist/tagging/headless/index.js"
+    },
+    "./tagging/ui": {
+      "types": "./dist/tagging/ui/index.d.ts",
+      "default": "./dist/tagging/ui/index.js"
+    },
+    "./workflows/headless": {
+      "types": "./dist/workflows/headless/index.d.ts",
+      "default": "./dist/workflows/headless/index.js"
+    },
+    "./workflows/ui": {
+      "types": "./dist/workflows/ui/index.d.ts",
+      "default": "./dist/workflows/ui/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

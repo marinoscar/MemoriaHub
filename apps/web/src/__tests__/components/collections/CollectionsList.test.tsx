@@ -17,7 +17,7 @@ import { formatCollectionCount, collectionAccessibleName } from '../../../compon
 import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
 import type { PersonListResponse } from '../../../services/face';
 import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import type { MemoryCard, MemoryListResponse } from '../../../types/memories';
+import type { MemoryCard, MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
 
 // The packaged rail's collapse preference (RETRO-F1, #571), read by the hub
 // page this file also renders.
@@ -34,18 +34,15 @@ vi.mock('../../../services/face', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../services/face')>()),
   listPeople: vi.fn(),
 }));
-vi.mock('../../../services/memories', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../services/memories')>()),
+vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
   listMemories: vi.fn(),
-}));
-vi.mock('../../../hooks/useMemoriesEnabled', () => ({
   useMemoriesEnabled: vi.fn(),
 }));
 
 import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../../../services/face';
-import { listMemories } from '../../../services/memories';
-import { useMemoriesEnabled } from '../../../hooks/useMemoriesEnabled';
+import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 
 const mockListAlbums = vi.mocked(listAlbums);
 const mockListPeople = vi.mocked(listPeople);

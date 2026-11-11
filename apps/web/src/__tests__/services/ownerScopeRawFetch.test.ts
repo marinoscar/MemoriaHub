@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { armOwnerScopeParams, disarmOwnerScopeParams } from '../../services/ownerScopeParams';
-import { streamAgent } from '../../services/searchAgentStream';
+import { streamAgent } from '@marinoscar/memoriahub-web/search/headless';
 import { exportMedia } from '@marinoscar/memoriahub-web/media/headless';
 import { API_BASE_URL } from '../../services/api';
 

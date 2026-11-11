@@ -21,7 +21,7 @@
 
 import { Switch, Typography } from '@mui/material';
 import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
-import type { TagLabel } from '../../services/tagLabels';
+import type { TagLabel } from '@marinoscar/memoriahub-web/tagging/headless';
 
 // ---------------------------------------------------------------------------
 // Identity

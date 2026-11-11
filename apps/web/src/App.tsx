@@ -149,12 +149,16 @@ const MemoriesSettingsPage = lazy(() => import('./pages/Admin/MemoriesSettingsPa
 const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
-const SearchPage = lazy(() => import('./pages/SearchPage'));
+const SearchPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
+);
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
 const AlbumsPage = lazyMediaPage('AlbumsPage');
 const AlbumPage = lazyMediaPage('AlbumPage');
-const TagsBrowsePage = lazy(() => import('./pages/Tags'));
+const TagsBrowsePage = lazy(() =>
+  import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TagsBrowsePage })),
+);
 const PlacesOverviewPage = lazyMediaPage('PlacesOverviewPage');
 const LevelBrowsePage = lazyMediaPage('LevelBrowsePage');
 const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
@@ -179,14 +183,27 @@ const PublicLinkPage = lazy(() =>
   import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.PublicLinkPage })),
 );
 const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
-const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage'));
-const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilderPage'));
+// RETRO-J11: the workflow list and builder pages are the packaged slice's.
+const WorkflowListPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),
+);
+const WorkflowBuilderPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowBuilderPage })),
+);
 const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
-const MemoriesPage = lazy(() => import('./pages/Memories/MemoriesPage'));
-const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'));
+// RETRO-J11: the memories pages are the packaged slice's.
+type MemoriesUiModule = typeof import('@marinoscar/memoriahub-web/memories/ui');
+const lazyMemoriesPage = <K extends keyof MemoriesUiModule>(name: K) =>
+  lazy(() =>
+    import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({
+      default: m[name] as unknown as ComponentType<any>,
+    })),
+  );
+const MemoriesPage = lazyMemoriesPage('MemoriesPage');
+const MemoryDetailPage = lazyMemoriesPage('MemoryDetailPage');
 // RETRO-T2 (#625): the telemetry slice's three pages, each from its own package
 // entry so a lazy route keeps its own chunk (the `telemetry/ui` barrel would put
 // all three, the charts and the SQL editor in one).

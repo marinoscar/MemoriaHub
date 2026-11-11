@@ -16,8 +16,9 @@ import userEvent from '@testing-library/user-event';
 import { render, mockUser } from '../../utils/test-utils';
 import type { UserSettings } from '../../../types';
 
-vi.mock('../../../hooks/useFeatureFlags', () => ({
-  useFeatureFlags: vi.fn(),
+vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+  useMemoriesEnabled: vi.fn(),
 }));
 
 vi.mock('../../../services/face', () => ({
@@ -34,20 +35,14 @@ vi.mock('../../../services/face', () => ({
 }));
 
 import { MemoriesSettings } from '../../../components/settings/MemoriesSettings';
-import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
+import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { listPeople } from '../../../services/face';
 
-const mockFlags = vi.mocked(useFeatureFlags);
+const mockFlags = vi.mocked(useMemoriesEnabled);
 const mockListPeople = vi.mocked(listPeople);
 
 function setFlags(memories: boolean | null, isLoading = false) {
-  mockFlags.mockReturnValue({
-    features: memories === null ? null : { memories },
-    pictureEnhancement: null,
-    isLoading,
-    error: null,
-    refresh: vi.fn(),
-  });
+  mockFlags.mockReturnValue(isLoading || memories === null ? null : memories);
 }
 
 function makeSettings(memories?: UserSettings['memories']): UserSettings {

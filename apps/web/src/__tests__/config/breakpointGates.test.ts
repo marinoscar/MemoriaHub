@@ -47,23 +47,23 @@ const WHY = {
 
 const ALLOWED_READS: Readonly<Record<string, string>> = {
   'components/navigation/AppBar.tsx': WHY.appBarControls,
-  'components/search/TopbarSearch.tsx': WHY.searchPill,
+  'memoriahub-web/search/ui/components/TopbarSearch.tsx': WHY.searchPill,
   'hooks/useContextPaneVisible.ts': WHY.contextPane,
 
   'components/media/MediaDetailDrawer.tsx': WHY.dialog,
-  'components/search/SearchPanel.tsx': WHY.dialog,
+  'memoriahub-web/search/ui/components/SearchPanel.tsx': WHY.dialog,
 
   'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
   'components/media/MediaLightbox.tsx': WHY.media,
   'components/media/VideoPlayer.tsx': WHY.media,
-  'components/memories/MemoriesCarousel.tsx': WHY.media,
-  'components/memories/MemoryCard.tsx': WHY.media,
-  'components/memories/MemoryStoryPlayer.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoriesCarousel.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoryCard.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoryStoryPlayer.tsx': WHY.media,
 
   'components/review/MemberComparison.tsx': WHY.panel,
   'components/settings/mediaSync/DiagnosticsSection.tsx': WHY.panel,
   'components/settings/mediaSync/SyncHistory.tsx': WHY.panel,
-  'components/workflows/builder/WorkflowPreviewPanel.tsx': WHY.panel,
+  'memoriahub-web/workflows/ui/components/builder/WorkflowPreviewPanel.tsx': WHY.panel,
 };
 
 /** The app's shell chrome and its bindings: they read no breakpoint at all. */

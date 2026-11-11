@@ -1,0 +1,76 @@
+import { useState, useRef, useCallback } from 'react';
+import type {
+  WorkflowPreviewRequest,
+  WorkflowPreviewResponse,
+} from '../types.js';
+import { previewWorkflow as previewWorkflowApi } from '../services/workflows.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+
+/**
+ * Use Workflow Preview Result.
+ *
+ * @stability experimental
+ */
+export interface UseWorkflowPreviewResult {
+  /** The `preview`. */
+  preview: (body: WorkflowPreviewRequest) => Promise<WorkflowPreviewResponse | null>;
+  /** The `data`. */
+  data: WorkflowPreviewResponse | null;
+  /** The `isLoading`. */
+  isLoading: boolean;
+  /** The `error`. */
+  error: string | null;
+  /** The `reset`. */
+  reset: () => void;
+}
+
+/**
+ * Mutation hook for the live workflow preview. The CALLER is responsible for
+ * debouncing — this hook does not debounce internally. Out-of-order responses
+ * are guarded via a monotonic request id so only the latest request's result
+ * is applied to state.
+ *
+ * @stability experimental
+ */
+export function useWorkflowPreview(): UseWorkflowPreviewResult {
+  const [data, setData] = useState<WorkflowPreviewResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const latestRequestId = useRef(0);
+  const isMounted = useIsMounted();
+
+  const preview = useCallback(
+    async (body: WorkflowPreviewRequest): Promise<WorkflowPreviewResponse | null> => {
+      const requestId = ++latestRequestId.current;
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await previewWorkflowApi(body);
+        // Only apply if this is still the most recent request.
+        if (requestId === latestRequestId.current && isMounted()) {
+          setData(response);
+          setIsLoading(false);
+        }
+        return response;
+      } catch (err) {
+        if (requestId === latestRequestId.current && isMounted()) {
+          const message = err instanceof Error ? err.message : 'Failed to preview workflow';
+          setError(message);
+          setIsLoading(false);
+        }
+        return null;
+      }
+    },
+    [isMounted],
+  );
+
+  const reset = useCallback(() => {
+    // Invalidate any in-flight request so its late response is ignored.
+    latestRequestId.current++;
+    setData(null);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
+  return { preview, data, isLoading, error, reset };
+}

@@ -1,0 +1,430 @@
+// ---------------------------------------------------------------------------
+// Workflow builder — form-based rule builder (Subject · Trigger · If · Then ·
+// Safety) with a live plain-language summary and match-preview panel.
+//
+// Template hydration contract (from the templates gallery):
+//   navigate(`/workflows/new?template=<id>`, { state: { template } })
+//   Resolution order: location.state.template → getWorkflowTemplate(?template) → blank.
+// ---------------------------------------------------------------------------
+
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  Box,
+  Typography,
+  Button,
+  CircularProgress,
+  Alert,
+  Snackbar,
+  Stack,
+  Tabs,
+  Tab,
+} from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
+import SaveIcon from '@mui/icons-material/Save';
+import {
+  useParams,
+  useLocation,
+  useSearchParams,
+  useNavigate,
+} from 'react-router-dom';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { usePermissions } from '../../../core/headless/index.js';
+import { useWorkflowSubjects } from '../../headless/hooks/useWorkflowSubjects.js';
+import { useWorkflow } from '../../headless/hooks/useWorkflow.js';
+import { useWorkflowRuns } from '../../headless/hooks/useWorkflowRuns.js';
+import { useWorkflowMutations } from '../../headless/hooks/useWorkflowMutations.js';
+import { getWorkflowTemplate } from '../workflowTemplates.js';
+import type { WorkflowTemplate } from '../../headless/constants/workflowTemplates.js';
+import { isValidCron } from '../../headless/utils/workflowCron.js';
+import {
+  builderReducer,
+  blankState,
+  stateFromTemplate,
+  stateFromWorkflow,
+} from '../../headless/builderState.js';
+import { SubjectBlock } from '../components/builder/SubjectBlock.js';
+import { TriggerBlock } from '../components/builder/TriggerBlock.js';
+import { ConditionsBlock } from '../components/builder/ConditionsBlock.js';
+import { ActionsBlock } from '../components/builder/ActionsBlock.js';
+import { WorkflowPreviewPanel } from '../components/builder/WorkflowPreviewPanel.js';
+import { SafetyBlock } from '../components/builder/SafetyBlock.js';
+import { WorkflowRunHistory } from '../components/WorkflowRunHistory.js';
+import type { WorkflowRun } from '../../headless/types.js';
+import { api } from '../../../core/headless/index.js';
+
+// Fallback defaults mirroring the backend when the admin-only settings read is
+// unavailable (non-admin users get 403 on GET /system-settings).
+const DEFAULT_MAX_ITEMS_PER_RUN = 10000;
+const DEFAULT_REQUIRE_PREVIEW = true;
+import type { CreateWorkflowDto, UpdateWorkflowDto } from '../../headless/types.js';
+import { scrollableTabsProps } from '../../../core/ui/index.js';
+
+/** Subset of `workflows.*` system settings the builder reads (admin-only). */
+interface WorkflowSystemSettings {
+  allowHardDelete?: boolean;
+  maxItemsPerRun?: number;
+  requirePreview?: boolean;
+}
+
+const GATED_ACTION_TYPES = new Set(['hard_delete']);
+
+const RUNS_PAGE_SIZE = 20;
+
+/**
+ * Workflow Builder Page.
+ *
+ * @stability experimental
+ */
+export function WorkflowBuilderPage() {
+  const { id } = useParams<{ id?: string }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const isEdit = Boolean(id);
+
+  const { activeOption: activeCircle, activeRole } = useOwnerScope();
+  const { hasPermission } = usePermissions();
+  const {
+    subjects,
+    enabled: featureEnabled,
+    isLoading: subjectsLoading,
+    error: subjectsError,
+  } = useWorkflowSubjects();
+  const { workflow, isLoading: workflowLoading, error: workflowError, fetchWorkflow } =
+    useWorkflow();
+  const {
+    runs,
+    meta: runsMeta,
+    isLoading: runsLoading,
+    error: runsError,
+    fetchRuns,
+  } = useWorkflowRuns();
+  const { createWorkflow, updateWorkflow, isSaving } = useWorkflowMutations();
+
+  // Builder vs. Run history tab (run history is edit-mode only).
+  const [tab, setTab] = useState<'builder' | 'runs'>('builder');
+  const [runsPage, setRunsPage] = useState(1);
+
+  const [state, dispatch] = useReducer(builderReducer, undefined, blankState);
+  const hydratedRef = useRef(false);
+
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Admin-only `workflows.*` settings (cap, requirePreview, allowHardDelete).
+  // Non-admins get 403 here; we fall back to safe defaults.
+  const [sysWorkflows, setSysWorkflows] = useState<WorkflowSystemSettings | null>(null);
+  const canReadSettings = hasPermission('system_settings:read');
+  useEffect(() => {
+    if (!canReadSettings) return;
+    let active = true;
+    void api
+      .get<{ workflows?: WorkflowSystemSettings }>('/system-settings')
+      .then((res) => active && setSysWorkflows(res.workflows ?? {}))
+      .catch(() => active && setSysWorkflows(null));
+    return () => {
+      active = false;
+    };
+  }, [canReadSettings]);
+
+  // null when unknown (non-admin); the backend still enforces the gate.
+  const hardDeleteAllowed: boolean | null = sysWorkflows
+    ? sysWorkflows.allowHardDelete ?? false
+    : null;
+  const systemCap = sysWorkflows?.maxItemsPerRun ?? DEFAULT_MAX_ITEMS_PER_RUN;
+  const systemRequiresPreview =
+    sysWorkflows?.requirePreview ?? DEFAULT_REQUIRE_PREVIEW;
+
+  const canManage =
+    (activeRole === 'editor' || activeRole === 'admin') &&
+    hasPermission('media:write');
+
+  // Load the existing workflow when editing.
+  useEffect(() => {
+    if (isEdit && id) void fetchWorkflow(id);
+  }, [isEdit, id, fetchWorkflow]);
+
+  // Hydrate the draft exactly once, from the right source.
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (isEdit) {
+      if (workflow) {
+        dispatch({ kind: 'replace', state: stateFromWorkflow(workflow) });
+        hydratedRef.current = true;
+      }
+      return;
+    }
+    // Create mode: template via router state, else ?template=<id>, else blank.
+    const stateTemplate = (location.state as { template?: WorkflowTemplate } | null)?.template;
+    const paramTemplate = searchParams.get('template');
+    const template = stateTemplate ?? (paramTemplate ? getWorkflowTemplate(paramTemplate) : undefined);
+    if (template) {
+      dispatch({ kind: 'replace', state: stateFromTemplate(template) });
+    }
+    hydratedRef.current = true;
+  }, [isEdit, workflow, location.state, searchParams]);
+
+  // Load run history when the tab is active (edit mode only). Refetches on page
+  // change so pagination works.
+  useEffect(() => {
+    if (isEdit && id && tab === 'runs') {
+      void fetchRuns(id, { page: runsPage, pageSize: RUNS_PAGE_SIZE });
+    }
+  }, [isEdit, id, tab, runsPage, fetchRuns]);
+
+  const subjectEntry = useMemo(
+    () => subjects?.find((s) => s.subject === state.definition.subject),
+    [subjects, state.definition.subject],
+  );
+
+  const handleOpenRun = (run: WorkflowRun) => {
+    navigate(`/workflows/${run.workflowId}/runs/${run.id}`);
+  };
+
+  // Validation --------------------------------------------------------------
+  const hasGatedAction = state.definition.actions.some((a) =>
+    GATED_ACTION_TYPES.has(a.type),
+  );
+  const gatedActionError =
+    hasGatedAction && state.trigger !== 'manual'
+      ? 'Permanent delete is only allowed on manual-trigger workflows. Switch the trigger to Manual or remove the action.'
+      : null;
+
+  const nameError = submitAttempted && state.name.trim() === '';
+  const cronError =
+    state.trigger === 'scheduled' && !isValidCron(state.cronExpression);
+
+  const canSave = !isSaving && canManage && Boolean(activeCircle);
+
+  const handleSave = async () => {
+    setSubmitAttempted(true);
+    setSaveError(null);
+    if (!activeCircle) return;
+    if (state.name.trim() === '') return;
+    if (state.trigger === 'scheduled' && cronError) return;
+    if (gatedActionError) return;
+
+    const cronExpression =
+      state.trigger === 'scheduled' ? state.cronExpression.trim() : null;
+
+    try {
+      if (isEdit && id) {
+        const dto: UpdateWorkflowDto = {
+          name: state.name.trim(),
+          description: state.description.trim() || null,
+          enabled: state.enabled,
+          trigger: state.trigger,
+          cronExpression,
+          definition: state.definition,
+        };
+        const updated = await updateWorkflow(id, dto);
+        navigate(`/workflows/${updated.id}`);
+      } else {
+        const dto: CreateWorkflowDto = {
+          circleId: activeCircle.id,
+          name: state.name.trim(),
+          description: state.description.trim() || null,
+          enabled: state.enabled,
+          trigger: state.trigger,
+          cronExpression,
+          definition: state.definition,
+        };
+        const created = await createWorkflow(dto);
+        navigate(`/workflows/${created.id}`);
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save workflow');
+    }
+  };
+
+  // --- Guard states --------------------------------------------------------
+  if (!activeCircle) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="info">Select a circle to build a workflow.</Alert>
+      </Box>
+    );
+  }
+
+  if (subjectsLoading || (isEdit && workflowLoading && !hydratedRef.current)) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (featureEnabled === false) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="info">The Workflows feature is not enabled.</Alert>
+      </Box>
+    );
+  }
+
+  if (subjectsError || workflowError) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="error">{subjectsError || workflowError}</Alert>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1400, mx: 'auto' }}>
+      {/* Header */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          mb: 3,
+          gap: 1,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Typography variant="h5" component="h1">
+          {isEdit ? 'Edit workflow' : 'New workflow'}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="text"
+            startIcon={<CloseIcon />}
+            onClick={() => navigate('/workflows')}
+            sx={{ minHeight: 44 }}
+          >
+            Cancel
+          </Button>
+          {tab === 'builder' && (
+            <Button
+              variant="contained"
+              startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+              onClick={() => void handleSave()}
+              disabled={!canSave}
+              sx={{ minHeight: 44 }}
+            >
+              {isSaving ? 'Saving…' : isEdit ? 'Save changes' : 'Create workflow'}
+            </Button>
+          )}
+        </Box>
+      </Box>
+
+      {!canManage && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          You have read-only access to this workflow. Collaborator role and
+          media:write are required to edit.
+        </Alert>
+      )}
+
+      {isEdit && (
+        <Tabs
+          {...scrollableTabsProps}
+          value={tab}
+          onChange={(_, next: 'builder' | 'runs') => setTab(next)}
+          sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="builder" label="Builder" />
+          <Tab value="runs" label="Run history" />
+        </Tabs>
+      )}
+
+      {isEdit && tab === 'runs' ? (
+        <WorkflowRunHistory
+          runs={runs}
+          isLoading={runsLoading}
+          error={runsError}
+          onOpenRun={handleOpenRun}
+          page={runsMeta?.page}
+          totalPages={runsMeta?.totalPages}
+          onPageChange={setRunsPage}
+        />
+      ) : (
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 3,
+          alignItems: 'flex-start',
+          flexDirection: { xs: 'column', md: 'row' },
+        }}
+      >
+        {/* Main column — stacked blocks */}
+        <Stack spacing={2.5} sx={{ flex: 1, minWidth: 0 }}>
+          {subjects && (
+            <SubjectBlock
+              subjects={subjects}
+              value={state.definition.subject}
+              onChange={() => {
+                /* v1: single Subject; selection is fixed to media_item */
+              }}
+            />
+          )}
+
+          <TriggerBlock
+            subject={subjectEntry}
+            name={state.name}
+            description={state.description}
+            enabled={state.enabled}
+            trigger={state.trigger}
+            cronExpression={state.cronExpression}
+            onName={(v) => dispatch({ kind: 'setName', value: v })}
+            onDescription={(v) => dispatch({ kind: 'setDescription', value: v })}
+            onEnabled={(v) => dispatch({ kind: 'setEnabled', value: v })}
+            onTrigger={(v) => dispatch({ kind: 'setTrigger', value: v })}
+            onCron={(v) => dispatch({ kind: 'setCron', value: v })}
+            gatedActionError={gatedActionError}
+            nameError={nameError}
+          />
+
+          {subjectEntry && (
+            <ConditionsBlock
+              circleId={activeCircle.id}
+              fields={subjectEntry.fields}
+              match={state.definition.match}
+              conditions={state.definition.conditions}
+              dispatch={dispatch}
+            />
+          )}
+
+          {subjectEntry && (
+            <ActionsBlock
+              circleId={activeCircle.id}
+              actionCatalog={subjectEntry.actions}
+              actions={state.definition.actions}
+              dispatch={dispatch}
+              hardDeleteAllowed={hardDeleteAllowed}
+            />
+          )}
+
+          <SafetyBlock
+            maxItems={state.definition.options?.maxItems}
+            requirePreview={state.definition.options?.requirePreview}
+            systemCap={systemCap}
+            systemRequiresPreview={systemRequiresPreview}
+            hasGatedAction={hasGatedAction}
+            dispatch={dispatch}
+          />
+        </Stack>
+
+        <WorkflowPreviewPanel
+          circleId={activeCircle.id}
+          definition={state.definition}
+          subjectEntry={subjectEntry}
+          trigger={state.trigger}
+          cronExpression={state.cronExpression}
+        />
+      </Box>
+      )}
+
+      <Snackbar
+        open={Boolean(saveError)}
+        autoHideDuration={6000}
+        onClose={() => setSaveError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSaveError(null)} severity="error" sx={{ width: '100%' }}>
+          {saveError}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}

@@ -39,7 +39,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import StopIcon from '@mui/icons-material/Stop';
 import type { AdminWorkflowRun } from '../../../services/adminWorkflows';
-import { isTerminalRunStatus } from '../../../utils/workflowFormat';
+import { isTerminalRunStatus } from '@marinoscar/memoriahub-web/workflows/headless';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {

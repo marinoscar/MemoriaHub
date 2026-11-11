@@ -9,10 +9,13 @@ import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 
 vi.mock('../../../hooks/useUserSettings', () => ({ useUserSettings: vi.fn() }));
-vi.mock('../../../hooks/useMemoriesEnabled', () => ({ useMemoriesEnabled: vi.fn() }));
+vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+  useMemoriesEnabled: vi.fn(),
+}));
 
 import { useUserSettings } from '../../../hooks/useUserSettings';
-import { useMemoriesEnabled } from '../../../hooks/useMemoriesEnabled';
+import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import AppearanceSettingsPage from '../../../pages/settings/AppearanceSettingsPage';
 import MemoriesPreferencesPage from '../../../pages/settings/MemoriesPreferencesPage';
 

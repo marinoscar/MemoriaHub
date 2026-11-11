@@ -406,6 +406,61 @@
         "@mui/icons-material",
         "react"
       ]
+    },
+    "memories": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "search": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "tagging": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "workflows": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

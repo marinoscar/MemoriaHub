@@ -13,21 +13,12 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Superset of every run status across all four backends.
- *
- * `awaiting_approval` and `expired` are workflow-only today; the trash-empty,
- * location-suggestion and review-run backends emit the other six. Keeping one
- * union means the shared formatters and progress panel handle any run.
+ * Superset of every run status across all four backends. It lives with the packaged
+ * run formatters (`@marinoscar/memoriahub-web/core/headless`); re-exported so the app's
+ * imports stay unchanged.
  */
-export type RunStatus =
-  | 'evaluating'
-  | 'awaiting_approval'
-  | 'running'
-  | 'completed'
-  | 'completed_with_errors'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+export type { RunStatus } from '@marinoscar/memoriahub-web/core/headless';
+import type { RunStatus } from '@marinoscar/memoriahub-web/core/headless';
 
 /**
  * Superset of every run-item status across all four backends.

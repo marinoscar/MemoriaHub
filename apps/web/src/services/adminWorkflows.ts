@@ -3,7 +3,7 @@ import type {
   WorkflowRunStatus,
   WorkflowTriggerType,
   WorkflowSubjectType,
-} from '../types/workflows';
+} from '@marinoscar/memoriahub-web/workflows/headless';
 
 // ---------------------------------------------------------------------------
 // Admin workflow oversight API client (issue #143).

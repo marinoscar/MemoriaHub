@@ -37,7 +37,7 @@ import { useMediaRefresh } from '@marinoscar/memoriahub-web/media/headless';
 import { UserMenu } from './UserMenu';
 import { OwnerScopeChip } from './OwnerScopeChip';
 import { NotificationBell } from '../notifications/NotificationBell';
-import { TopbarSearch } from '../search/TopbarSearch';
+import { TopbarSearch } from '@marinoscar/memoriahub-web/search/ui';
 import { MediaUploadDialog } from '@marinoscar/memoriahub-web/media/ui';
 import { APP_NAME } from '../../constants/app';
 import appLogo from '@marinoscar/memoriahub-web/brand/assets/app-logo.png';

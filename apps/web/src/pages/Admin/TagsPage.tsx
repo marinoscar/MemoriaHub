@@ -49,8 +49,8 @@ import {
   deleteTagLabel,
   exportTagLabels,
   importTagLabels,
-} from '../../services/tagLabels';
-import type { TagLabel, ImportResult } from '../../services/tagLabels';
+} from '@marinoscar/memoriahub-web/tagging/headless';
+import type { TagLabel, ImportResult } from '@marinoscar/memoriahub-web/tagging/headless';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
 import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {

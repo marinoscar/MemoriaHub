@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as names from '@marinoscar/memoriahub-web/media/headless';
+import { SEARCH_PEOPLE_EXPLORE_SLOT } from '@marinoscar/memoriahub-web/search/headless';
+import { WORKFLOW_PERSON_SELECT_SLOT } from '@marinoscar/memoriahub-web/workflows/headless';
 
 import { APP_SLOT_NAMES, appMemoriahubSlots } from '../../platform-memoriahub/slots';
 
@@ -20,6 +22,8 @@ describe('app slots', () => {
       albumPeopleDialog: names.ALBUM_PEOPLE_DIALOG_SLOT,
       personMultiSelect: names.PERSON_MULTI_SELECT_SLOT,
       mergeLocationsDialog: names.MERGE_LOCATIONS_DIALOG_SLOT,
+      searchPeopleExplore: SEARCH_PEOPLE_EXPLORE_SLOT,
+      workflowPersonSelect: WORKFLOW_PERSON_SELECT_SLOT,
     });
   });
 

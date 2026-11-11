@@ -28,12 +28,11 @@ import { getExploreLocations, listAlbums } from '@marinoscar/memoriahub-web/medi
 import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
 import { listPeople } from '../services/face';
 import type { PersonListItem } from '../services/face';
-import { listMemories } from '../services/memories';
+import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { COLLECTIONS } from '../config/collections';
 import type { CollectionDef, CollectionFlag, CollectionSource } from '../config/collections';
 import { useOwnerScope } from './useOwnerScope';
 import { useIsMounted } from './useIsMounted';
-import { useMemoriesEnabled } from './useMemoriesEnabled';
 
 /** The four sources that actually fetch. `null`-source entries (Map, Favorites, Archive, Trash) never appear here. */
 export type CollectionSummarySource = Exclude<CollectionSource, null>;

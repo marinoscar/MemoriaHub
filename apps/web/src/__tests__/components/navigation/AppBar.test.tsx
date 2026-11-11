@@ -16,20 +16,10 @@ import { APP_NAME } from '../../../constants/app';
 import type { Circle } from '../../../types/circles';
 import { renderShell } from '../../utils/shell-harness';
 
-vi.mock('../../../contexts/SearchContext', () => ({
-  useSearch: vi.fn(() => ({
-    messages: [],
-    results: null,
-    isSearching: false,
-    error: null,
-    searchRequest: null,
-    runAgentSearch: vi.fn(),
-    runDeterministicSearch: vi.fn(),
-    clearSearch: vi.fn(),
-  })),
-  SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+// The pill itself is the packaged search slice's (its own tests cover it); the bar only mounts it.
+vi.mock('@marinoscar/memoriahub-web/search/ui', () => ({
+  TopbarSearch: () => <input aria-label="Search your photos" />,
 }));
-vi.mock('../../../components/search/SearchPanel', () => ({ SearchPanel: vi.fn(() => null) }));
 vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   MediaUploadDialog: vi.fn(({ open }: { open: boolean }) =>

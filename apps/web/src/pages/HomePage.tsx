@@ -29,7 +29,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import { Link as RouterLink } from 'react-router-dom';
 import { useOwnerScope } from '../hooks/useOwnerScope';
 import { MediaGallery } from '@marinoscar/memoriahub-web/media/ui';
-import { MemoriesCarousel } from '../components/memories/MemoriesCarousel';
+import { MemoriesCarousel } from '@marinoscar/memoriahub-web/memories/ui';
 import { HomeGroupInvites } from '../components/sharing/HomeGroupInvites';
 
 export default function HomePage() {

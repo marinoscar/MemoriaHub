@@ -7,7 +7,7 @@ import type {
 import type {
   MemoriesPreferences,
   MemoriesPreferencesPatch,
-} from './memories';
+} from '@marinoscar/memoriahub-web/memories/headless';
 
 export interface Role {
   name: string;

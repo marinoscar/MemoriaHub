@@ -57,6 +57,8 @@ export interface MemoriahubApiClient {
   refreshToken(): Promise<boolean>;
   /** The owner-scope rewrite of an endpoint (`circleId` goes out as `ownerGroupId`), for the calls that bypass this client. */
   rewriteEndpoint(endpoint: string): string;
+  /** The owner-scope rewrite of a top-level `circleId` in a JSON body (a new object), for the calls that bypass this client (a streamed request). */
+  rewriteBody(endpoint: string, body: unknown): unknown;
   /** The bearer credential, for the few calls that go out of the client (a byte upload). `null` when signed out. */
   getAccessToken(): string | null;
   /** The API root URL (`/api`), for the same calls. */

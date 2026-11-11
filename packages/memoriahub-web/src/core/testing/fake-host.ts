@@ -143,6 +143,7 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
     delete: (e, o) => send('DELETE', e, undefined, o),
     refreshToken: async () => false,
     rewriteEndpoint: (endpoint) => endpoint,
+    rewriteBody: (_endpoint, body) => body,
     getAccessToken: () => 'fake-token',
     baseUrl: '/api',
   };

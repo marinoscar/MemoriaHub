@@ -97,16 +97,23 @@ vi.mock('../../../services/face', () => ({
 // finish (issue #196).
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/tagging', () => ({
-  getMediaTagStatus: vi.fn().mockResolvedValue({
-    status: 'not_processed',
-    providerKey: null,
-    modelVersion: null,
-    tagCount: 0,
-    processedAt: null,
-    lastError: null,
+vi.mock('@marinoscar/memoriahub-web/tagging/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // The drawer's tag hook fetches on mount; a stable stub keeps the file's async work deterministic.
+  useMediaTags: () => ({
+    status: {
+      status: 'not_processed',
+      providerKey: null,
+      modelVersion: null,
+      tagCount: 0,
+      processedAt: null,
+      lastError: null,
+    },
+    loading: false,
+    error: null,
+    rerun: vi.fn(),
+    rerunLoading: false,
   }),
-  rerunMediaTags: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
 }));
 
 

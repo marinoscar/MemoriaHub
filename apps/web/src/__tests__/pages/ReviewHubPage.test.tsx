@@ -17,7 +17,8 @@ import type { PictureEnhancementPolicy } from '../../services/features';
 vi.mock('../../hooks/useFeatureFlags', () => ({
   useFeatureFlags: vi.fn(),
 }));
-vi.mock('../../hooks/useWorkflowSubjects', () => ({
+vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowsEnabled: vi.fn(),
 }));
 // The packaged rail's collapse preference (RETRO-F1, #571): the hub redirects
@@ -38,7 +39,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 }));
 
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
+import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
 import { useScrollRestoration } from '../../hooks/useScrollRestoration';
 import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
 
