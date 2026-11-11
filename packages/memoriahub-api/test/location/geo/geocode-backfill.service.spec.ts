@@ -16,11 +16,15 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
-import { GeocodeBackfillService } from './geocode-backfill.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { GeocodeBackfillService } from '../../../src/location/geo/geocode-backfill.service.js';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../../src/ports/index.js';
+import { jobsPortOverFacade } from '../../helpers/facade-jobs-port.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../../helpers/mock-db.js';
+
+// The enums the web app's generated client carried (the package imports no generated client).
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MhLegacyJobStatus = { pending: 'pending' } as const;
+const MediaMetadataStatusType = { not_processed: 'not_processed', pending: 'pending', processing: 'processing', processed: 'processed', failed: 'failed' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,14 +67,16 @@ describe('GeocodeBackfillService', () => {
   let mockEnrichmentJobService: { enqueue: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
+    // The job row the rerun reads its status from (a fresh job is pending).
+    mockPrisma.job.findUnique.mockResolvedValue({ status: MhLegacyJobStatus.pending });
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue(makeJob()) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GeocodeBackfillService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
       ],
     }).compile();
 

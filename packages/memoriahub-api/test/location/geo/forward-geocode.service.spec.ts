@@ -1,8 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceUnavailableException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ForwardGeocodeService } from './forward-geocode.service';
-import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { ForwardGeocodeService } from '../../../src/location/geo/forward-geocode.service.js';
+import { MEMORIAHUB_SETTINGS } from '../../../src/ports/index.js';
+import { settingsPortFrom } from '../../helpers/settings-port.js';
+
+const ENV_KEYS = ['NOMINATIM_BASE_URL', 'GEO_FORWARD_PROVIDER', 'GOOGLE_MAPS_API_KEY', 'GEO_FORWARD_SEARCH_ENABLED'] as const;
+const savedEnv: Record<string, string | undefined> = {};
+
+beforeEach(() => {
+  for (const key of ENV_KEYS) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+
+afterEach(() => {
+  for (const key of ENV_KEYS) {
+    if (savedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedEnv[key];
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal fetch Response mock (Nominatim-style)
@@ -37,24 +54,15 @@ async function buildServiceWithConfig(
   configMap: Record<string, string | undefined>,
   systemSettingsEnabled?: boolean,
 ): Promise<ForwardGeocodeService> {
+  for (const [key, value] of Object.entries(configMap)) {
+    if (value !== undefined) process.env[key] = value;
+  }
   const module: TestingModule = await Test.createTestingModule({
     providers: [
       ForwardGeocodeService,
       {
-        provide: ConfigService,
-        useValue: {
-          get: jest.fn((key: string, defaultValue?: string) => {
-            return key in configMap ? configMap[key] : defaultValue;
-          }),
-        },
-      },
-      {
-        provide: AppSystemSettingsService,
-        useValue: {
-          getSettingValue: jest.fn().mockResolvedValue(
-            systemSettingsEnabled !== undefined ? systemSettingsEnabled : undefined,
-          ),
-        },
+        provide: MEMORIAHUB_SETTINGS,
+        useValue: settingsPortFrom({ geo: { forwardSearchEnabled: systemSettingsEnabled } }),
       },
     ],
   }).compile();
@@ -78,35 +86,11 @@ describe('ForwardGeocodeService', () => {
   });
 
   /**
-   * Build ForwardGeocodeService with getSettingValue returning the parsed boolean
-   * (true → enabled, false → disabled). The env var path is bypassed because
-   * getSettingValue returns a non-undefined value.
+   * Build ForwardGeocodeService with the `geo.forwardSearchEnabled` setting set to the parsed boolean
+   * (true → enabled, false → disabled). The env var path is bypassed because the setting is not undefined.
    */
   async function buildService(enabled: string): Promise<ForwardGeocodeService> {
-    const enabledBool = enabled === 'true';
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ForwardGeocodeService,
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string, defaultValue?: string) => {
-              if (key === 'NOMINATIM_BASE_URL')
-                return 'https://nominatim.openstreetmap.org';
-              return defaultValue ?? undefined;
-            }),
-          },
-        },
-        {
-          provide: AppSystemSettingsService,
-          useValue: {
-            getSettingValue: jest.fn().mockResolvedValue(enabledBool),
-          },
-        },
-      ],
-    }).compile();
-
-    return module.get<ForwardGeocodeService>(ForwardGeocodeService);
+    return buildServiceWithConfig({ NOMINATIM_BASE_URL: 'https://nominatim.openstreetmap.org' }, enabled === 'true');
   }
 
   describe('when GEO_FORWARD_SEARCH_ENABLED is false', () => {

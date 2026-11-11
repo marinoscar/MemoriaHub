@@ -31,7 +31,7 @@ jest.mock('local-reverse-geocoder', () => ({
 // Imports (after mock declaration)
 // ---------------------------------------------------------------------------
 
-import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
+import { OfflineGeoLocationProvider } from '../../../src/location/geo/offline-geo-location.provider.js';
 
 // Obtain typed references to the mocked functions so tests can configure them.
 // eslint-disable-next-line @typescript-eslint/no-require-imports

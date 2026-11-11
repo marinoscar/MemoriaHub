@@ -1,27 +1,16 @@
 /**
  * Unit tests for NominatimGeoLocationProvider.
  *
- * Mocks global fetch. The provider is constructed with a stub ConfigService
- * that returns the default Nominatim base URL.
+ * Mocks global fetch. The base URL comes from `NOMINATIM_BASE_URL` (default: the public instance).
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
-import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
-import { RateLimitError } from '../../enrichment/rate-limit.error';
+import { NominatimGeoLocationProvider } from '../../../src/location/geo/nominatim-geo-location.provider.js';
+import { MemoriahubRateLimitError } from '../../../src/ports/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeConfigService(nominatimUrl = 'https://nominatim.openstreetmap.org'): ConfigService {
-  return {
-    get: jest.fn().mockImplementation((key: string, defaultValue?: string) => {
-      if (key === 'NOMINATIM_BASE_URL') return nominatimUrl;
-      return defaultValue;
-    }),
-  } as unknown as ConfigService;
-}
 
 /** Minimal successful Nominatim reverse-geocoding response. */
 const FULL_RESPONSE = {
@@ -69,11 +58,9 @@ describe('NominatimGeoLocationProvider', () => {
   let fetchSpy: jest.SpyInstance;
 
   beforeEach(async () => {
+    delete process.env['NOMINATIM_BASE_URL'];
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        NominatimGeoLocationProvider,
-        { provide: ConfigService, useValue: makeConfigService() },
-      ],
+      providers: [NominatimGeoLocationProvider],
     }).compile();
 
     provider = module.get<NominatimGeoLocationProvider>(NominatimGeoLocationProvider);
@@ -194,27 +181,27 @@ describe('NominatimGeoLocationProvider', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Rate-limit / server error — must throw RateLimitError
+  // Rate-limit / server error — must throw MemoriahubRateLimitError
   // -------------------------------------------------------------------------
 
   describe('HTTP 429 (throttled)', () => {
-    it('throws RateLimitError', async () => {
+    it('throws MemoriahubRateLimitError', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpErrorResponse(429));
 
       await expect(provider.reverseGeocode(10.47, -84.64)).rejects.toBeInstanceOf(
-        RateLimitError,
+        MemoriahubRateLimitError,
       );
     });
 
-    it('thrown RateLimitError carries "nominatim" providerKey', async () => {
+    it('thrown rate-limit error names the geocode throttle bucket', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpErrorResponse(429));
 
       await expect(provider.reverseGeocode(10.47, -84.64)).rejects.toMatchObject({
-        providerKey: 'nominatim',
+        throttleKey: 'geocode',
       });
     });
 
@@ -224,8 +211,8 @@ describe('NominatimGeoLocationProvider', () => {
         .mockResolvedValue(makeHttpErrorResponse(429, '30'));
 
       const err = await provider.reverseGeocode(10.47, -84.64).catch((e) => e);
-      expect(err).toBeInstanceOf(RateLimitError);
-      expect((err as RateLimitError).retryAfterMs).toBe(30_000);
+      expect(err).toBeInstanceOf(MemoriahubRateLimitError);
+      expect((err as MemoriahubRateLimitError).retryAfterMs).toBe(30_000);
     });
 
     it('retryAfterMs is undefined when Retry-After header is absent', async () => {
@@ -234,28 +221,28 @@ describe('NominatimGeoLocationProvider', () => {
         .mockResolvedValue(makeHttpErrorResponse(429));
 
       const err = await provider.reverseGeocode(10.47, -84.64).catch((e) => e);
-      expect((err as RateLimitError).retryAfterMs).toBeUndefined();
+      expect((err as MemoriahubRateLimitError).retryAfterMs).toBeUndefined();
     });
   });
 
   describe('HTTP 5xx (server error)', () => {
-    it('throws RateLimitError on HTTP 503', async () => {
+    it('throws MemoriahubRateLimitError on HTTP 503', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpErrorResponse(503));
 
       await expect(provider.reverseGeocode(10.47, -84.64)).rejects.toBeInstanceOf(
-        RateLimitError,
+        MemoriahubRateLimitError,
       );
     });
 
-    it('throws RateLimitError on HTTP 500', async () => {
+    it('throws MemoriahubRateLimitError on HTTP 500', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpErrorResponse(500));
 
       await expect(provider.reverseGeocode(10.47, -84.64)).rejects.toBeInstanceOf(
-        RateLimitError,
+        MemoriahubRateLimitError,
       );
     });
   });
@@ -330,13 +317,15 @@ describe('NominatimGeoLocationProvider', () => {
   // Custom base URL
   // -------------------------------------------------------------------------
 
-  describe('custom base URL from ConfigService', () => {
-    it('uses the base URL returned by ConfigService', async () => {
+  describe('custom base URL from NOMINATIM_BASE_URL', () => {
+    afterEach(() => {
+      delete process.env['NOMINATIM_BASE_URL'];
+    });
+
+    it('uses the base URL named by NOMINATIM_BASE_URL', async () => {
+      process.env['NOMINATIM_BASE_URL'] = 'https://nominatim.example.com';
       const customModule: TestingModule = await Test.createTestingModule({
-        providers: [
-          NominatimGeoLocationProvider,
-          { provide: ConfigService, useValue: makeConfigService('https://nominatim.example.com') },
-        ],
+        providers: [NominatimGeoLocationProvider],
       }).compile();
 
       const customProvider = customModule.get<NominatimGeoLocationProvider>(

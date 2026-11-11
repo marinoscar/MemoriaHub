@@ -1,17 +1,17 @@
-import { CredentialsService } from '@marinoscar/platform-api/credentials';
-import { GEO_GOOGLE_SECRET_KIND, GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
-import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
-import { FakeCredentials } from '../../test/helpers/fake-credentials';
-import { mediaItemJob } from '../../test/helpers/platform-job';
+import { GEO_GOOGLE_SECRET_KIND, GoogleGeocodeKeyBroker } from '../../../src/location/geo/google-geocode-key.broker.js';
+import { GeoGoogleCredentialResolver } from '../../../src/location/geo/geo-google-credential.resolver.js';
+import { FakeGeoSecrets } from '../../helpers/geo-secrets.js';
+import { mediaItemJob } from '../../helpers/job-fixtures.js';
+import { settingsPortFrom } from '../../helpers/settings-port.js';
 
 const FIXTURE_KEY = 'k-fixture-1234567890';
 
-function make(settings: unknown, key: string | null = FIXTURE_KEY) {
-  const creds = new FakeCredentials();
+function make(settings: Record<string, unknown>, key: string | null = FIXTURE_KEY) {
+  const creds = new FakeGeoSecrets();
   if (key) creds.seed('geo_provider', 'google', key);
-  const systemSettings = { getSettings: jest.fn(async () => settings) };
-  const resolver = new GeoGoogleCredentialResolver(creds as unknown as CredentialsService, systemSettings as never);
-  const broker = new GoogleGeocodeKeyBroker(creds as unknown as CredentialsService, systemSettings as never, resolver);
+  const settingsPort = settingsPortFrom(settings) as never;
+  const resolver = new GeoGoogleCredentialResolver(creds, settingsPort);
+  const broker = new GoogleGeocodeKeyBroker(creds, settingsPort, resolver);
   return { broker, creds };
 }
 
@@ -54,8 +54,8 @@ describe('GoogleGeocodeKeyBroker', () => {
     it('never reads the secret: it asks only for the credential metadata', async () => {
       const { broker, creds } = make(google);
       await broker.usable();
-      expect(creds.getSecret).not.toHaveBeenCalled();
-      expect(creds.describe).toHaveBeenCalledWith('geo_provider', 'google');
+      expect(creds.get).not.toHaveBeenCalled();
+      expect(creds.status).toHaveBeenCalledWith('geo_provider', 'google');
     });
 
     it('carries no key material in the reason or remedy of a refusal', async () => {

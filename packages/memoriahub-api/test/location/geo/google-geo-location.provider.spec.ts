@@ -7,8 +7,8 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { GoogleGeoLocationProvider } from './google-geo-location.provider';
-import { RateLimitError } from '../../enrichment/rate-limit.error';
+import { GoogleGeoLocationProvider } from '../../../src/location/geo/google-geo-location.provider.js';
+import { MemoriahubRateLimitError } from '../../../src/ports/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -216,21 +216,21 @@ describe('GoogleGeoLocationProvider', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Rate-limit statuses — must throw RateLimitError (not return null)
+  // Rate-limit statuses — must throw MemoriahubRateLimitError (not return null)
   // -------------------------------------------------------------------------
 
   describe('OVER_QUERY_LIMIT (API quota exhaustion)', () => {
-    it('throws RateLimitError', async () => {
+    it('throws MemoriahubRateLimitError', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeResponse({ status: 'OVER_QUERY_LIMIT', results: [] }));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     });
 
-    it('thrown RateLimitError carries the status in the message', async () => {
+    it('thrown MemoriahubRateLimitError carries the status in the message', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeResponse({ status: 'OVER_QUERY_LIMIT', results: [] }));
@@ -242,14 +242,14 @@ describe('GoogleGeoLocationProvider', () => {
   });
 
   describe('RESOURCE_EXHAUSTED (API-level rate limit)', () => {
-    it('throws RateLimitError', async () => {
+    it('throws MemoriahubRateLimitError', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeResponse({ status: 'RESOURCE_EXHAUSTED', results: [] }));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     });
   });
 
@@ -267,44 +267,44 @@ describe('GoogleGeoLocationProvider', () => {
       } as unknown as Response;
     }
 
-    it('throws RateLimitError on HTTP 429', async () => {
+    it('throws MemoriahubRateLimitError on HTTP 429', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpResponse(429));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     });
 
-    it('thrown RateLimitError on 429 has "google" providerKey', async () => {
+    it('thrown rate-limit error on 429 names the geocode throttle bucket', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpResponse(429));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toMatchObject({ providerKey: 'google' });
+      ).rejects.toMatchObject({ throttleKey: 'geocode' });
     });
 
-    it('throws RateLimitError on HTTP 503', async () => {
+    it('throws MemoriahubRateLimitError on HTTP 503', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpResponse(503));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     });
 
-    it('throws RateLimitError on HTTP 500', async () => {
+    it('throws MemoriahubRateLimitError on HTTP 500', async () => {
       fetchSpy = jest
         .spyOn(global, 'fetch')
         .mockResolvedValue(makeHttpResponse(500));
 
       await expect(
         provider.reverseGeocodeWithKey(9.9, -84.0, 'key'),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     });
 
     it('parses Retry-After header into retryAfterMs on HTTP 429', async () => {
@@ -313,8 +313,8 @@ describe('GoogleGeoLocationProvider', () => {
         .mockResolvedValue(makeHttpResponse(429, '60'));
 
       const err = await provider.reverseGeocodeWithKey(9.9, -84.0, 'key').catch((e) => e);
-      expect(err).toBeInstanceOf(RateLimitError);
-      expect((err as RateLimitError).retryAfterMs).toBe(60_000);
+      expect(err).toBeInstanceOf(MemoriahubRateLimitError);
+      expect((err as MemoriahubRateLimitError).retryAfterMs).toBe(60_000);
     });
 
     it('retryAfterMs is undefined when Retry-After header is absent', async () => {
@@ -323,8 +323,8 @@ describe('GoogleGeoLocationProvider', () => {
         .mockResolvedValue(makeHttpResponse(429));
 
       const err = await provider.reverseGeocodeWithKey(9.9, -84.0, 'key').catch((e) => e);
-      expect(err).toBeInstanceOf(RateLimitError);
-      expect((err as RateLimitError).retryAfterMs).toBeUndefined();
+      expect(err).toBeInstanceOf(MemoriahubRateLimitError);
+      expect((err as MemoriahubRateLimitError).retryAfterMs).toBeUndefined();
     });
   });
 

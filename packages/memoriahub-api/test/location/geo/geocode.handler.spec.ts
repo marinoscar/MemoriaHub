@@ -11,27 +11,23 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaMetadataStatusType } from '@prisma/client';
-import {
-  JobHandlerRegistry,
-  ProviderThrottleService,
-  RateLimitError as PlatformRateLimitError,
-} from '@marinoscar/platform-api/jobs';
-import { GeocodeHandler } from './geocode.handler';
-import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
-import { RateLimitError as LegacyRateLimitError } from '../enrichment/rate-limit.error';
-import { mediaItemJob } from '../../test/helpers/platform-job';
-import { GeoLocationService } from '../media/geo/geo-location.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
+import { GeocodeHandler } from '../../../src/location/geo/geocode.handler.js';
+import { GoogleGeocodeKeyBroker } from '../../../src/location/geo/google-geocode-key.broker.js';
+import { GeoLocationService } from '../../../src/location/geo/geo-location.service.js';
+import { LocationGroupResolverService } from '../../../src/location/groups/location-group-resolver.service.js';
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, MemoriahubRateLimitError } from '../../../src/ports/index.js';
+import { mediaItemJob } from '../../helpers/job-fixtures.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../../helpers/mock-db.js';
+
+// The enum the web app's generated client carried (the package imports no generated client).
+const MediaMetadataStatusType = { not_processed: 'not_processed', pending: 'pending', processing: 'processing', processed: 'processed', failed: 'failed' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function makeJob(): ReturnType<typeof mediaItemJob> {
-  return mediaItemJob('geocode', 'media-1', 'circle-1', { id: 'job-1', reason: 'backfill', priority: 100 });
+  return mediaItemJob('geocode', 'media-1', 'circle-1', { id: 'job-1', reason: 'backfill' });
 }
 
 /** What the persist half reads of a job: its id and its media item. */
@@ -48,16 +44,14 @@ describe('GeocodeHandler', () => {
   let mockPrisma: MockPrismaService;
   let mockGeoLocationService: { reverseGeocode: jest.Mock };
   let mockLocationGroupResolver: { resolve: jest.Mock };
-  let registry: { register: jest.Mock };
-  let throttle: { registerProviderKey: jest.Mock };
+  let jobs: { registerHandler: jest.Mock };
   const broker = { kind: 'geo.google' } as unknown as GoogleGeocodeKeyBroker;
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    mockPrisma = createMockPrismaService();
-    registry = { register: jest.fn() };
-    throttle = { registerProviderKey: jest.fn() };
+    mockPrisma = createMockDb();
+    jobs = { registerHandler: jest.fn() };
     mockGeoLocationService = { reverseGeocode: jest.fn() };
     // Default: the identity resolver (feature off / no groups configured).
     mockLocationGroupResolver = {
@@ -73,10 +67,9 @@ describe('GeocodeHandler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GeocodeHandler,
-        { provide: JobHandlerRegistry, useValue: registry },
-        { provide: ProviderThrottleService, useValue: throttle },
+        { provide: MEMORIAHUB_JOBS, useValue: jobs },
         { provide: GoogleGeocodeKeyBroker, useValue: broker },
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         { provide: GeoLocationService, useValue: mockGeoLocationService },
         { provide: LocationGroupResolverService, useValue: mockLocationGroupResolver },
       ],
@@ -103,9 +96,9 @@ describe('GeocodeHandler', () => {
   // -------------------------------------------------------------------------
 
   describe('onModuleInit', () => {
-    it('registers itself with the platform registry and the geocode throttle key', () => {
-      expect(registry.register).toHaveBeenCalledWith(handler);
-      expect(throttle.registerProviderKey).toHaveBeenCalledWith('geocode', 'geocode');
+    it('registers itself through the jobs port, declaring the geocode throttle key', () => {
+      expect(jobs.registerHandler).toHaveBeenCalledWith(handler);
+      expect(handler.throttleKey).toBe('geocode');
     });
   });
 
@@ -443,12 +436,17 @@ describe('GeocodeHandler', () => {
     });
 
     it.each([
-      ['a legacy RateLimitError', () => new LegacyRateLimitError('OVER_QUERY_LIMIT', 30_000)],
+      ['a provider rate-limit error', () => new MemoriahubRateLimitError('geocode', 30_000, 'OVER_QUERY_LIMIT')],
       ['an HTTP 429', () => Object.assign(new Error('Too Many Requests'), { status: 429 })],
-    ])('throws the platform RateLimitError for %s and leaves the item pending, never processed', async (_n, make) => {
+    ])('throws the queue rate-limit error (on the geocode bucket) for %s and leaves the item pending, never processed', async (_n, make) => {
       mockGeoLocationService.reverseGeocode.mockRejectedValue(make());
 
-      await expect(handler.process(makeJob())).rejects.toBeInstanceOf(PlatformRateLimitError);
+      const error = await handler.process(makeJob()).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(MemoriahubRateLimitError);
+      expect((error as MemoriahubRateLimitError).throttleKey).toBe('geocode');
 
       const calls = mockPrisma.mediaGeocodeStatus.upsert.mock.calls;
       expect(calls[calls.length - 1][0].update.status).toBe(MediaMetadataStatusType.pending);

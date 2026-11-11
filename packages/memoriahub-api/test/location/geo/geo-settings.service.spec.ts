@@ -1,7 +1,7 @@
 /**
  * Unit tests for GeoSettingsService (credential store edition, RETRO-B4 #617).
  *
- *   - the Google key is the platform credential `geo_provider/google`; the legacy table is never touched
+ *   - the Google key is the secret `geo_provider/google` (through the secrets port)
  *   - getSettings keeps the wire shape (configured / enabled / last4 / baseUrl) and never returns a secret
  *   - upsertCredential writes the secret to the store and the non-secret half to the `geo` settings
  *   - setActiveReverseProvider rejects 'google' without an enabled credential (400)
@@ -11,32 +11,31 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { CredentialsService } from '@marinoscar/platform-api/credentials';
-import { GeoSettingsService } from './geo-settings.service';
-import { GoogleGeoLocationProvider } from '../media/geo/google-geo-location.provider';
-import { OfflineGeoLocationProvider } from '../media/geo/offline-geo-location.provider';
-import { NominatimGeoLocationProvider } from '../media/geo/nominatim-geo-location.provider';
-import { GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { FakeCredentials } from '../../test/helpers/fake-credentials';
+import { GeoSettingsService } from '../../../src/location/geo/geo-settings.service.js';
+import { GoogleGeoLocationProvider } from '../../../src/location/geo/google-geo-location.provider.js';
+import { OfflineGeoLocationProvider } from '../../../src/location/geo/offline-geo-location.provider.js';
+import { NominatimGeoLocationProvider } from '../../../src/location/geo/nominatim-geo-location.provider.js';
+import { GeoGoogleCredentialResolver } from '../../../src/location/geo/geo-google-credential.resolver.js';
+import { MEMORIAHUB_SECRETS, MEMORIAHUB_SETTINGS } from '../../../src/ports/index.js';
+import { FakeGeoSecrets } from '../../helpers/geo-secrets.js';
 
 const PURPOSE = 'geo_provider';
 
 describe('GeoSettingsService', () => {
   let service: GeoSettingsService;
-  let creds: FakeCredentials;
+  let creds: FakeGeoSecrets;
   let geo: Record<string, unknown>;
-  let mockSystemSettings: { getSettings: jest.Mock; patchSettings: jest.Mock };
+  let mockSystemSettings: { readSystem: jest.Mock; patchSystem: jest.Mock };
   let mockGoogle: { reverseGeocodeWithKey: jest.Mock };
   let mockOffline: { reverseGeocode: jest.Mock };
   let mockNominatim: { reverseGeocode: jest.Mock };
 
   beforeEach(async () => {
-    creds = new FakeCredentials();
+    creds = new FakeGeoSecrets();
     geo = {};
     mockSystemSettings = {
-      getSettings: jest.fn(async () => ({ geo })),
-      patchSettings: jest.fn().mockResolvedValue(undefined),
+      readSystem: jest.fn(async (name: string) => ({ value: name === 'geo' ? geo : undefined, version: 1 })),
+      patchSystem: jest.fn().mockResolvedValue({ value: {}, version: 2 }),
     };
     mockGoogle = { reverseGeocodeWithKey: jest.fn() };
     mockOffline = { reverseGeocode: jest.fn() };
@@ -46,8 +45,8 @@ describe('GeoSettingsService', () => {
       providers: [
         GeoSettingsService,
         GeoGoogleCredentialResolver,
-        { provide: CredentialsService, useValue: creds },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: MEMORIAHUB_SECRETS, useValue: creds },
+        { provide: MEMORIAHUB_SETTINGS, useValue: mockSystemSettings },
         { provide: GoogleGeoLocationProvider, useValue: mockGoogle },
         { provide: OfflineGeoLocationProvider, useValue: mockOffline },
         { provide: NominatimGeoLocationProvider, useValue: mockNominatim },
@@ -109,21 +108,22 @@ describe('GeoSettingsService', () => {
     it('writes the key to the credential store with the actor, never to settings', async () => {
       await service.upsertCredential('google', { apiKey: 'AIza-test-5678' }, 'user-1');
 
-      expect(creds.setSecret).toHaveBeenCalledWith(PURPOSE, 'google', 'AIza-test-5678', { updatedByUserId: 'user-1' });
-      const patch = JSON.stringify(mockSystemSettings.patchSettings.mock.calls);
+      expect(creds.set).toHaveBeenCalledWith(PURPOSE, 'google', 'AIza-test-5678', 'user-1');
+      const patch = JSON.stringify(mockSystemSettings.patchSystem.mock.calls);
       expect(patch).not.toContain('AIza-test-5678');
     });
 
     it('patches baseUrl (overwrite) and enabled (only when sent) into geo.google', async () => {
       await service.upsertCredential('google', { apiKey: 'k-abcd1234', baseUrl: 'https://x.example.test', enabled: false }, 'user-1');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith(
-        { geo: { google: { baseUrl: 'https://x.example.test', enabled: false } } },
-        'user-1',
+      expect(mockSystemSettings.patchSystem).toHaveBeenCalledWith(
+        'geo',
+        { google: { baseUrl: 'https://x.example.test', enabled: false } },
+        { actorUserId: 'user-1' },
       );
 
-      mockSystemSettings.patchSettings.mockClear();
+      mockSystemSettings.patchSystem.mockClear();
       await service.upsertCredential('google', { apiKey: 'k-abcd1234' }, 'user-1');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { google: { baseUrl: null } } }, 'user-1');
+      expect(mockSystemSettings.patchSystem).toHaveBeenCalledWith('geo', { google: { baseUrl: null } }, { actorUserId: 'user-1' });
     });
 
     it('returns the same shape as before: last4, no secret', async () => {
@@ -135,7 +135,7 @@ describe('GeoSettingsService', () => {
 
     it('rejects an unsupported provider without writing', async () => {
       await expect(service.upsertCredential('bing', { apiKey: 'k' }, 'u')).rejects.toBeInstanceOf(BadRequestException);
-      expect(creds.setSecret).not.toHaveBeenCalled();
+      expect(creds.set).not.toHaveBeenCalled();
     });
   });
 
@@ -143,13 +143,13 @@ describe('GeoSettingsService', () => {
     it('deletes the stored secret and resets the non-secret settings', async () => {
       creds.seed(PURPOSE, 'google', 'AIza-test-5678');
       await service.deleteCredential('google', 'user-1');
-      expect(creds.deleteSecret).toHaveBeenCalledWith(PURPOSE, 'google');
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { google: { baseUrl: null, enabled: true } } }, 'user-1');
+      expect(creds.delete).toHaveBeenCalledWith(PURPOSE, 'google', 'user-1');
+      expect(mockSystemSettings.patchSystem).toHaveBeenCalledWith('geo', { google: { baseUrl: null, enabled: true } }, { actorUserId: 'user-1' });
     });
 
     it('throws NotFoundException when no credential exists', async () => {
       await expect(service.deleteCredential('google', 'u')).rejects.toBeInstanceOf(NotFoundException);
-      expect(creds.deleteSecret).not.toHaveBeenCalled();
+      expect(creds.delete).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException for an unsupported provider', async () => {
@@ -161,12 +161,12 @@ describe('GeoSettingsService', () => {
     it('accepts google when an enabled credential exists', async () => {
       creds.seed(PURPOSE, 'google', 'k-12345678');
       await expect(service.setActiveReverseProvider('google', 'u')).resolves.toEqual({ reverseProvider: 'google' });
-      expect(mockSystemSettings.patchSettings).toHaveBeenCalledWith({ geo: { reverseProvider: 'google' } }, 'u');
+      expect(mockSystemSettings.patchSystem).toHaveBeenCalledWith('geo', { reverseProvider: 'google' }, { actorUserId: 'u' });
     });
 
     it('rejects google without a credential and does not patch', async () => {
       await expect(service.setActiveReverseProvider('google', 'u')).rejects.toBeInstanceOf(BadRequestException);
-      expect(mockSystemSettings.patchSettings).not.toHaveBeenCalled();
+      expect(mockSystemSettings.patchSystem).not.toHaveBeenCalled();
     });
 
     it('rejects google when the provider is switched off', async () => {
@@ -177,7 +177,7 @@ describe('GeoSettingsService', () => {
 
     it('accepts nominatim without a credential check', async () => {
       await service.setActiveReverseProvider('nominatim', 'u');
-      expect(creds.getSecret).not.toHaveBeenCalled();
+      expect(creds.get).not.toHaveBeenCalled();
     });
   });
 

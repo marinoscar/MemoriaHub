@@ -10,7 +10,7 @@
  *  - Missing input → undefined
  */
 
-import { US_STATE_CODES, resolveUsState } from './us-state-codes';
+import { US_STATE_CODES, resolveUsState } from '../../../src/location/geo/us-state-codes.js';
 
 // ---------------------------------------------------------------------------
 // US_STATE_CODES constant

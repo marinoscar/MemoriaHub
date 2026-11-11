@@ -13,12 +13,12 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { GeoLocationService } from './geo-location.service';
-import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
-import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
-import { GoogleGeoLocationProvider } from './google-geo-location.provider';
-import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
-import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { GeoLocationService } from '../../../src/location/geo/geo-location.service.js';
+import { OfflineGeoLocationProvider } from '../../../src/location/geo/offline-geo-location.provider.js';
+import { NominatimGeoLocationProvider } from '../../../src/location/geo/nominatim-geo-location.provider.js';
+import { GoogleGeoLocationProvider } from '../../../src/location/geo/google-geo-location.provider.js';
+import { GeoGoogleCredentialResolver } from '../../../src/location/geo/geo-google-credential.resolver.js';
+import { MEMORIAHUB_SETTINGS } from '../../../src/ports/index.js';
 
 
 // ---------------------------------------------------------------------------
@@ -53,14 +53,19 @@ const NOMINATIM_RESULT = {
 describe('GeoLocationService', () => {
   let service: GeoLocationService;
   let mockGoogleCredential: { resolveApiKey: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock; readSystem: jest.Mock };
   let mockOffline: { reverseGeocode: jest.Mock };
   let mockNominatim: { reverseGeocode: jest.Mock };
   let mockGoogle: { reverseGeocodeWithKey: jest.Mock };
   beforeEach(async () => {
     mockGoogleCredential = { resolveApiKey: jest.fn().mockResolvedValue(null) };
 
-    mockSystemSettings = { getSettings: jest.fn() };
+    // The settings port answers one namespace at a time; the document is what each case seeds.
+    const getSettings = jest.fn();
+    mockSystemSettings = {
+      getSettings,
+      readSystem: jest.fn(async (name: string) => ({ value: ((await getSettings()) ?? {})[name], version: 1 })),
+    };
     mockOffline = { reverseGeocode: jest.fn().mockResolvedValue(OFFLINE_RESULT) };
     mockNominatim = { reverseGeocode: jest.fn().mockResolvedValue(NOMINATIM_RESULT) };
     mockGoogle = { reverseGeocodeWithKey: jest.fn().mockResolvedValue(GOOGLE_RESULT) };
@@ -69,7 +74,7 @@ describe('GeoLocationService', () => {
       providers: [
         GeoLocationService,
         { provide: GeoGoogleCredentialResolver, useValue: mockGoogleCredential },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
+        { provide: MEMORIAHUB_SETTINGS, useValue: mockSystemSettings },
         { provide: OfflineGeoLocationProvider, useValue: mockOffline },
         { provide: NominatimGeoLocationProvider, useValue: mockNominatim },
         { provide: GoogleGeoLocationProvider, useValue: mockGoogle },
@@ -110,7 +115,7 @@ describe('GeoLocationService', () => {
     it('does not read system settings or call any provider', async () => {
       await service.reverseGeocode(NaN, NaN);
 
-      expect(mockSystemSettings.getSettings).not.toHaveBeenCalled();
+      expect(mockSystemSettings.readSystem).not.toHaveBeenCalled();
       expect(mockOffline.reverseGeocode).not.toHaveBeenCalled();
       expect(mockNominatim.reverseGeocode).not.toHaveBeenCalled();
       expect(mockGoogle.reverseGeocodeWithKey).not.toHaveBeenCalled();

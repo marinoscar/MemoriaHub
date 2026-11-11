@@ -1,21 +1,18 @@
-import { CredentialsService } from '@marinoscar/platform-api/credentials';
-import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
-import { FakeCredentials } from '../../../test/helpers/fake-credentials';
+import { GeoGoogleCredentialResolver } from '../../../src/location/geo/geo-google-credential.resolver.js';
+import { FakeGeoSecrets } from '../../helpers/geo-secrets.js';
+import { settingsPortFrom } from '../../helpers/settings-port.js';
 
 describe('GeoGoogleCredentialResolver', () => {
-  const make = (settings: unknown, creds = new FakeCredentials()) => ({
+  const make = (settings: Record<string, unknown>, creds = new FakeGeoSecrets()) => ({
     creds,
-    resolver: new GeoGoogleCredentialResolver(
-      creds as unknown as CredentialsService,
-      { getSettings: jest.fn(async () => settings) } as never,
-    ),
+    resolver: new GeoGoogleCredentialResolver(creds, settingsPortFrom(settings) as never),
   });
 
   it('returns the stored key from geo_provider/google', async () => {
     const { resolver, creds } = make({ geo: { google: { enabled: true, baseUrl: null } } });
     creds.seed('geo_provider', 'google', 'k-1234567890');
     expect(await resolver.resolveApiKey()).toBe('k-1234567890');
-    expect(creds.getSecret).toHaveBeenCalledWith('geo_provider', 'google');
+    expect(creds.get).toHaveBeenCalledWith('geo_provider', 'google');
   });
 
   it('returns null when no key is stored', async () => {
@@ -26,7 +23,7 @@ describe('GeoGoogleCredentialResolver', () => {
     const { resolver, creds } = make({ geo: { google: { enabled: false, baseUrl: null } } });
     creds.seed('geo_provider', 'google', 'k-1234567890');
     expect(await resolver.resolveApiKey()).toBeNull();
-    expect(creds.getSecret).not.toHaveBeenCalled();
+    expect(creds.get).not.toHaveBeenCalled();
   });
 
   it('treats an absent geo.google as enabled (the default)', async () => {
