@@ -3,4 +3,9 @@ import { mediaThumbnailsQuerySchema } from '@marinoscar/memoriahub-contract/medi
 
 export { mediaThumbnailsQuerySchema };
 
+/**
+ * The `MediaThumbnailsQueryDto` request shape, built from its contract schema.
+ *
+ * @stability experimental
+ */
 export class MediaThumbnailsQueryDto extends createZodDto(mediaThumbnailsQuerySchema) {}

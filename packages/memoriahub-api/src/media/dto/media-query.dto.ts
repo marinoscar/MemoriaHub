@@ -3,4 +3,9 @@ import { mediaFilterFields, mediaQuerySchema } from '@marinoscar/memoriahub-cont
 
 export { mediaFilterFields, mediaQuerySchema };
 
+/**
+ * The `MediaQueryDto` request shape, built from its contract schema.
+ *
+ * @stability experimental
+ */
 export class MediaQueryDto extends createZodDto(mediaQuerySchema) {}

@@ -75,7 +75,12 @@ import type { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
 type MediaItemWhereInput = Record<string, any>;
 type AlbumWhereInput = Record<string, any>;
 type MediaItemOrderByWithRelationInput = Record<string, any>;
-type MediaTagSource = 'manual' | 'ai' | 'system';
+/**
+ * Where a tag came from: a user, the AI tagger or an automated system feature.
+ *
+ * @stability experimental
+ */
+export type MediaTagSource = 'manual' | 'ai' | 'system';
 type JsonValue = any;
 type InputJsonValue = any;
 type OwnerRole = MemoriahubScopeRole;
@@ -118,7 +123,11 @@ function groupCoverKey(countryCode: string | null, name: string): string {
   return `${countryCode ?? ''}|${fold(name)}`;
 }
 
-/** Shape of each element returned by listLocations. */
+/**
+ * Shape of each element returned by listLocations.
+ *
+ * @stability experimental
+ */
 export interface MediaLocation {
   id: string;
   takenLat: number;
@@ -134,6 +143,13 @@ export interface MediaLocation {
  */
 const CLUSTER_CELL_PX = 64;
 
+/**
+ * The gallery service: registration with content-hash dedup, the keyset and offset listings, albums,
+ * tags, the map, explore and places queries, archive and trash, the bulk actions, the export, the
+ * review-queue counts and the batched hard delete.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MediaService {
   private readonly logger = new Logger(MediaService.name);
@@ -2015,10 +2031,12 @@ export class MediaService {
     );
   }
 
+  /** Reverse-geocodes a coordinate pair through the active provider (`GET /api/media/geo/reverse`). */
   async reverseGeocodeOnDemand(lat: number, lng: number) {
     return this.geoProvider.reverseGeocode(lat, lng);
   }
 
+  /** Searches places by typed text through the forward geocoder (`GET /api/media/geo/search`). */
   async searchPlaces(q: string, limit: number) {
     return this.forwardGeocodeService.searchPlaces(q, limit);
   }
@@ -2110,6 +2128,7 @@ export class MediaService {
     };
   }
 
+  /** The circle dashboard: On This Day, recent, favorites and the review-queue counts. */
   async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
@@ -2199,6 +2218,7 @@ export class MediaService {
     };
   }
 
+  /** Bulk-updates the location, favorite flag or capture date of 1 to 500 items (collaborator role). */
   async bulkUpdateMedia(
     dto: BulkUpdateMediaDto,
     userId: string,
@@ -2245,6 +2265,7 @@ export class MediaService {
     return { updated: count };
   }
 
+  /** Bulk-adds or removes tags on 1 to 500 items (collaborator role). */
   async bulkTags(
     dto: BulkTagsDto,
     userId: string,
@@ -2355,6 +2376,7 @@ export class MediaService {
     }
   }
 
+  /** Bulk soft-deletes 1 to 500 items: they move to Trash (collaborator role). */
   async bulkDelete(
     dto: BulkDeleteDto,
     userId: string,
@@ -2387,6 +2409,7 @@ export class MediaService {
   // Archive / Trash methods
   // ---------------------------------------------------------------------------
 
+  /** Bulk-archives 1 to 500 items: `archivedAt` is set (collaborator role). */
   async bulkArchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ archived: number }> {
     await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
 
@@ -2399,6 +2422,7 @@ export class MediaService {
     return { archived: count };
   }
 
+  /** Bulk-unarchives 1 to 500 items: `archivedAt` is cleared (collaborator role). */
   async bulkUnarchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ unarchived: number }> {
     await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
@@ -2421,6 +2445,7 @@ export class MediaService {
   // (dedups pending/running per (type, mediaItemId)), so the loop is safe.
   // ---------------------------------------------------------------------------
 
+  /** Queues an AI tagging rerun per selected item, routed by media type (collaborator role). */
   async bulkRerunTags(
     dto: BulkArchiveDto,
     userId: string,
@@ -2455,6 +2480,7 @@ export class MediaService {
     return { queued };
   }
 
+  /** Queues a face detection rerun per selected item, routed by media type (collaborator role). */
   async bulkRerunFaces(
     dto: BulkArchiveDto,
     userId: string,
@@ -2485,6 +2511,7 @@ export class MediaService {
     return { queued };
   }
 
+  /** Queues the asynchronous thumbnail regeneration job per selected item (collaborator role). */
   async bulkRerunThumbnails(
     dto: BulkArchiveDto,
     userId: string,
@@ -2503,6 +2530,7 @@ export class MediaService {
     return { queued };
   }
 
+  /** Lists the archived, non-deleted items of a circle, newest archive first (viewer role). */
   async listArchived(query: ListArchivedQueryDto, userId: string, userPermissions: string[]) {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
@@ -2539,6 +2567,7 @@ export class MediaService {
     };
   }
 
+  /** Lists the trashed items of a circle, newest deletion first (viewer role). */
   async listTrash(query: ListTrashQueryDto, userId: string, userPermissions: string[]) {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
@@ -2574,6 +2603,7 @@ export class MediaService {
     };
   }
 
+  /** Restores trashed items; an item whose content hash collides with an active item is skipped and reported as a conflict (collaborator role). */
   async restoreFromTrash(
     dto: RestoreFromTrashDto,
     userId: string,
@@ -2642,6 +2672,7 @@ export class MediaService {
     });
   }
 
+  /** Hard-deletes items one at a time (row with its grants, blob, storage object); a failure is logged and skipped. */
   async purgeMediaItems(ids: string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
@@ -2813,6 +2844,7 @@ export class MediaService {
     return { deleted, failedIds };
   }
 
+  /** Permanently deletes the given trashed items of a circle through the batched purge (collaborator role). */
   async deleteForever(
     dto: DeleteForeverDto,
     userId: string,
@@ -2830,6 +2862,7 @@ export class MediaService {
     return { deleted };
   }
 
+  /** Permanently deletes every trashed item of a circle (circle admin role); the web app starts the asynchronous run instead. */
   async emptyTrash(
     dto: EmptyTrashDto,
     userId: string,

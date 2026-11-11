@@ -54,6 +54,11 @@ import { GeoSearchQueryDto } from '../dto/geo-search-query.dto.js';
 import { DashboardQueryDto } from '../dto/dashboard-query.dto.js';
 import { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
 
+/**
+ * The `/api/media` routes of the gallery; mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')

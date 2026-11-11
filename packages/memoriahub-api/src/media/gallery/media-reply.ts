@@ -11,7 +11,10 @@ export interface MediaReply {
   status(statusCode: number): unknown;
 
   /** The underlying Node response. */
-  raw: Writable & { writeHead(statusCode: number, headers: Record<string, string>): unknown };
+  raw: Writable & {
+    /** Writes the status line and headers. */
+    writeHead(statusCode: number, headers: Record<string, string>): unknown;
+  };
 }
 
 /**

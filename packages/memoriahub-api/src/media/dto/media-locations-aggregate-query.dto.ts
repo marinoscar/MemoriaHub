@@ -3,4 +3,9 @@ import { mediaLocationsAggregateQuerySchema } from '@marinoscar/memoriahub-contr
 
 export { mediaLocationsAggregateQuerySchema };
 
+/**
+ * The `MediaLocationsAggregateQueryDto` request shape, built from its contract schema.
+ *
+ * @stability experimental
+ */
 export class MediaLocationsAggregateQueryDto extends createZodDto(mediaLocationsAggregateQuerySchema) {}

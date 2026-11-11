@@ -3,4 +3,9 @@ import { addAlbumItemsByFilterSchema } from '@marinoscar/memoriahub-contract/med
 
 export { addAlbumItemsByFilterSchema };
 
+/**
+ * The `AddAlbumItemsByFilterDto` request shape, built from its contract schema.
+ *
+ * @stability experimental
+ */
 export class AddAlbumItemsByFilterDto extends createZodDto(addAlbumItemsByFilterSchema) {}
