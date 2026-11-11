@@ -5,20 +5,29 @@
  * mocked so no real DB is needed, making this a true unit test.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaService } from './media.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
-import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
+import { MediaService } from './media.service.js';
+import { MediaMetadataSyncService } from '../index.js';
+import { MediaTouchService, UploadNotificationService } from '../index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import {
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_LOCATION_RESOLVER,
+  MEDIA_PERMISSIONS,
+} from '../index.js';
+import { deepMockDb } from '../../../test/helpers/deep-mock-db.js';
+import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../../../test/helpers/gallery-providers.js';
+import { createMockLocationGroupResolver } from '../../../test/helpers/location-group-resolver.mock.js';
+
+const PERMISSIONS = {
+  ...MEDIA_PERMISSIONS,
+  MEDIA_READ_ANY: 'media:read_any',
+  MEDIA_WRITE_ANY: 'media:write_any',
+  MEDIA_DELETE_ANY: 'media:delete_any',
+} as const;
+type MockPrismaService = any;
+const createMockPrismaService = (): MockPrismaService => deepMockDb();
 
 const CIRCLE_ID = 'circle-facets-test';
 const USER_ID = 'user-facets-test';
@@ -55,17 +64,15 @@ describe('MediaService.facetsLocations', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
+        { provide: MEDIA_LOCATION_RESOLVER, useValue: createMockLocationGroupResolver() },
         MediaService,
         thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: { getSignedDownloadUrl: jest.fn() } },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver({ getSignedDownloadUrl: jest.fn() }, { getProviderFor: jest.fn() }) },
         { provide: MediaMetadataSyncService, useValue: {} },
-        { provide: OwnerAccessService, useValue: mockCircleMembership },
-        { provide: GEO_LOCATION_PROVIDER, useValue: {} },
-        { provide: ForwardGeocodeService, useValue: {} },
-        { provide: StorageProviderResolver, useValue: { getProviderFor: jest.fn() } },
+        { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockCircleMembership) },
+        { provide: MEDIA_GEO_LOCATION_PROVIDER, useValue: {} },
+        { provide: MEDIA_FORWARD_GEOCODER, useValue: {} },
         {
           // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
@@ -75,7 +82,7 @@ describe('MediaService.facetsLocations', () => {
           provide: MediaTouchService,
           useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
         },
-        { provide: MediaEnrichmentService, useValue: {} },
+        { provide: MEDIA_ENRICHMENT, useValue: {} },
       ],
     }).compile();
 

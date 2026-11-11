@@ -4,27 +4,31 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { MediaType, Prisma } from '@prisma/client';
-import { MediaService } from './media.service';
-import { PrismaService } from '../prisma/prisma.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { PERMISSIONS } from '../common/constants/roles.constants';
+import { MediaService } from './media.service.js';
+import { MediaMetadataSyncService } from '../index.js';
 import { randomUUID } from 'crypto';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
-import { mediaThumbnailsQuerySchema } from '@marinoscar/memoriahub-api/media';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
-import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '../index.js';
+import { mediaThumbnailsQuerySchema } from '../index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import {
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_LOCATION_RESOLVER,
+  MEDIA_PERMISSIONS,
+} from '../index.js';
+import { deepMockDb } from '../../../test/helpers/deep-mock-db.js';
+import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../../../test/helpers/gallery-providers.js';
+import { createMockLocationGroupResolver } from '../../../test/helpers/location-group-resolver.mock.js';
+
+const PERMISSIONS = {
+  ...MEDIA_PERMISSIONS,
+  MEDIA_READ_ANY: 'media:read_any',
+  MEDIA_WRITE_ANY: 'media:write_any',
+  MEDIA_DELETE_ANY: 'media:delete_any',
+} as const;
+type MockPrismaService = any;
+const createMockPrismaService = (): MockPrismaService => deepMockDb();
 
 // ---------------------------------------------------------------------------
 // AND-composition query helpers
@@ -53,11 +57,9 @@ function orInAnd(where: any, key: string): any {
 // ---------------------------------------------------------------------------
 // Helper: build a Prisma P2002 error the way Prisma actually throws it
 // ---------------------------------------------------------------------------
-function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError(
-    'Unique constraint failed',
-    { code: 'P2002', clientVersion: '0.0.0', meta: { target: ['owner_id', 'content_hash'] } },
-  );
+function makeP2002Error(): Error {
+  // The slice reads a unique violation structurally (`code === 'P2002'`), like Prisma's known request error.
+  return Object.assign(new Error('Unique constraint failed'), { code: 'P2002', meta: { target: ['owner_id', 'content_hash'] } });
 }
 
 // A valid 64-char lowercase hex SHA-256 string for use in tests
@@ -284,26 +286,24 @@ describe('MediaService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
+        { provide: MEDIA_LOCATION_RESOLVER, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService so batched/legacy thumbnail-signing logic
         // stays faithful to production; its own dependencies (PrismaService,
         // STORAGE_PROVIDER, StorageProviderResolver) reuse the same mocks
         // registered below.
         thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, mockResolver) },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
-        { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockOwnerAccessService) },
+        { provide: MEDIA_GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
+        { provide: MEDIA_FORWARD_GEOCODER, useValue: mockForwardGeocodeService },
         {
           provide: UploadNotificationService,
           useValue: mockUploadNotificationService,
         },
-        { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
+        { provide: MEDIA_ENRICHMENT, useValue: mockMediaEnrichmentService },
         { provide: MediaTouchService, useValue: mockMediaTouch },
       ],
     }).compile();
@@ -662,7 +662,7 @@ describe('MediaService', () => {
           'user-1',
           ownPerms,
         ),
-      ).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      ).rejects.toMatchObject({ code: 'P2002' });
     });
 
     it('cleanup failures do NOT prevent the dedup hit from being returned', async () => {
@@ -1863,9 +1863,7 @@ describe('MediaService', () => {
 
       await service.deleteAlbum(album.id, 'user-1', ownPerms);
 
-      expect(mockPrisma.grant.deleteMany).toHaveBeenCalledWith({
-        where: { resourceType: 'album', resourceId: { in: [album.id] } },
-      });
+      expect((mockOwnerAccessService as any).deleteGrantsFor).toHaveBeenCalledWith(mockPrisma, 'album', [album.id]);
     });
 
     it('should NOT call mediaItem.delete (MediaItems are not deleted)', async () => {
@@ -2540,7 +2538,7 @@ describe('MediaService', () => {
 
     it('does NOT include optional filter fragments when no filters are given', async () => {
       await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).not.toContain('AND captured_at >=');
       expect(sqlObj.text).not.toContain('AND captured_at <=');
@@ -2552,7 +2550,7 @@ describe('MediaService', () => {
 
     it('selects min/max lat/lng extent aggregates in the legacy grid SELECT, adding no bound parameters', async () => {
       await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('min(taken_lat)');
       expect(sqlObj.text).toContain('max(taken_lat)');
@@ -2565,7 +2563,7 @@ describe('MediaService', () => {
 
     it('always excludes exact (0,0) Null Island coordinates, even with no optional filters supplied', async () => {
       await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('NOT (taken_lat = 0 AND taken_lng = 0)');
     });
@@ -2573,7 +2571,7 @@ describe('MediaService', () => {
     it('interpolates capturedAtFrom into the query when supplied', async () => {
       const from = new Date('2024-01-01');
       await service.aggregateLocations({ ...baseQuery, capturedAtFrom: from }, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('AND captured_at >=');
       expect(sqlObj.values).toContain(from);
@@ -2582,7 +2580,7 @@ describe('MediaService', () => {
     it('interpolates capturedAtTo into the query when supplied', async () => {
       const to = new Date('2024-12-31');
       await service.aggregateLocations({ ...baseQuery, capturedAtTo: to }, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('AND captured_at <=');
       expect(sqlObj.values).toContain(to);
@@ -2590,7 +2588,7 @@ describe('MediaService', () => {
 
     it('interpolates type into the query when supplied', async () => {
       await service.aggregateLocations({ ...baseQuery, type: 'video' }, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('AND type::text =');
       expect(sqlObj.values).toContain('video');
@@ -2599,7 +2597,7 @@ describe('MediaService', () => {
     it('interpolates all four bbox bounds into the query when supplied', async () => {
       const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
       await service.aggregateLocations({ ...baseQuery, bbox }, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('AND taken_lat BETWEEN');
       expect(sqlObj.values).toEqual(
@@ -2609,7 +2607,7 @@ describe('MediaService', () => {
 
     it('embeds precision as a raw numeric literal, never as a bound parameter', async () => {
       await service.aggregateLocations({ ...baseQuery, precision: 3 }, 'user-1', ownPerms);
-      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+      const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
       expect(sqlObj.text).toContain('round(taken_lat::numeric, 3)');
       expect(sqlObj.values).not.toContain(3);
@@ -2646,7 +2644,7 @@ describe('MediaService', () => {
 
       it('groups by the Web-Mercator pixel grid (cx/cy) and omits the legacy equirectangular grid', async () => {
         await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.text).toContain('AS cx');
         expect(sqlObj.text).toContain('AS cy');
@@ -2659,7 +2657,7 @@ describe('MediaService', () => {
 
       it('embeds zoom and CLUSTER_CELL_PX as raw numeric literals, never as bound parameters', async () => {
         await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         // Only circleId is bound when no optional filter is supplied — zoom (5)
         // and the CLUSTER_CELL_PX constant (64) are raw literals in sqlObj.text,
@@ -2671,7 +2669,7 @@ describe('MediaService', () => {
 
       it('selects min/max lat/lng extent aggregates in the mercator grid SELECT, adding no bound parameters', async () => {
         await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.text).toContain('min(taken_lat)');
         expect(sqlObj.text).toContain('max(taken_lat)');
@@ -2710,7 +2708,7 @@ describe('MediaService', () => {
       it('still binds filter values (bbox) as parameters while using the mercator grid', async () => {
         const bbox = { minLat: 9, minLng: -85, maxLat: 10, maxLng: -84 };
         await service.aggregateLocations({ ...zoomQuery, bbox }, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.text).toContain('AND taken_lat BETWEEN');
         expect(sqlObj.text).toContain('GROUP BY cx, cy');
@@ -2721,7 +2719,7 @@ describe('MediaService', () => {
 
       it('always excludes exact (0,0) Null Island coordinates in the mercator branch too', async () => {
         await service.aggregateLocations(zoomQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.text).toContain('NOT (taken_lat = 0 AND taken_lng = 0)');
       });
@@ -2735,7 +2733,7 @@ describe('MediaService', () => {
     describe('legacy grid (zoom omitted)', () => {
       it('groups by round(taken_lat/lng::numeric, precision) and never emits mercator markers', async () => {
         await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.text).toContain('round(taken_lat::numeric, 3)');
         expect(sqlObj.text).toContain('round(taken_lng::numeric, 3)');
@@ -2748,7 +2746,7 @@ describe('MediaService', () => {
 
       it('does not bind precision as a parameter (raw literal only)', async () => {
         await service.aggregateLocations(baseQuery, 'user-1', ownPerms);
-        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as Prisma.Sql;
+        const sqlObj = (mockPrisma.$queryRaw as jest.Mock).mock.calls[0][0] as any;
 
         expect(sqlObj.values).toEqual([CIRCLE_ID]);
         expect(sqlObj.values).not.toContain(3);
@@ -3720,7 +3718,7 @@ describe('MediaService', () => {
       const ids = [randomUUID(), randomUUID(), randomUUID()];
       const dto = makeBulkRerunDto({ ids });
       mockPrisma.mediaItem.findMany.mockResolvedValue(
-        ids.map((id) => ({ id, type: MediaType.photo })) as any,
+        ids.map((id) => ({ id, type: 'photo' })) as any,
       );
 
       const result = await service.bulkRerunTags(dto, 'user-1', ownPerms);
@@ -3729,7 +3727,7 @@ describe('MediaService', () => {
       for (const id of ids) {
         expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
           id,
-          type: MediaType.photo,
+          type: 'photo',
           circleId: CIRCLE_ID,
         });
       }
@@ -3747,20 +3745,20 @@ describe('MediaService', () => {
       const videoId = randomUUID();
       const dto = makeBulkRerunDto({ ids: [photoId, videoId] });
       mockPrisma.mediaItem.findMany.mockResolvedValue([
-        { id: photoId, type: MediaType.photo },
-        { id: videoId, type: MediaType.video },
+        { id: photoId, type: 'photo' },
+        { id: videoId, type: 'video' },
       ] as any);
 
       const result = await service.bulkRerunTags(dto, 'user-1', ownPerms);
 
       expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
         id: photoId,
-        type: MediaType.photo,
+        type: 'photo',
         circleId: CIRCLE_ID,
       });
       expect(mockMediaEnrichmentService.enqueueTagRerun).toHaveBeenCalledWith({
         id: videoId,
-        type: MediaType.video,
+        type: 'video',
         circleId: CIRCLE_ID,
       });
       expect(result).toEqual({ queued: 2 });

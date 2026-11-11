@@ -14,25 +14,30 @@
  * single-purpose file structure used in media.service.locations.spec.ts.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaService } from './media.service';
-import { PrismaService } from '../prisma/prisma.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { PERMISSIONS } from '../common/constants/roles.constants';
+import { MediaService } from './media.service.js';
+import { MediaMetadataSyncService } from '../index.js';
 import { randomUUID } from 'crypto';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { createMockLocationGroupResolver } from '../../test/mocks/location-group-resolver.mock';
-import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
+import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '../index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import {
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_LOCATION_RESOLVER,
+  MEDIA_PERMISSIONS,
+} from '../index.js';
+import { deepMockDb } from '../../../test/helpers/deep-mock-db.js';
+import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../../../test/helpers/gallery-providers.js';
+import { createMockLocationGroupResolver } from '../../../test/helpers/location-group-resolver.mock.js';
+
+const PERMISSIONS = {
+  ...MEDIA_PERMISSIONS,
+  MEDIA_READ_ANY: 'media:read_any',
+  MEDIA_WRITE_ANY: 'media:write_any',
+  MEDIA_DELETE_ANY: 'media:delete_any',
+} as const;
+type MockPrismaService = any;
+const createMockPrismaService = (): MockPrismaService => deepMockDb();
 
 const CIRCLE_ID = 'circle-uuid-0001-0002-0003';
 
@@ -166,19 +171,17 @@ describe('MediaService.createMedia — fallback location', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
+        { provide: MEDIA_LOCATION_RESOLVER, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, mockResolver) },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
-        { provide: ForwardGeocodeService, useValue: mockForwardGeocodeService },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockOwnerAccessService) },
+        { provide: MEDIA_GEO_LOCATION_PROVIDER, useValue: mockGeoProvider },
+        { provide: MEDIA_FORWARD_GEOCODER, useValue: mockForwardGeocodeService },
         {
           // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
@@ -188,7 +191,7 @@ describe('MediaService.createMedia — fallback location', () => {
           provide: MediaTouchService,
           useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
         },
-        { provide: MediaEnrichmentService, useValue: mockMediaEnrichmentService },
+        { provide: MEDIA_ENRICHMENT, useValue: mockMediaEnrichmentService },
       ],
     }).compile();
 

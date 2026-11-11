@@ -15,21 +15,28 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, CanActivate, RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
-import { MediaController } from './media.controller';
-import { MediaService } from './media.service';
-import { TrashEmptyRunService } from '@marinoscar/memoriahub-api/media';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { JwtAuthGuard, RolesGuard, PermissionsGuard, PERMISSIONS_KEY, type RequestUser } from '@marinoscar/platform-api/identity';
-import type { MediaLocationsQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { BulkUpdateMediaDto } from '@marinoscar/memoriahub-api/media';
-import type { BulkTagsDto } from '@marinoscar/memoriahub-api/media';
-import type { BulkDeleteDto } from '@marinoscar/memoriahub-api/media';
-import type { DashboardQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { ReviewCountsQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { ReverseGeocodeQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { GeoSearchQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { AddAlbumItemsByFilterDto } from '@marinoscar/memoriahub-api/media';
+import { MediaController } from './media.controller.js';
+import { MediaService } from './media.service.js';
+import { TrashEmptyRunService } from '../index.js';
+import { MEDIA_PERMISSIONS } from '../constants/permissions.js';
+import { MemoriahubAuthGuard, MEMORIAHUB_PERMISSIONS_KEY as PERMISSIONS_KEY, type MemoriahubRequestUser as RequestUser } from '../../core/index.js';
+import type { MediaLocationsQueryDto } from '../index.js';
+import type { BulkUpdateMediaDto } from '../index.js';
+import type { BulkTagsDto } from '../index.js';
+import type { BulkDeleteDto } from '../index.js';
+import type { DashboardQueryDto } from '../index.js';
+import type { ReviewCountsQueryDto } from '../index.js';
+import type { ReverseGeocodeQueryDto } from '../index.js';
+import type { GeoSearchQueryDto } from '../index.js';
+import type { AddAlbumItemsByFilterDto } from '../index.js';
 import { randomUUID } from 'crypto';
+
+const PERMISSIONS = {
+  ...MEDIA_PERMISSIONS,
+  MEDIA_READ_ANY: 'media:read_any',
+  MEDIA_WRITE_ANY: 'media:write_any',
+  MEDIA_DELETE_ANY: 'media:delete_any',
+} as const;
 
 // ---------------------------------------------------------------------------
 // Pass-through guard — allows all requests without DI dependencies
@@ -48,10 +55,9 @@ class PassThroughGuard implements CanActivate {
 function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
   return {
     id: 'user-1',
-    email: 'test@example.com',
     permissions: [PERMISSIONS.MEDIA_READ],
     roles: [],
-    isActive: true,
+    activeOrgId: null,
     ...overrides,
   };
 }
@@ -121,11 +127,7 @@ describe('MediaController', () => {
     })
       // Override guards with pass-through implementations to avoid DI
       // requirements for PatService, JwtStrategy, etc.
-      .overrideGuard(JwtAuthGuard)
-      .useClass(PassThroughGuard)
-      .overrideGuard(RolesGuard)
-      .useClass(PassThroughGuard)
-      .overrideGuard(PermissionsGuard)
+      .overrideGuard(MemoriahubAuthGuard)
       .useClass(PassThroughGuard)
       .compile();
 
