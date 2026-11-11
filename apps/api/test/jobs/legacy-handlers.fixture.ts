@@ -5,7 +5,7 @@
  */
 
 import { AutoTaggingHandler, VideoAutoTaggingHandler } from '@marinoscar/memoriahub-api/tagging';
-import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
+import { BurstDetectionHandler } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateConfidenceBackfillHandler, DuplicateDetectionHandler, DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { FaceAutoArchiveSweepHandler, FaceDetectionHandler, VideoFaceDetectionHandler } from '@marinoscar/memoriahub-api/face';
 import { GeocodeHandler } from '../../src/geo/geocode.handler';

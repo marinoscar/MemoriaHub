@@ -55,7 +55,7 @@ import { updatePersonSchema, UpdatePersonDto } from '@marinoscar/memoriahub-api/
 import { ReprocessFailedBodyDto } from '../../media/media-reprocess.controller';
 import { composePatchUserSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../../settings/registry';
-import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
+import { AcceptLocationSuggestionDto } from '@marinoscar/memoriahub-api/location';
 
 describe('issue #289 — top-level .default({}) contract on all-optional Zod body schemas', () => {
 
@@ -217,7 +217,7 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
   // AcceptLocationSuggestionDto — a second plain `.default({})` case (numeric
   // optional fields) rounding out the spread.
   // ===========================================================================
-  describe('AcceptLocationSuggestionDto (apps/api/src/location-inference/dto/accept-location-suggestion.dto.ts)', () => {
+  describe('AcceptLocationSuggestionDto (packages/memoriahub-api/src/location/http/location-suggestion.dto.ts)', () => {
     const schema = AcceptLocationSuggestionDto.schema;
 
     it('parse(undefined) -> {} — accept-unmodified is the documented bodyless use case', () => {

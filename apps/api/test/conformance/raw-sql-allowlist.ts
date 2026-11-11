@@ -8,7 +8,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'common/tenancy/default-org-id.ts', why: 'Reads the default organization id once (RETRO-A5 shim, removed by RETRO-D1).' },
   { file: 'duplicate-backfill.service.ts', why: 'pgvector candidate queries scoped by circle id; not user data.' },
   { file: 'duplicate-detection.service.ts', why: 'pgvector KNN queries scoped by circle id; not user data.' },
-  { file: 'dedup/duplicate.service.ts', why: 'pgvector similarity queries scoped by circle id; not user data.' },
+  { file: 'duplicate.service.ts', why: 'pgvector similarity queries scoped by circle id; not user data. In the dedup slice package (packages/memoriahub-api/src/dedup).' },
   { file: 'visual-embedding.service.ts', why: 'pgvector column reads and writes (Prisma cannot type vector columns), keyed by media item id.' },
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
   { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },

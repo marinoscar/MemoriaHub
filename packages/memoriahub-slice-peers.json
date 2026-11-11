@@ -266,13 +266,18 @@
       "peers": [
         "@nestjs/common",
         "@nestjs/schedule",
-        "@marinoscar/memoriahub-contract"
+        "@nestjs/swagger",
+        "@marinoscar/memoriahub-contract",
+        "nestjs-zod"
       ]
     },
     "dedup": {
       "peers": [
         "@nestjs/common",
+        "@nestjs/swagger",
         "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
         "onnxruntime-node"
       ]
     },
@@ -327,6 +332,15 @@
         "@marinoscar/memoriahub-contract",
         "nestjs-zod",
         "zod"
+      ]
+    },
+    "burst": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "nestjs-zod"
       ]
     }
   },
