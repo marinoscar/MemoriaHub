@@ -182,6 +182,8 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
       return source.includes('<AdminPageHeader') || source.includes('<AdminBackLink');
     });
 
+    // 14 since RETRO-J11 (#626): the Tagging settings page is the tagging slice's packaged
+    // TaggingSettingsPage, which renders the host's AdminPageHeader (the adopters moved with it).
     // 19 since RETRO-D3 (#576): the Web Push, Notifications policy and
     // Broadcasts pages are the platform notifications slice's packaged pages.
     // 18 since RETRO-D1 (#563): the Storage Providers page is the storage
@@ -190,6 +192,6 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // slice's packaged AndroidAppPage.
     // 16 since RETRO-E4 (#607): the AI page is the AI slice's packaged AiConfigPage.
     // 15 since RETRO-C2 (#581): the Worker Nodes page is the nodes slice's packaged WorkersPage.
-    expect(adopters.length).toBeGreaterThanOrEqual(15);
+    expect(adopters.length).toBeGreaterThanOrEqual(14);
   });
 });

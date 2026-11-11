@@ -88,6 +88,8 @@ export interface FakeMemoriahubWebHostOptions {
   slots?: MemoriahubWebHost['slots'];
   /** The deployment settings the fake admin port serves; `null` keeps the settings hook loading. Default: an empty document. */
   systemSettings?: Partial<MemoriahubSystemSettings> | null;
+  /** With `systemSettings: null`, the load failure the fake settings hook reports. */
+  systemSettingsError?: string;
 }
 
 /**
@@ -129,7 +131,7 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
   const calls: FakeCall[] = [];
   const navigations: string[] = [];
   const notifications: Array<{ message: string; severity?: string }> = [];
-  const admin = createFakeAdminPort(options.systemSettings);
+  const admin = createFakeAdminPort(options.systemSettings, options.systemSettingsError ?? null);
 
   async function send<T>(method: FakeCall['method'], endpoint: string, body: unknown, opts?: MemoriahubRequestOptions): Promise<T> {
     const [path, qs = ''] = endpoint.split('?');

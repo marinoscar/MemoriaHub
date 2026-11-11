@@ -173,3 +173,38 @@ export async function importTagLabels(file: File): Promise<ImportResult> {
   // Unwrap { data: { ... } } envelope if present (matches api client behaviour)
   return (data.data ?? data) as ImportResult;
 }
+
+// ---------------------------------------------------------------------------
+// Global backfill (admin)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the global tagging backfill enqueued.
+ *
+ * @stability experimental
+ */
+export interface TaggingBackfillResult {
+  /** Jobs enqueued. */
+  enqueued: number;
+  /** Circles walked. */
+  circles: number;
+}
+
+/**
+ * Enqueues AI tagging for every circle (`POST /admin/tagging/backfill`).
+ *
+ * @param body - the capture-date window, `force` and the media types; videos are opt-in
+ * (omitting `mediaTypes` backfills photos only, so a habitual backfill does not dispatch
+ * an AI call for every video in the library).
+ * @returns how many jobs and circles.
+ *
+ * @stability experimental
+ */
+export async function runTaggingBackfill(body?: {
+  from?: string;
+  to?: string;
+  force?: boolean;
+  mediaTypes?: ('photo' | 'video')[];
+}): Promise<TaggingBackfillResult> {
+  return api.post<TaggingBackfillResult>('/admin/tagging/backfill', body ?? {});
+}

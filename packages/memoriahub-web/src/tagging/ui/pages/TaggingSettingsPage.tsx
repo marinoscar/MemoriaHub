@@ -19,14 +19,13 @@ import {
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalTaggingBackfill } from '../../services/adminBackfill';
-import type { GlobalBackfillResult } from '../../services/adminBackfill';
-import { TagsContent } from './TagsPage';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { runTaggingBackfill } from '../../headless/index.js';
+import type { TaggingBackfillResult } from '../../headless/index.js';
+import { TagsContent } from './TagsPage.js';
 
 function TaggingSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // Backfill state
@@ -37,7 +36,7 @@ function TaggingSettingsContent() {
   // AI call for every video in the library.
   const [backfillIncludeVideos, setBackfillIncludeVideos] = useState(false);
   const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<GlobalBackfillResult | null>(null);
+  const [backfillResult, setBackfillResult] = useState<TaggingBackfillResult | null>(null);
   const [backfillError, setBackfillError] = useState<string | null>(null);
 
   // Feedback
@@ -76,7 +75,7 @@ function TaggingSettingsContent() {
     setBackfillLoading(true);
     setBackfillResult(null);
     setBackfillError(null);
-    runGlobalTaggingBackfill({
+    runTaggingBackfill({
       from: backfillFrom || undefined,
       to: backfillTo || undefined,
       force: backfillForce,
@@ -369,6 +368,14 @@ function TaggingSettingsContent() {
   );
 }
 
+/**
+ * The Tagging settings page (`/admin/settings/tagging`): the global auto-tagging toggle, the video
+ * section, the global backfill and the vocabulary, behind an admin check.
+ *
+ * @returns the page.
+ *
+ * @stability experimental
+ */
 export default function TaggingSettingsPage() {
   const { isAdmin } = usePermissions();
 

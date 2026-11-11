@@ -20,4 +20,4 @@ The app builds the host once with `useMemo` (its state fields change over a sess
 
 ## Extension-point catalog
 
-`MemoriahubWebHost`, `MemoriahubApiClient`, `MemoriahubWebSlots` and `MemoriahubAdminPort` are the extension points: the host chooses the transport and supplies the bridged components and the admin building blocks.
+`MemoriahubWebHost`, `MemoriahubApiClient`, `MemoriahubWebSlots`, `MemoriahubAdminPort`, `MemoriahubDataTableComponent` and `MemoriahubAdminPageHeaderComponent` are the extension points: the host chooses the transport and supplies the bridged components and the admin building blocks (the data table, the page header and the settings hook).

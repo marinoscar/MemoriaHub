@@ -140,7 +140,10 @@ const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettings
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
-const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
+// RETRO-J11 (#626): the packaged Tagging settings page (vocabulary included); the host supplies its table, header and settings hook.
+const TaggingSettingsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TaggingSettingsPage })),
+);
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));

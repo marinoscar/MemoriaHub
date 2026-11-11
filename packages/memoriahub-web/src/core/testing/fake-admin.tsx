@@ -143,11 +143,12 @@ export interface FakeAdminPort {
  * Creates the fake admin port.
  *
  * @param initial - the settings document; `null` leaves the hook in its loading state.
+ * @param loadError - with `initial` `null`, the message the hook reports as its load failure.
  * @returns the port and its recordings.
  *
  * @stability experimental
  */
-export function createFakeAdminPort(initial: Partial<MemoriahubSystemSettings> | null = {}): FakeAdminPort {
+export function createFakeAdminPort(initial: Partial<MemoriahubSystemSettings> | null = {}, loadError: string | null = null): FakeAdminPort {
   const settingsUpdates: Array<Partial<MemoriahubSystemSettings>> = [];
   let failure: string | null = null;
 
@@ -170,7 +171,7 @@ export function createFakeAdminPort(initial: Partial<MemoriahubSystemSettings> |
       setIsSaving(false);
     }, []);
     const refresh = useCallback(async () => undefined, []);
-    return { settings, isLoading: settings === null, error: null, isSaving, updateSettings, refresh };
+    return { settings, isLoading: settings === null && loadError === null, error: settings === null ? loadError : null, isSaving, updateSettings, refresh };
   }
 
   return {
