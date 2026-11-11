@@ -25,7 +25,14 @@ import { DUPLICATE_OBSERVER, type DuplicateObserver } from './duplicate-observer
 const DuplicateGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
 const MediaType = { photo: 'photo' } as const;
 
-type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
+/**
+ * How a duplicate group relates to itself, classified at read time (never persisted): `exact_variant`
+ * (near-byte-identical copies), `edited` (a crop, filter or recompress sits between matching photos) or
+ * `similar` (anything else that met the matching threshold).
+ *
+ * @stability experimental
+ */
+export type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
 interface GroupMemberRow {
   id: string;

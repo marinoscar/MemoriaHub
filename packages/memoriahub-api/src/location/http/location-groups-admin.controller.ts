@@ -23,6 +23,7 @@ import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './
 export class LocationGroupsAdminController {
   constructor(private readonly service: LocationGroupsService) {}
 
+  /** Queues a full `location_group_rebuild` job (Admin). */
   @Post('rebuild')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({

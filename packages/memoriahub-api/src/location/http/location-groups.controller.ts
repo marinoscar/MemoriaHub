@@ -51,6 +51,7 @@ import {
 export class LocationGroupsController {
   constructor(private readonly service: LocationGroupsService) {}
 
+  /** Lists the location groups (Admin). */
   @Get()
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
@@ -63,6 +64,7 @@ export class LocationGroupsController {
     return this.service.list(query);
   }
 
+  /** Lists the raw place values present app-wide at one tier (Admin). */
   @Get('values')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
@@ -75,6 +77,7 @@ export class LocationGroupsController {
     return this.service.listValues(query);
   }
 
+  /** Lists the clusters of ungrouped raw values that look like one place (Admin). */
   @Get('suggestions')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
@@ -87,6 +90,7 @@ export class LocationGroupsController {
     return this.service.suggestions(query);
   }
 
+  /** Folds a selection of raw values into one group in a single call (Admin). */
   @Post('merge')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
@@ -105,6 +109,7 @@ export class LocationGroupsController {
     return this.service.merge(dto, userId ?? null);
   }
 
+  /** One group with its aliases (Admin). */
   @Get(':id')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({ summary: 'Get a location group with its full alias list (Admin)' })
@@ -115,6 +120,7 @@ export class LocationGroupsController {
     return this.service.get(id);
   }
 
+  /** Creates a group (Admin). */
   @Post()
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
@@ -132,6 +138,7 @@ export class LocationGroupsController {
     return this.service.create(dto, userId ?? null);
   }
 
+  /** Updates a group (Admin). */
   @Patch(':id')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Update a location group (Admin)' })
@@ -145,6 +152,7 @@ export class LocationGroupsController {
     return this.service.update(id, dto);
   }
 
+  /** Deletes a group; its members revert to their raw names (Admin). */
   @Delete(':id')
   @HttpCode(204)
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
@@ -159,6 +167,7 @@ export class LocationGroupsController {
     await this.service.remove(id);
   }
 
+  /** Adds raw values to a group (Admin). */
   @Post(':id/members')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Add raw values to a location group (Admin)' })
@@ -172,6 +181,7 @@ export class LocationGroupsController {
     return this.service.addMembers(id, dto.values);
   }
 
+  /** Removes raw values from a group (Admin). */
   @Delete(':id/members')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Remove raw values from a location group (Admin)' })

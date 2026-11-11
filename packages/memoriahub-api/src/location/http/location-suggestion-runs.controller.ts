@@ -46,6 +46,7 @@ import { ListLocationSuggestionRunItemsQueryDto } from './location-suggestion.dt
 export class LocationSuggestionRunsController {
   constructor(private readonly runService: ReviewRunService) {}
 
+  /** Gets a run (deprecated alias of the review-run API). */
   @Get(':id')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -59,6 +60,7 @@ export class LocationSuggestionRunsController {
     return this.runService.getRunDetail(id, user.id, user.permissions);
   }
 
+  /** Lists a run's items (deprecated alias of the review-run API). */
   @Get(':id/items')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
@@ -78,6 +80,7 @@ export class LocationSuggestionRunsController {
     return this.runService.listRunItems(id, query, user.id, user.permissions);
   }
 
+  /** Cancels a run (deprecated alias of the review-run API). */
   @Post(':id/cancel')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)

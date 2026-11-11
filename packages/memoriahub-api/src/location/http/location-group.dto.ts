@@ -19,6 +19,11 @@ import {
 export { GROUPED_FILTERS, LOCATION_GROUP_LEVELS, ListLocationGroupsSchema, CreateLocationGroupSchema, UpdateLocationGroupSchema, LocationGroupMembersSchema, ListLocationValuesSchema, MergeLocationGroupsSchema, ListLocationGroupSuggestionsSchema, RebuildLocationGroupsSchema };
 export type { LocationGroupLevelValue };
 
+/**
+ * Query of `GET /api/location-groups`.
+ *
+ * @stability experimental
+ */
 export class ListLocationGroupsDto extends createZodDto(ListLocationGroupsSchema) {
   @ApiPropertyOptional({ enum: LOCATION_GROUP_LEVELS })
   declare level?: LocationGroupLevelValue;
@@ -36,6 +41,11 @@ export class ListLocationGroupsDto extends createZodDto(ListLocationGroupsSchema
   declare pageSize: number;
 }
 
+/**
+ * Body of `POST /api/location-groups`.
+ *
+ * @stability experimental
+ */
 export class CreateLocationGroupDto extends createZodDto(CreateLocationGroupSchema) {
   @ApiProperty({ enum: LOCATION_GROUP_LEVELS })
   declare level: LocationGroupLevelValue;
@@ -65,6 +75,11 @@ export class CreateLocationGroupDto extends createZodDto(CreateLocationGroupSche
   declare notes?: string | null;
 }
 
+/**
+ * Body of `PATCH /api/location-groups/:id`.
+ *
+ * @stability experimental
+ */
 export class UpdateLocationGroupDto extends createZodDto(UpdateLocationGroupSchema) {
   @ApiPropertyOptional()
   declare canonicalName?: string;
@@ -85,11 +100,21 @@ export class UpdateLocationGroupDto extends createZodDto(UpdateLocationGroupSche
   declare notes?: string | null;
 }
 
+/**
+ * Body of the add and remove member endpoints.
+ *
+ * @stability experimental
+ */
 export class LocationGroupMembersDto extends createZodDto(LocationGroupMembersSchema) {
   @ApiProperty({ type: [String] })
   declare values: string[];
 }
 
+/**
+ * Query of `GET /api/location-groups/values`.
+ *
+ * @stability experimental
+ */
 export class ListLocationValuesDto extends createZodDto(ListLocationValuesSchema) {
   @ApiProperty({ enum: LOCATION_GROUP_LEVELS })
   declare level: LocationGroupLevelValue;
@@ -119,6 +144,11 @@ export class ListLocationValuesDto extends createZodDto(ListLocationValuesSchema
   declare pageSize?: number;
 }
 
+/**
+ * Body of `POST /api/location-groups/merge`.
+ *
+ * @stability experimental
+ */
 export class MergeLocationGroupsDto extends createZodDto(MergeLocationGroupsSchema) {
   @ApiProperty({ enum: LOCATION_GROUP_LEVELS })
   declare level: LocationGroupLevelValue;
@@ -143,6 +173,11 @@ export class MergeLocationGroupsDto extends createZodDto(MergeLocationGroupsSche
   declare canonicalName?: string;
 }
 
+/**
+ * Query of `GET /api/location-groups/suggestions`.
+ *
+ * @stability experimental
+ */
 export class ListLocationGroupSuggestionsDto extends createZodDto(
   ListLocationGroupSuggestionsSchema,
 ) {
@@ -153,6 +188,11 @@ export class ListLocationGroupSuggestionsDto extends createZodDto(
   declare limit: number;
 }
 
+/**
+ * Body of `POST /api/admin/location-groups/rebuild`.
+ *
+ * @stability experimental
+ */
 export class RebuildLocationGroupsDto extends createZodDto(RebuildLocationGroupsSchema) {
   @ApiPropertyOptional({ description: 'Restrict the rebuild to one circle' })
   declare circleId?: string;

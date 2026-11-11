@@ -8,7 +8,12 @@ import { MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../../ports/in
 import { LocationInferenceBackfillService } from '../inference/location-inference-backfill.service.js';
 import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './location-permissions.js';
 
-class AdminLocationInferenceBackfillDto extends createZodDto(adminLocationInferenceBackfillSchema) {}
+/**
+ * Body of `POST /api/admin/location-inference/backfill`.
+ *
+ * @stability experimental
+ */
+export class AdminLocationInferenceBackfillDto extends createZodDto(adminLocationInferenceBackfillSchema) {}
 
 /**
  * The `AdminLocationInferenceController` routes (`POST /api/admin/location-inference/backfill`); mounted by

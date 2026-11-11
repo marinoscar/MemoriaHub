@@ -34,9 +34,19 @@ import { DEDUP_PERMISSIONS as PERMISSIONS, DEDUP_ROLES as ROLES } from './dedup-
 // This one uses .prefault({}) rather than .default({}) so the empty body is fed
 // THROUGH the schema and still yields force: false; see the fuller note in
 // admin-metadata.controller.ts.
-class AdminDuplicateBackfillDto extends createZodDto(adminDuplicateBackfillSchema) {}
+/**
+ * Body of `POST /api/admin/duplicates/backfill`.
+ *
+ * @stability experimental
+ */
+export class AdminDuplicateBackfillDto extends createZodDto(adminDuplicateBackfillSchema) {}
 
-class AdminDuplicateConfidenceBackfillDto extends createZodDto(
+/**
+ * Body of `POST /api/admin/duplicates/confidence/backfill`.
+ *
+ * @stability experimental
+ */
+export class AdminDuplicateConfidenceBackfillDto extends createZodDto(
   adminDuplicateConfidenceBackfillSchema,
 ) {}
 
