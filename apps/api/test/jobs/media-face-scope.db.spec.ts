@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { JobScope } from '@marinoscar/platform-api/jobs';
 import type { Prisma } from '@prisma/client';
 
-import { ThumbnailNodePersistService } from '../../src/media/thumbnail-node-persist.service';
+import { ThumbnailNodePersistService } from '@marinoscar/memoriahub-api/media';
 import { jobWriteScope } from '../../src/platform/jobs/media-item-job';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
@@ -77,7 +77,7 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     const provider = { exists: async () => true, size: async () => 2048, getBucket: () => 'bucket' };
     return new ThumbnailNodePersistService(
       prismaWithItem as never,
-      { getActiveProvider: async () => ({ id: 's3', provider }) } as never,
+      { active: async () => ({ id: 's3', store: provider }) } as never,
       { syncFromStorageObject: async () => undefined } as never,
       { pruneSupersededThumbnails: async () => undefined } as never,
     );
@@ -99,7 +99,7 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     await service(objectId).persistThumbnail(
       { id: job.id, mediaItemId: 'media-1', circleId: 'circle-1' },
       { storageKey, width: 400, height: 300, bytes: 2048 },
-      observed,
+      observed as never,
     );
 
     expect(seenOrg).toBe(orgId);
@@ -128,7 +128,7 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     await service(objectId).persistThumbnail(
       { id: job.id, mediaItemId: 'media-1', circleId: 'circle-1' },
       { storageKey, width: 400, height: 300, bytes: 2048 },
-      observed,
+      observed as never,
     );
     expect(seenOrg).toBe(orgId);
 

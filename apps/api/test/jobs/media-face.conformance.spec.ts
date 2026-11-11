@@ -39,9 +39,9 @@ import {
   VideoFaceDetectionHandler,
   VideoFaceDetectionService,
 } from '@marinoscar/memoriahub-api/face';
-import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
-import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
-import { MetadataExtractionHandler } from '../../src/metadata/metadata.handler';
+import { ThumbnailRegenHandler } from '@marinoscar/memoriahub-api/media';
+import { ThumbnailRepairHandler } from '@marinoscar/memoriahub-api/media';
+import { MetadataExtractionHandler } from '@marinoscar/memoriahub-api/media';
 import { mediaItemJob } from '../helpers/platform-job';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c301';
@@ -374,11 +374,10 @@ describe('face_auto_archive_sweep', () => {
 
 const buildMetadataExtraction = () =>
   new MetadataExtractionHandler(
-    registry,
-    jobScope as never,
+    { ...jobsPort, runInJobScope: jobScope.run } as never,
     subjectLookups() as never,
     { ...recordingService('processMediaItem'), ...recordingService('persistMetadata') } as never,
-  );
+  ) as unknown as JobHandler;
 
 describe('metadata_extraction', () => {
   staticContract('metadata_extraction', buildMetadataExtraction);
@@ -428,8 +427,7 @@ function buildThumbnailRegen(): ThumbnailRegenHandler {
     },
   };
   return new ThumbnailRegenHandler(
-    registry,
-    jobScope as never,
+    { ...jobsPort, runInJobScope: jobScope.run } as never,
     prisma as never,
     recovery as never,
     { persistThumbnail: async () => undefined } as never,
@@ -475,8 +473,8 @@ describe('thumbnail_regen', () => {
 
 function buildThumbnailRepair(): ThumbnailRepairHandler {
   const prisma = { $queryRaw: async () => [] };
-  const system = { asSystem: () => prisma, runAsSystem: (_r: string, fn: (tx: unknown) => unknown) => fn(prisma) };
-  return new ThumbnailRepairHandler(registry, prisma as never, system as never, {} as never, {} as never);
+  const system = { asSystem: () => prisma, runAsSystem: (fn: (tx: unknown) => unknown) => fn(prisma) };
+  return new ThumbnailRepairHandler(jobsPort as never, prisma as never, system as never, {} as never, {} as never);
 }
 
 describe('thumbnail_repair', () => {

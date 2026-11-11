@@ -14,9 +14,9 @@ import {
   randomThumbnailVersion,
   thumbnailKeyPrefixFor,
   thumbnailVersionFromBytes,
-} from './thumbnail-key.util';
+} from './thumbnail-key.js';
 
-describe('thumbnail-key.util', () => {
+describe('thumbnail-key', () => {
   describe('buildThumbnailKey', () => {
     it('produces thumbnails/<objectId>-<version>.jpg', () => {
       expect(buildThumbnailKey('obj-1', 'abc123')).toBe('thumbnails/obj-1-abc123.jpg');

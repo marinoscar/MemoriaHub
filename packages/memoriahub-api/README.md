@@ -110,6 +110,11 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `BURST_OBSERVER`, `BurstObserver` | token, interface | the burst slice's optional side channel: the `media.item.trashed` webhook after a trash resolve commits |
 | `ReviewRunSubjectRegistry`, `ReviewRunSubjectStrategy` | registry, interface | the review-runs slice's per-queue behaviour: the owner of a review queue registers what is eligible, how to apply the action and how to show a subject |
 | `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
+| `MEDIA_LOCATION_RESOLVER`, `MediaLocationResolver` | token | the canonical place-name resolver of the location slice (`location` depends on `media`, so `media` cannot import it), used by `MediaMetadataSyncService` |
+| `MEDIA_REVERSE_GEOCODER`, `MediaReverseGeocoder` | token | reverse geocoding with the deployment's configured provider and credential, called from the server-only persist half of the `metadata_extraction` job |
+| `MEDIA_OBJECT_REPROCESSOR`, `MediaObjectReprocessor` | token | re-runs the post-upload processors for one stored object, now (the thumbnail jobs call it from inside a job) |
+| `MEDIA_THUMBNAIL_PRUNER`, `MediaThumbnailPruner` | token | deletes the thumbnails a source object no longer points at (best-effort; after the media item sync, issue #434) |
+| `MEDIA_SYSTEM_ACCESS`, `MediaSystemAccess` | token | the cross-organization database client for the global `thumbnail_repair` scan, bound under the host's media housekeeping reason |
 | `FACE_CONFIG`, `FACE_PERSON_AVATARS`, `FACE_STORAGE_ORG` | token | the face slice's three host hooks: the configuration reader, the account-avatar code and the organization of a derived storage row |
 | `MEMORIES_OPTIONS`, `MEMORIES_ALBUMS`, `MEMORIES_EMAIL_READINESS`, `MEMORIES_GENERATION_HOOK` | token | the memories slice's host hooks: the resolved options (digest signing key), save-as-album over the host's album code, e-mail readiness, and the after-generation hook |
 

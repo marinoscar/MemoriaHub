@@ -14,48 +14,34 @@
  */
 
 import { Readable } from 'stream';
-import sharp from 'sharp';
-import { Test, TestingModule } from '@nestjs/testing';
-import { MetadataExtractionService } from './metadata.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
-import { GeoLocationService } from '../media/geo/geo-location.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { EnrichmentJob, JobReason, MhLegacyJobStatus, MediaMetadataStatusType } from '@prisma/client';
+import { MetadataExtractionService } from './metadata-extraction.service.js';
+
+/** The slice of the database client the service reads and writes. */
+function createMockPrismaService() {
+  return {
+    mediaItem: { findUnique: jest.fn() },
+    storageObject: { findUnique: jest.fn(), update: jest.fn() },
+    mediaMetadataStatus: { upsert: jest.fn() },
+  };
+}
+type MockPrismaService = ReturnType<typeof createMockPrismaService>;
+
+/** The status values the service writes. */
+const MediaMetadataStatusType = { processing: 'processing', processed: 'processed', failed: 'failed' } as const;
+
+/** What the service reads of a job. */
+interface MediaJob {
+  id: string;
+  mediaItemId: string | null;
+  circleId: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'metadata_extraction',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.rerun,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+function makeJob(overrides: Partial<MediaJob> = {}): MediaJob {
+  return { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1', ...overrides };
 }
 
 function makeMediaItem(overrides: Partial<{
@@ -88,13 +74,12 @@ function makeStorageObject(overrides: Partial<{
   };
 }
 
-/** A tiny real JPEG (no EXIF) — used to exercise the real compute path. */
+/** A tiny real 20x10 JPEG (no EXIF), as base64: it exercises the real compute path without a native image library in the spec. */
+const TEST_JPEG_BASE64 =
+  '/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAKABQDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAYI/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AnQCOaRAAf//Z';
+
 async function makeTestJpeg(): Promise<Buffer> {
-  return sharp({
-    create: { width: 20, height: 10, channels: 3, background: { r: 255, g: 0, b: 0 } },
-  })
-    .jpeg()
-    .toBuffer();
+  return Buffer.from(TEST_JPEG_BASE64, 'base64');
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +90,7 @@ describe('MetadataExtractionService', () => {
   let service: MetadataExtractionService;
   let mockPrisma: MockPrismaService;
   let mockStorageProvider: { download: jest.Mock };
+  let mockObjectStore: { forLocation: jest.Mock };
   let mockMediaMetadataSyncService: { syncFromStorageObject: jest.Mock };
   let mockGeoLocationService: { reverseGeocode: jest.Mock };
   let testJpeg: Buffer;
@@ -134,17 +120,14 @@ describe('MetadataExtractionService', () => {
     (mockPrisma.mediaMetadataStatus.upsert as jest.Mock).mockResolvedValue({});
     (mockPrisma.storageObject.update as jest.Mock).mockResolvedValue({});
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MetadataExtractionService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: MediaMetadataSyncService, useValue: mockMediaMetadataSyncService },
-        { provide: GeoLocationService, useValue: mockGeoLocationService },
-      ],
-    }).compile();
+    mockObjectStore = { forLocation: jest.fn().mockResolvedValue(mockStorageProvider) };
 
-    service = module.get<MetadataExtractionService>(MetadataExtractionService);
+    service = new MetadataExtractionService(
+      mockPrisma as never,
+      mockObjectStore as never,
+      mockMediaMetadataSyncService as never,
+      mockGeoLocationService as never,
+    );
   });
 
   // =========================================================================

@@ -5,7 +5,7 @@ import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
 import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';

@@ -8,13 +8,23 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { MetadataBackfillService } from './metadata-backfill.service';
+import { MemoriahubAuth } from '../../core/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS, MEDIA_ROLES as ROLES } from '../constants/permissions.js';
+import { MetadataBackfillService } from './metadata-backfill.service.js';
 import { adminMetadataBackfillSchema } from '@marinoscar/memoriahub-contract/media';
 
-class AdminMetadataBackfillDto extends createZodDto(adminMetadataBackfillSchema) {}
+/**
+ * The body of `POST /api/admin/metadata/backfill`.
+ *
+ * @stability experimental
+ */
+export class AdminMetadataBackfillDto extends createZodDto(adminMetadataBackfillSchema) {}
 
+/**
+ * `POST /api/admin/metadata/backfill`; mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Metadata')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/metadata')
@@ -25,8 +35,14 @@ export class AdminMetadataController {
     private readonly metadataBackfillService: MetadataBackfillService,
   ) {}
 
+  /**
+   * Queues metadata extraction for every eligible item of every circle.
+   *
+   * @param dto - the optional date range and `force`.
+   * @returns how many jobs were queued across how many circles.
+   */
   @Post('backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Backfill metadata extraction across ALL circles (Admin)' })
   @ApiResponse({ status: 201, description: 'Backfill jobs enqueued' })

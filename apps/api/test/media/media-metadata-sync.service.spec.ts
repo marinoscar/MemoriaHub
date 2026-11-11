@@ -17,13 +17,13 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
-import { PrismaService } from '../../src/prisma/prisma.service';
+import { MediaMetadataSyncService, MEDIA_LOCATION_RESOLVER } from '@marinoscar/memoriahub-api/media';
+import { MEMORIAHUB_PRISMA } from '@marinoscar/memoriahub-api/ports';
+import { MediaMetadataSyncListener } from '../../src/media/sync/media-metadata-sync.listener';
 import {
   ObjectProcessedEvent,
   OBJECT_PROCESSED_EVENT,
 } from '../../src/media-processing/events/object-processed.event';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ const mockMediaItem = { id: MEDIA_ITEM_ID };
 // ---------------------------------------------------------------------------
 
 describe('MediaMetadataSyncService', () => {
-  let service: MediaMetadataSyncService;
+  let service: MediaMetadataSyncListener;
   let prisma: any; // typed as any to allow jest mock calls
 
   function makePrismaMock() {
@@ -155,17 +155,18 @@ describe('MediaMetadataSyncService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
+        { provide: MEDIA_LOCATION_RESOLVER, useValue: createMockLocationGroupResolver() },
         MediaMetadataSyncService,
+        MediaMetadataSyncListener,
         {
-          provide: PrismaService,
+          provide: MEMORIAHUB_PRISMA,
           useValue: prisma,
         },
         EventEmitter2,
       ],
     }).compile();
 
-    service = module.get<MediaMetadataSyncService>(MediaMetadataSyncService);
+    service = module.get(MediaMetadataSyncListener);
   });
 
   afterEach(() => {

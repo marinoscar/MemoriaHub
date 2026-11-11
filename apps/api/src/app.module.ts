@@ -263,7 +263,7 @@ import { AppSystemSettingsService } from './platform/settings/app-system-setting
     // would therefore NOT be applied to a bodyless request, and `{}` would not
     // even satisfy the schema's own output type. Those schemas use `.prefault({})`
     // instead, which feeds `{}` through the parse so a bodyless request is exactly
-    // equivalent to `{}`; see metadata/admin-metadata.controller.ts.
+    // equivalent to `{}`; see packages/memoriahub-api/src/media/metadata/admin-metadata.controller.ts.
     //
     // Caveat 2: `.default({})` BYPASSES a top-level `.refine()` for the default
     // value — Zod short-circuits and hands back that `{}` without running the

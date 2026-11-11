@@ -6,9 +6,18 @@ import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import {
   MEDIA_ITEM_PURGER,
+  MEDIA_LOCATION_RESOLVER,
+  MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_SYSTEM_ACCESS,
+  MEDIA_THUMBNAIL_PRUNER,
+  MediaMetadataSyncService,
   MediaModule as MediaCoreModule,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
+  ThumbnailNodePersistService,
+  ThumbnailRegenHandler,
+  ThumbnailRepairHandler,
+  ThumbnailRepairTask,
   TrashEmptyRunsController,
   TrashPurgeHandler,
   TrashPurgeTask,
@@ -16,7 +25,8 @@ import {
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
@@ -24,12 +34,11 @@ import { MediaOrientationEditController } from './media-orientation-edit.control
 import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
-import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
-import { ThumbnailRepairTask } from './thumbnail-repair.task';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
-import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
-import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
+import { MediaSystemAccessAdapter } from './media-system-access.adapter';
+import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
+import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
@@ -101,6 +110,10 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
   providers: [
     MediaService,
     MediaMetadataSyncService,
+    MediaMetadataSyncListener,
+    // The media slice cannot import the location slice (location depends on media): the host binds
+    // the canonical-name resolver hook to it.
+    { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
     ForwardGeocodeService,
     ThumbnailProcessor,
     ImageDimensionsProcessor,
@@ -109,8 +122,14 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashPurgeHandler,
     TrashPurgeTask,
     { provide: MEDIA_ITEM_PURGER, useExisting: MediaService },
+    // The thumbnail jobs and the repair cron are the media slice's; the host binds the three hooks they
+    // reach its post-upload processing through.
     ThumbnailRepairHandler,
     ThumbnailRepairTask,
+    { provide: MEDIA_OBJECT_REPROCESSOR, useExisting: ObjectReprocessService },
+    { provide: MEDIA_THUMBNAIL_PRUNER, useExisting: ThumbnailPruneService },
+    MediaSystemAccessAdapter,
+    { provide: MEDIA_SYSTEM_ACCESS, useExisting: MediaSystemAccessAdapter },
     MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
     MediaOrientationEditService,

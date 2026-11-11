@@ -36,20 +36,25 @@
 // `media_items` carries no row-level security and stays on the main client.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { withPlatformRateLimits } from '../platform/jobs/media-item-job';
-import { PrismaService } from '../prisma/prisma.service';
-import { PrismaSystemService } from '../prisma/prisma-system.service';
-import { MEDIA_HOUSEKEEPING_REASON } from '../app-registrations/system-access-reasons';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import {
+  MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_SYSTEM_ACCESS,
+  type MediaObjectReprocessor,
+  type MediaSystemAccess,
+} from '../hooks/media-host-hooks.js';
+import { withMediaRateLimits } from '../jobs/media-item-job.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_MAX_ATTEMPTS = 3;
@@ -63,32 +68,38 @@ interface ThumbnailRepairCandidate {
 
 type RepairOutcome = 'resynced' | 'reprocessed' | 'exhausted' | 'failed';
 
+/**
+ * The global `thumbnail_repair` sweep (server-only).
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
+export class ThumbnailRepairHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'thumbnail_repair';
   readonly label = 'Thumbnail repair sweep';
   /**
    * Up to THUMBNAIL_REPAIR_BATCH_SIZE full reprocesses run one after another; two
    * attempts, because the next hourly sweep is the real retry.
    */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 2 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 2 };
 
   private readonly logger = new Logger(ThumbnailRepairHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly system: PrismaSystemService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEDIA_SYSTEM_ACCESS) private readonly system: MediaSystemAccess,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly storageProcessingRecoveryService: ObjectReprocessService,
+    @Inject(MEDIA_OBJECT_REPROCESSOR) private readonly storageProcessingRecoveryService: MediaObjectReprocessor,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(_job: Job): Promise<void> {
-    await withPlatformRateLimits(() => this.sweep());
+  async process(_job: MemoriahubJob): Promise<void> {
+    await withMediaRateLimits(() => this.sweep());
   }
 
   private async sweep(): Promise<void> {
@@ -109,7 +120,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     // object settled at a terminal status long enough ago that in-flight
     // processing cannot explain the gap. status='processing' is excluded on
     // purpose — those objects belong to StorageRecoveryTask (`media.storage.recover_stuck`).
-    const candidates = await this.system.runAsSystem(MEDIA_HOUSEKEEPING_REASON, (tx) => tx.$queryRaw<ThumbnailRepairCandidate[]>(Prisma.sql`
+    const candidates = await this.system.runAsSystem((tx) => tx.$queryRaw<ThumbnailRepairCandidate[]>`
       SELECT mi.id AS media_item_id, so.id AS storage_object_id
       FROM media_items mi
       JOIN storage_objects so ON so.id = mi.storage_object_id
@@ -122,7 +133,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
         AND COALESCE((so.metadata->>'_thumbnailRepairAttempts')::int, 0) < ${maxAttempts}
       ORDER BY so.updated_at ASC
       LIMIT ${batchSize}
-    `));
+    `);
 
     const counts = { resynced: 0, reprocessed: 0, exhausted: 0, errors: 0 };
 
@@ -164,7 +175,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
   }
 
   private async repairOne(storageObjectId: string, maxAttempts: number): Promise<RepairOutcome> {
-    const object = await this.system.asSystem(MEDIA_HOUSEKEEPING_REASON).storageObject.findUnique({
+    const object = await this.system.asSystem().storageObject.findUnique({
       where: { id: storageObjectId },
     });
 
@@ -207,14 +218,14 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
     // advanced — otherwise the object would be reclaimed and retried forever
     // every sweep without ever reaching maxAttempts. Mirrors
     // StorageRecoveryService.recoverOne.
-    const claimed = await this.system.asSystem(MEDIA_HOUSEKEEPING_REASON).storageObject.update({
+    const claimed = await this.system.asSystem().storageObject.update({
       where: { id: object.id },
       data: {
         metadata: {
           ...meta,
           _thumbnailRepairAttempts: nextAttempts,
           ...(nextAttempts >= maxAttempts ? { _thumbnailRepairExhausted: true } : {}),
-        } as Prisma.InputJsonValue,
+        } ,
       },
     });
 
@@ -238,7 +249,7 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
       // Success — clear the repair bookkeeping so a future regression gets a
       // fresh budget. Re-read the row first: the pipeline just merged new
       // _processing results into metadata and we must not clobber them.
-      const fresh = await this.system.asSystem(MEDIA_HOUSEKEEPING_REASON).storageObject.findUnique({
+      const fresh = await this.system.asSystem().storageObject.findUnique({
         where: { id: object.id },
         select: { metadata: true },
       });
@@ -249,9 +260,9 @@ export class ThumbnailRepairHandler implements JobHandler, OnModuleInit {
         ...restMeta
       } = freshMeta;
 
-      await this.system.asSystem(MEDIA_HOUSEKEEPING_REASON).storageObject.update({
+      await this.system.asSystem().storageObject.update({
         where: { id: object.id },
-        data: { metadata: restMeta as Prisma.InputJsonValue },
+        data: { metadata: restMeta  },
       });
 
       return 'reprocessed';

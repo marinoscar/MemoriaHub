@@ -11,32 +11,34 @@
  *
  * No database required — all dependencies are fully mocked.
  */
-import { Test, TestingModule } from '@nestjs/testing';
-import { JobHandlerRegistry, JobScope, type Job } from '@marinoscar/platform-api/jobs';
-import { ThumbnailRegenHandler } from './thumbnail-regen.handler';
-import { PrismaService } from '../prisma/prisma.service';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
-import { mediaItemJob } from '../../test/helpers/platform-job';
+import type { MemoriahubJob } from '../../ports/index.js';
+import { ThumbnailRegenHandler } from './thumbnail-regen.handler.js';
+
+type MockPrismaService = ReturnType<typeof createMockPrismaService>;
+
+/** The slice of the database client the handler reads. */
+function createMockPrismaService() {
+  return { mediaItem: { findUnique: jest.fn() } };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return mediaItemJob('thumbnail_regen', randomUUID(), randomUUID(), {
+function makeJob(overrides: Partial<MemoriahubJob> = {}): MemoriahubJob {
+  return {
     id: 'job-thumb-1',
-    status: 'running',
+    type: 'thumbnail_regen',
+    subjectType: 'media_item',
+    subjectId: randomUUID(),
+    payload: { circleId: randomUUID() },
     reason: 'rerun',
     attempts: 1,
-    startedAt: new Date(),
+    orgId: 'org-1',
+    status: 'running',
     ...overrides,
-  });
+  };
 }
 
 function makeStorageObject(overrides: Partial<any> = {}) {
@@ -68,16 +70,12 @@ function makeMediaItem(overrides: Partial<any> = {}) {
 
 describe('ThumbnailRegenHandler', () => {
   let handler: ThumbnailRegenHandler;
-  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
-  let mockJobScope: { run: jest.Mock };
-  let mockRecoveryService: jest.Mocked<Pick<ObjectReprocessService, 'reprocessNow'>>;
-  let mockThumbnailNodePersistService: jest.Mocked<Pick<ThumbnailNodePersistService, 'persistThumbnail'>>;
+  let mockJobs: { registerHandler: jest.Mock; runInJobScope: jest.Mock };
+  let mockRecoveryService: { reprocessNow: jest.Mock };
+  let mockThumbnailNodePersistService: { persistThumbnail: jest.Mock };
   let mockPrisma: MockPrismaService;
 
-  beforeEach(async () => {
-    mockRegistry = {
-      register: jest.fn(),
-    };
+  beforeEach(() => {
 
     mockRecoveryService = {
       reprocessNow: jest.fn().mockResolvedValue(undefined),
@@ -88,26 +86,17 @@ describe('ThumbnailRegenHandler', () => {
     };
 
     mockPrisma = createMockPrismaService();
-    mockJobScope = { run: jest.fn(async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn('tx')) };
+    mockJobs = {
+      registerHandler: jest.fn(),
+      runInJobScope: jest.fn(async (_job: unknown, fn: (tx: unknown) => Promise<unknown>) => fn('tx')),
+    };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ThumbnailRegenHandler,
-        { provide: JobHandlerRegistry, useValue: mockRegistry },
-        { provide: JobScope, useValue: mockJobScope },
-        { provide: PrismaService, useValue: mockPrisma },
-        {
-          provide: ObjectReprocessService,
-          useValue: mockRecoveryService,
-        },
-        {
-          provide: ThumbnailNodePersistService,
-          useValue: mockThumbnailNodePersistService,
-        },
-      ],
-    }).compile();
-
-    handler = module.get<ThumbnailRegenHandler>(ThumbnailRegenHandler);
+    handler = new ThumbnailRegenHandler(
+      mockJobs as never,
+      mockPrisma as never,
+      mockRecoveryService as never,
+      mockThumbnailNodePersistService as never,
+    );
   });
 
   afterEach(() => {
@@ -136,15 +125,15 @@ describe('ThumbnailRegenHandler', () => {
   });
 
   describe('onModuleInit', () => {
-    it('registers itself in the platform JobHandlerRegistry on init', () => {
+    it('registers itself with the queue on init', () => {
       handler.onModuleInit();
-      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+      expect(mockJobs.registerHandler).toHaveBeenCalledWith(handler);
     });
 
     it('registers exactly once per call', () => {
-      const before = (mockRegistry.register as jest.Mock).mock.calls.length;
+      const before = mockJobs.registerHandler.mock.calls.length;
       handler.onModuleInit();
-      expect(mockRegistry.register).toHaveBeenCalledTimes(before + 1);
+      expect(mockJobs.registerHandler).toHaveBeenCalledTimes(before + 1);
     });
   });
 

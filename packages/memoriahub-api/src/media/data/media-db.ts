@@ -73,6 +73,8 @@ export interface MediaModels {
   trashEmptyRun: MediaDelegate;
   /** `trash_empty_run_items`. */
   trashEmptyRunItem: MediaDelegate;
+  /** `media_metadata_status`. */
+  mediaMetadataStatus: MediaDelegate;
 }
 
 /**

@@ -1,8 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
-import { MediaMetadataStatusType } from '@prisma/client';
-import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
-import { Prisma } from '@prisma/client';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -14,11 +10,26 @@ import {
   extractContainerMetadata,
   FfprobeDataLike,
 } from '@marinoscar/memoriahub-compute/metadata';
-import { PrismaService } from '../prisma/prisma.service';
-import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
-import { streamToBuffer, streamToTempFile } from '../media-processing/processors/stream-utils';
-import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
-import { GeoLocationService } from '../media/geo/geo-location.service';
+
+import {
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubObjectStorePort,
+} from '../../ports/index.js';
+import { streamToBuffer, streamToTempFile } from '../../core/index.js';
+import type { MediaDb, MediaTx } from '../data/media-db.js';
+import type { MediaJobContext } from '../jobs/media-item-job.js';
+import { MEDIA_REVERSE_GEOCODER, type MediaReverseGeocoder } from '../location/media-reverse-geocoder.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
+
+/**
+ * Runs a short unit of writes to org (row-level-security) tables in the job's organization: the
+ * handler passes `(fn) => jobs.runInJobScope(job, fn)`. Keep it SHORT: no download, no provider
+ * call, no ffmpeg inside it, it holds an interactive transaction open.
+ *
+ * @stability experimental
+ */
+export type MediaWriteScope = <R>(fn: (tx: MediaTx) => Promise<R>) => Promise<R>;
 
 // =============================================================================
 // COMPUTE / PERSIST split (distributed-nodes spec §6)
@@ -60,6 +71,8 @@ import { GeoLocationService } from '../media/geo/geo-location.service';
  *            exactly like the legacy processor loop did. Absent on node
  *            results (a node-side compute error routes to the /failure path
  *            instead).
+ *
+ * @stability experimental
  */
 export interface MetadataComputeResult {
   exif: Record<string, unknown>;
@@ -67,15 +80,21 @@ export interface MetadataComputeResult {
   errors?: Record<string, string>;
 }
 
+/**
+ * The metadata extraction job's work: compute (EXIF, dimensions, ffprobe) and the server-only
+ * persist half (reverse geocoding, `_processing` merge, typed-column sync, status rows).
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MetadataExtractionService {
   private readonly logger = new Logger(MetadataExtractionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    @Inject(STORAGE_PROVIDER) private readonly storageProvider: StorageProvider,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly geoLocationService: GeoLocationService,
+    @Inject(MEDIA_REVERSE_GEOCODER) private readonly geoLocationService: MediaReverseGeocoder,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -167,7 +186,7 @@ export class MetadataExtractionService {
   async persistMetadata(
     job: MediaJobContext,
     result: MetadataComputeResult,
-    scope?: OrgWriteScope,
+    scope?: MediaWriteScope,
   ): Promise<void> {
     if (!job.mediaItemId) {
       throw new Error(`metadata_extraction job ${job.id} is missing mediaItemId`);
@@ -206,8 +225,8 @@ export class MetadataExtractionService {
 
       // The read-merge-write of `storage_objects.metadata` runs in the job's
       // organization when a scope is given (`JobScope`, RETRO-C3).
-      const runWrites: OrgWriteScope =
-        scope ?? ((fn) => fn(this.prisma as unknown as Prisma.TransactionClient));
+      const runWrites: MediaWriteScope =
+        scope ?? ((fn) => fn(this.prisma));
       const storageObjectId = await runWrites(async (tx) => {
         const storageObject = await tx.storageObject.findUnique({
           where: { id: mediaItem.storageObject!.id },
@@ -234,7 +253,7 @@ export class MetadataExtractionService {
 
         await tx.storageObject.update({
           where: { id: storageObject.id },
-          data: { metadata: mergedMetadata as Prisma.InputJsonValue },
+          data: { metadata: mergedMetadata },
         });
         return storageObject.id;
       });
@@ -247,11 +266,11 @@ export class MetadataExtractionService {
         create: {
           mediaItemId,
           circleId,
-          status: MediaMetadataStatusType.processed,
+          status: 'processed',
           processedAt: new Date(),
         },
         update: {
-          status: MediaMetadataStatusType.processed,
+          status: 'processed',
           processedAt: new Date(),
           lastError: null,
         },
@@ -351,7 +370,14 @@ export class MetadataExtractionService {
   // In-process path: download → computeMetadata → persistMetadata
   // ---------------------------------------------------------------------------
 
-  async processMediaItem(job: MediaJobContext, scope?: OrgWriteScope): Promise<void> {
+  /**
+   * The in-process path: download the object, compute the metadata, persist it. Marks the status row
+   * `processing`, then `processed` or `failed` (and rethrows so the queue retries).
+   *
+   * @param job - the media-item job context.
+   * @param scope - where the `storage_objects` writes run (the job's organization).
+   */
+  async processMediaItem(job: MediaJobContext, scope?: MediaWriteScope): Promise<void> {
     // Guard: mediaItemId must be present
     if (!job.mediaItemId) {
       throw new Error(`metadata_extraction job ${job.id} is missing mediaItemId`);
@@ -368,7 +394,7 @@ export class MetadataExtractionService {
         deletedAt: true,
         storageObjectId: true,
         storageObject: {
-          select: { id: true, storageKey: true, mimeType: true },
+          select: { id: true, storageKey: true, mimeType: true, storageProvider: true, bucket: true },
         },
       },
     });
@@ -390,17 +416,17 @@ export class MetadataExtractionService {
       create: {
         mediaItemId,
         circleId,
-        status: MediaMetadataStatusType.processing,
+        status: 'processing',
       },
       update: {
-        status: MediaMetadataStatusType.processing,
+        status: 'processing',
         lastError: null,
       },
     });
 
     try {
-      const { storageKey, mimeType } = mediaItem.storageObject;
-      const result = await this.downloadAndCompute(storageKey, mimeType);
+      const { storageKey, mimeType, storageProvider, bucket } = mediaItem.storageObject;
+      const result = await this.downloadAndCompute(storageKey, mimeType, storageProvider, bucket);
       await this.persistMetadata(job, result, scope);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -418,11 +444,14 @@ export class MetadataExtractionService {
   private async downloadAndCompute(
     storageKey: string,
     mimeType: string,
+    storageProvider?: string | null,
+    bucket?: string | null,
   ): Promise<MetadataComputeResult> {
+    const store = await this.objectStore.forLocation(storageProvider, bucket);
     if (mimeType.startsWith('video/')) {
       const tmpPath = join(tmpdir(), `memoriahub-job-metadata-${randomUUID()}`);
       try {
-        const stream = await this.storageProvider.download(storageKey);
+        const stream = await store.download(storageKey);
         await streamToTempFile(stream, tmpPath);
         return await this.computeMetadata(Buffer.alloc(0), { mimeType, filePath: tmpPath });
       } finally {
@@ -430,7 +459,7 @@ export class MetadataExtractionService {
       }
     }
 
-    const stream = await this.storageProvider.download(storageKey);
+    const stream = await store.download(storageKey);
     const buffer = await streamToBuffer(stream);
     return this.computeMetadata(buffer, { mimeType });
   }
@@ -441,11 +470,11 @@ export class MetadataExtractionService {
       create: {
         mediaItemId,
         circleId,
-        status: MediaMetadataStatusType.failed,
+        status: 'failed',
         lastError: error,
       },
       update: {
-        status: MediaMetadataStatusType.failed,
+        status: 'failed',
         lastError: error,
       },
     });
@@ -458,6 +487,8 @@ export class MetadataExtractionService {
  * formatName/formatTags/streamTags, capturedAt derived from creation_time).
  * Exported for the unit tests; the CLI node module replicates the same
  * mapping so node results match byte-for-byte.
+ *
+ * @stability experimental
  */
 export function buildProbeEntry(probeData: FfprobeDataLike): Record<string, unknown> {
   const container = extractContainerMetadata(probeData);

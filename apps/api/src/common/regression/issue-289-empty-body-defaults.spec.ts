@@ -142,7 +142,7 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
   // ===========================================================================
   // ReprocessFailedBodyDto — stand-in "admin-backfill clone" representative.
   //
-  // The task named `AdminMetadataBackfillDto` (apps/api/src/metadata/admin-metadata.controller.ts)
+  // The task named `AdminMetadataBackfillDto` (packages/memoriahub-api/src/media/metadata/admin-metadata.controller.ts)
   // as the canonical admin-backfill example, but BOTH its local schema const
   // (`adminMetadataBackfillSchema`) AND the DTO class itself are declared
   // without `export` — there is no way to import either without changing

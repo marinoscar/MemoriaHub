@@ -23,7 +23,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { MediaService } from '../../src/media/media.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '../../src/media/sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import {
   createMockPrismaService,

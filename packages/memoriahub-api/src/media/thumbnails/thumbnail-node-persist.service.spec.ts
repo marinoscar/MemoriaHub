@@ -16,46 +16,32 @@
  * one of this object's thumbnails is rejected outright.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import type { EnrichmentJob } from '@prisma/client';
+import type { MediaWriteScope } from '../metadata/metadata-extraction.service.js';
+import { ThumbnailNodePersistService } from './thumbnail-node-persist.service.js';
 import type { ThumbnailResult } from '@marinoscar/memoriahub-compute/dto';
-import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
+
+/** The slice of the database client the service reads and writes. */
+function createMockPrismaService() {
+  return {
+    mediaItem: { findUnique: jest.fn() },
+    storageObject: { upsert: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
+  };
+}
+type MockPrismaService = ReturnType<typeof createMockPrismaService>;
+
+/** What the service reads of a job. */
+interface MediaJob {
+  id: string;
+  mediaItemId: string | null;
+  circleId: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'thumbnail_regen',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: 'running' as any,
-    reason: 'rerun' as any,
-    priority: 0,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  } as EnrichmentJob;
+function makeJob(overrides: Partial<MediaJob> = {}): MediaJob {
+  return { id: 'job-1', mediaItemId: 'media-1', circleId: 'circle-1', ...overrides };
 }
 
 function makeResult(overrides: Partial<ThumbnailResult> = {}): ThumbnailResult {
@@ -86,18 +72,18 @@ function makeMediaItem(overrides: Record<string, unknown> = {}) {
 describe('ThumbnailNodePersistService', () => {
   let service: ThumbnailNodePersistService;
   let mockPrisma: MockPrismaService;
-  let mockResolver: { getActiveProvider: jest.Mock };
+  let mockObjectStore: { active: jest.Mock };
   let mockActiveProvider: {
     exists: jest.Mock;
     size: jest.Mock;
     getBucket: jest.Mock;
   };
-  let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
+  let mockSync: { syncFromStorageObject: jest.Mock };
   let mockPrune: { pruneSupersededThumbnails: jest.Mock };
   /** Records sync-vs-prune ordering (issue #434). */
   let callOrder: string[];
 
-  beforeEach(async () => {
+  beforeEach(() => {
     mockPrisma = createMockPrismaService();
 
     mockActiveProvider = {
@@ -105,8 +91,8 @@ describe('ThumbnailNodePersistService', () => {
       size: jest.fn().mockResolvedValue(12345),
       getBucket: jest.fn().mockReturnValue('test-bucket'),
     };
-    mockResolver = {
-      getActiveProvider: jest.fn().mockResolvedValue({ id: 's3', provider: mockActiveProvider }),
+    mockObjectStore = {
+      active: jest.fn().mockResolvedValue({ id: 's3', store: mockActiveProvider }),
     };
     callOrder = [];
     mockSync = {
@@ -125,18 +111,7 @@ describe('ThumbnailNodePersistService', () => {
     (mockPrisma.storageObject.upsert as jest.Mock).mockResolvedValue({ id: 'thumb-obj-1' });
     (mockPrisma.storageObject.update as jest.Mock).mockResolvedValue({});
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ThumbnailNodePersistService,
-        { provide: PrismaService, useValue: mockPrisma },
-        defaultOrgIdProvider,
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: MediaMetadataSyncService, useValue: mockSync },
-        { provide: ThumbnailPruneService, useValue: mockPrune },
-      ],
-    }).compile();
-
-    service = module.get(ThumbnailNodePersistService);
+    service = new ThumbnailNodePersistService(mockPrisma as never, mockObjectStore as never, mockSync as never, mockPrune as never);
   });
 
   // =========================================================================
@@ -241,14 +216,14 @@ describe('ThumbnailNodePersistService', () => {
       await expect(
         service.persistThumbnail(makeJob({ mediaItemId: null }), makeResult()),
       ).resolves.toBeUndefined();
-      expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
+      expect(mockObjectStore.active).not.toHaveBeenCalled();
     });
 
     it('skips without throwing when the MediaItem is missing', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(service.persistThumbnail(makeJob(), makeResult())).resolves.toBeUndefined();
-      expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
+      expect(mockObjectStore.active).not.toHaveBeenCalled();
     });
 
     it('skips without throwing when the MediaItem is soft-deleted', async () => {
@@ -257,7 +232,7 @@ describe('ThumbnailNodePersistService', () => {
       );
 
       await expect(service.persistThumbnail(makeJob(), makeResult())).resolves.toBeUndefined();
-      expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
+      expect(mockObjectStore.active).not.toHaveBeenCalled();
     });
 
     it('skips without throwing when the MediaItem has no storageObject', async () => {
@@ -266,7 +241,7 @@ describe('ThumbnailNodePersistService', () => {
       );
 
       await expect(service.persistThumbnail(makeJob(), makeResult())).resolves.toBeUndefined();
-      expect(mockResolver.getActiveProvider).not.toHaveBeenCalled();
+      expect(mockObjectStore.active).not.toHaveBeenCalled();
     });
   });
 

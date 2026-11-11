@@ -1,30 +1,29 @@
+import { Controller, Post, Get, Param, NotFoundException, Logger, Inject } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
 import {
-  Controller,
-  Post,
-  Get,
-  Param,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
-import { JobReason, MediaMetadataStatusType } from '@prisma/client';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubScopeRole,
+} from '../../ports/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS } from '../constants/permissions.js';
+import type { MediaDb } from '../data/media-db.js';
+import { enqueueEnrichmentJob } from '../jobs/enrichment-jobs.js';
 
 // ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
 
+/**
+ * `POST /api/media/:id/metadata/rerun` and `GET /api/media/:id/metadata/status`; mounted by the host in
+ * its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Metadata')
 @ApiBearerAuth('JWT-auth')
 @Controller()
@@ -32,23 +31,30 @@ export class MetadataController {
   private readonly logger = new Logger(MetadataController.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
   // --------------------------------------------------------------------------
   // POST /api/media/:id/metadata/rerun
   // --------------------------------------------------------------------------
 
+  /**
+   * Re-runs metadata extraction for one media item.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the queued job.
+   */
   @Post('media/:id/metadata/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run metadata extraction for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 201, description: 'Metadata extraction job queued' })
   async rerunMetadata(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     const mediaItem = await this.assertMediaItemAccess(
       mediaItemId,
@@ -56,11 +62,11 @@ export class MetadataController {
       'editor',
     );
 
-    const job = await this.enrichmentJobService.enqueue({
+    const job = await enqueueEnrichmentJob(this.jobs, {
       type: 'metadata_extraction',
       mediaItemId,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
+      reason: 'rerun',
       priority: 0,
       // mimeType rides in the job payload so a distributed worker node can
       // dispatch to the image vs. video compute path without a second lookup —
@@ -73,10 +79,10 @@ export class MetadataController {
       create: {
         mediaItemId,
         circleId: mediaItem.circleId,
-        status: MediaMetadataStatusType.pending,
+        status: 'pending',
       },
       update: {
-        status: MediaMetadataStatusType.pending,
+        status: 'pending',
       },
     });
 
@@ -84,21 +90,29 @@ export class MetadataController {
       `Rerun metadata extraction job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${user.id}`,
     );
 
-    return { data: { jobId: job.id, status: job.status } };
+    // A freshly queued job is `pending`; the queue facade reported the row's status the same way.
+    return { data: { jobId: job.id, status: 'pending' } };
   }
 
   // --------------------------------------------------------------------------
   // GET /api/media/:id/metadata/status
   // --------------------------------------------------------------------------
 
+  /**
+   * Reads the metadata extraction status of one media item.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the status (`not_processed` when none was recorded).
+   */
   @Get('media/:id/metadata/status')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get metadata extraction status for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 200, description: 'Metadata extraction status' })
   async getMetadataStatus(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.assertMediaItemAccess(mediaItemId, user, 'viewer');
 
@@ -109,7 +123,7 @@ export class MetadataController {
     if (!status) {
       return {
         data: {
-          status: MediaMetadataStatusType.not_processed,
+          status: 'not_processed',
           processedAt: null,
           lastError: null,
         },
@@ -125,8 +139,8 @@ export class MetadataController {
 
   private async assertMediaItemAccess(
     mediaItemId: string,
-    user: RequestUser,
-    requiredRole: OwnerRole = 'viewer',
+    user: MemoriahubRequestUser,
+    requiredRole: MemoriahubScopeRole = 'viewer',
   ): Promise<{ id: string; circleId: string; mimeType: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },

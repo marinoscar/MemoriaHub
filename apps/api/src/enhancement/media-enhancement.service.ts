@@ -11,7 +11,7 @@ import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-sc
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
 import { EnrichmentJobService } from '../enrichment/enrichment-job.service';

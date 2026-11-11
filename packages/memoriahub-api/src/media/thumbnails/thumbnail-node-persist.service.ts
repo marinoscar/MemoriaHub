@@ -26,37 +26,50 @@
 //     upload/repair pipelines already use)
 // =============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import type { MediaJobContext, OrgWriteScope } from '../platform/jobs/media-item-job';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ThumbnailResult } from '@marinoscar/memoriahub-compute/dto';
-import { PrismaService } from '../prisma/prisma.service';
-import { storageObjectSize } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { thumbnailKeyPrefixFor } from '../media-processing/thumbnail-key.util';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
 
+import {
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubObjectStorePort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_THUMBNAIL_PRUNER, type MediaThumbnailPruner } from '../hooks/media-host-hooks.js';
+import type { MediaJobContext } from '../jobs/media-item-job.js';
+import type { MediaWriteScope } from '../metadata/metadata-extraction.service.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
+import { thumbnailKeyPrefixFor } from './thumbnail-key.js';
+
+/**
+ * Persists the thumbnail a worker node rendered and uploaded: verifies the bytes landed, writes the
+ * rows the server-side pipeline would, syncs the media item and prunes the superseded thumbnail.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class ThumbnailNodePersistService {
   private readonly logger = new Logger(ThumbnailNodePersistService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly thumbnailPrune: ThumbnailPruneService,
+    @Inject(MEDIA_THUMBNAIL_PRUNER) private readonly thumbnailPrune: MediaThumbnailPruner,
   ) {}
 
   /**
-   * @param scope - where the two `storage_objects` writes run: the handler passes
-   *   the platform `JobScope` (the job's organization, RETRO-C3); omitted, they run
-   *   on the plain client.
+   * Persists the thumbnail a node rendered.
+   *
+   * @param job - the media-item job context.
+   * @param result - what the node submitted (`{ storageKey, width, height, bytes }`).
+   * @param scope - where the two `storage_objects` writes run: the handler passes the job's write
+   *   scope (its organization); omitted, they run on the plain client.
    */
   async persistThumbnail(
     job: MediaJobContext,
     result: ThumbnailResult,
-    scope?: OrgWriteScope,
+    scope?: MediaWriteScope,
   ): Promise<void> {
     if (!job.mediaItemId) {
       this.logger.warn(`persistThumbnail: job ${job.id} has no mediaItemId; skipping`);
@@ -98,8 +111,7 @@ export class ThumbnailNodePersistService {
     // The node uploads via whichever provider is currently active — the same
     // resolution ThumbnailProcessor.uploadThumbnail uses, so a thumbnail
     // always lands in the same provider/bucket new uploads go to.
-    const { id: activeProviderId, provider: activeProvider } =
-      await this.resolver.getActiveProvider();
+    const { id: activeProviderId, store: activeProvider } = await this.objectStore.active();
 
     const exists = await activeProvider.exists(result.storageKey);
     if (!exists) {
@@ -109,9 +121,9 @@ export class ThumbnailNodePersistService {
       );
     }
 
-    // The platform size probe (S3 `HeadObject`, the local driver's `stat`); `undefined` when the
-    // provider has none, `null` when absent (already ruled out above): the check is then skipped.
-    const actualSize = await storageObjectSize(activeProvider, result.storageKey);
+    // The size probe (S3 `HeadObject`, the local driver's `stat`); `null` when the provider has none
+    // or the object is absent (already ruled out above): the check is then skipped.
+    const actualSize = await activeProvider.size(result.storageKey);
     if (typeof actualSize === 'number' && actualSize !== result.bytes) {
       throw new Error(
         `persistThumbnail: byte-length mismatch for "${result.storageKey}": node reported ` +
@@ -123,7 +135,7 @@ export class ThumbnailNodePersistService {
     // when a scope is given (`JobScope`, RETRO-C3); the provider checks above ran
     // OUTSIDE it, so the transaction stays short.
     const orgId = originalObject.orgId; // the source object's organization (RETRO-D1)
-    const runWrites: OrgWriteScope = scope ?? ((fn) => fn(this.prisma as unknown as Prisma.TransactionClient));
+    const runWrites: MediaWriteScope = scope ?? ((fn) => fn(this.prisma));
     const thumbObject = await runWrites(async (tx) => {
       // Upsert the thumbnail's own StorageObject row — mirrors
       // ThumbnailProcessor.uploadThumbnail's upsert exactly (same key
@@ -180,7 +192,7 @@ export class ThumbnailNodePersistService {
                 thumbnailStorageKey: result.storageKey,
               },
             },
-          } as Prisma.InputJsonValue,
+          },
         },
       });
       return thumb;
