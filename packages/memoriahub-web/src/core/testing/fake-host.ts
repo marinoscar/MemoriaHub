@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { MemoriahubApiError } from '../headless/api.js';
+import type { MemoriahubSystemSettings } from '../headless/admin.js';
 import type {
   MemoriahubApiClient,
   MemoriahubFeatures,
@@ -16,6 +17,8 @@ import type {
   MemoriahubWebHost,
 } from '../headless/host.js';
 import type { MemoriahubOwnerScopeValue } from '../headless/owner-scope.js';
+import { createFakeAdminPort } from './fake-admin.js';
+import type { FakeAdminPort } from './fake-admin.js';
 
 /**
  * What a route handler receives.
@@ -83,6 +86,8 @@ export interface FakeMemoriahubWebHostOptions {
   ownerScope?: Partial<MemoriahubOwnerScopeValue>;
   /** Slots. */
   slots?: MemoriahubWebHost['slots'];
+  /** The deployment settings the fake admin port serves; `null` keeps the settings hook loading. Default: an empty document. */
+  systemSettings?: Partial<MemoriahubSystemSettings> | null;
 }
 
 /**
@@ -99,6 +104,8 @@ export interface FakeMemoriahubWebHost {
   navigations: string[];
   /** Every `notify` message, in order. */
   notifications: Array<{ message: string; severity?: string }>;
+  /** The fake admin port (data table, header, settings hook) and its recordings. */
+  admin: FakeAdminPort;
   /** Replace or add a route. */
   setRoute(key: string, route: FakeRoute): void;
 }
@@ -122,6 +129,7 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
   const calls: FakeCall[] = [];
   const navigations: string[] = [];
   const notifications: Array<{ message: string; severity?: string }> = [];
+  const admin = createFakeAdminPort(options.systemSettings);
 
   async function send<T>(method: FakeCall['method'], endpoint: string, body: unknown, opts?: MemoriahubRequestOptions): Promise<T> {
     const [path, qs = ''] = endpoint.split('?');
@@ -191,7 +199,8 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
     },
     timeZone: null,
     slots: options.slots,
+    admin: admin.port,
   };
 
-  return { host, calls, navigations, notifications, setRoute: (key, route) => void routes.set(key, route) };
+  return { host, calls, navigations, notifications, admin, setRoute: (key, route) => void routes.set(key, route) };
 }

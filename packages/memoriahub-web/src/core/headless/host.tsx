@@ -13,6 +13,7 @@
 import { createContext, createElement, useContext } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 
+import type { MemoriahubAdminPort } from './admin.js';
 import type { MemoriahubOwnerScopeValue } from './owner-scope.js';
 
 /**
@@ -238,6 +239,8 @@ export interface MemoriahubWebHost {
   search?: MemoriahubSearchPort;
   /** The host's shell layout port; absent in a host whose shell has one layout. */
   shell?: MemoriahubShellPort;
+  /** The host's admin port (data table, page header, deployment settings); absent in a host that mounts no admin page. */
+  admin?: MemoriahubAdminPort;
   /** The active owner scope ("My library" or one group) and the caller's role in it. */
   ownerScope: MemoriahubOwnerScopeValue;
   /** Tell the user something happened. */
