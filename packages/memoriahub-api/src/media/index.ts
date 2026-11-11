@@ -70,3 +70,6 @@ export * from './dto/review-counts-query.dto.js';
 export * from './dto/shared-with-me-query.dto.js';
 export * from './dto/update-album.dto.js';
 export * from './dto/update-media.dto.js';
+export * from './location/fold.js';
+export * from './location/geo-result.mapper.js';
+export * from './location/apply-location.js';
