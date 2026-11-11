@@ -20,41 +20,39 @@ import {
   ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { FastifyReply } from 'fastify';
-
-import { MediaService } from './media.service';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { CreateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { UpdateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { MediaQueryDto } from '@marinoscar/memoriahub-api/media';
-import { AttachTagsDto } from '@marinoscar/memoriahub-api/media';
-import { CreateAlbumDto } from '@marinoscar/memoriahub-api/media';
-import { UpdateAlbumDto } from '@marinoscar/memoriahub-api/media';
-import { AlbumQueryDto } from '@marinoscar/memoriahub-api/media';
-import { SharedWithMeQueryDto } from '@marinoscar/memoriahub-api/media';
-import { AddAlbumItemsDto } from '@marinoscar/memoriahub-api/media';
-import { AddAlbumItemsByFilterDto } from '@marinoscar/memoriahub-api/media';
-import { ExportQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsAggregateQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsExtentQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaThumbnailsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { BulkUpdateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { BulkTagsDto } from '@marinoscar/memoriahub-api/media';
-import { BulkDeleteDto } from '@marinoscar/memoriahub-api/media';
-import { BulkArchiveDto } from '@marinoscar/memoriahub-api/media';
-import { ListArchivedQueryDto } from '@marinoscar/memoriahub-api/media';
-import { ListTrashQueryDto } from '@marinoscar/memoriahub-api/media';
-import { RestoreFromTrashDto } from '@marinoscar/memoriahub-api/media';
-import { DeleteForeverDto } from '@marinoscar/memoriahub-api/media';
-import { EmptyTrashDto } from '@marinoscar/memoriahub-api/media';
-import { ReverseGeocodeQueryDto } from '@marinoscar/memoriahub-api/media';
-import { GeoSearchQueryDto } from '@marinoscar/memoriahub-api/media';
-import { DashboardQueryDto } from '@marinoscar/memoriahub-api/media';
-import { ReviewCountsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { TrashEmptyRunService } from '@marinoscar/memoriahub-api/media';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS } from '../constants/permissions.js';
+import { TrashEmptyRunService } from '../trash-empty/trash-empty-run.service.js';
+import { MediaService } from './media.service.js';
+import type { MediaReply } from './media-reply.js';
+import { CreateMediaDto } from '../dto/create-media.dto.js';
+import { UpdateMediaDto } from '../dto/update-media.dto.js';
+import { MediaQueryDto } from '../dto/media-query.dto.js';
+import { AttachTagsDto } from '../dto/attach-tags.dto.js';
+import { CreateAlbumDto } from '../dto/create-album.dto.js';
+import { UpdateAlbumDto } from '../dto/update-album.dto.js';
+import { AlbumQueryDto } from '../dto/album-query.dto.js';
+import { SharedWithMeQueryDto } from '../dto/shared-with-me-query.dto.js';
+import { AddAlbumItemsDto } from '../dto/add-album-items.dto.js';
+import { AddAlbumItemsByFilterDto } from '../dto/add-album-items-by-filter.dto.js';
+import { ExportQueryDto } from '../dto/export-query.dto.js';
+import { MediaLocationsQueryDto } from '../dto/media-locations-query.dto.js';
+import { MediaLocationsAggregateQueryDto } from '../dto/media-locations-aggregate-query.dto.js';
+import { MediaLocationsExtentQueryDto } from '../dto/media-locations-extent-query.dto.js';
+import { MediaThumbnailsQueryDto } from '../dto/media-thumbnails-query.dto.js';
+import { BulkUpdateMediaDto } from '../dto/bulk-update-media.dto.js';
+import { BulkTagsDto } from '../dto/bulk-tags.dto.js';
+import { BulkDeleteDto } from '../dto/bulk-delete.dto.js';
+import { BulkArchiveDto } from '../dto/bulk-archive.dto.js';
+import { ListArchivedQueryDto } from '../dto/list-archived-query.dto.js';
+import { ListTrashQueryDto } from '../dto/list-trash-query.dto.js';
+import { RestoreFromTrashDto } from '../dto/restore-from-trash.dto.js';
+import { DeleteForeverDto } from '../dto/delete-forever.dto.js';
+import { EmptyTrashDto } from '../dto/empty-trash.dto.js';
+import { ReverseGeocodeQueryDto } from '../dto/reverse-geocode-query.dto.js';
+import { GeoSearchQueryDto } from '../dto/geo-search-query.dto.js';
+import { DashboardQueryDto } from '../dto/dashboard-query.dto.js';
+import { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
 
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -73,7 +71,7 @@ export class MediaController {
    * GET /api/media/explore/places
    */
   @Get('explore/places')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Explore: places with media counts and cover thumbnail' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiResponse({
@@ -93,7 +91,7 @@ export class MediaController {
   })
   async explorePlaces(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.explorePlaces(circleId, user.id, user.permissions);
   }
@@ -102,7 +100,7 @@ export class MediaController {
    * GET /api/media/explore/tags
    */
   @Get('explore/tags')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Explore: tags with media counts and cover thumbnail' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiResponse({
@@ -122,7 +120,7 @@ export class MediaController {
   })
   async exploreTags(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.exploreTags(circleId, user.id, user.permissions);
   }
@@ -131,7 +129,7 @@ export class MediaController {
    * GET /api/media/explore/locations
    */
   @Get('explore/locations')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Explore: tiered locations (top countries, regions, cities) with counts and cover thumbnails',
   })
@@ -181,7 +179,7 @@ export class MediaController {
   })
   async exploreLocations(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.exploreLocations(circleId, user.id, user.permissions);
   }
@@ -194,7 +192,7 @@ export class MediaController {
    * so it never shadows the `/:id` media route.
    */
   @Get('explore/locations/:level')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Explore: full list for one location tier (countries|regions|cities)',
   })
@@ -219,7 +217,7 @@ export class MediaController {
   async exploreLocationLevel(
     @Param('level') level: string,
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.exploreLocationLevel(circleId, level, user.id, user.permissions);
   }
@@ -232,7 +230,7 @@ export class MediaController {
    * pick-lists in the search UI so users see only real values from their library.
    */
   @Get('facets/locations')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Geo facets: Country → Region → Locality hierarchy with item counts',
     description:
@@ -279,7 +277,7 @@ export class MediaController {
   })
   async facetsLocations(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.facetsLocations(circleId, user.id, user.permissions);
   }
@@ -288,13 +286,13 @@ export class MediaController {
    * GET /api/media/tags
    */
   @Get('tags')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: "List caller's tags with attach counts" })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Tag list returned' })
   async listTags(
     @Query('circleId') circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listTags(circleId, user.id, user.permissions);
   }
@@ -304,14 +302,14 @@ export class MediaController {
    * The media items shared with the caller through grants, across libraries.
    */
   @Get('shared-with-me')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List media items shared with the caller through grants (paginated)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated media items shared with the caller' })
   async listSharedMedia(
     @Query() query: SharedWithMeQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listSharedMedia(query, user.id, user.permissions);
   }
@@ -321,14 +319,14 @@ export class MediaController {
    * Declared before @Get('albums/:id') so it is never shadowed.
    */
   @Get('albums/shared-with-me')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List albums shared with the caller through grants (paginated)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Paginated albums shared with the caller' })
   async listSharedAlbums(
     @Query() query: SharedWithMeQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listSharedAlbums(query, user.id, user.permissions);
   }
@@ -337,7 +335,7 @@ export class MediaController {
    * GET /api/media/albums
    */
   @Get('albums')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List caller\'s albums (paginated)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'pageSize', required: false, type: Number })
@@ -346,7 +344,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Paginated album list' })
   async listAlbums(
     @Query() query: AlbumQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listAlbums(query, user.id, user.permissions);
   }
@@ -358,7 +356,7 @@ export class MediaController {
    * Declared before @Get(':id') to prevent route shadowing.
    */
   @Get('export')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Stream metadata export for the caller\'s media items',
     description:
@@ -375,8 +373,8 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Non-admin caller supplied ownerId for another user' })
   async exportMedia(
     @Query() dto: ExportQueryDto,
-    @CurrentUser() user: RequestUser,
-    @Res() res: FastifyReply,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
+    @Res() res: MediaReply,
   ): Promise<void> {
     // Delegate to service; all validation and header-writing happen there.
     // Errors thrown before streaming begins propagate through Nest's exception filter.
@@ -391,7 +389,7 @@ export class MediaController {
    * Declared in the static-routes block so it is never shadowed by @Get(':id').
    */
   @Get('locations')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: "List all caller's geotagged media for map view (no pagination)",
     description:
@@ -413,7 +411,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Array of geotagged media location objects' })
   async listLocations(
     @Query() query: MediaLocationsQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listLocations(query, user.id, user.permissions);
   }
@@ -429,7 +427,7 @@ export class MediaController {
    * Declared before @Get(':id') so it is never shadowed.
    */
   @Get('locations/aggregate')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Server-side spatial clustering of geotagged media for the map view',
     description:
@@ -453,7 +451,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Array of location clusters { lat, lng, count, sampleId, minLat, maxLat, minLng, maxLng } — the min/max fields are the cluster cell\'s true bounding box, used by the client to refetch the cluster\'s photos by bbox' })
   async aggregateLocations(
     @Query() query: MediaLocationsAggregateQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.aggregateLocations(query, user.id, user.permissions);
   }
@@ -470,7 +468,7 @@ export class MediaController {
    * Declared before @Get(':id') so it is never shadowed.
    */
   @Get('locations/extent')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: "Geographic bounding box of all the circle's geotagged media (for initial map framing)",
     description:
@@ -485,7 +483,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Bounding box { minLat, minLng, maxLat, maxLng, count } or null when no geotagged items' })
   async getLocationsExtent(
     @Query() query: MediaLocationsExtentQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getLocationsExtent(query, user.id, user.permissions);
   }
@@ -497,7 +495,7 @@ export class MediaController {
    * Declared before @Get(':id') so it is never shadowed.
    */
   @Get('thumbnails')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Batch-sign thumbnail URLs for a set of media items',
     description:
@@ -509,7 +507,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Array of { id, thumbnailUrl }' })
   async getThumbnails(
     @Query() query: MediaThumbnailsQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getThumbnails(query, user.id, user.permissions);
   }
@@ -519,12 +517,12 @@ export class MediaController {
    * Bulk update location or favorite on a set of media items.
    */
   @Patch('bulk')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Bulk update media items (location, favorite)' })
   @ApiResponse({ status: 200, description: 'Items updated' })
   async bulkUpdateMedia(
     @Body() dto: BulkUpdateMediaDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkUpdateMedia(dto, user.id, user.permissions);
   }
@@ -534,13 +532,13 @@ export class MediaController {
    * Add and/or remove tags on multiple media items.
    */
   @Post('bulk/tags')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk add/remove tags on media items' })
   @ApiResponse({ status: 200, description: 'Tags updated' })
   async bulkTags(
     @Body() dto: BulkTagsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkTags(dto, user.id, user.permissions);
   }
@@ -550,13 +548,13 @@ export class MediaController {
    * Soft-delete multiple media items.
    */
   @Post('bulk/delete')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk soft-delete media items' })
   @ApiResponse({ status: 200, description: 'Items soft-deleted' })
   async bulkDelete(
     @Body() dto: BulkDeleteDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkDelete(dto, user.id, user.permissions);
   }
@@ -566,13 +564,13 @@ export class MediaController {
    * Bulk archive media items (sets archivedAt, hides from browse surfaces).
    */
   @Patch('bulk/archive')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk archive media items' })
   @ApiResponse({ status: 200, description: 'Items archived' })
   async bulkArchive(
     @Body() dto: BulkArchiveDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkArchive(dto, user.id, user.permissions);
   }
@@ -582,13 +580,13 @@ export class MediaController {
    * Bulk unarchive media items (clears archivedAt, restores to browse surfaces).
    */
   @Patch('bulk/unarchive')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk unarchive media items' })
   @ApiResponse({ status: 200, description: 'Items unarchived' })
   async bulkUnarchive(
     @Body() dto: BulkArchiveDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkUnarchive(dto, user.id, user.permissions);
   }
@@ -598,13 +596,13 @@ export class MediaController {
    * Bulk re-enqueue auto-tagging for a selection of media items.
    */
   @Post('bulk/tags/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk re-run auto-tagging on selected media items' })
   @ApiResponse({ status: 200, description: '{ queued: number }' })
   async bulkRerunTags(
     @Body() dto: BulkArchiveDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkRerunTags(dto, user.id, user.permissions);
   }
@@ -614,13 +612,13 @@ export class MediaController {
    * Bulk re-enqueue face detection for a selection of media items.
    */
   @Post('bulk/faces/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk re-run face detection on selected media items' })
   @ApiResponse({ status: 200, description: '{ queued: number }' })
   async bulkRerunFaces(
     @Body() dto: BulkArchiveDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkRerunFaces(dto, user.id, user.permissions);
   }
@@ -630,13 +628,13 @@ export class MediaController {
    * Bulk re-enqueue thumbnail regeneration for a selection of media items.
    */
   @Post('bulk/thumbnail/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bulk re-run thumbnail generation on selected media items' })
   @ApiResponse({ status: 200, description: '{ queued: number }' })
   async bulkRerunThumbnails(
     @Body() dto: BulkArchiveDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.bulkRerunThumbnails(dto, user.id, user.permissions);
   }
@@ -646,7 +644,7 @@ export class MediaController {
    * List archived media items for a circle (paginated).
    */
   @Get('archived')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List archived media items' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -654,7 +652,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Paginated archived items' })
   async listArchived(
     @Query() query: ListArchivedQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listArchived(query, user.id, user.permissions);
   }
@@ -664,7 +662,7 @@ export class MediaController {
    * List trashed (soft-deleted) media items for a circle (paginated).
    */
   @Get('trash')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List trashed media items' })
   @ApiQuery({ name: 'circleId', required: true, type: String, format: 'uuid' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -672,7 +670,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Paginated trashed items' })
   async listTrash(
     @Query() query: ListTrashQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listTrash(query, user.id, user.permissions);
   }
@@ -682,13 +680,13 @@ export class MediaController {
    * Restore items from the trash (clears deletedAt).
    */
   @Post('trash/restore')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Restore items from trash' })
   @ApiResponse({ status: 200, description: 'Items restored, with conflicts list' })
   async restoreFromTrash(
     @Body() dto: RestoreFromTrashDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.restoreFromTrash(dto, user.id, user.permissions);
   }
@@ -698,13 +696,13 @@ export class MediaController {
    * Permanently hard-delete trashed items (removes DB rows and blobs).
    */
   @Post('trash/delete-forever')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Permanently delete trashed items (hard delete)' })
   @ApiResponse({ status: 200, description: 'Items permanently deleted' })
   async deleteForever(
     @Body() dto: DeleteForeverDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.deleteForever(dto, user.id, user.permissions);
   }
@@ -719,14 +717,14 @@ export class MediaController {
    * immediately with the run id; poll GET /api/trash-empty-runs/:id for progress.
    */
   @Post('trash/empty')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Empty trash — start an async purge run (circle_admin only)' })
   @ApiResponse({ status: 200, description: 'Empty-trash run started' })
   @ApiResponse({ status: 409, description: 'A trash-empty run is already in progress' })
   async emptyTrash(
     @Body() dto: EmptyTrashDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     const run = await this.trashEmptyRunService.createRun(
       dto.circleId,
@@ -741,7 +739,7 @@ export class MediaController {
    * On-demand reverse geocoding for a coordinate pair.
    */
   @Get('geo/reverse')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Reverse geocode a coordinate pair on demand' })
   @ApiQuery({ name: 'lat', required: true, type: Number })
   @ApiQuery({ name: 'lng', required: true, type: Number })
@@ -757,7 +755,7 @@ export class MediaController {
    * Forward geocode — search places by name. Gated by GEO_FORWARD_SEARCH_ENABLED.
    */
   @Get('geo/search')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Search places by name (forward geocoding, requires GEO_FORWARD_SEARCH_ENABLED=true)' })
   @ApiQuery({ name: 'q', required: true, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -774,7 +772,7 @@ export class MediaController {
    * Returns dashboard aggregation: On This Day, recent, favorites, and review queue counts.
    */
   @Get('dashboard')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Get circle dashboard aggregation',
     description:
@@ -785,7 +783,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Dashboard data returned' })
   async getDashboard(
     @Query() query: DashboardQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getDashboard(query, user.id, user.permissions);
   }
@@ -799,7 +797,7 @@ export class MediaController {
    * shadowed by @Get(':id').
    */
   @Get('review-counts')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Get circle review-queue counts',
     description:
@@ -813,7 +811,7 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async getReviewCounts(
     @Query() query: ReviewCountsQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getReviewCounts(query, user.id, user.permissions);
   }
@@ -822,12 +820,12 @@ export class MediaController {
    * POST /api/media/albums
    */
   @Post('albums')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Create a new album' })
   @ApiResponse({ status: 201, description: 'Album created' })
   async createAlbum(
     @Body() dto: CreateAlbumDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.createAlbum(dto, user.id, user.permissions);
   }
@@ -836,7 +834,7 @@ export class MediaController {
    * GET /api/media/albums/:id
    */
   @Get('albums/:id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get album with item list' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Album returned' })
@@ -844,7 +842,7 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async getAlbum(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getAlbum(id, user.id, user.permissions);
   }
@@ -853,7 +851,7 @@ export class MediaController {
    * PATCH /api/media/albums/:id
    */
   @Patch('albums/:id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Rename / update album' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Album updated' })
@@ -862,7 +860,7 @@ export class MediaController {
   async updateAlbum(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAlbumDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.updateAlbum(id, dto, user.id, user.permissions);
   }
@@ -871,7 +869,7 @@ export class MediaController {
    * DELETE /api/media/albums/:id
    */
   @Delete('albums/:id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete album (does not delete MediaItems)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -880,7 +878,7 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async deleteAlbum(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.mediaService.deleteAlbum(id, user.id, user.permissions);
   }
@@ -889,7 +887,7 @@ export class MediaController {
    * POST /api/media/albums/:id/items
    */
   @Post('albums/:id/items')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Add MediaItem(s) to album' })
   @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'Album ID' })
   @ApiResponse({ status: 201, description: 'Items added to album' })
@@ -898,7 +896,7 @@ export class MediaController {
   async addAlbumItems(
     @Param('id', ParseUUIDPipe) albumId: string,
     @Body() dto: AddAlbumItemsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.addAlbumItems(albumId, dto, user.id, user.permissions);
   }
@@ -907,7 +905,7 @@ export class MediaController {
    * POST /api/media/albums/:id/items/by-filter
    */
   @Post('albums/:id/items/by-filter')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Add all media matching filters to an album' })
   @ApiParam({ name: 'id', description: 'Album ID', type: String })
   @ApiResponse({ status: 200, description: 'Number of items added' })
@@ -916,7 +914,7 @@ export class MediaController {
   async addAlbumItemsByFilter(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddAlbumItemsByFilterDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<{ added: number }> {
     return this.mediaService.addAlbumItemsByFilter(id, dto, user.id, user.permissions);
   }
@@ -925,7 +923,7 @@ export class MediaController {
    * DELETE /api/media/albums/:id/items/:itemId
    */
   @Delete('albums/:id/items/:itemId')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove MediaItem from album' })
   @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'Album ID' })
@@ -936,7 +934,7 @@ export class MediaController {
   async removeAlbumItem(
     @Param('id', ParseUUIDPipe) albumId: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.mediaService.removeAlbumItem(albumId, itemId, user.id, user.permissions);
   }
@@ -964,7 +962,7 @@ export class MediaController {
    *   does not supply a hash.
    */
   @Post()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: 'Register an uploaded StorageObject as a MediaItem',
     description:
@@ -992,8 +990,8 @@ export class MediaController {
   @ApiResponse({ status: 404, description: 'StorageObject not found' })
   async createMedia(
     @Body() dto: CreateMediaDto,
-    @CurrentUser() user: RequestUser,
-    @Res({ passthrough: true }) res: FastifyReply,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
+    @Res({ passthrough: true }) res: MediaReply,
   ) {
     const result = await this.mediaService.createMedia(dto, user.id, user.permissions);
     // Signal dedup vs. fresh create via HTTP status while keeping the body shape
@@ -1010,7 +1008,7 @@ export class MediaController {
    * GET /api/media
    */
   @Get()
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'List media items (paginated, filtered)',
     description: 'Returns the caller\'s active (non-deleted) media items. Admins with media:read_any see all.',
@@ -1043,7 +1041,7 @@ export class MediaController {
   @ApiResponse({ status: 200, description: 'Paginated media list' })
   async listMedia(
     @Query() query: MediaQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.listMedia(query, user.id, user.permissions);
   }
@@ -1052,7 +1050,7 @@ export class MediaController {
    * GET /api/media/:id
    */
   @Get(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get a single MediaItem' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'MediaItem returned' })
@@ -1060,7 +1058,7 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async getMedia(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.getMedia(id, user.id, user.permissions);
   }
@@ -1069,7 +1067,7 @@ export class MediaController {
    * PATCH /api/media/:id
    */
   @Patch(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: 'Update mutable fields on a MediaItem',
     description: 'Mutable: capturedAt, capturedAtOffset, metadata, description, favorite.',
@@ -1081,7 +1079,7 @@ export class MediaController {
   async updateMedia(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateMediaDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.updateMedia(id, dto, user.id, user.permissions);
   }
@@ -1090,7 +1088,7 @@ export class MediaController {
    * DELETE /api/media/:id  — soft-delete
    */
   @Delete(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_DELETE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Soft-delete a MediaItem',
@@ -1102,7 +1100,7 @@ export class MediaController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async deleteMedia(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.mediaService.deleteMedia(id, user.id, user.permissions);
   }
@@ -1111,7 +1109,7 @@ export class MediaController {
    * POST /api/media/:id/tags
    */
   @Post(':id/tags')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: 'Attach one or more tags to a MediaItem',
     description: 'Creates Tag records if they do not exist (idempotent on name). Returns the attached tags.',
@@ -1123,7 +1121,7 @@ export class MediaController {
   async attachTags(
     @Param('id', ParseUUIDPipe) mediaItemId: string,
     @Body() dto: AttachTagsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.mediaService.attachTags(mediaItemId, dto, user.id, user.permissions);
   }
@@ -1132,7 +1130,7 @@ export class MediaController {
    * DELETE /api/media/:id/tags/:tagId
    */
   @Delete(':id/tags/:tagId')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a tag from a MediaItem' })
   @ApiParam({ name: 'id', type: String, format: 'uuid', description: 'MediaItem ID' })
@@ -1143,7 +1141,7 @@ export class MediaController {
   async removeTag(
     @Param('id', ParseUUIDPipe) mediaItemId: string,
     @Param('tagId', ParseUUIDPipe) tagId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<void> {
     await this.mediaService.removeTag(mediaItemId, tagId, user.id, user.permissions);
   }

@@ -21,6 +21,7 @@ interface RuntimeUtils {
   join(values: readonly unknown[], separator?: string, prefix?: string, suffix?: string): MemoriahubSql;
   empty: MemoriahubSql;
   DbNull: unknown;
+  JsonNull: unknown;
 }
 
 let loaded: RuntimeUtils | undefined;
@@ -86,5 +87,10 @@ export const Prisma = Object.freeze({
   /** The value that writes SQL `NULL` into a nullable `jsonb` column (a bare `null` would be the JSON value `null`). */
   get DbNull(): unknown {
     return runtimeUtils().DbNull;
+  },
+
+  /** The value that writes the JSON value `null` into a `jsonb` column (distinct from SQL `NULL`). */
+  get JsonNull(): unknown {
+    return runtimeUtils().JsonNull;
   },
 });

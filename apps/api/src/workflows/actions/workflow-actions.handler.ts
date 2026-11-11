@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MediaService } from '../../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService, ResolveBurstDto } from '@marinoscar/memoriahub-api/burst';

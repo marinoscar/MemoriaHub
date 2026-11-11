@@ -6,67 +6,104 @@ import {
   BadRequestException,
   HttpException,
   Inject,
+  ServiceUnavailableException,
   Optional,
 } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { Prisma, BurstGroupStatus, DuplicateGroupStatus, LocationSuggestionStatus, MediaEnhancementStatus, MediaTagSource } from '@prisma/client';
-import { FastifyReply } from 'fastify';
-import { stringify as csvStringify } from 'csv-stringify';
-import { PrismaService } from '../prisma/prisma.service';
-import { PERMISSIONS } from '../common/constants/roles.constants';
 import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '@marinoscar/platform-api/storage';
-import { deleteStorageKeys } from '@marinoscar/platform-api/storage';
-import { deleteGrantsForResources } from '@marinoscar/platform-api/sharing';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { CreateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { UpdateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { MediaQueryDto } from '@marinoscar/memoriahub-api/media';
-import { AttachTagsDto } from '@marinoscar/memoriahub-api/media';
-import { CreateAlbumDto } from '@marinoscar/memoriahub-api/media';
-import { UpdateAlbumDto } from '@marinoscar/memoriahub-api/media';
-import { AlbumQueryDto } from '@marinoscar/memoriahub-api/media';
-import type { SharedWithMeQueryDto } from '@marinoscar/memoriahub-api/media';
-import { AddAlbumItemsDto } from '@marinoscar/memoriahub-api/media';
-import { AddAlbumItemsByFilterDto } from '@marinoscar/memoriahub-api/media';
-import { ExportQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsAggregateQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaLocationsExtentQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaThumbnailsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubRecordAction,
+  type MemoriahubRecordType,
+  type MemoriahubScopeRole,
+} from '../../ports/index.js';
+import { Prisma } from '../../core/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_CSV_STRINGIFIER, type MediaCsvStringifier, type MediaReply } from './media-reply.js';
 import {
-  RecordAccessService,
-  actionForRole,
-  isAccessRefusal,
-  type RecordAction,
-  type RecordType,
-} from '../platform/sharing/record-access';
-import { andWhere, buildMediaWhere, wherePeople } from '@marinoscar/memoriahub-api/media';
-import { GEO_LOCATION_PROVIDER, GeoLocationProvider } from '@marinoscar/memoriahub-api/location';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { fold } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from './geo/forward-geocode.service';
-import { BulkUpdateMediaDto } from '@marinoscar/memoriahub-api/media';
-import { BulkTagsDto } from '@marinoscar/memoriahub-api/media';
-import { BulkDeleteDto } from '@marinoscar/memoriahub-api/media';
-import { BulkArchiveDto } from '@marinoscar/memoriahub-api/media';
-import { ListArchivedQueryDto } from '@marinoscar/memoriahub-api/media';
-import { ListTrashQueryDto } from '@marinoscar/memoriahub-api/media';
-import { RestoreFromTrashDto } from '@marinoscar/memoriahub-api/media';
-import { DeleteForeverDto } from '@marinoscar/memoriahub-api/media';
-import { EmptyTrashDto } from '@marinoscar/memoriahub-api/media';
-import { GEO_CLEAR_COLUMNS } from '@marinoscar/memoriahub-api/location';
-import { applyLocation } from '@marinoscar/memoriahub-api/location';
-import { DashboardQueryDto } from '@marinoscar/memoriahub-api/media';
-import { ReviewCountsQueryDto } from '@marinoscar/memoriahub-api/media';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
-import { MediaThumbnailService, MediaTouchService, UploadNotificationService, assertMediaSyncSourceDevice } from '@marinoscar/memoriahub-api/media';
-import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
-import { metricNumber } from '../platform-extensions/telemetry/memoriahub-metrics.manifest';
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_WEBHOOK_EVENTS,
+  type MediaEnrichment,
+  type MediaForwardGeocoder,
+  type MediaGeoLocationProvider,
+  type MediaWebhookEvents,
+} from '../hooks/media-host-hooks.js';
+import { MEDIA_LOCATION_RESOLVER, type MediaLocationResolver } from '../location/media-location-resolver.js';
+import { applyLocation } from '../location/apply-location.js';
+import { GEO_CLEAR_COLUMNS } from '../location/geo-result.mapper.js';
+import { fold } from '../location/fold.js';
+import { andWhere, buildMediaWhere, wherePeople } from '../where/media-where.builder.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
+import { MediaThumbnailService } from '../thumbnails/media-thumbnail.service.js';
+import { MediaTouchService } from '../touch/media-touch.service.js';
+import { UploadNotificationService } from '../producers/upload-notification.service.js';
+import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source.js';
+import type { CreateMediaDto } from '../dto/create-media.dto.js';
+import type { UpdateMediaDto } from '../dto/update-media.dto.js';
+import type { MediaQueryDto } from '../dto/media-query.dto.js';
+import type { AttachTagsDto } from '../dto/attach-tags.dto.js';
+import type { CreateAlbumDto } from '../dto/create-album.dto.js';
+import type { UpdateAlbumDto } from '../dto/update-album.dto.js';
+import type { AlbumQueryDto } from '../dto/album-query.dto.js';
+import type { SharedWithMeQueryDto } from '../dto/shared-with-me-query.dto.js';
+import type { AddAlbumItemsDto } from '../dto/add-album-items.dto.js';
+import type { AddAlbumItemsByFilterDto } from '../dto/add-album-items-by-filter.dto.js';
+import type { ExportQueryDto } from '../dto/export-query.dto.js';
+import type { MediaLocationsQueryDto } from '../dto/media-locations-query.dto.js';
+import type { MediaLocationsAggregateQueryDto } from '../dto/media-locations-aggregate-query.dto.js';
+import type { MediaLocationsExtentQueryDto } from '../dto/media-locations-extent-query.dto.js';
+import type { MediaThumbnailsQueryDto } from '../dto/media-thumbnails-query.dto.js';
+import type { BulkUpdateMediaDto } from '../dto/bulk-update-media.dto.js';
+import type { BulkTagsDto } from '../dto/bulk-tags.dto.js';
+import type { BulkDeleteDto } from '../dto/bulk-delete.dto.js';
+import type { BulkArchiveDto } from '../dto/bulk-archive.dto.js';
+import type { ListArchivedQueryDto } from '../dto/list-archived-query.dto.js';
+import type { ListTrashQueryDto } from '../dto/list-trash-query.dto.js';
+import type { RestoreFromTrashDto } from '../dto/restore-from-trash.dto.js';
+import type { DeleteForeverDto } from '../dto/delete-forever.dto.js';
+import type { EmptyTrashDto } from '../dto/empty-trash.dto.js';
+import type { DashboardQueryDto } from '../dto/dashboard-query.dto.js';
+import type { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
+
+// Structural stand-ins for the generated client's types (the slice imports no generated client).
+type MediaItemWhereInput = Record<string, any>;
+type AlbumWhereInput = Record<string, any>;
+type MediaItemOrderByWithRelationInput = Record<string, any>;
+type MediaTagSource = 'manual' | 'ai' | 'system';
+type JsonValue = any;
+type InputJsonValue = any;
+type OwnerRole = MemoriahubScopeRole;
+type RecordType = MemoriahubRecordType;
+type RecordAction = MemoriahubRecordAction;
+
+/** `viewer` reads, `editor` writes; `admin` has no grant fallback (group-admin-only actions never fall back). */
+function actionForRole(minRole: OwnerRole): RecordAction | null {
+  if (minRole === 'viewer') return 'read';
+  if (minRole === 'editor') return 'write';
+  return null;
+}
+
+/** A refusal a grant may override: the owner check's 404 (non-member) or 403 (role too low). */
+function isAccessRefusal(err: unknown): boolean {
+  return err instanceof NotFoundException || err instanceof ForbiddenException;
+}
+
+/** A count as a non-negative finite number (a BigInt byte count included); 0 otherwise. */
+function metricNumber(value: unknown): number {
+  const n = typeof value === 'bigint' ? Number(value) : typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** A Prisma unique-constraint violation (`P2002`), seen structurally. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
+}
 
 /**
  * Key for the tiered-browsing group-cover override map (Location Grouping,
@@ -102,26 +139,23 @@ export class MediaService {
   private readonly logger = new Logger(MediaService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    @Inject(STORAGE_PROVIDER)
-    private readonly storageProvider: StorageProvider,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
     private readonly mediaMetadataSyncService: MediaMetadataSyncService,
-    private readonly circleMembershipService: OwnerAccessService,
-    @Inject(GEO_LOCATION_PROVIDER) private readonly geoProvider: GeoLocationProvider,
-    private readonly forwardGeocodeService: ForwardGeocodeService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly mediaEnrichmentService: MediaEnrichmentService,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
+    @Inject(MEDIA_GEO_LOCATION_PROVIDER) private readonly geoProvider: MediaGeoLocationProvider,
+    @Inject(MEDIA_FORWARD_GEOCODER) private readonly forwardGeocodeService: MediaForwardGeocoder,
+    @Inject(MEDIA_ENRICHMENT) private readonly mediaEnrichmentService: MediaEnrichment,
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly uploadNotificationService: UploadNotificationService,
     private readonly mediaTouch: MediaTouchService,
-    private readonly locationGroupResolver: LocationGroupResolverService,
-    // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
-    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
-    // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
-    // Grants on media items and albums (RETRO-I3, #573): consulted ONLY when the owner-scope
-    // check refused. Optional so hand-built unit tests keep today's member-only behaviour.
-    @Optional() private readonly recordAccess?: RecordAccessService,
+    @Inject(MEDIA_LOCATION_RESOLVER) private readonly locationGroupResolver: MediaLocationResolver,
+    // Webhooks (RETRO-H4, #603). Optional so a host without webhooks binds nothing.
+    @Optional() @Inject(MEDIA_WEBHOOK_EVENTS) private readonly webhookEvents?: MediaWebhookEvents,
+    // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. An unbound port is a no-op.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+    // CSV export writer (the host binds `csv-stringify`); the CSV format answers 503 without it.
+    @Optional() @Inject(MEDIA_CSV_STRINGIFIER) private readonly csv?: MediaCsvStringifier,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -144,12 +178,12 @@ export class MediaService {
     action?: RecordAction,
   ): Promise<boolean> {
     try {
-      await this.circleMembershipService.requireOwnerRole(userId, scopeId, perms, minRole);
+      await this.access.requireOwnerRole(userId, scopeId, perms, minRole);
       return false;
     } catch (err) {
       const wanted = action ?? actionForRole(minRole);
-      if (!this.recordAccess || !wanted || !isAccessRefusal(err)) throw err;
-      if (await this.recordAccess.grantAllows(userId, perms, wanted, type, id)) return true;
+      if (!wanted || !isAccessRefusal(err)) throw err;
+      if (await this.access.grantAllows(userId, perms, wanted, type, id)) return true;
       throw err;
     }
   }
@@ -168,11 +202,11 @@ export class MediaService {
     type: RecordType,
   ): Promise<Record<string, unknown> | undefined> {
     try {
-      await this.circleMembershipService.requireOwnerRole(userId, scopeId, perms, 'viewer');
+      await this.access.requireOwnerRole(userId, scopeId, perms, 'viewer');
       return undefined;
     } catch (err) {
-      if (!this.recordAccess || !isAccessRefusal(err)) throw err;
-      const shared = await this.recordAccess.sharedWhere(userId, perms, type);
+      if (!isAccessRefusal(err)) throw err;
+      const shared = await this.access.sharedWhere(userId, perms, type);
       if (!shared) throw err;
       return shared;
     }
@@ -243,7 +277,7 @@ export class MediaService {
       );
     }
 
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
+    await this.access.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
 
     // Android Media Sync attribution (#505): an android upload naming a
     // device must name an active device of the caller's.
@@ -289,7 +323,7 @@ export class MediaService {
           capturedAtOffset: dto.capturedAtOffset ?? null,
           description: dto.description ?? null,
           favorite: dto.favorite ?? false,
-          metadata: dto.metadata ? (dto.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
+          metadata: dto.metadata ? (dto.metadata as InputJsonValue) : Prisma.JsonNull,
           originalCreatedAt: dto.originalCreatedAt ?? null,
           sourcePath: dto.sourcePath ?? null,
           sourceDeviceId: dto.sourceDeviceId ?? null,
@@ -302,8 +336,7 @@ export class MediaService {
       // (circle_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL
       // fired because a concurrent request registered the same hash first.
       if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002' &&
+        isUniqueViolation(err) &&
         hash
       ) {
         this.logger.warn(
@@ -440,12 +473,18 @@ export class MediaService {
    * The storage key is different from the original (it is the redundant one),
    * so deleting it is safe.
    */
+  /** Deletes one blob from the ACTIVE store (a redundant upload is never on another provider). */
+  private async deleteBlob(storageKey: string): Promise<void> {
+    const { store } = await this.objectStore.active();
+    await store.delete(storageKey);
+  }
+
   private async cleanupRedundantStorageObject(
     storageObjectId: string,
     storageKey: string,
   ): Promise<void> {
     try {
-      await this.storageProvider.delete(storageKey);
+      await this.deleteBlob(storageKey);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(
@@ -536,14 +575,14 @@ export class MediaService {
         excludeArchived: true,
       }),
       effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : undefined,
-      grantWhere as Prisma.MediaItemWhereInput | undefined,
+      grantWhere as MediaItemWhereInput | undefined,
     );
 
     const dir = sortOrder;
     const orderBy = [
       { [sortBy]: dir },
       { id: dir },
-    ] as Prisma.MediaItemOrderByWithRelationInput[];
+    ] as MediaItemOrderByWithRelationInput[];
 
     // Keyset mode: page omitted → cursor-based pagination (no COUNT).
     if (query.page === undefined) {
@@ -633,9 +672,9 @@ export class MediaService {
       limit,
     } = query;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
-    const where: Prisma.MediaItemWhereInput = {
+    const where: MediaItemWhereInput = {
       circleId,
       // Must have coordinates; when a viewport bbox is supplied, merge the
       // range constraints with the existing not-null guards.
@@ -800,7 +839,7 @@ export class MediaService {
   > {
     const { circleId, precision, zoom, bbox, capturedAtFrom, capturedAtTo, type } = query;
 
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
@@ -808,7 +847,7 @@ export class MediaService {
     );
 
     // Build optional WHERE fragments; user input is always parameterized.
-    const fragments: Prisma.Sql[] = [
+    const fragments: ReturnType<typeof Prisma.sql>[] = [
       capturedAtFrom ? Prisma.sql`AND captured_at >= ${capturedAtFrom}` : Prisma.empty,
       capturedAtTo ? Prisma.sql`AND captured_at <= ${capturedAtTo}` : Prisma.empty,
       type ? Prisma.sql`AND type::text = ${type}` : Prisma.empty,
@@ -910,14 +949,14 @@ export class MediaService {
   ): Promise<{ minLat: number; minLng: number; maxLat: number; maxLng: number; count: number } | null> {
     const { circleId, capturedAtFrom, capturedAtTo, type } = query;
 
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
       'viewer',
     );
 
-    const where: Prisma.MediaItemWhereInput = {
+    const where: MediaItemWhereInput = {
       circleId,
       takenLat: { not: null },
       takenLng: { not: null },
@@ -976,7 +1015,7 @@ export class MediaService {
   ): Promise<Array<{ id: string; thumbnailUrl: string | null }>> {
     const { circleId, ids } = query;
 
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
@@ -1034,8 +1073,8 @@ export class MediaService {
     const [thumbnailUrl, downloadUrl] = await Promise.all([
       this.signThumb(item.metadata),
       storageObj
-        ? this.resolver
-            .getProviderFor(storageObj.storageProvider, storageObj.bucket)
+        ? this.objectStore
+            .forLocation(storageObj.storageProvider, storageObj.bucket)
             .then((p) => p.getSignedDownloadUrl(storageObj.storageKey))
         : Promise.resolve(null),
     ]);
@@ -1044,7 +1083,7 @@ export class MediaService {
 
     return {
       ...rest,
-      tags: mediaTags.map((mt) => mt.tag.name),
+      tags: mediaTags.map((mt: any) => mt.tag.name),
       thumbnailUrl,
       downloadUrl,
     };
@@ -1076,7 +1115,7 @@ export class MediaService {
         ...(dto.metadata !== undefined && {
           metadata:
             dto.metadata !== null
-              ? (dto.metadata as Prisma.InputJsonValue)
+              ? (dto.metadata as InputJsonValue)
               : Prisma.JsonNull,
         }),
         ...(dto.description !== undefined && { description: dto.description }),
@@ -1120,7 +1159,7 @@ export class MediaService {
    * List the caller's tags with the count of active (non-deleted) MediaItems attached.
    */
   async listTags(circleId: string, userId: string, userPermissions: string[]) {
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     const tags = await this.prisma.tag.findMany({
       where: { circleId },
@@ -1239,7 +1278,7 @@ export class MediaService {
    * Create a new album owned by the caller.
    */
   async createAlbum(dto: CreateAlbumDto, userId: string, userPermissions: string[]) {
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
+    await this.access.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
 
     const album = await this.prisma.album.create({
       data: {
@@ -1264,8 +1303,8 @@ export class MediaService {
 
     const grantWhere = await this.requireListScope(userId, userPermissions, circleId, 'album');
 
-    const where: Prisma.AlbumWhereInput = grantWhere
-      ? { AND: [{ circleId }, grantWhere as Prisma.AlbumWhereInput] }
+    const where: AlbumWhereInput = grantWhere
+      ? { AND: [{ circleId }, grantWhere as AlbumWhereInput] }
       : { circleId };
 
     const [albums, totalItems] = await Promise.all([
@@ -1300,7 +1339,7 @@ export class MediaService {
     // captured-at date range across its non-deleted / non-archived members.
     return Promise.all(
       albums.map(async (album) => {
-        const memberWhere: Prisma.MediaItemWhereInput = {
+        const memberWhere: MediaItemWhereInput = {
           albumItems: { some: { albumId: album.id } },
           deletedAt: null,
           archivedAt: null,
@@ -1346,9 +1385,9 @@ export class MediaService {
    */
   async listSharedMedia(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
     const { page, pageSize } = query;
-    const shared = this.recordAccess ? await this.recordAccess.sharedWhere(userId, userPermissions, 'media_item') : null;
+    const shared = await this.access.sharedWhere(userId, userPermissions, 'media_item');
     if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
-    const where: Prisma.MediaItemWhereInput = { AND: [shared as Prisma.MediaItemWhereInput, { deletedAt: null }] };
+    const where: MediaItemWhereInput = { AND: [shared as MediaItemWhereInput, { deletedAt: null }] };
     const [rows, totalItems] = await Promise.all([
       this.prisma.mediaItem.findMany({
         where,
@@ -1365,9 +1404,9 @@ export class MediaService {
   /** The albums shared with the caller through grants, newest first; same item shape as `listAlbums`. */
   async listSharedAlbums(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
     const { page, pageSize } = query;
-    const shared = this.recordAccess ? await this.recordAccess.sharedWhere(userId, userPermissions, 'album') : null;
+    const shared = await this.access.sharedWhere(userId, userPermissions, 'album');
     if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
-    const where = shared as Prisma.AlbumWhereInput;
+    const where = shared as AlbumWhereInput;
     const [albums, totalItems] = await Promise.all([
       this.prisma.album.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
       this.prisma.album.count({ where }),
@@ -1401,7 +1440,7 @@ export class MediaService {
     // a signed thumbnailUrl (matching listMedia / listLocations item shape).
     const { items: albumItems, ...albumFields } = album;
     const items = await this.mediaThumbnailService.attachThumbnailUrls(
-      albumItems.map((ai) => ai.mediaItem),
+      albumItems.map((ai: any) => ai.mediaItem),
     );
 
     const coverThumbnailUrl = await this.resolveAlbumCoverThumb(
@@ -1500,7 +1539,7 @@ export class MediaService {
     // has no foreign key to its record (RETRO-I6, #588).
     await this.prisma.$transaction(async (tx) => {
       await tx.album.delete({ where: { id } });
-      await deleteGrantsForResources(tx, 'album', [id]);
+      await this.access.deleteGrantsFor(tx, 'album', [id]);
     });
 
     await this.mediaTouch.touchMediaItems(memberIds);
@@ -1748,18 +1787,18 @@ export class MediaService {
     dto: ExportQueryDto,
     userId: string,
     userPermissions: string[],
-    res: FastifyReply,
+    res: MediaReply,
   ): Promise<void> {
     // ------------------------------------------------------------------
     // 1. Circle access check (MUST happen before first write)
     // ------------------------------------------------------------------
     const { circleId, type, from, to } = dto;
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // ------------------------------------------------------------------
     // 2. Build Prisma where clause
     // ------------------------------------------------------------------
-    const where: Prisma.MediaItemWhereInput = {
+    const where: MediaItemWhereInput = {
       circleId,
       deletedAt: null,
       ...(type && { type }),
@@ -1782,6 +1821,8 @@ export class MediaService {
     const contentType = isJson
       ? 'application/json'
       : 'text/csv; charset=utf-8';
+
+    if (!isJson && !this.csv) throw new ServiceUnavailableException('CSV export is not available');
 
     res.raw.writeHead(200, {
       'Content-Type': contentType,
@@ -1810,7 +1851,7 @@ export class MediaService {
       cameraMake: string | null;
       cameraModel: string | null;
       contentHash: string | null;
-      metadata: Prisma.JsonValue | null;
+      metadata: JsonValue | null;
       storageObject: {
         storageProvider: string;
         storageKey: string;
@@ -1906,10 +1947,7 @@ export class MediaService {
         'metadata',
       ] as const;
 
-      const stringifier = csvStringify({
-        header: true,
-        columns: CSV_COLUMNS as unknown as string[],
-      });
+      const stringifier = this.csv!.create(CSV_COLUMNS as unknown as string[]);
 
       // Pipe the stringifier output into the raw Node response stream.
       stringifier.pipe(res.raw);
@@ -2001,7 +2039,7 @@ export class MediaService {
   async getReviewCounts(query: ReviewCountsQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     return this.computeReviewCounts(circleId);
   }
@@ -2036,20 +2074,20 @@ export class MediaService {
       this.prisma.burstGroup.count({
         where: {
           circleId,
-          status: BurstGroupStatus.pending,
+          status: 'pending',
           mediaCount: { gte: burstMinGroupSize },
         },
       }),
       this.prisma.duplicateGroup.count({
         where: {
           circleId,
-          status: DuplicateGroupStatus.pending,
+          status: 'pending',
         },
       }),
       this.prisma.locationSuggestion.count({
         where: {
           circleId,
-          status: LocationSuggestionStatus.pending,
+          status: 'pending',
         },
       }),
       // "Pending review" for an enhancement means STAGED and awaiting a human
@@ -2059,7 +2097,7 @@ export class MediaService {
       this.prisma.mediaEnhancement.count({
         where: {
           circleId,
-          status: MediaEnhancementStatus.ready,
+          status: 'ready',
         },
       }),
     ]);
@@ -2075,7 +2113,7 @@ export class MediaService {
   async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
     const { circleId } = query;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, perms, 'viewer');
 
     const now = new Date();
     const month = now.getUTCMonth() + 1; // 1-12
@@ -2221,7 +2259,7 @@ export class MediaService {
     // Default add source is `manual` (HTTP callers) — unchanged behavior.
     // Workflow actions pass `system` so automated tagging never masquerades as
     // a user-applied tag.
-    const addSource = opts?.addSource ?? MediaTagSource.manual;
+    const addSource = opts?.addSource ?? 'manual';
 
     await this.prisma.$transaction(async (tx) => {
       if (dto.add && dto.add.length > 0) {
@@ -2248,7 +2286,7 @@ export class MediaService {
           where: {
             tagId: { in: tagIds },
             mediaItemId: { in: dto.ids },
-            source: MediaTagSource.ai,
+            source: 'ai',
           },
           data: { source: addSource },
         });
@@ -2264,7 +2302,7 @@ export class MediaService {
           select: { id: true },
         });
         if (tags.length > 0) {
-          const removeTagIds = tags.map((t) => t.id);
+          const removeTagIds = tags.map((t: any) => t.id);
           const result = await tx.mediaTag.deleteMany({
             where: {
               tagId: { in: removeTagIds },
@@ -2362,7 +2400,7 @@ export class MediaService {
   }
 
   async bulkUnarchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ unarchived: number }> {
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     const { count } = await this.prisma.mediaItem.updateMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: { not: null } },
@@ -2469,9 +2507,9 @@ export class MediaService {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
-    const where: Prisma.MediaItemWhereInput = {
+    const where: MediaItemWhereInput = {
       circleId,
       deletedAt: null,
       archivedAt: { not: null },
@@ -2505,9 +2543,9 @@ export class MediaService {
     const { circleId, page, pageSize } = query;
     const skip = (page - 1) * pageSize;
 
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
-    const where: Prisma.MediaItemWhereInput = {
+    const where: MediaItemWhereInput = {
       circleId,
       deletedAt: { not: null },
     };
@@ -2541,7 +2579,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ restored: number; conflicts: string[] }> {
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     let restored = 0;
     const conflicts: string[] = [];
@@ -2599,7 +2637,7 @@ export class MediaService {
       } else {
         ({ count } = await tx.mediaItem.deleteMany({ where: { id: { in: [...ids] } } }));
       }
-      await deleteGrantsForResources(tx, 'media_item', ids);
+      await this.access.deleteGrantsFor(tx, 'media_item', ids);
       return count;
     });
   }
@@ -2626,7 +2664,7 @@ export class MediaService {
 
         if (item.storageObject?.storageKey) {
           try {
-            await this.storageProvider.delete(item.storageObject.storageKey);
+            await this.deleteBlob(item.storageObject.storageKey);
           } catch (blobErr) {
             const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
             this.logger.warn(`purgeMediaItems: blob delete failed for key=${item.storageObject.storageKey}: ${msg}`);
@@ -2747,8 +2785,8 @@ export class MediaService {
 
     for (const group of groups.values()) {
       try {
-        const provider = await this.resolver.getProviderFor(group.provider, group.bucket);
-        const result = await deleteStorageKeys(provider, group.keys);
+        const store = await this.objectStore.forLocation(group.provider, group.bucket);
+        const result = await store.deleteMany(group.keys);
         if (result.failed.length > 0) {
           this.logger.warn(
             `purgeMediaItemsBatched: ${result.failed.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
@@ -2780,7 +2818,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ deleted: number }> {
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
     const items = await this.prisma.mediaItem.findMany({
       where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: { not: null } },
@@ -2797,7 +2835,7 @@ export class MediaService {
     userId: string,
     perms: string[],
   ): Promise<{ deleted: number }> {
-    await this.circleMembershipService.requireOwnerRole(userId, dto.circleId, perms, 'admin');
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'admin');
 
     const items = await this.prisma.mediaItem.findMany({
       where: { circleId: dto.circleId, deletedAt: { not: null } },
@@ -2828,13 +2866,13 @@ export class MediaService {
     const uniqueIds = [...new Set(ids)];
 
     try {
-      await this.circleMembershipService.requireOwnerRole(userId, circleId, perms, role);
+      await this.access.requireOwnerRole(userId, circleId, perms, role);
     } catch (err) {
       // RETRO-I3: a caller refused on the owner scope may still hold grants on EVERY
       // id. ONE AccessPolicy.decideMany for the whole batch, never one call per id.
       const action = actionForRole(role);
-      if (!this.recordAccess || !action || !isAccessRefusal(err)) throw err;
-      if (!(await this.recordAccess.grantsAllowAll(userId, perms, action, 'media_item', uniqueIds))) throw err;
+      if (!action || !isAccessRefusal(err)) throw err;
+      if (!(await this.access.grantsAllowAll(userId, perms, action, 'media_item', uniqueIds))) throw err;
     }
 
     const found = await this.prisma.mediaItem.findMany({
@@ -2898,7 +2936,7 @@ export class MediaService {
     albumId: string,
     coverMediaItemId: string | null,
   ): Promise<string | null> {
-    const memberWhere: Prisma.MediaItemWhereInput = {
+    const memberWhere: MediaItemWhereInput = {
       albumItems: { some: { albumId } },
       deletedAt: null,
       archivedAt: null,
@@ -2929,7 +2967,7 @@ export class MediaService {
    * `signThumbsBatched`/`attachThumbnailUrls` to avoid the N+1 pattern.
    */
   private async signThumb(
-    metadata: Prisma.JsonValue | null,
+    metadata: JsonValue | null,
   ): Promise<string | null> {
     return this.mediaThumbnailService.signThumb(metadata);
   }
@@ -2953,7 +2991,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
   ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // Fetch all geotagged items with the fields we need (no pagination — we aggregate)
     const items = await this.prisma.mediaItem.findMany({
@@ -2977,7 +3015,7 @@ export class MediaService {
     // Group by most specific geo tier
     const placeMap = new Map<
       string,
-      { count: number; coverMetadata: Prisma.JsonValue | null }
+      { count: number; coverMetadata: JsonValue | null }
     >();
 
     for (const item of items) {
@@ -3021,7 +3059,7 @@ export class MediaService {
     userId: string,
     userPermissions: string[],
   ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
-    await this.circleMembershipService.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
 
     // Fetch tags with count and one cover media item's metadata
     const tags = await this.prisma.tag.findMany({
@@ -3220,7 +3258,7 @@ export class MediaService {
           };
         }
 
-        const where: Prisma.MediaItemWhereInput = {
+        const where: MediaItemWhereInput = {
           circleId,
           deletedAt: null,
           archivedAt: null,
@@ -3283,8 +3321,8 @@ export class MediaService {
   private async fetchGroupCoverOverrides(
     level: 'countries' | 'regions' | 'cities',
     entries: Array<{ name: string; countryCode: string | null }>,
-  ): Promise<Map<string, Prisma.JsonValue | null>> {
-    const overrides = new Map<string, Prisma.JsonValue | null>();
+  ): Promise<Map<string, JsonValue | null>> {
+    const overrides = new Map<string, JsonValue | null>();
     if (entries.length === 0) return overrides;
 
     const groupLevel =
@@ -3307,7 +3345,7 @@ export class MediaService {
     // Country-SCOPED groups, indexed by normalized name alone. Needed because
     // the regions and cities tiers aggregate ACROSS countries and therefore
     // carry no countryCode of their own (see the fallback below).
-    const scopedByName = new Map<string, Array<Prisma.JsonValue | null>>();
+    const scopedByName = new Map<string, Array<JsonValue | null>>();
 
     for (const group of groups) {
       // A soft-deleted cover is treated as no cover: the SetNull FK only fires
@@ -3383,7 +3421,7 @@ export class MediaService {
     regions: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
     cities: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
   }> {
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
@@ -3438,7 +3476,7 @@ export class MediaService {
       );
     }
 
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
@@ -3522,7 +3560,7 @@ export class MediaService {
       }>;
     }>
   > {
-    await this.circleMembershipService.requireOwnerRole(
+    await this.access.requireOwnerRole(
       userId,
       circleId,
       userPermissions,
