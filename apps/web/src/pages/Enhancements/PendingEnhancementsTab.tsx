@@ -282,6 +282,7 @@ export function EnhancementCard({
               {item.status === 'ready' && (
                 <Chip size="small" color="success" label="Ready to review" />
               )}
+              {item.status === 'cancelled' && <Chip size="small" label="Cancelled" />}
               {item.status === 'failed' && (
                 <Chip
                   size="small"

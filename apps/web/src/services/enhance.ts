@@ -1,4 +1,8 @@
-import type { ApplyEnhancement, EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
+import type {
+  ApplyEnhancement,
+  EnhanceParams,
+  EnhancementStatus as ContractEnhancementStatus,
+} from '@marinoscar/memoriahub-contract/enhancement';
 import { api, ApiError } from './api';
 import type { BaseRun } from '../types/runs';
 import type { BulkEnhanceSkipped } from '@marinoscar/memoriahub-web/media/headless';
@@ -25,14 +29,9 @@ export type EnhancePreset = NonNullable<EnhanceParams['preset']>;
 /** Per-run override of the `pictureEnhancement.defaultQuality` system setting. */
 export type EnhanceQuality = NonNullable<EnhanceParams['quality']>;
 
-export type EnhancementStatus =
-  | 'pending'
-  | 'processing'
-  | 'ready'
-  | 'failed'
-  | 'applied'
-  | 'discarded'
-  | 'expired';
+// The concrete status vocabulary is the contract's (includes `cancelled`, a row
+// withdrawn before any render ran, e.g. by a batch cancel).
+export type EnhancementStatus = ContractEnhancementStatus;
 
 export type EnhanceAdjustments = NonNullable<EnhanceParams['adjustments']>;
 

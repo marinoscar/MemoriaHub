@@ -20,7 +20,9 @@ import type {
 // window before giving up.
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLLS = 120; // 120 * 2s = 4 min ceiling
-const TERMINAL_STATUSES: EnhancementStatus[] = ['ready', 'failed'];
+// `cancelled` is terminal too: a withdrawn row never advances, so polling it
+// would otherwise run to the timeout and report a bogus "timed out" error.
+const TERMINAL_STATUSES: EnhancementStatus[] = ['ready', 'failed', 'cancelled'];
 
 export type EnhanceUiStatus = EnhancementStatus | 'idle';
 
@@ -74,6 +76,8 @@ export function useMediaEnhance(mediaId: string) {
               stopPolling();
               if (d.status === 'failed') {
                 setError(d.lastError ?? 'Enhancement failed');
+              } else if (d.status === 'cancelled') {
+                setError('This enhancement was cancelled before it ran.');
               }
             } else if (pollCountRef.current >= MAX_POLLS) {
               stopPolling();
