@@ -283,7 +283,7 @@ runPlatformConformance({
     //   - ai-orchestration-boundary: no orchestration library anywhere (`allowedRoots: {}`).
     aiNoSdkLeak: {
       apiTrees: [
-        { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 500 },
+        { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 400 },
         { name: 'apps/cli', root: join(REPO_ROOT, 'apps', 'cli', 'src'), minFiles: 50 },
       ],
       webTrees: [{ name: 'apps/web', root: join(REPO_ROOT, 'apps', 'web', 'src'), minFiles: 200 }],

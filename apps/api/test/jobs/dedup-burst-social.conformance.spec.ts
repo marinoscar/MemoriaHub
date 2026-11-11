@@ -296,7 +296,7 @@ describe('duplicate_confidence_backfill', () => {
 // ---------------------------------------------------------------------------
 
 const buildBurst = () =>
-  new BurstDetectionHandler(registry, subjectLookups() as never, {
+  new BurstDetectionHandler(registry as never, subjectLookups() as never, {
     processMediaItem: async (context: { mediaItemId: string }) => {
       world.writes.set(`burst:${context.mediaItemId}`, 'grouped');
     },

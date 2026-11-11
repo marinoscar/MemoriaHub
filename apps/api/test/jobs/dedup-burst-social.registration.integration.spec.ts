@@ -40,12 +40,15 @@ describe('dedup/burst/social job handlers on the booted app (RETRO-C5)', () => {
     await closeTestApp(context);
   });
 
-  // The dedup handlers moved into `@marinoscar/memoriahub-api/dedup` (RETRO-J10): they register through the
+  // The dedup and burst handlers moved into `@marinoscar/memoriahub-api/dedup` and `/burst` (RETRO-J10): they register through the
   // jobs port, so the platform registry holds the adapted handler, not the class instance.
-  const PORT_BOUND = new Set(['duplicate_detection', 'duplicate_detection_batch', 'duplicate_confidence_backfill']);
+  const PORT_BOUND = new Set(['duplicate_detection', 'duplicate_detection_batch', 'duplicate_confidence_backfill', 'burst_detection']);
   it.each(NATIVE)('%s dispatches to the native handler class', (type, HandlerClass) => {
     if (PORT_BOUND.has(type)) {
       expect(registry.get(type)?.type).toBe(type);
+      if (type === 'burst_detection') {
+        expect(registry.get(type)?.profile).toEqual({ maxRuntimeMs: 300_000, maxAttempts: 3 });
+      }
     } else {
       expect(registry.get(type)).toBeInstanceOf(HandlerClass);
     }
