@@ -13,6 +13,10 @@ import { SOCIAL_MEDIA_POST_DETECTION, SocialMediaModule } from '../src/social-me
 import { describeSocialMediaSliceConformance } from '../src/social-media/testing/index.js';
 import { createFakeMemoriahubPorts, fakeMemoriahubBindings } from '../src/testing/index.js';
 
+// `SocialMediaModule.forRoot` is cached (one module per host), so the hook binding must not close over
+// per-run state: it appends to whichever list the current run installed.
+let postDetection: string[] = [];
+
 async function socialMediaOverFakes() {
   const fakes = createFakeMemoriahubPorts();
   let enabled = true;
@@ -33,7 +37,7 @@ async function socialMediaOverFakes() {
       return {};
     },
   };
-  const postDetection: string[] = [];
+  postDetection = [];
 
   const moduleRef = await Test.createTestingModule({
     imports: [

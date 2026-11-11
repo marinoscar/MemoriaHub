@@ -34,15 +34,12 @@ export const SOCIAL_STATUS = {
   failed: 'failed',
 } as const;
 
-/** One value of {@link SOCIAL_STATUS}. */
-type SocialStatusValue = (typeof SOCIAL_STATUS)[keyof typeof SOCIAL_STATUS];
-
 /**
  * A `media_social_status_type` literal.
  *
  * @stability experimental
  */
-export type SocialStatus = SocialStatusValue;
+export type SocialStatus = (typeof SOCIAL_STATUS)[keyof typeof SOCIAL_STATUS];
 
 /**
  * The `media_tag_source` literals the slice writes.

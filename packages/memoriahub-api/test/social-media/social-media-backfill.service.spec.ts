@@ -6,12 +6,20 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { JobReason, MediaSocialStatusType, MediaType } from '@prisma/client';
-import { SocialMediaBackfillService } from './social-media-backfill.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
+import { SocialMediaBackfillService } from '../../src/social-media/index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+const MediaType = { video: 'video', photo: 'photo' } as const;
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MediaSocialStatusType = {
+  not_processed: 'not_processed',
+  pending: 'pending',
+  processing: 'processing',
+  processed: 'processed',
+  failed: 'failed',
+} as const;
 
 /** The scope ids a sweep lists (RETRO-K2: no `circles` table to mock). */
 const scopeFindMany = jest.fn();
@@ -23,7 +31,7 @@ describe('SocialMediaBackfillService', () => {
 
   beforeEach(async () => {
     scopeFindMany.mockReset().mockResolvedValue([]);
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }) };
 
     (mockPrisma.mediaSocialStatus.upsert as jest.Mock).mockResolvedValue({});
@@ -31,14 +39,14 @@ describe('SocialMediaBackfillService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SocialMediaBackfillService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
         // The sweep helper (groups through the slice, personal libraries through the store) is
         // stood in for by `scopeFindMany`, which each case fills with the scope ids.
         {
-          provide: OwnerScopeSweepService,
+          provide: MEMORIAHUB_ACCESS,
           useValue: { allScopeIds: async () => ((await scopeFindMany({})) as { id: string }[]).map((c) => c.id) },
         },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
       ],
     }).compile();
 

@@ -48,6 +48,13 @@ export class SocialMediaMediaController {
     private readonly socialMediaBackfillService: SocialMediaBackfillService,
   ) {}
 
+  /**
+   * Re-runs social-media detection for one media item (priority 0).
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the queued job.
+   */
   @Post(':id/social-media/rerun')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run social-media detection for a media item' })
@@ -71,6 +78,13 @@ export class SocialMediaMediaController {
     return { data: result };
   }
 
+  /**
+   * Reads one media item's detection status.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the status.
+   */
   @Get(':id/social-media/status')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get social-media detection status for a media item' })

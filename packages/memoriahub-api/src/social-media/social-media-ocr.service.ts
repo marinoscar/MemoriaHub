@@ -81,6 +81,7 @@ export class SocialMediaOcrService implements OnModuleDestroy {
     private readonly frameExtractor: VideoFrameExtractionService,
   ) {}
 
+  /** Terminates the OCR engine when the module shuts down. */
   async onModuleDestroy(): Promise<void> {
     if (this.engine) {
       await this.engine.terminate();

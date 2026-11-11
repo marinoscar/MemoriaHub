@@ -16,7 +16,7 @@
 import {
   SocialMediaDetectorService,
   VideoDetectionInput,
-} from './social-media-detector.service';
+} from '../../src/social-media/index.js';
 
 describe('SocialMediaDetectorService', () => {
   let detector: SocialMediaDetectorService;

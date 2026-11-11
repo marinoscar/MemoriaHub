@@ -44,11 +44,12 @@
  * select includes it for the pre-flight caps and the disk guard.
  */
 
-// Mock ffprobe.util so the legacy re-probe branch never shells out to a real
+// Mock the compute package's ffprobe helpers so the legacy re-probe branch never shells out to a real
 // ffprobe binary — only used by the OOM-fix "downloadVideo() memoization"
 // tests below, which deliberately omit the persisted `video-probe` block to
 // force that branch.
-jest.mock('../media-processing/processors/ffprobe.util', () => ({
+jest.mock('@marinoscar/memoriahub-compute/metadata', () => ({
+  ...jest.requireActual('@marinoscar/memoriahub-compute/metadata'),
   probeVideoFile: jest.fn().mockResolvedValue({}),
   extractContainerMetadata: jest.fn().mockReturnValue({
     formatTags: {},
@@ -78,34 +79,35 @@ jest.mock('fs', () => {
   };
 });
 
-import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { promises as fsPromises } from 'fs';
-import type { Job } from '@marinoscar/platform-api/jobs';
-import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
-import {
-  JobReason,
-  MediaSocialStatusType,
-  MediaTagSource,
-  MediaType,
-} from '@prisma/client';
 import {
   socialMediaDetectionResultSchema,
   type SocialMediaDetectionResult,
 } from '@marinoscar/memoriahub-compute/dto';
-import { SocialMediaDetectionHandler, type SocialMediaJobContext } from './social-media-detection.handler';
-import { SocialMediaDetectorService, type VideoDetectionInput } from './social-media-detector.service';
-import { SocialMediaOcrService } from './social-media-ocr.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
 import {
-  createMockPrismaService,
-  MockPrismaService,
-  mockPrismaTransaction,
-} from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { circleJob, mediaItemJob } from '../../test/helpers/platform-job';
+  SocialMediaDetectionHandler,
+  SocialMediaDetectorService,
+  type SocialMediaJobContext,
+  type VideoDetectionInput,
+} from '../../src/social-media/index.js';
+import type { MemoriahubJob } from '../../src/ports/index.js';
+import { circleJob, mediaItemJob } from '../helpers/job-fixtures.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+
+type Job = MemoriahubJob;
+
+const MediaType = { video: 'video', photo: 'photo' } as const;
+const JobReason = { upload: 'upload', rerun: 'rerun', backfill: 'backfill' } as const;
+const MediaTagSource = { manual: 'manual', ai: 'ai', system: 'system' } as const;
+const MediaSocialStatusType = {
+  not_processed: 'not_processed',
+  pending: 'pending',
+  processing: 'processing',
+  processed: 'processed',
+  failed: 'failed',
+} as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,7 +115,7 @@ import { circleJob, mediaItemJob } from '../../test/helpers/platform-job';
 
 /** A platform job about media-1 (circle-1), as the enqueue facade writes it. */
 function makeJob(overrides: Partial<Job> = {}): Job {
-  return mediaItemJob('social_media_detection', 'media-1', 'circle-1', { priority: 10, attempts: 1, ...overrides });
+  return mediaItemJob('social_media_detection', 'media-1', 'circle-1', { attempts: 1, ...overrides });
 }
 
 /** What the persist half receives: the job id, its media item and the enqueue reason. */
@@ -185,19 +187,19 @@ describe('SocialMediaDetectionHandler', () => {
   let mockPrisma: MockPrismaService;
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockOcr: { recognizeVideo: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockResolver: { forLocation: jest.Mock };
   let mockMediaEnrichment: { enqueueVideoPostDetectionEnrichment: jest.Mock };
-  let mockRegistry: { register: jest.Mock };
+  let mockRegistry: { registerHandler: jest.Mock };
 
-  beforeEach(async () => {
-    mockRegistry = { register: jest.fn() };
+  beforeEach(() => {
+    mockRegistry = { registerHandler: jest.fn() };
     jest.clearAllMocks();
     delete process.env['SOCIAL_MEDIA_DETECTION_ENABLED'];
 
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(makeSettings()) };
     mockOcr = { recognizeVideo: jest.fn() };
-    mockResolver = { getProviderFor: jest.fn() };
+    mockResolver = { forLocation: jest.fn() };
     mockMediaEnrichment = { enqueueVideoPostDetectionEnrichment: jest.fn().mockResolvedValue(undefined) };
 
     mockPrisma.mediaSocialStatus.upsert.mockResolvedValue({} as any);
@@ -208,32 +210,18 @@ describe('SocialMediaDetectionHandler', () => {
     mockPrisma.mediaTag.upsert.mockResolvedValue({} as any);
     mockPrisma.mediaTag.updateMany.mockResolvedValue({ count: 0 } as any);
     mockPrisma.mediaTag.deleteMany.mockResolvedValue({ count: 0 } as any);
-    mockPrismaTransaction();
-    // mockPrismaTransaction() sets $transaction on the *shared* prismaMock
-    // singleton (test/mocks/prisma.mock.ts), not our per-test mockDeep instance.
-    // Wire the same passthrough on our local mock explicitly.
-    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
-      if (typeof arg === 'function') return arg(mockPrisma);
-      if (Array.isArray(arg)) return Promise.all(arg);
-      return arg;
-    });
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SocialMediaDetectionHandler,
-        { provide: JobHandlerRegistry, useValue: mockRegistry },
-        SocialMediaDetectorService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
-        { provide: SocialMediaOcrService, useValue: mockOcr },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
-      ],
-    }).compile();
-
-    await module.init();
-
-    handler = module.get<SocialMediaDetectionHandler>(SocialMediaDetectionHandler);
+    handler = new SocialMediaDetectionHandler(
+      mockRegistry as never,
+      mockPrisma as never,
+      // The settings document the cases seed (`getSettings`), answered one namespace at a time.
+      settingsPortFrom(() => mockSystemSettings.getSettings()) as never,
+      new SocialMediaDetectorService(),
+      mockOcr as never,
+      mockResolver as never,
+      mockMediaEnrichment as never,
+    );
+    handler.onModuleInit();
   });
 
   // -------------------------------------------------------------------------
@@ -243,7 +231,7 @@ describe('SocialMediaDetectionHandler', () => {
     expect(handler.type).toBe('social_media_detection');
     expect(handler.label).toBe('Social media detection');
     expect(handler.profile).toEqual({ maxRuntimeMs: 1_200_000, maxAttempts: 3 });
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('throws for a job that is not about a media item', async () => {
@@ -410,7 +398,7 @@ describe('SocialMediaDetectionHandler', () => {
     it('does not download the video (persisted probe already had formatTags)', async () => {
       await handler.process(makeJob());
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
     });
   });
 
@@ -490,7 +478,7 @@ describe('SocialMediaDetectionHandler', () => {
     }
 
     beforeEach(() => {
-      mockResolver.getProviderFor.mockResolvedValue({
+      mockResolver.forLocation.mockResolvedValue({
         download: jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes'))),
       });
     });
@@ -736,7 +724,7 @@ describe('SocialMediaDetectionHandler', () => {
 
     beforeEach(() => {
       mockDownload = jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes')));
-      mockResolver.getProviderFor.mockResolvedValue({ download: mockDownload });
+      mockResolver.forLocation.mockResolvedValue({ download: mockDownload });
       mockOcr.recognizeVideo.mockResolvedValue({ texts: [], available: true });
       mockPrisma.mediaItem.findUnique.mockResolvedValue(
         makeLegacyMediaItemNeedingReprobeAndOcr() as any,
@@ -747,9 +735,9 @@ describe('SocialMediaDetectionHandler', () => {
       await handler.process(makeJob());
 
       // downloadVideo() is invoked from both the re-probe branch and the OCR
-      // branch, but the actual download (getProviderFor + provider.download)
+      // branch, but the actual download (forLocation + provider.download)
       // must only happen once — the second call reuses the memoized path.
-      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      expect(mockResolver.forLocation).toHaveBeenCalledTimes(1);
       expect(mockDownload).toHaveBeenCalledTimes(1);
       expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
     });
@@ -777,7 +765,7 @@ describe('SocialMediaDetectionHandler', () => {
 
     it('still cleans up the memoized temp file exactly once when the legacy re-probe itself throws', async () => {
       const ffprobeUtil = jest.requireMock(
-        '../media-processing/processors/ffprobe.util',
+        '@marinoscar/memoriahub-compute/metadata',
       ) as { probeVideoFile: jest.Mock };
       ffprobeUtil.probeVideoFile.mockRejectedValueOnce(new Error('ffprobe exploded'));
 
@@ -883,7 +871,7 @@ describe('SocialMediaDetectionHandler', () => {
       });
 
       // Not a single byte downloaded; no OCR; no tags applied.
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
       expect(mockPrisma.tag.upsert).not.toHaveBeenCalled();
 
@@ -914,7 +902,7 @@ describe('SocialMediaDetectionHandler', () => {
       await handler.process(makeJob());
 
       expect(findSkipUpsert('skip-duration-cap')).toBeDefined();
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
     });
 
     it('respects a custom socialMedia.maxDurationSeconds setting', async () => {
@@ -952,7 +940,7 @@ describe('SocialMediaDetectionHandler', () => {
       const skipCall = findSkipUpsert('skip-size-cap');
       expect(skipCall).toBeDefined();
       expect(skipCall![0].update.isSocialMedia).toBe(false);
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'media-1' }),
         JobReason.rerun,
@@ -1013,7 +1001,7 @@ describe('SocialMediaDetectionHandler', () => {
       await handler.process(makeJob());
 
       expect(findSkipUpsert('skip-size-cap')).toBeDefined();
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
     });
 
     it('a previously-flagged item skipped by a cap still gets its system tags stripped and source cleared', async () => {
@@ -1073,7 +1061,7 @@ describe('SocialMediaDetectionHandler', () => {
 
     beforeEach(() => {
       mockDownload = jest.fn().mockResolvedValue(Readable.from(Buffer.from('fake-video-bytes')));
-      mockResolver.getProviderFor.mockResolvedValue({ download: mockDownload });
+      mockResolver.forLocation.mockResolvedValue({ download: mockDownload });
       mockOcr.recognizeVideo.mockResolvedValue({ texts: [], available: true });
     });
 
@@ -1082,7 +1070,7 @@ describe('SocialMediaDetectionHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockDownload).not.toHaveBeenCalled();
     });
 
@@ -1119,7 +1107,7 @@ describe('SocialMediaDetectionHandler', () => {
       // Detected via the filename rule without downloading a byte.
       const tagNames = mockPrisma.tag.upsert.mock.calls.map((c: any[]) => c[0].create.name);
       expect(tagNames).toEqual(['Social Media', 'TikTok']);
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockOcr.recognizeVideo).not.toHaveBeenCalled();
       expect(mockMediaEnrichment.enqueueVideoPostDetectionEnrichment).not.toHaveBeenCalled();
     });
@@ -1131,7 +1119,7 @@ describe('SocialMediaDetectionHandler', () => {
 
       await handler.process(makeJob());
 
-      expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+      expect(mockResolver.forLocation).toHaveBeenCalledTimes(1);
       expect(mockDownload).toHaveBeenCalledTimes(1);
       expect(mockOcr.recognizeVideo).toHaveBeenCalledTimes(1);
     });

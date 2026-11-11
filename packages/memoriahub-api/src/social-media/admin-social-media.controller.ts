@@ -51,6 +51,11 @@ export class AdminSocialMediaController {
     private readonly socialMediaOcr: SocialMediaOcrService,
   ) {}
 
+  /**
+   * Backfills detection across every circle (Admin).
+   *
+   * @param dto - the optional capture-date range and the force flag.
+   */
   @Post('backfill')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
@@ -72,6 +77,7 @@ export class AdminSocialMediaController {
     return { data: result };
   }
 
+  /** Reads the OCR availability and the effective `socialMedia` configuration (Admin). */
   @Get('status')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
   @ApiOperation({

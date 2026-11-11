@@ -465,6 +465,13 @@ export class SocialMediaDetectionHandler implements MemoriahubJobHandler, OnModu
   // NOT part of what a node computes.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: Tier-1 detection over the built input, then the Tier-2 OCR fallback when Tier 1 is
+   * inconclusive but suspicious. Returns the node-result DTO a worker node submits for the same job.
+   *
+   * @param input - the video's detection input.
+   * @param opts - the thresholds, the OCR knobs and the memoized video download.
+   */
   async computeSocialMedia(
     input: VideoDetectionInput,
     opts: {
@@ -539,6 +546,15 @@ export class SocialMediaDetectionHandler implements MemoriahubJobHandler, OnModu
   // logic.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The persist half, shared by the in-process path and a node's submitted result: applies the tags, the
+   * status and the source column for a DETECTED verdict, or strips stale tags and fans out the withheld
+   * video enrichment for a CLEAN one.
+   *
+   * @param job - the job's id, media item and enqueue reason.
+   * @param result - the verdict.
+   * @param preloadedMediaItem - the already-loaded item, to skip a re-read.
+   */
   async persistSocialMedia(
     job: SocialMediaJobContext,
     result: SocialMediaDetectionResult,
