@@ -146,6 +146,81 @@ jobs:
       # exactly-matching name, and there is no `pretest:ci`, so nothing to skip.
       - run: npm run test:ci --workspace=api -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # The real-Postgres tier (RETRO-J, #555). The *.db.spec.ts files skip when no
+  # database listens, so the API shards above never ran them. This job gives them
+  # one: pgvector Postgres, the migrations and the seed, then every *.db.spec.ts
+  # in one process (some are destructive and share the database, so never in
+  # parallel).
+  #
+  # The suites connect as the bootstrap superuser, exactly as apps/api/.env.test
+  # declares: their seeding helpers (test/helpers/library.ts and the specs that
+  # insert rows directly) write `groups`, `media_items` and the like without
+  # setting app.org_id, and as an ordinary role the forced row-level security
+  # policies refuse those inserts. The suites that assert tenant isolation
+  # (db-backup-rls, storage-objects-rls, ownership, owner-access) create and
+  # SET ROLE to their own ordinary, NOBYPASSRLS roles, so the policies are still
+  # exercised. The credentials are throwaway values for a service container that
+  # lives for this job only.
+  api-db-test:
+    name: API DB tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-throwaway
+          POSTGRES_DB: memoriahub_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ci-throwaway
+      POSTGRES_DB: memoriahub_test
+      POSTGRES_SSL: 'false'
+      DATABASE_URL: postgresql://postgres:ci-throwaway@localhost:5432/memoriahub_test
+      JWT_SECRET: ci-only-jwt-secret-minimum-32-characters-long
+      SECRETS_ENCRYPTION_KEY: Y2ktb25seS10aHJvd2F3YXkta2V5LTMyLWJ5dGVzISE=
+      INITIAL_ADMIN_EMAIL: admin@example.test
+      OTEL_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # onnxruntime-node's install script downloads from nuget; nothing in the
+      # DB tier loads it, and that download is a known flake.
+      - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - run: npm run build --workspace=@marinoscar/memoriahub-compute
+      - run: npm run build --workspace=@marinoscar/memoriahub-contract
+      - run: npm run build --workspace=@marinoscar/memoriahub-api
+
+      - run: npx prisma generate
+        working-directory: apps/api
+
+      - run: npm run build -w @marinoscar/memoriahub-db
+      - run: npm run db:compose:check --workspace=api
+      - run: npm run prisma:migrate --workspace=api
+      - run: npm run prisma:seed --workspace=api
+      - run: npm run db:check:database --workspace=api
+
+      - run: npm run test:db --workspace=api
+
   web-test:
     name: Web Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest

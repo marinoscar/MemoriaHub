@@ -38,6 +38,7 @@ import { z } from 'zod';
 
 import { NodeJobInputsAdapter } from '../../src/platform/jobs/node-job-inputs.adapter';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { createSharedLibrary } from '../helpers/library';
 import { connectionUrl, createScratchDatabase, type ScratchDatabase } from './scratch-db';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
@@ -184,7 +185,8 @@ describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the Memoria
       objectId = randomUUID();
       mediaItemId = randomUUID();
       const circleId = randomUUID();
-      await q(`INSERT INTO circles (id, name, owner_id, is_personal, updated_at) VALUES ($1, 'Circle Alpha', $2, false, now())`, [circleId, ownerId]);
+      // RETRO-K2: a shared library is a platform group of the scope id the content rows carry
+      await createSharedLibrary(scratch.db, { id: circleId, name: 'Library Alpha', createdById: ownerId });
       await q(
         `INSERT INTO storage_objects (id, org_id, name, size, mime_type, storage_key, status, uploaded_by_id, updated_at)
          VALUES ($1, $2, 'photo-a.jpg', 4096, 'image/jpeg', $3, 'ready', $4, now())`,
