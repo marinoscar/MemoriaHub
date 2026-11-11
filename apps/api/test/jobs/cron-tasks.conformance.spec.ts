@@ -25,7 +25,7 @@ import { describeJobHandlerConformance } from '@marinoscar/platform-api/jobs/tes
 import { WorkflowRunItemStatus, WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
 
 import { PictureEnhancementPurgeTask } from '../../src/enhancement/picture-enhancement-purge.task';
-import { ThumbnailRepairTask } from '../../src/media/thumbnail-repair.task';
+import { ThumbnailRepairTask } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeTask } from '@marinoscar/memoriahub-api/media';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 import { NodeBackupStaleTask } from '../../src/node-backup/node-backup-stale.task';
@@ -93,7 +93,13 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
   {
     name: 'ThumbnailRepairTask',
     type: 'thumbnail_repair',
-    tick: (w) => new ThumbnailRepairTask(w.jobs as never, w.prisma as never).handleScheduledRepair(),
+    tick: (w) =>
+      new ThumbnailRepairTask({
+        enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+          const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('ThumbnailRepairTask'), type, what });
+          return job ? { id: job.id } : null;
+        },
+      } as never).handleScheduledRepair(),
     gate: { env: 'THUMBNAIL_REPAIR_ENABLED', value: 'false' },
   },
   {

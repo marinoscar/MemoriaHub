@@ -43,8 +43,8 @@ const ALLOWLIST: Record<string, string> = {
     'webhooks: the cached "does any enabled endpoint subscribe" read, which must see system-scope endpoints',
   'platform/sharing/sharing-data.adapter.ts':
     "the sharing slice's five named reasons (purge, doctor, retention, link-resolution, invite-claim) of SHARING_DATA",
-  'media/thumbnail-repair.handler.ts':
-    'media-housekeeping: the global thumbnail_repair sweep finds and counts repair attempts across organizations',
+  'media/media-system-access.adapter.ts':
+    'media-housekeeping: the media slice's MEDIA_SYSTEM_ACCESS hook, for the global thumbnail_repair sweep that finds and counts repair attempts across organizations',
   'platform-extensions/telemetry/memoriahub-telemetry-signals.service.ts':
     'admin-aggregate: the app.media.processing.backlog gauge counts storage_objects by status across organizations (RETRO-T3)',
   'media-processing/recovery/storage-recovery.service.ts':

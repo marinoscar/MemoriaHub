@@ -12,8 +12,8 @@
 import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
-import { ThumbnailRegenHandler } from '../../src/media/thumbnail-regen.handler';
-import { ThumbnailRepairHandler } from '../../src/media/thumbnail-repair.handler';
+import { ThumbnailRegenHandler } from '@marinoscar/memoriahub-api/media';
+import { ThumbnailRepairHandler } from '@marinoscar/memoriahub-api/media';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
 const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [

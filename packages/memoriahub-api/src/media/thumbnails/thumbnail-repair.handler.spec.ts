@@ -13,30 +13,36 @@
  * Mirrors trash-purge.handler.spec.ts. No database required — all
  * dependencies are fully mocked.
  */
-import { Test, TestingModule } from '@nestjs/testing';
-import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
-import { ThumbnailRepairHandler } from './thumbnail-repair.handler';
-import { PrismaService } from '../prisma/prisma.service';
-import { PrismaSystemService } from '../prisma/prisma-system.service';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { systemJob } from '../../test/helpers/platform-job';
+import type { MemoriahubJob } from '../../ports/index.js';
+import { ThumbnailRepairHandler } from './thumbnail-repair.handler.js';
+
+/** The slice of the database client the handler reads and writes. */
+function createMockPrismaService() {
+  return {
+    $queryRaw: jest.fn(),
+    mediaItem: { findUnique: jest.fn() },
+    storageObject: { findUnique: jest.fn(), update: jest.fn() },
+  };
+}
+type MockPrismaService = ReturnType<typeof createMockPrismaService>;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<Job> = {}): Job {
-  return systemJob('thumbnail_repair', {
+function makeJob(overrides: Partial<MemoriahubJob> = {}): MemoriahubJob {
+  return {
     id: 'job-thumb-repair-1',
-    status: 'running',
+    type: 'thumbnail_repair',
+    subjectType: null,
+    subjectId: null,
+    payload: {},
     reason: 'backfill',
-    priority: 100,
     attempts: 1,
-    startedAt: new Date(),
+    orgId: null,
+    status: 'running',
     ...overrides,
-  });
+  };
 }
 
 function makeCandidateRow(objectId: string, mediaItemId = `media-for-${objectId}`) {
@@ -67,15 +73,13 @@ function makeStorageObject(id: string, metadata: Record<string, unknown> | null 
 
 describe('ThumbnailRepairHandler', () => {
   let handler: ThumbnailRepairHandler;
-  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
-  let mockSync: jest.Mocked<Pick<MediaMetadataSyncService, 'syncFromStorageObject'>>;
-  let mockRecovery: jest.Mocked<Pick<ObjectReprocessService, 'reprocessNow'>>;
+  let mockJobs: { registerHandler: jest.Mock };
+  let mockSync: { syncFromStorageObject: jest.Mock };
+  let mockRecovery: { reprocessNow: jest.Mock };
   let mockPrisma: MockPrismaService;
 
-  beforeEach(async () => {
-    mockRegistry = {
-      register: jest.fn(),
-    };
+  beforeEach(() => {
+    mockJobs = { registerHandler: jest.fn() };
 
     mockSync = {
       syncFromStorageObject: jest.fn().mockResolvedValue(undefined),
@@ -88,24 +92,17 @@ describe('ThumbnailRepairHandler', () => {
     mockPrisma = createMockPrismaService();
     mockPrisma.$queryRaw.mockResolvedValue([]);
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ThumbnailRepairHandler,
-        { provide: JobHandlerRegistry, useValue: mockRegistry },
-        { provide: MediaMetadataSyncService, useValue: mockSync },
-        { provide: ObjectReprocessService, useValue: mockRecovery },
-        { provide: PrismaService, useValue: mockPrisma },
-        {
-          provide: PrismaSystemService,
-          useValue: {
-            asSystem: () => mockPrisma,
-            runAsSystem: (_reason: string, fn: (tx: unknown) => unknown) => fn(mockPrisma),
-          },
-        },
-      ],
-    }).compile();
-
-    handler = module.get<ThumbnailRepairHandler>(ThumbnailRepairHandler);
+    const system = {
+      asSystem: () => mockPrisma,
+      runAsSystem: (fn: (tx: unknown) => unknown) => fn(mockPrisma),
+    };
+    handler = new ThumbnailRepairHandler(
+      mockJobs as never,
+      mockPrisma as never,
+      system as never,
+      mockSync as never,
+      mockRecovery as never,
+    );
   });
 
   afterEach(() => {
@@ -125,7 +122,7 @@ describe('ThumbnailRepairHandler', () => {
   describe('onModuleInit', () => {
     it('registers itself in the platform JobHandlerRegistry on init', () => {
       handler.onModuleInit();
-      expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+      expect(mockJobs.registerHandler).toHaveBeenCalledWith(handler);
     });
   });
 
