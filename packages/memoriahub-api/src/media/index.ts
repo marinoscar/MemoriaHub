@@ -12,6 +12,11 @@ export { MEDIA_SYNC_REASONS, AUDIT_COMMAND, AUDIT_CONFIG_UPDATED, AUDIT_TARGET_T
 export type { MediaSyncReason, MediaSyncCommand } from './media-sync/media-sync.constants.js';
 export { assertMediaSyncSourceDevice } from './media-sync/media-sync-source.js';
 export * from './thumbnails/media-thumbnail.service.js';
+export * from './thumbnails/media-thumbnail-rerun.controller.js';
+export * from './orientation/media-orientation-edit.service.js';
+export * from './orientation/media-orientation-edit.controller.js';
+export * from './recovery/storage-recovery-types.js';
+export * from './recovery/media-reprocess.controller.js';
 export * from './archive-trash/media-item-purger.js';
 export * from './archive-trash/trash-purge.handler.js';
 export * from './archive-trash/trash-purge.task.js';

@@ -183,7 +183,8 @@
     "csv-stringify": "^6.5.1",
     "nestjs-zod": "^5.4.0",
     "zod": "^4.4.3",
-    "onnxruntime-node": "^1.27.0"
+    "onnxruntime-node": "^1.27.0",
+    "local-reverse-geocoder": "^0.16.7"
   },
   "peerDependenciesMeta": {
     "@marinoscar/memoriahub-compute": {
@@ -220,6 +221,9 @@
       "optional": true
     },
     "onnxruntime-node": {
+      "optional": true
+    },
+    "local-reverse-geocoder": {
       "optional": true
     }
   },

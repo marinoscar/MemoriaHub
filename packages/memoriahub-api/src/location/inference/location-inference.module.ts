@@ -1,4 +1,4 @@
-import { Module, type DynamicModule, type Type } from '@nestjs/common';
+import { Module, type DynamicModule } from '@nestjs/common';
 
 import { MediaModule } from '../../media/index.js';
 import { ReviewRunsModule } from '../../review-runs/index.js';
@@ -11,24 +11,21 @@ import { LocationInferenceService } from './location-inference.service.js';
 import { LocationSuggestionService } from './location-suggestion.service.js';
 
 /**
- * Options of {@link LocationInferenceModule.forRoot}.
+ * Options of {@link LocationInferenceModule.forRoot}. None yet: the geo providers the suggestion service calls
+ * on accept come from {@link LocationModule}.
  *
  * @stability experimental
  */
 export interface LocationInferenceModuleOptions {
-  /**
-   * Modules that provide and export the `GEO_LOCATION_PROVIDER` token (the reverse geocoder the
-   * suggestion service calls when a suggestion is accepted). The providers themselves (offline
-   * GeoNames, Nominatim, Google) stay in the host until the geo part of the slice moves.
-   */
-  readonly geoProviderImports?: ReadonlyArray<Type<unknown> | DynamicModule>;
+  /** Reserved. */
+  readonly reserved?: never;
 }
 
 /**
  * Location inference (RETRO-J10, #624): the per-item and sweep inference of coordinates for photos
  * without GPS, the `location_inference` job, the review-queue service behind
  * `/api/media/location-suggestions` and the upload fan-out registration. Reaches the outside only
- * through the host ports and the `GEO_LOCATION_PROVIDER` token the host provides.
+ * through the host ports and the `GEO_LOCATION_PROVIDER` token of the location slice.
  *
  * Import it ONCE in the host (the handler and the registration are singletons); the first
  * `forRoot()` call wins.
@@ -42,12 +39,12 @@ export class LocationInferenceModule {
   /**
    * Builds the module (cached, so every call names the same instance).
    *
-   * @param options - the geo provider imports.
+   * @param _options - reserved.
    */
-  static forRoot(options: LocationInferenceModuleOptions = {}): DynamicModule {
+  static forRoot(_options: LocationInferenceModuleOptions = {}): DynamicModule {
     LocationInferenceModule.root ??= {
       module: LocationInferenceModule,
-      imports: [LocationModule.forRoot(), MediaModule.forRoot(), ReviewRunsModule.forRoot(), ...(options.geoProviderImports ?? [])],
+      imports: [LocationModule.forRoot(), MediaModule.forRoot(), ReviewRunsModule.forRoot()],
       providers: [
         LocationInferenceService,
         LocationInferenceHandler,

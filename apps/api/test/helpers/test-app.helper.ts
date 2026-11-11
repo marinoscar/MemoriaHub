@@ -17,7 +17,7 @@ import { prismaMock } from '../mocks/prisma.mock';
 import { mirroredSharingData } from '../mocks/group-mirror.mock';
 import { SHARING_DATA } from '@marinoscar/platform-api/sharing';
 import { DefaultOrgId } from '../../src/common/tenancy/default-org-id';
-import { OfflineGeoLocationProvider } from '../../src/media/geo/offline-geo-location.provider';
+import { OfflineGeoLocationProvider } from '@marinoscar/memoriahub-api/location';
 
 /**
  * Inert stand-in for OfflineGeoLocationProvider.

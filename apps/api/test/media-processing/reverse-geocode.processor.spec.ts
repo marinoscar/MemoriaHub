@@ -18,7 +18,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   GeoLocationResult,
 } from '@marinoscar/memoriahub-api/location';
-import { GeoLocationService } from '../../src/media/geo/geo-location.service';
+import { GeoLocationService } from '@marinoscar/memoriahub-api/location';
 import { ReverseGeocodeProcessor } from '../../src/media-processing/processors/reverse-geocode.processor';
 import { getPlainJpegBuffer, makeGetStream } from '../fixtures/media/image-fixtures';
 

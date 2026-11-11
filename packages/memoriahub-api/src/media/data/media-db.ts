@@ -97,6 +97,10 @@ export interface MediaModels {
   systemSettings: MediaDelegate;
   /** `location_groups` (the tiered browsing cover override). */
   locationGroup: MediaDelegate;
+  /** `media_face_status` (an orientation edit marks face detection pending). */
+  mediaFaceStatus: MediaDelegate;
+  /** The platform job rows (the state of a job an admin recovery request returned). */
+  job: MediaDelegate;
 }
 
 /**

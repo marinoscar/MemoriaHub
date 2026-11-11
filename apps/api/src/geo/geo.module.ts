@@ -1,21 +1,23 @@
 import { Module } from '@nestjs/common';
-import { CredentialsModule } from '../platform/credentials/credentials.config';
-import { GeoSettingsController } from './geo-settings.controller';
-import { GeoSettingsService } from './geo-settings.service';
-import { GeocodeAdminController } from './geocode-admin.controller';
-import { GeocodeMediaController } from './geocode-media.controller';
-import { GeocodeBackfillService } from './geocode-backfill.service';
-import { GeocodeHandler } from './geocode.handler';
-import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
-import { GeoLocationModule } from '../media/geo/geo-location.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { LocationGroupsModule } from '../location-groups/location-groups.module';
+import {
+  GeoSettingsController,
+  GeocodeAdminController,
+  GeocodeMediaController,
+} from '@marinoscar/memoriahub-api/location';
 
+import { GeoLocationModule } from '../media/geo/geo-location.module';
+
+/**
+ * GeoModule: mounts the geo controllers (RETRO-J10, #624).
+ *
+ * The geo settings and Google key administration, the `geocode` job with its per-job key broker, the geocode
+ * backfill and the controllers' classes live in `@marinoscar/memoriahub-api/location`; the slice is imported
+ * through {@link GeoLocationModule}, which this module re-exports (the Doctor check injects
+ * `GeoSettingsService` through it).
+ */
 @Module({
-  imports: [CredentialsModule, GeoLocationModule, EnrichmentModule, OwnerAccessModule, LocationGroupsModule],
+  imports: [GeoLocationModule],
   controllers: [GeoSettingsController, GeocodeAdminController, GeocodeMediaController],
-  providers: [GeoSettingsService, GeocodeBackfillService, GoogleGeocodeKeyBroker, GeocodeHandler],
-  exports: [GeocodeBackfillService, GeoSettingsService],
+  exports: [GeoLocationModule],
 })
 export class GeoModule {}

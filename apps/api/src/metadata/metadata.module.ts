@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { GeoLocationService } from '@marinoscar/memoriahub-api/location';
 import {
   AdminMetadataController,
   MEDIA_REVERSE_GEOCODER,
@@ -12,7 +13,6 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { PrismaModule } from '../prisma/prisma.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from '../media/geo/geo-location.module';
-import { GeoLocationService } from '../media/geo/geo-location.service';
 import { MediaModule } from '../media/media.module';
 
 /**
