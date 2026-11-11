@@ -1,4 +1,5 @@
 import type { GROUPED_FILTERS, LocationGroupLevelValue } from '@marinoscar/memoriahub-contract/location';
+import { LOCATION_GROUP_LEVELS } from '@marinoscar/memoriahub-contract/location';
 import { api, ApiError } from './api';
 
 /**
@@ -19,7 +20,7 @@ import { api, ApiError } from './api';
 /** The level vocabulary of `@marinoscar/memoriahub-contract/location` (mirrors the `LocationGroupLevel` Prisma enum). */
 export type LocationGroupLevel = LocationGroupLevelValue;
 
-export const LOCATION_GROUP_LEVELS: LocationGroupLevel[] = ['country', 'region', 'locality'];
+export { LOCATION_GROUP_LEVELS };
 
 /** `grouped` filter accepted by `GET /api/location-groups/values`. */
 export type LocationValueGroupedFilter = (typeof GROUPED_FILTERS)[number];

@@ -53,8 +53,10 @@ export default () => {
   ...identityKeys(),
 
   // The jobs slice's keys (RETRO-C1, #575): `jobs.*` (retry, rate-limit, worker pool, reaper) and
-  // `nodes.*` (the fleet's crons), built from the `JOBS_*` variables. The old `ENRICHMENT_*` names are
-  // translated for one release by `legacyJobsEnv` (deprecation warning per variable; JOBS_* wins).
+  // `nodes.*` (the fleet's crons), built from the `JOBS_*` variables. KEPT, not dead: the old
+  // `ENRICHMENT_*` names are still translated by `legacyJobsEnv` (deprecation warning per variable;
+  // JOBS_* wins) because deployments may not have renamed them yet. It goes in the RETRO-C11 shim-removal
+  // step, one production release after the cutover (docs/runbooks/release-window.md, local-exceptions.md).
   ...jobsConfiguration(legacyJobsEnv()),
 
   // The db-backup slice (RETRO-D4, #580): whether this process schedules backups.

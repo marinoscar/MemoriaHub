@@ -721,7 +721,15 @@ function AppRoutes() {
                 <Route path="/admin/insights" element={<Navigate to="/admin/settings/storage/insights" replace />} />
                 <Route path="/admin/storage-providers" element={<Navigate to="/admin/settings/storage" replace />} />
                 <Route path="/admin/backup" element={<Navigate to="/admin/settings/workers" replace />} />
-                <Route path="/search" element={<SearchPage />} />
+                {/* Agentic/semantic search and the enhancer are AI surfaces: hidden while AI is off (RETRO-E2, #601). */}
+                <Route
+                  path="/search"
+                  element={
+                    <RequireAiEnabled>
+                      <SearchPage />
+                    </RequireAiEnabled>
+                  }
+                />
                 {/* The Collections hub (issue #391, spec §4.6) ADDS a route; it
                     replaces none. Every browse destination below keeps its own
                     URL, because bookmarks, deep links, the Android app and the
@@ -742,7 +750,14 @@ function AppRoutes() {
                 <Route path="/workflows/new" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/:id" element={<WorkflowBuilderPage />} />
                 <Route path="/workflows/:id/runs/:runId" element={<WorkflowRunPage />} />
-                <Route path="/enhancements" element={<EnhancementsPage />} />
+                <Route
+                  path="/enhancements"
+                  element={
+                    <RequireAiEnabled>
+                      <EnhancementsPage />
+                    </RequireAiEnabled>
+                  }
+                />
                 {/* Bulk AI enhance progress — a run page like the others (#423). */}
                 <Route path="/enhancement-batches/:id" element={<EnhancementBatchPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />

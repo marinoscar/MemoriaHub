@@ -223,6 +223,34 @@ describe('useMediaEnhance', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('cancelled enhancement', () => {
+    it('treats "cancelled" as terminal: stops polling with an honest message, no timeout', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      mockStartEnhance.mockResolvedValue({ enhancementId: 'enh-1', jobId: 'job-1', status: 'pending' });
+      mockGetEnhancement.mockResolvedValue(makeEnhancementDto('cancelled'));
+
+      const { result } = renderHook(() => useMediaEnhance('media-1'));
+      await act(async () => {
+        await result.current.start({});
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      await waitFor(() => {
+        expect(result.current.status).toBe('cancelled');
+      });
+      expect(result.current.error).toMatch(/cancelled/i);
+      expect(result.current.polling).toBe(false);
+      const calls = mockGetEnhancement.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+      expect(mockGetEnhancement.mock.calls.length).toBe(calls);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('poll timeout — MAX_POLLS exceeded (bug fix)', () => {
     it('moves status to "failed" and sets a timeout error after 120 polls with no terminal status', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
