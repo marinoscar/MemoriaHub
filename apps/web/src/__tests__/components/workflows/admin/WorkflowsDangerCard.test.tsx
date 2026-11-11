@@ -18,7 +18,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../utils/test-utils';
-import { WorkflowsDangerCard } from '../../../../components/workflows/admin/WorkflowsDangerCard';
+import { WorkflowsDangerCard } from '@marinoscar/memoriahub-web/workflows/ui';
 
 describe('WorkflowsDangerCard', () => {
   describe('toggle state', () => {

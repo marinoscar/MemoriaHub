@@ -24,74 +24,44 @@ import { render, mockAdminUser } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
-  usePermissions: vi.fn(),
-}));
-
 vi.mock('../../hooks/useSystemSettings', () => ({
   useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/adminWorkflows', () => ({
-  getAdminWorkflowStats: vi.fn(),
-  listAdminWorkflows: vi.fn(),
-  listAdminWorkflowRuns: vi.fn(),
-  disableAdminWorkflow: vi.fn(),
-  cancelAdminWorkflowRun: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import WorkflowsSettingsPage from '../../pages/Admin/WorkflowsSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
+// The page is the packaged one: its clients go through the app's `api` (the host's transport), which
+// the tests stub; the principal's roles and permissions come from the user the wrapper signs in.
+import { WorkflowsSettingsPage } from '@marinoscar/memoriahub-web/workflows/ui';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
-import {
-  getAdminWorkflowStats,
-  listAdminWorkflows,
-  listAdminWorkflowRuns,
-  disableAdminWorkflow,
-  cancelAdminWorkflowRun,
-} from '../../services/adminWorkflows';
+import { api } from '../../services/api';
 
-const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseSystemSettings = vi.mocked(useSystemSettings);
-const mockGetStats = vi.mocked(getAdminWorkflowStats);
-const mockListWorkflows = vi.mocked(listAdminWorkflows);
-const mockListRuns = vi.mocked(listAdminWorkflowRuns);
-const mockDisable = vi.mocked(disableAdminWorkflow);
-const mockCancelRun = vi.mocked(cancelAdminWorkflowRun);
+const mockGetStats = vi.fn();
+const mockListWorkflows = vi.fn();
+const mockListRuns = vi.fn();
+const mockDisable = vi.fn();
+const mockCancelRun = vi.fn();
+
+const query = (endpoint: string) => {
+  const out: Record<string, string | number> = {};
+  new URLSearchParams(endpoint.split('?')[1] ?? '').forEach((v, k) => {
+    out[k] = /^\d+$/.test(v) ? Number(v) : v;
+  });
+  return out;
+};
+
+const adminUser = {
+  ...mockAdminUser,
+  permissions: ['system_settings:read', 'system_settings:write', 'jobs:read', 'jobs:write'],
+} as typeof mockAdminUser;
+const viewerUser = { ...mockAdminUser, roles: [{ name: 'viewer' }], permissions: [] } as typeof mockAdminUser;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function adminPermissions() {
-  return {
-    isAdmin: true,
-    permissions: new Set(['system_settings:read', 'system_settings:write', 'jobs:read', 'jobs:write']),
-    roles: new Set(['admin']),
-    hasPermission: vi.fn().mockReturnValue(true),
-    hasAnyPermission: vi.fn().mockReturnValue(true),
-    hasAllPermissions: vi.fn().mockReturnValue(true),
-    hasRole: vi.fn().mockReturnValue(true),
-    hasAnyRole: vi.fn().mockReturnValue(true),
-  };
-}
-
-function nonAdminPermissions() {
-  return {
-    isAdmin: false,
-    permissions: new Set<string>(),
-    roles: new Set<string>(),
-    hasPermission: vi.fn().mockReturnValue(false),
-    hasAnyPermission: vi.fn().mockReturnValue(false),
-    hasAllPermissions: vi.fn().mockReturnValue(false),
-    hasRole: vi.fn().mockReturnValue(false),
-    hasAnyRole: vi.fn().mockReturnValue(false),
-  };
-}
 
 function makeSystemSettingsMock(overrides: Record<string, unknown> = {}) {
   const updateSettings = vi.fn().mockResolvedValue(undefined);
@@ -192,7 +162,19 @@ async function openWorkflowRowMenu(
 describe('WorkflowsSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUsePermissions.mockReturnValue(adminPermissions() as any);
+    vi.spyOn(api, 'get').mockImplementation(async (endpoint: string) => {
+      if (endpoint === '/admin/workflows/stats') return mockGetStats() as never;
+      if (endpoint.startsWith('/admin/workflows?')) return mockListWorkflows(query(endpoint)) as never;
+      if (endpoint.startsWith('/admin/workflow-runs')) return mockListRuns(query(endpoint)) as never;
+      return {} as never;
+    });
+    vi.spyOn(api, 'post').mockImplementation(async (endpoint: string) => {
+      const disable = /^\/admin\/workflows\/(.+)\/disable$/.exec(endpoint);
+      if (disable) return mockDisable(disable[1]) as never;
+      const cancel = /^\/admin\/workflow-runs\/(.+)\/cancel$/.exec(endpoint);
+      if (cancel) return mockCancelRun(cancel[1]) as never;
+      return {} as never;
+    });
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as any);
     mockGetStats.mockResolvedValue({
       windowDays: 7,
@@ -216,9 +198,7 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('access control', () => {
     it('redirects non-admin users', () => {
-      mockUsePermissions.mockReturnValue(nonAdminPermissions() as any);
-
-      render(<WorkflowsSettingsPage />);
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: viewerUser } });
 
       expect(
         screen.queryByRole('heading', { name: /workflow automation/i }),
@@ -239,7 +219,7 @@ describe('WorkflowsSettingsPage', () => {
         refresh: vi.fn(),
       } as any);
 
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
@@ -255,7 +235,7 @@ describe('WorkflowsSettingsPage', () => {
         refresh: vi.fn(),
       } as any);
 
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       expect(screen.getByText(/failed to load settings/i)).toBeInTheDocument();
     });
@@ -264,14 +244,14 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('page structure', () => {
     it('renders the page heading and back link', () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       expect(screen.getByRole('heading', { name: /workflow automation/i })).toBeInTheDocument();
       expect(screen.getByText(/back to settings/i)).toBeInTheDocument();
     });
 
     it('fetches and renders the KPI strip', async () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => expect(mockGetStats).toHaveBeenCalledTimes(1));
       await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument());
@@ -281,7 +261,7 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('global feature toggle', () => {
     it('switch reflects features.workflows=false', () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const label = screen.getByText(/enable workflow automation globally/i);
       const switchEl = label
@@ -295,7 +275,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const label = screen.getByText(/enable workflow automation globally/i);
       const switchEl = label
@@ -320,7 +300,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const label = screen.getByText(/on new media/i);
       const switchEl = label
@@ -342,7 +322,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const label = screen.getByText(/scheduled runs/i);
       const switchEl = label
@@ -364,7 +344,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const label = screen.getByText(/require preview approval/i);
       const switchEl = label
@@ -385,7 +365,7 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('engine limits', () => {
     it('pre-fills the limit fields from settings', () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       expect((screen.getByLabelText(/max items per run/i) as HTMLInputElement).value).toBe('10000');
       expect((screen.getByLabelText(/batch size/i) as HTMLInputElement).value).toBe('200');
@@ -397,7 +377,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await user.click(screen.getByRole('button', { name: /save limits/i }));
 
@@ -421,7 +401,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await user.click(screen.getByRole('button', { name: /save limits/i }));
 
@@ -436,7 +416,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await user.click(screen.getByRole('button', { name: /save limits/i }));
 
@@ -449,7 +429,7 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('danger card wiring', () => {
     it('renders the danger card reflecting allowHardDelete=false', () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       expect(screen.getByText(/danger zone/i)).toBeInTheDocument();
       const toggle = screen.getByLabelText(/allow the hard-delete workflow action/i) as HTMLInputElement;
@@ -461,7 +441,7 @@ describe('WorkflowsSettingsPage', () => {
       mockUseSystemSettings.mockReturnValue(mock as any);
 
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const toggle = screen.getByLabelText(/allow the hard-delete workflow action/i);
       await user.click(toggle);
@@ -483,7 +463,7 @@ describe('WorkflowsSettingsPage', () => {
         makeSystemSettingsMock({ workflows: { allowHardDelete: true } }) as any,
       );
 
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       const alerts = screen.getAllByRole('alert');
       expect(
@@ -495,7 +475,7 @@ describe('WorkflowsSettingsPage', () => {
   // -------------------------------------------------------------------------
   describe('oversight table', () => {
     it('fetches and renders workflows on mount', async () => {
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => {
         expect(mockListWorkflows).toHaveBeenCalledWith({ page: 1, pageSize: 25 });
@@ -507,7 +487,7 @@ describe('WorkflowsSettingsPage', () => {
 
     it('disabling a workflow opens a confirm dialog, then calls disableAdminWorkflow on confirm', async () => {
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
@@ -528,7 +508,7 @@ describe('WorkflowsSettingsPage', () => {
 
     it('cancelling the disable confirm dialog does not call disableAdminWorkflow', async () => {
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
@@ -542,7 +522,7 @@ describe('WorkflowsSettingsPage', () => {
 
     it('clicking "Runs" opens the runs drawer and fetches runs for that workflow', async () => {
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
 
@@ -564,7 +544,7 @@ describe('WorkflowsSettingsPage', () => {
   describe('cancel-run flow (via runs drawer)', () => {
     it('cancelling a non-terminal run opens a confirm dialog, then calls cancelAdminWorkflowRun on confirm', async () => {
       const user = userEvent.setup();
-      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
+      render(<WorkflowsSettingsPage />, { wrapperOptions: { user: adminUser } });
 
       await waitFor(() => expect(screen.getByText('Screenshot cleanup')).toBeInTheDocument());
       await openWorkflowRowMenu(user);

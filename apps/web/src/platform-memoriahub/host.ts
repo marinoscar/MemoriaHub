@@ -22,6 +22,7 @@ import { useShellMainVariant } from '@marinoscar/platform-web/shell/headless';
 
 import { API_BASE_URL, api, rewriteEndpoint } from '../services/api';
 import { rewriteBody } from '../services/ownerScopeParams';
+import { appMemoriahubAdmin } from './admin';
 import { appMemoriahubSlots } from './slots';
 
 /** The app's API client as the package's `MemoriahubApiClient`. */
@@ -90,5 +91,6 @@ export function buildMemoriahubHost(inputs: MemoriahubHostInputs): MemoriahubWeb
     timeZone: inputs.principal?.timeZone ?? null,
     shell: { useMainVariant: useShellMainVariant },
     slots: appMemoriahubSlots,
+    admin: appMemoriahubAdmin,
   };
 }

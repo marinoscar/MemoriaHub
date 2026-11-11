@@ -27,55 +27,23 @@ import {
 // Module mocks — declared before the imports they affect
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
-  usePermissions: vi.fn(),
-}));
-
-vi.mock('@marinoscar/memoriahub-web/tagging/headless', () => ({
-  listTagLabels: vi.fn(),
-  createTagLabel: vi.fn(),
-  updateTagLabel: vi.fn(),
-  deleteTagLabel: vi.fn(),
-  exportTagLabels: vi.fn(),
-  importTagLabels: vi.fn(),
-}));
-
-import TagsPage from '../../pages/Admin/TagsPage';
-import { buildTagColumns } from '../../pages/Admin/tagsTable';
-import { usePermissions } from '../../hooks/usePermissions';
-import {
-  listTagLabels,
-  createTagLabel,
-  updateTagLabel,
-  deleteTagLabel,
-  exportTagLabels,
-} from '@marinoscar/memoriahub-web/tagging/headless';
+// The page is the packaged one: its clients go through the app's `api` (the host's transport), so
+// the tests stub that, and the CSV export (a raw request) through `fetch`.
+import { TagsPage, buildTagColumns } from '@marinoscar/memoriahub-web/tagging/ui';
 import type { TagLabel } from '@marinoscar/memoriahub-web/tagging/headless';
 import { api } from '../../services/api';
 
-const mockUsePermissions = vi.mocked(usePermissions);
-const mockList = vi.mocked(listTagLabels);
-const mockCreate = vi.mocked(createTagLabel);
-const mockUpdate = vi.mocked(updateTagLabel);
-const mockDelete = vi.mocked(deleteTagLabel);
-const mockExport = vi.mocked(exportTagLabels);
+const mockList = vi.fn();
+const mockCreate = vi.fn();
+const mockUpdate = vi.fn();
+const mockDelete = vi.fn();
+const mockExport = vi.fn();
+
+const viewerUser = { ...mockAdminUser, roles: [{ name: 'viewer' }], permissions: [] } as typeof mockAdminUser;
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-function makePermissions(isAdmin: boolean) {
-  return {
-    permissions: new Set<string>(),
-    roles: new Set<string>(isAdmin ? ['admin'] : ['viewer']),
-    hasPermission: vi.fn().mockReturnValue(isAdmin),
-    hasAnyPermission: vi.fn().mockReturnValue(isAdmin),
-    hasAllPermissions: vi.fn().mockReturnValue(isAdmin),
-    hasRole: vi.fn().mockReturnValue(isAdmin),
-    hasAnyRole: vi.fn().mockReturnValue(isAdmin),
-    isAdmin,
-  };
-}
 
 function makeLabel(overrides: Partial<TagLabel> = {}): TagLabel {
   return {
@@ -88,8 +56,8 @@ function makeLabel(overrides: Partial<TagLabel> = {}): TagLabel {
   };
 }
 
-function renderPage() {
-  return render(<TagsPage />, { wrapperOptions: { user: mockAdminUser } });
+function renderPage(user: typeof mockAdminUser = mockAdminUser) {
+  return render(<TagsPage />, { wrapperOptions: { user } });
 }
 
 async function openRowMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
@@ -106,13 +74,32 @@ describe('TagsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetContainerWidth(1400);
-    mockUsePermissions.mockReturnValue(makePermissions(true));
     mockList.mockResolvedValue([makeLabel({ id: 'l1', name: 'beach' })]);
     mockCreate.mockResolvedValue(makeLabel({ id: 'l2', name: 'sunset' }));
     mockUpdate.mockResolvedValue(makeLabel({ id: 'l1', name: 'seaside' }));
     mockDelete.mockResolvedValue(undefined as never);
-    vi.spyOn(api, 'get').mockResolvedValue({} as never);
-    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
+    vi.spyOn(api, 'get').mockImplementation(async (endpoint: string) =>
+      (endpoint === '/tag-labels' ? mockList() : {}) as never,
+    );
+    vi.spyOn(api, 'post').mockImplementation(async (endpoint: string, body?: unknown) =>
+      (endpoint === '/tag-labels' ? mockCreate(body) : {}) as never,
+    );
+    vi.spyOn(api, 'patch').mockImplementation(async (endpoint: string, body?: unknown) =>
+      (endpoint.startsWith('/tag-labels/') ? mockUpdate(endpoint.slice('/tag-labels/'.length), body) : {}) as never,
+    );
+    vi.spyOn(api, 'delete').mockImplementation(async (endpoint: string) =>
+      (endpoint.startsWith('/tag-labels/') ? mockDelete(endpoint.slice('/tag-labels/'.length)) : undefined) as never,
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith('/tag-labels/export')) {
+          const blob = await mockExport();
+          return { ok: true, blob: async () => blob } as unknown as Response;
+        }
+        throw new Error(`unexpected fetch ${String(url)}`);
+      }),
+    );
   });
 
   // =========================================================================
@@ -120,9 +107,7 @@ describe('TagsPage', () => {
   // =========================================================================
 
   it('redirects non-admin users — page content not shown', () => {
-    mockUsePermissions.mockReturnValue(makePermissions(false));
-
-    renderPage();
+    renderPage(viewerUser);
 
     expect(screen.queryByRole('heading', { name: /^tags$/i })).not.toBeInTheDocument();
   });

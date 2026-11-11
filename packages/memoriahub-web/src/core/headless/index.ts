@@ -1,4 +1,5 @@
 export * from './host.js';
+export * from './admin.js';
 export * from './owner-scope.js';
 export * from './api.js';
 export * from './hooks.js';

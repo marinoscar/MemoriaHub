@@ -1,13 +1,32 @@
+import type { ReactNode } from 'react';
 import { Card, CardContent, Typography, Box, alpha } from '@mui/material';
 
-interface KpiCardProps {
-  label: string;       // displayed in UPPERCASE caption
-  value: string;       // large primary display
+/**
+ * Props of {@link KpiCard}.
+ *
+ * @stability experimental
+ */
+export interface KpiCardProps {
+  /** Displayed in an uppercase caption. */
+  label: string;
+  /** The large primary figure. */
+  value: string;
+  /** A smaller line under the figure. */
   subLabel?: string;
-  icon: React.ReactNode;
+  /** The glyph in the tinted circle. */
+  icon: ReactNode;
+  /** The accent colour of the top border and the glyph. */
   accentColor: string;
 }
 
+/**
+ * One key-figure card of an insights dashboard.
+ *
+ * @param props - the label, figure, glyph and accent.
+ * @returns the card.
+ *
+ * @stability experimental
+ */
 export function KpiCard({ label, value, subLabel, icon, accentColor }: KpiCardProps) {
   return (
     <Card

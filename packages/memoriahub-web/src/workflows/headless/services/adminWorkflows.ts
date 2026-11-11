@@ -1,9 +1,9 @@
-import { api } from './api';
+import { api } from '../../../core/headless/index.js';
 import type {
   WorkflowRunStatus,
   WorkflowTriggerType,
   WorkflowSubjectType,
-} from '@marinoscar/memoriahub-web/workflows/headless';
+} from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Admin workflow oversight API client (issue #143).
@@ -20,6 +20,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** KPI strip aggregate for `GET /admin/workflows/stats`. */
+/**
+ * The admin workflow stats shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowStats {
   windowDays: number;
   runsLast7Days: number;
@@ -29,6 +34,11 @@ export interface AdminWorkflowStats {
 }
 
 /** Latest-run summary embedded in each oversight-table row. */
+/**
+ * The admin workflow last run shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowLastRun {
   status: WorkflowRunStatus;
   triggerType: WorkflowTriggerType;
@@ -42,6 +52,11 @@ export interface AdminWorkflowLastRun {
 }
 
 /** A single row of `GET /admin/workflows`. */
+/**
+ * The admin workflow list item shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowListItem {
   id: string;
   circle: { id: string; name: string } | null;
@@ -58,6 +73,11 @@ export interface AdminWorkflowListItem {
 }
 
 /** Shared pagination meta shape used by both admin list endpoints. */
+/**
+ * The admin workflows meta shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowsMeta {
   page: number;
   pageSize: number;
@@ -65,12 +85,22 @@ export interface AdminWorkflowsMeta {
   totalPages: number;
 }
 
+/**
+ * The admin workflows response shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowsResponse {
   items: AdminWorkflowListItem[];
   meta: AdminWorkflowsMeta;
 }
 
 /** A single row of `GET /admin/workflow-runs`. */
+/**
+ * The admin workflow run shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowRun {
   id: string;
   workflowId: string;
@@ -95,11 +125,21 @@ export interface AdminWorkflowRun {
   lastError: string | null;
 }
 
+/**
+ * The admin workflow runs response shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowRunsResponse {
   items: AdminWorkflowRun[];
   meta: AdminWorkflowsMeta;
 }
 
+/**
+ * The admin workflows query shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowsQuery {
   page?: number;
   pageSize?: number;
@@ -108,6 +148,11 @@ export interface AdminWorkflowsQuery {
   enabled?: boolean;
 }
 
+/**
+ * The admin workflow runs query shape.
+ *
+ * @stability experimental
+ */
 export interface AdminWorkflowRunsQuery {
   page?: number;
   pageSize?: number;
@@ -120,10 +165,20 @@ export interface AdminWorkflowRunsQuery {
 // Requests
 // ---------------------------------------------------------------------------
 
+/**
+ * Reads the KPI strip aggregate (`GET /admin/workflows/stats`).
+ *
+ * @stability experimental
+ */
 export async function getAdminWorkflowStats(): Promise<AdminWorkflowStats> {
   return api.get<AdminWorkflowStats>('/admin/workflows/stats');
 }
 
+/**
+ * Lists every workflow across every circle (`GET /admin/workflows`).
+ *
+ * @stability experimental
+ */
 export async function listAdminWorkflows(
   params: AdminWorkflowsQuery = {},
 ): Promise<AdminWorkflowsResponse> {
@@ -137,6 +192,11 @@ export async function listAdminWorkflows(
   return api.get<AdminWorkflowsResponse>(`/admin/workflows${qs ? `?${qs}` : ''}`);
 }
 
+/**
+ * Lists every run across every circle (`GET /admin/workflow-runs`).
+ *
+ * @stability experimental
+ */
 export async function listAdminWorkflowRuns(
   params: AdminWorkflowRunsQuery = {},
 ): Promise<AdminWorkflowRunsResponse> {
@@ -152,6 +212,11 @@ export async function listAdminWorkflowRuns(
   );
 }
 
+/**
+ * Force-disables a workflow regardless of circle membership.
+ *
+ * @stability experimental
+ */
 export async function disableAdminWorkflow(
   id: string,
 ): Promise<{ id: string; enabled: boolean }> {
@@ -160,6 +225,11 @@ export async function disableAdminWorkflow(
   );
 }
 
+/**
+ * Cancels a runaway run app-wide.
+ *
+ * @stability experimental
+ */
 export async function cancelAdminWorkflowRun(
   id: string,
 ): Promise<{ id: string; status: WorkflowRunStatus }> {

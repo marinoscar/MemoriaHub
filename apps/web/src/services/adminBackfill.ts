@@ -5,20 +5,6 @@ export interface GlobalBackfillResult {
   circles: number;
 }
 
-export async function runGlobalTaggingBackfill(body?: {
-  from?: string;
-  to?: string;
-  force?: boolean;
-  /**
-   * Media types to back-fill. Videos are OPT-IN (epic #452): omitting this
-   * backfills photos only, so an admin's habitual backfill does not suddenly
-   * dispatch an AI call for every video in the library.
-   */
-  mediaTypes?: ('photo' | 'video')[];
-}): Promise<GlobalBackfillResult> {
-  return api.post<GlobalBackfillResult>('/admin/tagging/backfill', body ?? {});
-}
-
 export async function runGlobalBurstBackfill(body?: {
   from?: string;
   to?: string;

@@ -372,7 +372,9 @@
         "react-dom"
       ],
       "entries": {
-        "ui": [],
+        "ui": [
+          "@mui/material"
+        ],
         "testing": [
           "@mui/material",
           "@testing-library/react",

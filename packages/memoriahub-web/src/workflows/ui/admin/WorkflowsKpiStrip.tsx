@@ -3,9 +3,8 @@ import PlayCircleOutlined from '@mui/icons-material/PlayCircleOutlined';
 import DoneAll from '@mui/icons-material/DoneAll';
 import ErrorOutlined from '@mui/icons-material/ErrorOutlined';
 import Bolt from '@mui/icons-material/Bolt';
-import { KpiCard } from '../../insights/KpiCard';
-import { KpiSkeleton } from '../../insights/KpiSkeleton';
-import type { AdminWorkflowStats } from '../../../services/adminWorkflows';
+import { KpiCard, KpiSkeleton } from '../../../core/ui/index.js';
+import type { AdminWorkflowStats } from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Workflows KPI strip (issue #143).
@@ -14,11 +13,21 @@ import type { AdminWorkflowStats } from '../../../services/adminWorkflows';
 // the parent owns fetching and passes `stats` (or null while loading).
 // ---------------------------------------------------------------------------
 
-interface WorkflowsKpiStripProps {
+/**
+ * The props or shape of `WorkflowsKpiStripProps`.
+ *
+ * @stability experimental
+ */
+export interface WorkflowsKpiStripProps {
   stats: AdminWorkflowStats | null;
   loading: boolean;
 }
 
+/**
+ * The workflows kpi strip of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function WorkflowsKpiStrip({ stats, loading }: WorkflowsKpiStripProps) {
   const theme = useTheme();
 

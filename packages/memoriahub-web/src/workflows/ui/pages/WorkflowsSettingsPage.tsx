@@ -21,13 +21,12 @@ import {
   DialogActions,
 } from '@mui/material';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import type { SystemSettings } from '../../types';
-import { WorkflowsDangerCard } from '../../components/workflows/admin/WorkflowsDangerCard';
-import { WorkflowsKpiStrip } from '../../components/workflows/admin/WorkflowsKpiStrip';
-import { WorkflowsOversightTable } from '../../components/workflows/admin/WorkflowsOversightTable';
-import { WorkflowRunsDrawer } from '../../components/workflows/admin/WorkflowRunsDrawer';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import type { MemoriahubSystemSettings } from '../../../core/headless/index.js';
+import { WorkflowsDangerCard } from '../admin/WorkflowsDangerCard.js';
+import { WorkflowsKpiStrip } from '../admin/WorkflowsKpiStrip.js';
+import { WorkflowsOversightTable } from '../admin/WorkflowsOversightTable.js';
+import { WorkflowRunsDrawer } from '../admin/WorkflowRunsDrawer.js';
 import {
   getAdminWorkflowStats,
   listAdminWorkflows,
@@ -37,8 +36,7 @@ import {
   type AdminWorkflowStats,
   type AdminWorkflowListItem,
   type AdminWorkflowRun,
-} from '../../services/adminWorkflows';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+} from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Media Workflow Automation — admin settings & oversight (issue #143).
@@ -65,6 +63,7 @@ const DEFAULTS = {
 };
 
 function WorkflowsSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
   const { hasPermission } = usePermissions();
 
@@ -180,7 +179,7 @@ function WorkflowsSettingsContent() {
   // Settings save helpers
   // -------------------------------------------------------------------------
 
-  const patch = (updates: Partial<SystemSettings>, successText?: string) =>
+  const patch = (updates: Partial<MemoriahubSystemSettings>, successText?: string) =>
     updateSettings(updates)
       .then(() => {
         if (successText) setSuccessMessage(successText);
@@ -597,6 +596,11 @@ function WorkflowsSettingsContent() {
   );
 }
 
+/**
+ * The workflows settings page of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export default function WorkflowsSettingsPage() {
   const { isAdmin } = usePermissions();
 

@@ -13,7 +13,10 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils';
 
-vi.mock('@marinoscar/platform-web/jobs/ui', () => ({
+// Keep the rest of the platform entry (the admin section registry reads `jobsAdminSections` from it,
+// and the host admin port now reaches that registry), and replace only the page.
+vi.mock('@marinoscar/platform-web/jobs/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/platform-web/jobs/ui')>()),
   JobsPage: ({ slots }: { slots?: { Toolbar?: () => JSX.Element } }) => {
     const Toolbar = slots?.Toolbar;
     return (

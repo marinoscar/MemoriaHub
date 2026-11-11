@@ -136,11 +136,16 @@ const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 // entry chunk.
 const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'));
 const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
-const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
+const WorkflowsSettingsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowsSettingsPage })),
+);
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
-const TaggingSettingsPage = lazy(() => import('./pages/Admin/TaggingSettingsPage'));
+// RETRO-J11 (#626): the packaged Tagging settings page (vocabulary included); the host supplies its table, header and settings hook.
+const TaggingSettingsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TaggingSettingsPage })),
+);
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));

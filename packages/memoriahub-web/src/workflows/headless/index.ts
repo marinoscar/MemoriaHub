@@ -7,6 +7,7 @@ export * from './hooks/useWorkflowRuns.js';
 export * from './hooks/useWorkflowSubjects.js';
 export * from './hooks/useWorkflows.js';
 export * from './services/workflows.js';
+export * from './services/adminWorkflows.js';
 export * from './utils/workflowCron.js';
 export * from './utils/workflowFormat.js';
 export * from './utils/workflowSentence.js';

@@ -20,22 +20,36 @@
  */
 
 import { Switch, Typography } from '@mui/material';
-import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
-import type { TagLabel } from '@marinoscar/memoriahub-web/tagging/headless';
+import type { MemoriahubDataTableColumn } from '../../../core/headless/index.js';
+import type { TagLabel } from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
 
+/**
+ * The id the user's column layout of the vocabulary table is saved under.
+ *
+ * @stability experimental
+ */
 export const TAG_LABELS_TABLE_ID = 'admin-tag-labels';
 
-/** Rows per page for the client-side slice. */
+/**
+ * Rows per page for the client-side slice.
+ *
+ * @stability experimental
+ */
 export const TAG_LABELS_PAGE_SIZE = 25;
 
 // ---------------------------------------------------------------------------
 // Columns
 // ---------------------------------------------------------------------------
 
+/**
+ * What the vocabulary columns call back into.
+ *
+ * @stability experimental
+ */
 export interface TagColumnHandlers {
   /** Flips a label's `enabled` flag. Wired to the in-cell switch. */
   onToggleEnabled: (label: TagLabel, enabled: boolean) => void;
@@ -48,10 +62,15 @@ export interface TagColumnHandlers {
  *   - primary   — Name
  *   - secondary — Enabled (the switch, live in the cell AND on the card)
  *   - detail    — Updated
+ *
+ * @param handlers - what the in-cell switch calls back into.
+ * @returns the column declarations.
+ *
+ * @stability experimental
  */
 export function buildTagColumns({
   onToggleEnabled,
-}: TagColumnHandlers): DataTableColumn<TagLabel>[] {
+}: TagColumnHandlers): MemoriahubDataTableColumn<TagLabel>[] {
   return [
     {
       id: 'name',

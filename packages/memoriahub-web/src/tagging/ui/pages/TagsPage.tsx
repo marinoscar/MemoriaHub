@@ -41,7 +41,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import UploadIcon from '@mui/icons-material/Upload';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import { usePermissions } from '../../hooks/usePermissions';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
 import {
   listTagLabels,
   createTagLabel,
@@ -49,21 +49,29 @@ import {
   deleteTagLabel,
   exportTagLabels,
   importTagLabels,
-} from '@marinoscar/memoriahub-web/tagging/headless';
-import type { TagLabel, ImportResult } from '@marinoscar/memoriahub-web/tagging/headless';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+} from '../../headless/index.js';
+import type { TagLabel, ImportResult } from '../../headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
 import {
   TAG_LABELS_PAGE_SIZE,
   TAG_LABELS_TABLE_ID,
   buildTagColumns,
-} from './tagsTable';
+} from './tagsTable.js';
 
 // ---------------------------------------------------------------------------
 // Inner content (only rendered when user is admin)
 // ---------------------------------------------------------------------------
 
+/**
+ * The vocabulary editor: the add form, the table with rename and delete, and the CSV round trip.
+ * Admin-only content; the caller has already checked the role.
+ *
+ * @returns the editor.
+ *
+ * @stability experimental
+ */
 export function TagsContent() {
+  const { DataTable } = useMemoriahubAdmin();
   // ---- Tag label vocabulary state ----
   const [labels, setLabels] = useState<TagLabel[]>([]);
   const [labelsLoading, setLabelsLoading] = useState(false);
@@ -229,7 +237,7 @@ export function TagsContent() {
     [],
   );
 
-  const rowActions = useMemo<DataTableRowAction<TagLabel>[]>(
+  const rowActions = useMemo<MemoriahubDataTableRowAction<TagLabel>[]>(
     () => [
       {
         id: 'rename',
@@ -463,6 +471,13 @@ export function TagsContent() {
 // Page wrapper with admin guard
 // ---------------------------------------------------------------------------
 
+/**
+ * The admin vocabulary page: {@link TagsContent} behind an admin check that sends everyone else to `/`.
+ *
+ * @returns the page.
+ *
+ * @stability experimental
+ */
 export default function TagsPage() {
   const { isAdmin } = usePermissions();
 
