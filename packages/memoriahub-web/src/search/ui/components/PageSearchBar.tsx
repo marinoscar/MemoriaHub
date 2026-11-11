@@ -24,10 +24,15 @@ import { Box, IconButton, InputBase, Paper, Tooltip } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import TuneIcon from '@mui/icons-material/Tune';
 import ClearIcon from '@mui/icons-material/Close';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useSearch } from '../../contexts/SearchContext';
-import { SearchPanel } from './SearchPanel';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { useSearch } from '../contexts/SearchContext.js';
+import { SearchPanel } from './SearchPanel.js';
 
+/**
+ * Page Search Bar Props.
+ *
+ * @stability experimental
+ */
 export interface PageSearchBarProps {
   /** Pre-fill the field (e.g. restoring the query behind a results view). */
   initialQuery?: string;
@@ -36,6 +41,11 @@ export interface PageSearchBarProps {
   autoFocus?: boolean;
 }
 
+/**
+ * Page Search Bar.
+ *
+ * @stability experimental
+ */
 export function PageSearchBar({
   initialQuery = '',
   autoFocus = false,
@@ -170,7 +180,9 @@ export function PageSearchBar({
 }
 
 /** Convenience wrapper: the bar plus the vertical rhythm every SearchPage
- *  branch wants above its own header row. Keeps the four mount sites identical. */
+ *
+ * @stability experimental
+ */
 export function PageSearchBarSection(props: PageSearchBarProps) {
   return (
     <Box sx={{ mb: 2, minWidth: 0 }}>

@@ -15,30 +15,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../../__tests__/utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared BEFORE importing the modules under test
 // ---------------------------------------------------------------------------
 
 // Mock location facets and explore tags — return minimal static data
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getLocationFacets: vi.fn(),
   getExploreTags: vi.fn(),
 
 }));
 
-// Stub PersonMultiSelect so it renders a simple placeholder (no async calls)
-vi.mock('../PersonMultiSelect', () => ({
-  PersonMultiSelect: vi.fn(({ label }: { label: string }) => (
-    <div data-testid="person-multi-select">{label}</div>
-  )),
-}));
-
 // Stub LocationPickerMap to render a button that simulates dropping a pin when clicked
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  // The people picker is the host's slot; a placeholder keeps the test free of async calls.
+  PersonMultiSelectSlot: ({ label }: { label: string }) => <div data-testid="person-multi-select">{label}</div>,
   LocationPickerMap: vi.fn(
     ({
       onChange,
@@ -62,8 +57,8 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 // Imports after mocks (Vitest requires this order)
 // ---------------------------------------------------------------------------
 
-import { SearchPanel } from '../SearchPanel';
-import { getLocationFacets, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
+import { SearchPanel } from '../../src/search/ui/components/SearchPanel.js';
+import { getLocationFacets, getExploreTags } from '../../src/media/headless/index.js';
 
 const mockGetLocationFacets = vi.mocked(getLocationFacets);
 const mockGetExploreTags = vi.mocked(getExploreTags);

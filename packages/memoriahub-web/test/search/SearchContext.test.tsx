@@ -22,12 +22,13 @@ import { MemoryRouter } from 'react-router-dom';
 // ---------------------------------------------------------------------------
 
 // streamAgent is the SSE client — mock it so tests don't make real network calls.
-vi.mock('../../services/searchAgentStream', () => ({
+vi.mock('../../src/search/headless/services/searchAgentStream.js', () => ({
   streamAgent: vi.fn(),
 }));
 
 // useOwnerScope is used inside SearchProvider to react to circle changes.
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
@@ -35,10 +36,10 @@ vi.mock('../../hooks/useOwnerScope', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { SearchProvider, useSearch } from '../../contexts/SearchContext';
-import { streamAgent } from '../../services/searchAgentStream';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
+import { SearchProvider, useSearch } from '../../src/search/ui/contexts/SearchContext.js';
+import { streamAgent } from '../../src/search/headless/services/searchAgentStream.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import type { MediaItem, MediaListMeta } from '../../src/media/headless/index.js';
 
 const mockStreamAgent = vi.mocked(streamAgent);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);

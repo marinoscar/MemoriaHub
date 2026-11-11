@@ -47,11 +47,11 @@ const WHY = {
 
 const ALLOWED_READS: Readonly<Record<string, string>> = {
   'components/navigation/AppBar.tsx': WHY.appBarControls,
-  'components/search/TopbarSearch.tsx': WHY.searchPill,
+  'memoriahub-web/search/ui/components/TopbarSearch.tsx': WHY.searchPill,
   'hooks/useContextPaneVisible.ts': WHY.contextPane,
 
   'components/media/MediaDetailDrawer.tsx': WHY.dialog,
-  'components/search/SearchPanel.tsx': WHY.dialog,
+  'memoriahub-web/search/ui/components/SearchPanel.tsx': WHY.dialog,
 
   'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
   'components/media/MediaLightbox.tsx': WHY.media,

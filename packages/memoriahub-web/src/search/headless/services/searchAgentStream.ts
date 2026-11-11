@@ -1,24 +1,43 @@
 // Stateless SSE client for the /api/search/agent endpoint.
 // Sends the FULL message history each call; backend is stateless.
-import { api } from './api';
-import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
-import { rewriteBody } from './ownerScopeParams';
+import { api } from '../../../core/headless/index.js';
+import type { MediaItem, MediaListMeta } from '../../../media/headless/index.js';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-
+/**
+ * Chat Msg.
+ *
+ * @stability experimental
+ */
 export interface ChatMsg {
+  /** The `role`. */
   role: 'user' | 'assistant';
+  /** The `content`. */
   content: string;
 }
 
+/**
+ * Agent Stream Handlers.
+ *
+ * @stability experimental
+ */
 export interface AgentStreamHandlers {
+  /** The `onToken`. */
   onToken?: (text: string) => void;
+  /** The `onToolCall`. */
   onToolCall?: (data: { name: string; args: Record<string, unknown> }) => void;
+  /** The `onResults`. */
   onResults?: (data: { items: MediaItem[]; meta: MediaListMeta }) => void;
+  /** The `onDone`. */
   onDone?: () => void;
+  /** The `onError`. */
   onError?: (data: { message: string }) => void;
 }
 
+/**
+ * Stream Agent.
+ *
+ * @stability experimental
+ */
 export async function streamAgent(
   body: { circleId: string; messages: ChatMsg[] },
   handlers: AgentStreamHandlers,
@@ -34,13 +53,13 @@ export async function streamAgent(
     (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}/search/agent`, {
+  const response = await fetch(`${api.baseUrl}/search/agent`, {
     method: 'POST',
     headers,
     credentials: 'include',
     // RETRO-I6 (#588): this stream bypasses `api.ts`, so it applies the same
     // owner-scope rewrite (`circleId` -> `ownerGroupId` / `scope=me`).
-    body: JSON.stringify(rewriteBody('/search/agent', body)),
+    body: JSON.stringify(api.rewriteBody('/search/agent', body)),
     signal,
   });
 

@@ -6,7 +6,7 @@ The React side of the MemoriaHub domain: pages, components, hooks and clients, w
 
 The MemoriaHub web UI will live in this package, slice by slice (RETRO-J11, mirroring the API slices of RETRO-J5 to J10). A slice takes everything outside the domain (the API client, navigation, the signed-in user, feature flags, the active owner scope, the shell layout) from a `MemoriahubWebHost` the app provides once; it never imports the app or the platform. The platform's own UI (identity, the settings hub, notifications, jobs, sharing) stays `@marinoscar/platform-web`, and the web app binds the two in `apps/web/src/platform-memoriahub/`. Moving a slice therefore never moves an app import with it ([ADR 0001](../../docs/decisions/0001-packages-first.md)).
 
-This release carries five slices: `core` (the host), `brand`, `shell` (data for the app's registries), `memories` (the feed carousel, the Memories and detail pages, the story player and their hooks) and `media` (gallery, bulk toolbars and dialogs, albums, the map, places, archive and trash pages, the civil date utilities and the media clients). The lightbox, the detail drawer, the enhancement drawer and dialog, the people pickers and the location-merge dialog belong to later parts and reach the media pages through **host slots**; the media-sync page, the Collections hub and the trash-run page stay in the app until their slices move. The web app mounts the packaged pages on the same routes, so nothing changes for users.
+This release carries six slices: `core` (the host), `brand`, `shell` (data for the app's registries), `search` (the search panel, the top-bar pill, AI search and the Search page), `memories` (the feed carousel, the Memories and detail pages, the story player and their hooks) and `media` (gallery, bulk toolbars and dialogs, albums, the map, places, archive and trash pages, the civil date utilities and the media clients). The lightbox, the detail drawer, the enhancement drawer and dialog, the people pickers and the location-merge dialog belong to later parts and reach the media pages through **host slots**; the media-sync page, the Collections hub and the trash-run page stay in the app until their slices move. The web app mounts the packaged pages on the same routes, so nothing changes for users.
 
 Status: experimental. It is `"private": true` until the owner opens the publish gate ([release runbook](../../docs/runbooks/release-memoriahub-packages.md)).
 
@@ -21,6 +21,8 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-web/media/ui`: the media pages and components, and the slot bridges.
 - `@marinoscar/memoriahub-web/memories/headless`: the memories clients, hooks, story timing and types ([slice README](src/memories/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-web/memories/ui`: the Memories pages, the carousel and the story player.
+- `@marinoscar/memoriahub-web/search/headless`: the search clients, the agent stream and the search hook ([slice README](src/search/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-web/search/ui`: the search state, panel, top-bar pill and the Search page.
 
 ## Install and peer dependencies
 
@@ -48,7 +50,7 @@ import { AlbumsPage } from '@marinoscar/memoriahub-web/media/ui';
 
 // The app builds the host once (useMemo: its state fields change over a session).
 const host: MemoriahubWebHost = {
-  apiClient, // get/post/put/patch/delete, refreshToken, rewriteEndpoint, getAccessToken, baseUrl
+  apiClient, // get/post/put/patch/delete, refreshToken, rewriteEndpoint, rewriteBody, getAccessToken, baseUrl
   navigate, principal, authLoading, features, settings, ownerScope, notify, timeZone,
   slots: { 'media.lightbox': AppLightbox },
 };
@@ -74,6 +76,7 @@ const host: MemoriahubWebHost = {
 | `MemoriahubApiClient` | host | the HTTP transport, including the credential and the owner-scope rewrite |
 | `MemoriahubSearchPort` | host | the search surface the map hands a filter to |
 | `MemoriahubShellPort` | host | the shell's main-area layout (`full-bleed` for the map) |
+| `SearchPeopleExploreSlot` | slot | the people carousel of the Search page's explore view |
 | `MemoriahubWebSlots` | host | components of slices that have not moved into the package yet, by name |
 
 ## Data

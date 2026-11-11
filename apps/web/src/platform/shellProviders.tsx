@@ -22,7 +22,7 @@ import { NotificationProvider } from '@marinoscar/platform-web/notifications/hea
 import { AiConfigProvider } from '@marinoscar/platform-web/ai/headless';
 import { MediaRefreshProvider } from '@marinoscar/memoriahub-web/media/headless';
 import { MediaPreviewProvider } from '@marinoscar/memoriahub-web/media/headless';
-import { SearchProvider } from '../contexts/SearchContext';
+import { SearchProvider } from '@marinoscar/memoriahub-web/search/ui';
 import { MemoriahubSearchBridge } from '../platform-memoriahub/HostBinding';
 
 export const APP_SHELL_PROVIDERS: readonly ShellProvider[] = [

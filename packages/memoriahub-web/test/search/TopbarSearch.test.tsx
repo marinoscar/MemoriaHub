@@ -21,18 +21,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../../__tests__/utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared BEFORE any import of the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../contexts/SearchContext', () => ({
+vi.mock('../../src/search/ui/contexts/SearchContext.js', () => ({
   useSearch: vi.fn(),
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
@@ -42,7 +43,7 @@ const FAKE_REQUEST = { circleId: 'circle-1', filters: { country: 'Costa Rica' } 
 
 // Stub SearchPanel: renders an "Apply" button that calls onSubmit
 // when clicked, so we can test the wiring.
-vi.mock('../SearchPanel', () => ({
+vi.mock('../../src/search/ui/components/SearchPanel.js', () => ({
   SearchPanel: vi.fn(
     ({
       open,
@@ -82,9 +83,9 @@ vi.mock('@mui/material', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import { TopbarSearch } from '../TopbarSearch';
-import { useSearch } from '../../../contexts/SearchContext';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
+import { TopbarSearch } from '../../src/search/ui/components/TopbarSearch.js';
+import { useSearch } from '../../src/search/ui/contexts/SearchContext.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
 
 const mockUseSearch = vi.mocked(useSearch);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);

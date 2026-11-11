@@ -14,27 +14,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared BEFORE importing the module under test
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getLocationFacets: vi.fn(),
   getExploreTags: vi.fn(),
 
 }));
 
-vi.mock('../../../components/search/PersonMultiSelect', () => ({
-  PersonMultiSelect: vi.fn(({ label }: { label: string }) => (
-    <div data-testid="person-multi-select">{label}</div>
-  )),
-}));
-
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  // The people picker is the host's slot; a placeholder keeps the test free of async calls.
+  PersonMultiSelectSlot: ({ label }: { label: string }) => <div data-testid="person-multi-select">{label}</div>,
   LocationPickerMap: vi.fn(
     ({ onChange }: { onChange: (latlng: { lat: number; lng: number }) => void }) => (
       <button
@@ -52,9 +48,9 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 // Imports after mocks (Vitest requires this order)
 // ---------------------------------------------------------------------------
 
-import { SearchPanel } from '../../../components/search/SearchPanel';
-import { getLocationFacets, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
-import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
+import { SearchPanel } from '../../src/search/ui/components/SearchPanel.js';
+import { getLocationFacets, getExploreTags } from '../../src/media/headless/index.js';
+import { LocationPickerMap } from '../../src/media/ui/index.js';
 
 const mockGetLocationFacets = vi.mocked(getLocationFacets);
 const mockGetExploreTags = vi.mocked(getExploreTags);

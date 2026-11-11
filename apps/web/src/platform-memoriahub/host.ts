@@ -21,6 +21,7 @@ import type {
 import { useShellMainVariant } from '@marinoscar/platform-web/shell/headless';
 
 import { API_BASE_URL, api, rewriteEndpoint } from '../services/api';
+import { rewriteBody } from '../services/ownerScopeParams';
 import { appMemoriahubSlots } from './slots';
 
 /** The app's API client as the package's `MemoriahubApiClient`. */
@@ -32,6 +33,7 @@ export const appMemoriahubApi: MemoriahubApiClient = {
   delete: (endpoint, options) => api.delete(endpoint, options),
   refreshToken: () => api.refreshToken(),
   rewriteEndpoint,
+  rewriteBody,
   getAccessToken: () => api.getAccessToken(),
   baseUrl: API_BASE_URL,
 };

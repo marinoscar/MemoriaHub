@@ -12,26 +12,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../contexts/SearchContext', () => ({
+vi.mock('../../src/search/ui/contexts/SearchContext.js', () => ({
   useSearch: vi.fn(),
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../hooks/usePeople', () => ({
-  usePeople: vi.fn(),
-}));
-
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getExploreLocations: vi.fn().mockResolvedValue({
     countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
@@ -44,13 +41,13 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
 
 }));
 
-vi.mock('../../components/search/SearchPanel', () => ({
+vi.mock('../../src/search/ui/components/SearchPanel.js', () => ({
   SearchPanel: vi.fn(() => null),
 }));
 
@@ -58,14 +55,12 @@ vi.mock('../../components/search/SearchPanel', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import SearchPage from '../../pages/SearchPage';
-import { useSearch } from '../../contexts/SearchContext';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { usePeople } from '../../hooks/usePeople';
+import { SearchPage } from '../../src/search/ui/pages/SearchPage.js';
+import { useSearch } from '../../src/search/ui/contexts/SearchContext.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
 
 const mockUseSearch = vi.mocked(useSearch);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
-const mockUsePeople = vi.mocked(usePeople);
 
 // ---------------------------------------------------------------------------
 // Default mock factories
@@ -96,20 +91,6 @@ function defaultCircleMock() {
   };
 }
 
-function defaultPeopleMock() {
-  return {
-    data: { items: [], meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 } },
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    create: vi.fn(),
-    rename: vi.fn(),
-    cluster: vi.fn(),
-    assignFaces: vi.fn(),
-    unassignFace: vi.fn(),
-  };
-}
-
 // Convenience factory: results state
 function withResults(items = [], totalItems = 0) {
   return {
@@ -129,7 +110,6 @@ describe('SearchPage — extended coverage', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
   });
 
   // -------------------------------------------------------------------------
@@ -259,57 +239,5 @@ describe('SearchPage — extended coverage', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // People explore row
-  // -------------------------------------------------------------------------
-  describe('People explore row', () => {
-    it('shows the People section header and at least one person when people are available', () => {
-      // Note: useFittedCount seeds from getBoundingClientRect().width which
-      // returns 0 in jsdom, clamping count to 1. We therefore assert the
-      // section header and the first visible person (Alice), not every item.
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-            { id: 'p-2', name: 'Bob', isUnlabeled: false, faceCount: 2, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
-        },
-      } as any);
 
-      render(<SearchPage />);
-
-      // Section header must always be visible
-      expect(screen.getByText('People')).toBeInTheDocument();
-      // At least the first person tile renders
-      expect(screen.getByText('Alice')).toBeInTheDocument();
-    });
-
-    it('shows the "View all" button in the People section', () => {
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
-        },
-      } as any);
-
-      render(<SearchPage />);
-
-      // The People ExploreCarousel sets viewAllLabel="View all" and onViewAll=navigate('/people')
-      // At least one "View all" button should be present in the explore view
-      const viewAllButtons = screen.getAllByRole('button', { name: /view all/i });
-      expect(viewAllButtons.length).toBeGreaterThan(0);
-    });
-
-    it('does NOT show the People section when there are no labeled people', () => {
-      // defaultPeopleMock returns no items — People section should not render
-      render(<SearchPage />);
-
-      expect(screen.queryByText('People')).not.toBeInTheDocument();
-    });
-  });
 });

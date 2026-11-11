@@ -5,6 +5,7 @@ import { server } from './mocks/server';
 import { setActiveMemoriahubHost } from '@marinoscar/memoriahub-web/core/headless';
 import type { MemoriahubWebHost } from '@marinoscar/memoriahub-web/core/headless';
 import { api as staticApi, rewriteEndpoint, API_BASE_URL } from '../services/api';
+import { rewriteBody } from '../services/ownerScopeParams';
 
 // Set base URL for fetch
 const BASE_URL = 'http://localhost:3000';
@@ -202,6 +203,7 @@ const testHost = {
       return api.refreshToken();
     },
     rewriteEndpoint,
+    rewriteBody,
     getAccessToken: () => staticApi.getAccessToken(),
     baseUrl: API_BASE_URL,
   },

@@ -28,22 +28,30 @@ import { useTheme } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { PersonMultiSelect } from './PersonMultiSelect';
-import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
-import type { SearchRequest } from '../../services/search';
-import { getExploreTags, getLocationFacets } from '@marinoscar/memoriahub-web/media/headless';
-import type { LocationCountry } from '@marinoscar/memoriahub-web/media/headless';
-import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
-import { civilDayRange, instantDayRange } from '@marinoscar/memoriahub-web/media/headless';
-import { useAuth } from '../../contexts/AuthContext';
+import { PersonMultiSelectSlot as PersonMultiSelect } from '../../../media/ui/index.js';
+import { LocationPickerMap } from '../../../media/ui/index.js';
+import type { SearchRequest } from '../../headless/services/search.js';
+import { getExploreTags, getLocationFacets } from '../../../media/headless/index.js';
+import type { LocationCountry } from '../../../media/headless/index.js';
+import type { ExploreItem } from '../../../media/headless/index.js';
+import { civilDayRange, instantDayRange } from '../../../media/headless/index.js';
+import { usePrincipal } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Search Panel Props.
+ *
+ * @stability experimental
+ */
 export interface SearchPanelProps {
+  /** The `open`. */
   open: boolean;
+  /** The `onClose`. */
   onClose: () => void;
+  /** The `circleId`. */
   circleId: string;
   /**
    * Emits the built deterministic SearchRequest. The panel no longer fetches —
@@ -75,6 +83,11 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 // SearchPanel
 // ---------------------------------------------------------------------------
 
+/**
+ * Search Panel.
+ *
+ * @stability experimental
+ */
 export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelProps) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
@@ -82,8 +95,8 @@ export function SearchPanel({ open, onClose, circleId, onSubmit }: SearchPanelPr
   // The user's stored IANA zone (#444), used ONLY to resolve upload-date
   // bounds — an instant field. Null means "no preference expressed", which
   // `instantDayRange` reads as "use the browser zone".
-  const { user } = useAuth();
-  const userTimeZone = user?.timezone ?? undefined;
+  const principal = usePrincipal();
+  const userTimeZone = principal?.timeZone ?? undefined;
 
   // -------------------------------------------------------------------------
   // Data loading

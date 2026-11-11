@@ -5,7 +5,7 @@
  *   - No search input — input lives in TopbarSearch (AppBar).
  *   - Reads state from SearchContext via useSearch().
  *   - Shows MediaGallery when results !== null or isSearching.
- *   - Shows Explore (Places / Tags / People) carousels otherwise.
+ *   - Shows Explore (Places / Tags carousels, and the host's people slot) otherwise.
  *
  * Strategy: mock useSearch() and useOwnerScope(); verify the two branches and
  * the Explore row behaviour.
@@ -14,26 +14,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
+import { SEARCH_PEOPLE_EXPLORE_SLOT } from '../../src/search/headless/slot-names.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../contexts/SearchContext', () => ({
+vi.mock('../../src/search/ui/contexts/SearchContext.js', () => ({
   useSearch: vi.fn(),
   SearchProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../hooks/usePeople', () => ({
-  usePeople: vi.fn(),
-}));
-
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getExploreLocations: vi
     .fn()
@@ -42,13 +40,13 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
 
 }));
 
-vi.mock('../../components/search/SearchPanel', () => ({
+vi.mock('../../src/search/ui/components/SearchPanel.js', () => ({
   SearchPanel: vi.fn(() => null),
 }));
 
@@ -65,14 +63,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import SearchPage from '../../pages/SearchPage';
-import { useSearch } from '../../contexts/SearchContext';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { usePeople } from '../../hooks/usePeople';
+import { SearchPage } from '../../src/search/ui/pages/SearchPage.js';
+import { useSearch } from '../../src/search/ui/contexts/SearchContext.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
 
 const mockUseSearch = vi.mocked(useSearch);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
-const mockUsePeople = vi.mocked(usePeople);
 
 // ---------------------------------------------------------------------------
 // Default mock factories
@@ -103,20 +99,6 @@ function defaultCircleMock() {
   };
 }
 
-function defaultPeopleMock() {
-  return {
-    data: { items: [], meta: { page: 1, pageSize: 100, totalItems: 0, totalPages: 0 } },
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    create: vi.fn(),
-    rename: vi.fn(),
-    cluster: vi.fn(),
-    assignFaces: vi.fn(),
-    unassignFace: vi.fn(),
-  };
-}
-
 // ---------------------------------------------------------------------------
 
 describe('SearchPage', () => {
@@ -126,7 +108,6 @@ describe('SearchPage', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     mockUseOwnerScope.mockReturnValue(defaultCircleMock() as any);
     mockUseSearch.mockReturnValue(defaultSearchMock() as any);
-    mockUsePeople.mockReturnValue(defaultPeopleMock() as any);
   });
 
   // -------------------------------------------------------------------------
@@ -159,20 +140,12 @@ describe('SearchPage', () => {
       expect(screen.getByText('Tags')).toBeInTheDocument();
     });
 
-    it('shows People section when people are available', () => {
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
-        },
-      } as any);
 
-      render(<SearchPage />);
 
-      expect(screen.getByText('People')).toBeInTheDocument();
+    it('renders the host\'s people slot with the active circle in the explore view', () => {
+      const PeopleSlot = ({ circleId }: { circleId: string }) => <div data-testid="people-slot">{circleId}</div>;
+      render(<SearchPage />, { wrapperOptions: { slots: { [SEARCH_PEOPLE_EXPLORE_SLOT]: PeopleSlot } } });
+      expect(screen.getByTestId('people-slot')).toHaveTextContent('circle-1');
     });
 
     it('does NOT show the MediaGallery when results are null and not searching', () => {
@@ -181,7 +154,7 @@ describe('SearchPage', () => {
     });
 
     it('shows "See all places" button for the Countries section when countries are loaded', async () => {
-      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreLocations } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
         regions: [],
@@ -196,7 +169,7 @@ describe('SearchPage', () => {
     });
 
     it('navigates to /places when "See all places" is clicked', async () => {
-      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreLocations } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Rome', countryCode: 'IT', count: 4, coverThumbnailUrl: null }],
         regions: [],
@@ -213,7 +186,7 @@ describe('SearchPage', () => {
     });
 
     it('shows "View all" button for the Tags section when tags are loaded', async () => {
-      const { getExploreTags } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreTags } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreTags).mockResolvedValue([
         { name: 'sunset', count: 7, coverThumbnailUrl: null },
       ]);
@@ -227,22 +200,7 @@ describe('SearchPage', () => {
       });
     });
 
-    it('shows "View all" button for People section when people are loaded', () => {
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            { id: 'p-1', name: 'Alice', isUnlabeled: false, faceCount: 5, coverFace: null, createdAt: '', updatedAt: '', favorite: true },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
-        },
-      } as any);
 
-      render(<SearchPage />);
-
-      const viewAllButtons = screen.getAllByRole('button', { name: /view all/i });
-      expect(viewAllButtons.length).toBeGreaterThan(0);
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -382,7 +340,7 @@ describe('SearchPage', () => {
   // -------------------------------------------------------------------------
   describe('Explore data', () => {
     it('shows Countries from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreLocations } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [{ name: 'Paris', countryCode: 'FR', count: 10, coverThumbnailUrl: null }],
         regions: [],
@@ -397,7 +355,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Regions from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreLocations } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [],
         regions: [{ name: 'Provence', count: 6, coverThumbnailUrl: null }],
@@ -412,7 +370,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Cities from the explore endpoint', async () => {
-      const { getExploreLocations } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreLocations } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreLocations).mockResolvedValue({
         countries: [],
         regions: [],
@@ -427,7 +385,7 @@ describe('SearchPage', () => {
     });
 
     it('shows Tags from the explore endpoint', async () => {
-      const { getExploreTags } = await import('@marinoscar/memoriahub-web/media/headless');
+      const { getExploreTags } = await import('../../src/media/headless/index.js');
       vi.mocked(getExploreTags).mockResolvedValue([
         { name: 'beach', count: 5, coverThumbnailUrl: null },
       ]);
@@ -440,75 +398,7 @@ describe('SearchPage', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // People sort: favorites-first, then faceCount descending
-  // -------------------------------------------------------------------------
-  describe('People sort order', () => {
-    it('renders the favorite person before a non-favorite when count allows 1 tile', () => {
-      // jsdom: getBoundingClientRect returns 0 → useFittedCount clamps to 1.
-      // The person that appears must be the one that sorts first: favorite first.
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            // Carol is non-favorite with many faces — should sort AFTER Dave
-            { id: 'p-carol', name: 'Carol', isUnlabeled: false, faceCount: 50, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-            // Dave is a favorite with fewer faces — sorts FIRST
-            { id: 'p-dave', name: 'Dave', isUnlabeled: false, faceCount: 3, coverFace: null, createdAt: '', updatedAt: '', favorite: true },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
-        },
-      } as any);
 
-      render(<SearchPage />);
-
-      // Dave (favorite=true) must appear since it's the first item after sort
-      expect(screen.getByText('Dave')).toBeInTheDocument();
-      // Carol should not appear because jsdom caps the carousel at 1 tile
-      expect(screen.queryByText('Carol')).not.toBeInTheDocument();
-    });
-
-    it('renders the person with the highest faceCount first when no favorites', () => {
-      // Non-favorite items are sorted by faceCount desc; 1 tile visible in jsdom.
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            // Eve has fewer faces — sorts second
-            { id: 'p-eve', name: 'Eve', isUnlabeled: false, faceCount: 2, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-            // Frank has more faces — sorts first
-            { id: 'p-frank', name: 'Frank', isUnlabeled: false, faceCount: 10, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
-        },
-      } as any);
-
-      render(<SearchPage />);
-
-      // Frank (higher faceCount) must be visible
-      expect(screen.getByText('Frank')).toBeInTheDocument();
-      // Eve should not appear because jsdom caps the carousel at 1 tile
-      expect(screen.queryByText('Eve')).not.toBeInTheDocument();
-    });
-
-    it('excludes unlabeled (null-name) people from the People row', () => {
-      mockUsePeople.mockReturnValue({
-        ...defaultPeopleMock(),
-        data: {
-          items: [
-            { id: 'p-unlabeled', name: null, isUnlabeled: true, faceCount: 8, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-            { id: 'p-named', name: 'Grace', isUnlabeled: false, faceCount: 1, coverFace: null, createdAt: '', updatedAt: '', favorite: false },
-          ],
-          meta: { page: 1, pageSize: 100, totalItems: 2, totalPages: 1 },
-        },
-      } as any);
-
-      render(<SearchPage />);
-
-      // Grace should be visible; the unnamed person has no text to check
-      expect(screen.getByText('Grace')).toBeInTheDocument();
-    });
-  });
 
   // -------------------------------------------------------------------------
   // Capability guard — regression coverage for production bug #400.

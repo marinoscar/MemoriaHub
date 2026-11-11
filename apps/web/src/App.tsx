@@ -149,7 +149,9 @@ const MemoriesSettingsPage = lazy(() => import('./pages/Admin/MemoriesSettingsPa
 const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
-const SearchPage = lazy(() => import('./pages/SearchPage'));
+const SearchPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
+);
 const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
 const AlbumsPage = lazyMediaPage('AlbumsPage');

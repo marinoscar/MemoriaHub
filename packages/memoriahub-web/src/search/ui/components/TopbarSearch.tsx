@@ -21,10 +21,15 @@ import TuneIcon from '@mui/icons-material/Tune';
 import ClearIcon from '@mui/icons-material/Close';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useTheme } from '@mui/material/styles';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useSearch } from '../../contexts/SearchContext';
-import { SearchPanel } from './SearchPanel';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { useSearch } from '../contexts/SearchContext.js';
+import { SearchPanel } from './SearchPanel.js';
 
+/**
+ * Topbar Search.
+ *
+ * @stability experimental
+ */
 export function TopbarSearch() {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down('sm'));

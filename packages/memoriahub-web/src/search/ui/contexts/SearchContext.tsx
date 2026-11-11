@@ -8,23 +8,37 @@ import {
   ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useOwnerScope } from '../hooks/useOwnerScope';
-import { streamAgent } from '../services/searchAgentStream';
-import type { ChatMsg } from '../services/searchAgentStream';
-import type { SearchRequest } from '../services/search';
-import type { MediaItem, MediaListMeta } from '@marinoscar/memoriahub-web/media/headless';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { streamAgent } from '../../headless/services/searchAgentStream.js';
+import type { ChatMsg } from '../../headless/services/searchAgentStream.js';
+import type { SearchRequest } from '../../headless/services/search.js';
+import type { MediaItem, MediaListMeta } from '../../../media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Search Results.
+ *
+ * @stability experimental
+ */
 export interface SearchResults {
+  /** The `items`. */
   items: MediaItem[];
+  /** The `meta`. */
   meta: MediaListMeta;
 }
 
-interface SearchContextValue {
+/**
+ * Search Context Value.
+ *
+ * @stability experimental
+ */
+export interface SearchContextValue {
+  /** The `messages`. */
   messages: ChatMsg[];
+  /** The `results`. */
   results: SearchResults | null;
   /**
    * Deterministic (advanced) search request. When set, SearchPage renders the
@@ -32,10 +46,15 @@ interface SearchContextValue {
    * own paging. Mutually exclusive with the agentic `results` batch.
    */
   searchRequest: SearchRequest | null;
+  /** The `isSearching`. */
   isSearching: boolean;
+  /** The `error`. */
   error: string | null;
+  /** The `runAgentSearch`. */
   runAgentSearch: (query: string) => void;
+  /** The `runDeterministicSearch`. */
   runDeterministicSearch: (request: SearchRequest) => void;
+  /** The `clearSearch`. */
   clearSearch: () => void;
 }
 
@@ -45,10 +64,21 @@ interface SearchContextValue {
 
 const SearchContext = createContext<SearchContextValue | null>(null);
 
-interface SearchProviderProps {
+/**
+ * Search Provider Props.
+ *
+ * @stability experimental
+ */
+export interface SearchProviderProps {
+  /** The `children`. */
   children: ReactNode;
 }
 
+/**
+ * Search Provider.
+ *
+ * @stability experimental
+ */
 export function SearchProvider({ children }: SearchProviderProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -190,6 +220,11 @@ export function SearchProvider({ children }: SearchProviderProps) {
   );
 }
 
+/**
+ * Use Search.
+ *
+ * @stability experimental
+ */
 export function useSearch(): SearchContextValue {
   const ctx = useContext(SearchContext);
   if (!ctx) {

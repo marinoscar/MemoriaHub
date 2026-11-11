@@ -27,70 +27,24 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import PersonIcon from '@mui/icons-material/Person';
 import PlaceIcon from '@mui/icons-material/Place';
 import PublicIcon from '@mui/icons-material/Public';
 import TagIcon from '@mui/icons-material/LocalOffer';
-import { useOwnerScope } from '../hooks/useOwnerScope';
-import { usePeople } from '../hooks/usePeople';
-import { performSearch } from '../services/search';
-import { getExploreLocations, getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
-import type { ExploreItem, ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListItem } from '../services/face';
-import { MediaGallery } from '@marinoscar/memoriahub-web/media/ui';
-import { PersonAvatar } from '../components/people/PersonAvatar';
-import { useSearch } from '../contexts/SearchContext';
-import { ExploreCarousel } from '@marinoscar/memoriahub-web/media/ui';
-import { PageSearchBarSection } from '../components/search/PageSearchBar';
-import { renderLocationTile } from '@marinoscar/memoriahub-web/media/ui';
-import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { SearchPeopleExploreSlot } from '../slots.js';
+import { performSearch } from '../../headless/services/search.js';
+import { getExploreLocations, getExploreTags } from '../../../media/headless/index.js';
+import type { ExploreItem, ExploreLocations } from '../../../media/headless/index.js';
+import { MediaGallery } from '../../../media/ui/index.js';
+import { useSearch } from '../contexts/SearchContext.js';
+import { ExploreCarousel } from '../../../media/ui/index.js';
+import { PageSearchBarSection } from '../components/PageSearchBar.js';
+import { renderLocationTile } from '../../../media/ui/index.js';
+import type { ExploreLocationItem } from '../../../media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Tile renderers (presentational helpers)
 // ---------------------------------------------------------------------------
-
-function renderPersonTile(
-  person: PersonListItem,
-  navigate: ReturnType<typeof useNavigate>,
-) {
-  return (
-    <Box
-      onClick={() => navigate(`/media?personId=${person.id}`)}
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 0.5,
-        cursor: 'pointer',
-        flexShrink: 0,
-        width: 80,
-        '&:hover': { opacity: 0.8 },
-      }}
-      role="button"
-      aria-label={`View photos of ${person.name}`}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ')
-          navigate(`/media?personId=${person.id}`);
-      }}
-    >
-      <PersonAvatar person={person} size={64} />
-      <Typography
-        variant="caption"
-        align="center"
-        sx={{
-          maxWidth: 76,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          display: 'block',
-        }}
-      >
-        {person.name}
-      </Typography>
-    </Box>
-  );
-}
 
 function renderTagTile(
   tag: ExploreItem,
@@ -169,10 +123,14 @@ function renderTagTile(
 // SearchPage
 // ---------------------------------------------------------------------------
 
-export default function SearchPage() {
+/**
+ * Search Page.
+ *
+ * @stability experimental
+ */
+export function SearchPage() {
   const navigate = useNavigate();
   const { activeCircle, activeCircleRole } = useOwnerScope();
-  const { data: peopleData, loading: peopleLoading } = usePeople(activeCircle?.id ?? null);
   const { results, searchRequest, isSearching, error, clearSearch } = useSearch();
 
   // Explore data (shown when no results)
@@ -201,14 +159,6 @@ export default function SearchPage() {
       .catch(() => setTags([]))
       .finally(() => setTagsLoading(false));
   }, [activeCircle]);
-
-  // Sort people: favorites first, then by face count descending.
-  const people = [...(peopleData?.items ?? [])]
-    .filter((p) => p.name != null)
-    .sort(
-      (a, b) =>
-        Number(b.favorite) - Number(a.favorite) || b.faceCount - a.faceCount,
-    );
 
   if (!activeCircle) {
     return (
@@ -338,21 +288,8 @@ export default function SearchPage() {
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900, mx: 'auto' }}>
       <PageSearchBarSection />
 
-      {/* People */}
-      {(peopleLoading || people.length > 0) && (
-        <ExploreCarousel<PersonListItem>
-          title="People"
-          icon={<PersonIcon sx={{ color: 'text.secondary' }} />}
-          loading={peopleLoading}
-          items={people}
-          itemWidth={80}
-          gap={12}
-          keyOf={(p) => p.id}
-          renderItem={(p) => renderPersonTile(p, navigate)}
-          viewAllLabel="View all"
-          onViewAll={() => navigate('/people')}
-        />
-      )}
+      {/* People (a slot: the people slice has not moved into the package) */}
+      <SearchPeopleExploreSlot circleId={activeCircle.id} />
 
       {/* Countries */}
       <ExploreCarousel<ExploreLocationItem>

@@ -6,7 +6,7 @@ import type { MemoriahubFeatures, MemoriahubPrincipal } from '@marinoscar/memori
 
 import { useAuth } from '../contexts/AuthContext';
 import { useOwnerScope } from '../contexts/OwnerScopeContext';
-import { useSearch } from '../contexts/SearchContext';
+import { useSearch } from '@marinoscar/memoriahub-web/search/ui';
 import { useFeatureFlags } from '../hooks/useFeatureFlags';
 import { buildMemoriahubHost } from './host';
 
