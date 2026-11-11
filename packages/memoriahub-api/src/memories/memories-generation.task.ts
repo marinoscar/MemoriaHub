@@ -30,7 +30,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
-import { enqueueEnrichmentJob } from '../media/index.js';
 import {
   MEMORIAHUB_ACCESS,
   MEMORIAHUB_JOBS,
@@ -185,10 +184,11 @@ export class MemoriesGenerationTask {
           // A per-circle failure is logged and counted, never fatal — one bad
           // circle must not stop the rest of the deployment from generating.
           try {
-            await enqueueEnrichmentJob(this.jobs, {
+            await this.jobs.enqueue({
               type: MEMORY_GENERATION_JOB_TYPE,
-              mediaItemId: null,
-              circleId,
+              subjectType: 'circle',
+              subjectId: circleId,
+              payload: {},
               reason: JobReason.backfill,
               priority: MEMORY_GENERATION_PRIORITY,
               // MANDATORY — see the header. Without it, one circle's job would

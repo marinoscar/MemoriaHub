@@ -27,7 +27,7 @@ import {
 } from '@marinoscar/platform-api/jobs/testing';
 
 import { InsightsService, StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
-import { MemoryDigestHandler } from '@marinoscar/memoriahub-api/memories';
+import { MemoryDigestHandler, resolveMemoriesSettings } from '@marinoscar/memoriahub-api/memories';
 import { MemoryDigestService } from '@marinoscar/memoriahub-api/memories';
 import { MemoryGenerationHandler } from '@marinoscar/memoriahub-api/memories';
 import type {
@@ -76,7 +76,7 @@ const upsertingCurator: MemoryCurator = {
 } as unknown as MemoryCurator;
 
 function buildMemoryGeneration(): MemoryGenerationHandler {
-  const settings = { getSettings: async () => ({ features: { memories: mem.enabled } }) };
+  const settings = { enabled: async () => mem.enabled, resolve: async () => resolveMemoriesSettings(undefined) };
   const titles = { beginRun: () => ({ aiCalls: 0, stopReason: null }) };
   const notifications = { recordGeneratedAsync: () => undefined };
   return new MemoryGenerationHandler(

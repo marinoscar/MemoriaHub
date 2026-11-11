@@ -33,7 +33,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
-import { enqueueEnrichmentJob } from '../../media/index.js';
 import {
   MEMORIAHUB_ACCESS,
   MEMORIAHUB_JOBS,
@@ -205,10 +204,11 @@ export class MemoryDigestTask {
               continue;
             }
 
-            await enqueueEnrichmentJob(this.jobs, {
+            await this.jobs.enqueue({
               type: MEMORY_DIGEST_JOB_TYPE,
-              mediaItemId: null,
-              circleId,
+              subjectType: 'circle',
+              subjectId: circleId,
+              payload: {},
               // The queue has no 'scheduled' reason; `backfill` is what every
               // other cron-enqueued global job uses (trash_purge, thumbnail_repair,
               // memory_generation).

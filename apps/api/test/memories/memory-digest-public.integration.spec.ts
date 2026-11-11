@@ -138,7 +138,7 @@ describe('Memory digest public routes (integration)', () => {
     });
 
     it('accepts an RFC 8058 one-click POST — form-urlencoded body, no session', async () => {
-      context.prismaMock.user.findUnique.mockResolvedValue({ id: USER_ID });
+      context.prismaMock.user.findMany.mockResolvedValue([{ id: USER_ID, email: 'user@example.test', displayName: 'User A', providerDisplayName: null }]);
 
       const response = await request(context.app.getHttpServer())
         .post(`${UNSUB_BASE}/${signDigestUnsubscribeToken(USER_ID)}`)
@@ -168,7 +168,7 @@ describe('Memory digest public routes (integration)', () => {
     });
 
     it('POST 404s for a user who no longer exists', async () => {
-      context.prismaMock.user.findUnique.mockResolvedValue(null);
+      context.prismaMock.user.findMany.mockResolvedValue([]);
 
       await request(context.app.getHttpServer())
         .post(`${UNSUB_BASE}/${signDigestUnsubscribeToken(USER_ID)}`)
