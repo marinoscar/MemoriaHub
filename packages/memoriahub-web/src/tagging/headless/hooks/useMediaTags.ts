@@ -1,13 +1,36 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getMediaTagStatus, rerunMediaTags } from '../services/tagging';
-import { useIsMounted } from './useIsMounted';
-import type { MediaTagStatusDto, MediaTagStatusType } from '../services/tagging';
+import { getMediaTagStatus, rerunMediaTags } from '../services/tagging.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { MediaTagStatusDto, MediaTagStatusType } from '../services/tagging.js';
 
 const TERMINAL_STATUSES: MediaTagStatusType[] = ['processed', 'failed'];
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLLS = 60;
 
-export function useMediaTags(mediaId: string, onRefreshTags: () => void) {
+/**
+ * The result of {@link useMediaTags}.
+ *
+ * @stability experimental
+ */
+export interface UseMediaTagsResult {
+  /** The tagging status of the item, `null` before it loads. */
+  status: MediaTagStatusDto | null;
+  /** True while the status loads. */
+  loading: boolean;
+  /** The failure message, `null` when none. */
+  error: string | null;
+  /** Re-runs AI tagging and polls the status until it is terminal. */
+  rerun: () => Promise<void>;
+  /** True while a re-run is in flight. */
+  rerunLoading: boolean;
+}
+
+/**
+ * Use Media Tags.
+ *
+ * @stability experimental
+ */
+export function useMediaTags(mediaId: string, onRefreshTags: () => void): UseMediaTagsResult {
   const [status, setStatus] = useState<MediaTagStatusDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

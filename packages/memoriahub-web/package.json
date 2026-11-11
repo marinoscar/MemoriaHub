@@ -76,6 +76,14 @@
       "types": "./dist/search/ui/index.d.ts",
       "default": "./dist/search/ui/index.js"
     },
+    "./tagging/headless": {
+      "types": "./dist/tagging/headless/index.d.ts",
+      "default": "./dist/tagging/headless/index.js"
+    },
+    "./tagging/ui": {
+      "types": "./dist/tagging/ui/index.d.ts",
+      "default": "./dist/tagging/ui/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

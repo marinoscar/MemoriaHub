@@ -156,7 +156,9 @@ const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
 const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
 const AlbumsPage = lazyMediaPage('AlbumsPage');
 const AlbumPage = lazyMediaPage('AlbumPage');
-const TagsBrowsePage = lazy(() => import('./pages/Tags'));
+const TagsBrowsePage = lazy(() =>
+  import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TagsBrowsePage })),
+);
 const PlacesOverviewPage = lazyMediaPage('PlacesOverviewPage');
 const LevelBrowsePage = lazyMediaPage('LevelBrowsePage');
 const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));

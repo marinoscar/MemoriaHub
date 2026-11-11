@@ -11,17 +11,18 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { render } from '../../../__tests__/utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks (must precede the imports that use them)
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getExploreTags: vi.fn(),
 
@@ -40,9 +41,9 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import TagsBrowsePage from '../TagsBrowsePage';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
+import { TagsBrowsePage } from '../../src/tagging/ui/pages/TagsBrowsePage.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { getExploreTags } from '../../src/media/headless/index.js';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockGetExploreTags = vi.mocked(getExploreTags);

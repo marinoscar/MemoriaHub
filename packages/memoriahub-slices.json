@@ -187,6 +187,10 @@
     "search": [
       "core",
       "media"
+    ],
+    "tagging": [
+      "core",
+      "media"
     ]
   }
 }

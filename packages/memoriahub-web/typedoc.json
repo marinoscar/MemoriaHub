@@ -13,7 +13,9 @@
     "./src/memories/headless/index.ts",
     "./src/memories/ui/index.ts",
     "./src/search/headless/index.ts",
-    "./src/search/ui/index.ts"
+    "./src/search/ui/index.ts",
+    "./src/tagging/headless/index.ts",
+    "./src/tagging/ui/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-web",

@@ -26,14 +26,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { useMediaTags } from '../../hooks/useMediaTags';
+import { useMediaTags } from '../../src/tagging/headless/hooks/useMediaTags.js';
 
-vi.mock('../../services/tagging', () => ({
+vi.mock('../../src/tagging/headless/services/tagging.js', () => ({
   getMediaTagStatus: vi.fn(),
   rerunMediaTags: vi.fn(),
 }));
 
-import { getMediaTagStatus } from '../../services/tagging';
+import { getMediaTagStatus } from '../../src/tagging/headless/services/tagging.js';
 
 const mockGetMediaTagStatus = vi.mocked(getMediaTagStatus);
 

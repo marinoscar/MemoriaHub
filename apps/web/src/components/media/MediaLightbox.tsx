@@ -53,7 +53,7 @@ import {
 } from '@marinoscar/memoriahub-web/media/headless';
 import { rerunMediaFaces } from '../../services/face';
 import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
-import { useMediaTags } from '../../hooks/useMediaTags';
+import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
 import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
 import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { AddToAlbumDialog } from '@marinoscar/memoriahub-web/media/ui';

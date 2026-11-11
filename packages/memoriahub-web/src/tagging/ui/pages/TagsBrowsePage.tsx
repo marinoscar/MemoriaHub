@@ -7,9 +7,9 @@ import {
   Skeleton,
 } from '@mui/material';
 import TagIcon from '@mui/icons-material/LocalOffer';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { getExploreTags } from '@marinoscar/memoriahub-web/media/headless';
-import type { ExploreItem } from '@marinoscar/memoriahub-web/media/headless';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { getExploreTags } from '../../../media/headless/index.js';
+import type { ExploreItem } from '../../../media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,7 +21,12 @@ const TILE_SIZE = 96;
 // TagsBrowsePage
 // ---------------------------------------------------------------------------
 
-export default function TagsBrowsePage() {
+/**
+ * Tags Browse Page.
+ *
+ * @stability experimental
+ */
+export function TagsBrowsePage() {
   const navigate = useNavigate();
   const { activeCircle } = useOwnerScope();
 

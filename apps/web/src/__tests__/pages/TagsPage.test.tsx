@@ -31,7 +31,7 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../services/tagLabels', () => ({
+vi.mock('@marinoscar/memoriahub-web/tagging/headless', () => ({
   listTagLabels: vi.fn(),
   createTagLabel: vi.fn(),
   updateTagLabel: vi.fn(),
@@ -49,8 +49,8 @@ import {
   updateTagLabel,
   deleteTagLabel,
   exportTagLabels,
-} from '../../services/tagLabels';
-import type { TagLabel } from '../../services/tagLabels';
+} from '@marinoscar/memoriahub-web/tagging/headless';
+import type { TagLabel } from '@marinoscar/memoriahub-web/tagging/headless';
 import { api } from '../../services/api';
 
 const mockUsePermissions = vi.mocked(usePermissions);
