@@ -34,10 +34,12 @@ import { ReviewQueueReconcileHandler } from '../../src/notification-producers/re
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
 import { ShareExpiringTask } from '../../src/notification-producers/share-expiring.task';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
-import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
-import { WorkflowMicroRunFinalizeTask } from '../../src/workflows/runs/workflow-micro-run-finalize.task';
-import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
-import { WorkflowScheduleTask } from '../../src/workflows/runs/workflow-schedule.task';
+import {
+  WorkflowMicroRunFinalizeHandler,
+  WorkflowMicroRunFinalizeTask,
+  WorkflowScheduleTickHandler,
+  WorkflowScheduleTask,
+} from '@marinoscar/memoriahub-api/workflows';
 
 beforeAll(() => {
   // The crons and handlers log on purpose; keep the test output readable.
@@ -201,14 +203,21 @@ function workflowSettings(over: { enabled?: boolean; scheduled?: boolean } = {})
   };
 }
 
-const TICK_ENQUEUE = (type: string) => ({ type, reason: 'backfill', orgId: null, priority: 20 });
+const TICK_ENQUEUE = (type: string) => ({ type, reason: 'backfill', payload: {}, orgId: null, priority: 20 });
+
+/** The slice's settings port over a function that returns the settings document. */
+const settingsPortOver = (getSettings: () => Promise<Record<string, unknown>>) => ({
+  readSystem: async (name: string) => ({ value: (await getSettings())[name], version: 1 }),
+});
+/** The slice's job port over the platform registry the suite already holds. */
+const wfJobs = () => ({ registerHandler: (handler: unknown) => registry.register(handler as never) });
 
 describe('WorkflowScheduleTask only decides and enqueues workflows.schedule_tick', () => {
   function build(due: { id: string } | null, settings = workflowSettings()) {
     const jobs = { enqueue: jest.fn().mockResolvedValue({ id: 'job-new' }) };
     const prisma = { workflow: { findFirst: jest.fn().mockResolvedValue(due) } };
     const systemSettings = { getSettings: jest.fn().mockResolvedValue(settings) };
-    const task = new WorkflowScheduleTask(prisma as never, systemSettings as never, jobs as never);
+    const task = new WorkflowScheduleTask(prisma as never, settingsPortOver(() => systemSettings.getSettings()) as never, jobs as never);
     return { task, jobs, prisma, systemSettings };
   }
 
@@ -333,14 +342,14 @@ function buildScheduleTick(): JobHandler {
     },
     workflowRun: { count: async () => 0 },
   };
-  const settings = { getSettings: async () => workflowSettings({ enabled: wf.enabled }) };
+  const settings = settingsPortOver(async () => workflowSettings({ enabled: wf.enabled }) as never);
   const runService = {
     startUnattendedRun: async (workflow: { id: string }) => {
       wf.started.push(workflow.id);
       return { runId: `run-${wf.started.length}` };
     },
   };
-  return new WorkflowScheduleTickHandler(registry, prisma as never, settings as never, runService as never);
+  return new WorkflowScheduleTickHandler(wfJobs() as never, prisma as never, settings as never, runService as never);
 }
 
 describeJobHandlerConformance('workflows.schedule_tick', buildScheduleTick, {
@@ -388,13 +397,13 @@ function buildMicroRunFinalize(): JobHandler {
         micro.runs.find((r) => r.id === where.runId)!.matched,
     },
   };
-  const settings = { getSettings: async () => workflowSettings() };
+  const settings = settingsPortOver(async () => workflowSettings() as never);
   const runService = {
     enqueueExecuteBatches: async (run: { id: string }) => {
       micro.runs.find((r) => r.id === run.id)!.dispatched = true;
     },
   };
-  return new WorkflowMicroRunFinalizeHandler(registry, prisma as never, settings as never, runService as never);
+  return new WorkflowMicroRunFinalizeHandler(wfJobs() as never, prisma as never, settings as never, runService as never);
 }
 
 describeJobHandlerConformance('workflows.micro_run_finalize', buildMicroRunFinalize, {

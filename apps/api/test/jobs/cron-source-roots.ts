@@ -53,6 +53,13 @@ export const FACE_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', 'p
  */
 export const J7_SLICE_SOURCE_ROOTS: readonly string[] = ['tagging', 'search'].map((slice) => join(SLICES_ROOT, slice));
 
+/**
+ * The review-runs and workflows slices of `@marinoscar/memoriahub-api` (RETRO-J9, #622), scanned like the
+ * media slice: the two every-minute workflow crons live in the workflows slice and must keep enqueueing
+ * only. Paths in the raw-SQL allowlist are relative to each root (`runs/workflow-evaluate-item.handler.ts`).
+ */
+export const J9_SLICE_SOURCE_ROOTS: readonly string[] = ['review-runs', 'workflows'].map((slice) => join(SLICES_ROOT, slice));
+
 /** Every root the two scans read. */
 export const CRON_SOURCE_ROOTS: readonly string[] = [
   API_SOURCE_ROOT,
@@ -60,4 +67,5 @@ export const CRON_SOURCE_ROOTS: readonly string[] = [
   FACE_SLICE_SOURCE_ROOT,
   ...J10_SLICE_SOURCE_ROOTS,
   ...J7_SLICE_SOURCE_ROOTS,
+  ...J9_SLICE_SOURCE_ROOTS,
 ];

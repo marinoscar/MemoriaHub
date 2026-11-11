@@ -39,10 +39,12 @@ import { createMockContributorUser, authHeader } from '../helpers/auth-mock.help
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { WorkflowTriggerListener } from '../../src/workflows/runs/workflow-trigger.listener';
-import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
-import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
+import {
+  WorkflowEvaluateItemHandler,
+  WorkflowExecuteBatchHandler,
+  WorkflowMicroRunFinalizeHandler,
+  WorkflowScheduleTickHandler,
+} from '@marinoscar/memoriahub-api/workflows';
 import { ObjectProcessedEvent } from '../../src/media-processing/events/object-processed.event';
 import { EnrichmentJobSettledEvent } from '../../src/enrichment/events/enrichment-job-settled.event';
 

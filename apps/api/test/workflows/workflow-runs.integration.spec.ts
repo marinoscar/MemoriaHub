@@ -34,10 +34,9 @@ import {
   createMockContributorUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
+import { WorkflowEvaluateHandler, WorkflowExecuteBatchHandler } from '@marinoscar/memoriahub-api/workflows';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------

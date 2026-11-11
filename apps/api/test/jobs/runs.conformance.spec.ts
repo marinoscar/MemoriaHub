@@ -40,14 +40,12 @@ import { TrashEmptyExecuteBatchHandler } from '@marinoscar/memoriahub-api/media'
 import { TrashPurgeHandler } from '@marinoscar/memoriahub-api/media';
 import { ReviewRunEvaluateHandler, ReviewRunExecuteBatchHandler } from '@marinoscar/memoriahub-api/review-runs';
 import { ReviewRunsRetentionHandler, STALE_RUN_ERROR } from '../../src/review-runs/review-runs-retention.handler';
-import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
-import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
+import {
+  WorkflowEvaluateHandler,
+  WorkflowEvaluateItemHandler,
+  WorkflowExecuteBatchHandler,
+} from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
-
-jest.mock('../../src/workflows/execution/item-revalidation.util', () => ({
-  revalidateItemMatches: jest.fn(async () => true),
-}));
 
 // -----------------------------------------------------------------------------
 // A tiny in-memory table: just the Prisma calls these handlers make.
@@ -175,7 +173,8 @@ function wfPrisma(): any {
         if (wf.failMedia) throw new Error('database unavailable');
         return wf.media.findMany(args);
       },
-      findFirst: (args: Row) => wf.media.findFirst(args),
+      // Answers the drift re-validation (every item still matches); the tests never reach a real lookup.
+      findFirst: async (args: Row) => ({ id: (args['where'] as Row)?.['AND']?.[0]?.['id'] ?? 'item' }),
     },
     workflow: { findUnique: async () => null },
     auditEvent: { create: async () => ({}) },
@@ -183,7 +182,15 @@ function wfPrisma(): any {
   };
 }
 
-const wfNotifications = { notifyRunFinishedAsync: () => void (wf.notified += 1) };
+const wfNotifications = {
+  notifyRunFinishedAsync: () => void (wf.notified += 1),
+  runFinished: async () => undefined,
+  runAwaitingApproval: async () => undefined,
+};
+/** The slice's job port, over the platform registry the suite already holds. */
+const wfJobs = { registerHandler: (handler: unknown) => registry.register(handler as never) };
+/** The slice's settings port over a settings document. */
+const wfSettingsPort = (doc: Record<string, unknown>) => ({ readSystem: async (name: string) => ({ value: doc[name], version: 1 }) });
 const compiler = { compile: () => ({ where: { circleId: CIRCLE }, refinements: [] }) };
 
 function wfRun(over: Row = {}): Row {
@@ -221,9 +228,9 @@ function buildWorkflowEvaluate(): WorkflowEvaluateHandler {
     shouldBypassApproval: () => false,
     enqueueExecuteBatches: async () => void (wf.enqueued += 1),
   };
-  const settings = { getSettings: async () => ({ workflows: { maxItemsPerRun: 10_000 } }) };
+  const settings = wfSettingsPort({ workflows: { maxItemsPerRun: 10_000 } });
   return new WorkflowEvaluateHandler(
-    registry,
+    wfJobs as never,
     wfPrisma(),
     settings as never,
     compiler as never,
@@ -308,9 +315,7 @@ describe('workflow_evaluate run transitions', () => {
 });
 
 function buildWorkflowEvaluateItem(enabled: boolean): WorkflowEvaluateItemHandler {
-  const settings = {
-    getSettings: async () => ({ features: { workflows: enabled }, workflows: { triggers: { onEnrichment: true } } }),
-  };
+  const settings = wfSettingsPort({ features: { workflows: enabled }, workflows: { triggers: { onEnrichment: true } } });
   const prisma = {
     ...wfPrisma(),
     workflow: {
@@ -320,7 +325,7 @@ function buildWorkflowEvaluateItem(enabled: boolean): WorkflowEvaluateItemHandle
       },
     },
   };
-  return new WorkflowEvaluateItemHandler(registry, prisma as never, settings as never, compiler as never);
+  return new WorkflowEvaluateItemHandler(wfJobs as never, prisma as never, settings as never, compiler as never);
 }
 
 describeJobHandlerConformance('workflow_evaluate_item', () => alias(buildWorkflowEvaluateItem(true)), {
@@ -351,8 +356,9 @@ const executor = { execute: jest.fn(async (..._args: unknown[]) => ({ status: 'a
 
 function buildWorkflowExecuteBatch(): WorkflowExecuteBatchHandler {
   return new WorkflowExecuteBatchHandler(
-    registry,
+    wfJobs as never,
     wfPrisma(),
+    { permissionsOf: async () => [] } as never,
     compiler as never,
     executor as never,
     wfNotifications as never,
