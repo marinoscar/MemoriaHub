@@ -18,6 +18,10 @@ import {
   MEDIA_WEBHOOK_EVENTS,
   MediaController,
   MediaMetadataSyncService,
+  MediaOrientationEditController,
+  MediaOrientationEditService,
+  MediaReprocessController,
+  MediaThumbnailRerunController,
   MediaService,
   MediaModule as MediaCoreModule,
   TrashEmptyEvaluateHandler,
@@ -35,10 +39,6 @@ import { ForwardGeocodeService, GEO_LOCATION_PROVIDER } from '@marinoscar/memori
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { MediaReprocessController } from './media-reprocess.controller';
-import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
-import { MediaOrientationEditController } from './media-orientation-edit.controller';
-import { MediaOrientationEditService } from './media-orientation-edit.service';
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service';

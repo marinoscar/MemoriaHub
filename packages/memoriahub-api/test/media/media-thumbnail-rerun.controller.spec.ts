@@ -2,33 +2,24 @@
  * Unit tests for MediaThumbnailRerunController.
  *
  * Mirrors metadata.controller.spec.ts's structure:
- *   - delegates RBAC to OwnerAccessService (collaborator role)
+ *   - delegates RBAC to the access port (collaborator role)
  *   - returns the expected response shape
  *   - throws NotFoundException when the media item / storage object is
  *     missing or the item is soft-deleted
  *
- * All guards are bypassed; no real HTTP or database.
+ * No real HTTP or database; the controller is built over the ports.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { RequestUser, JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
-
-const allowAllGuard = { canActivate: () => true };
+import { MediaThumbnailRerunController } from '../../src/media/index.js';
+import type { MemoriahubRequestUser } from '../../src/core/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
 
 const mockOwnerAccessService = {
   requireOwnerRole: jest.fn(),
 };
 
-function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
+function makeUser(overrides: Partial<MemoriahubRequestUser> = {}): MemoriahubRequestUser {
   return {
     id: 'user-1',
     email: 'user@example.com',
@@ -36,7 +27,7 @@ function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
     permissions: ['media:read', 'media:write'],
     isActive: true,
     ...overrides,
-  };
+  } as MemoriahubRequestUser;
 }
 
 function makeMediaItem(overrides: Partial<{
@@ -61,24 +52,15 @@ describe('MediaThumbnailRerunController', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockOwnerAccessService.requireOwnerRole.mockResolvedValue(undefined);
     mockReprocessObjectNow = jest.fn().mockResolvedValue(undefined);
 
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [MediaThumbnailRerunController],
-      providers: [
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: ObjectReprocessService, useValue: { reprocessNow: mockReprocessObjectNow } },
-      ],
-    })
-      .overrideGuard(JwtAuthGuard).useValue(allowAllGuard)
-      .overrideGuard(RolesGuard).useValue(allowAllGuard)
-      .overrideGuard(PermissionsGuard).useValue(allowAllGuard)
-      .compile();
-
-    controller = module.get<MediaThumbnailRerunController>(MediaThumbnailRerunController);
+    controller = new MediaThumbnailRerunController(
+      mockPrisma as never,
+      mockOwnerAccessService as never,
+      { reprocessNow: mockReprocessObjectNow },
+    );
   });
 
   describe('rerunThumbnail', () => {

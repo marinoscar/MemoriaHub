@@ -1,66 +1,38 @@
 /**
  * Unit tests — MediaReprocessController
  *
- * Mock strategy: the platform JobsService and EnrichmentJobService are jest mocks.
+ * Mock strategy: the jobs port and the job table delegate are jest mocks.
  * Since RETRO-D1b (#567) reprocess, reprocess-stuck and reprocess-failed only
- * ENQUEUE a job and answer { data: { jobId, status } }.
- * Auth guards (JwtAuthGuard, RolesGuard, PermissionsGuard) are overridden to
- * allow=true so we can test method delegation without auth infrastructure.
+ * ENQUEUE a job and answer { data: { jobId, status } }; the status and priority
+ * of the job come from its row.
  * HTTP-level auth enforcement is tested in integration tests, not here.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { JobReason, MhLegacyJobStatus } from '@prisma/client';
-import {
-  MediaReprocessController,
-  ReprocessBodyDto,
-  ReprocessStuckBodyDto,
-  ReprocessFailedBodyDto,
-} from './media-reprocess.controller';
-import { JobsService } from '@marinoscar/platform-api/jobs';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '@marinoscar/platform-api/identity';
-
-const allowAllGuard = { canActivate: () => true };
+import { MediaReprocessController } from '../../src/media/index.js';
+import type { ReprocessBodyDto, ReprocessStuckBodyDto, ReprocessFailedBodyDto } from '../../src/media/index.js';
 
 describe('MediaReprocessController', () => {
   let controller: MediaReprocessController;
   let mockJobsEnqueue: jest.Mock;
-  let mockEnqueue: jest.Mock;
+  let mockJobFindUnique: jest.Mock;
   let mockJobUpdate: jest.Mock;
 
-  beforeEach(async () => {
-    mockJobsEnqueue = jest.fn().mockResolvedValue({ id: 'job-r-1', status: 'pending', priority: 0 });
-    mockEnqueue = jest.fn().mockResolvedValue({ id: 'job-new-1', status: MhLegacyJobStatus.pending, priority: 0 });
+  /** What the queue holds for the job the next `enqueue` answers with (the route reports its status and priority). */
+  function givenJob(id: string, status: string, priority: number): void {
+    mockJobsEnqueue.mockResolvedValue({ id, deduplicated: false });
+    mockJobFindUnique.mockResolvedValue({ status, priority });
+  }
+
+  beforeEach(() => {
+    mockJobsEnqueue = jest.fn();
+    mockJobFindUnique = jest.fn();
     mockJobUpdate = jest.fn().mockResolvedValue({});
+    givenJob('job-r-1', 'pending', 0);
 
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [MediaReprocessController],
-      providers: [
-        { provide: JobsService, useValue: { enqueue: mockJobsEnqueue } },
-        {
-          provide: EnrichmentJobService,
-          useValue: {
-            enqueue: mockEnqueue,
-          },
-        },
-        {
-          provide: PrismaService,
-          useValue: {
-            job: {
-              update: mockJobUpdate,
-            },
-          },
-        },
-      ],
-    })
-      .overrideGuard(JwtAuthGuard).useValue(allowAllGuard)
-      .overrideGuard(RolesGuard).useValue(allowAllGuard)
-      .overrideGuard(PermissionsGuard).useValue(allowAllGuard)
-      .compile();
-
-    controller = module.get<MediaReprocessController>(MediaReprocessController);
+    controller = new MediaReprocessController(
+      { enqueue: mockJobsEnqueue } as never,
+      { job: { findUnique: mockJobFindUnique, update: mockJobUpdate } } as never,
+    );
   });
 
   afterEach(() => {
@@ -126,7 +98,7 @@ describe('MediaReprocessController', () => {
     });
 
     it("promotes the cron's pending job (priority 100) to 0 and returns its id", async () => {
-      mockJobsEnqueue.mockResolvedValue({ id: 'job-cron', status: 'pending', priority: 100 });
+      givenJob('job-cron', 'pending', 100);
 
       const result = await controller.reprocessStuck({} as ReprocessStuckBodyDto);
 
@@ -135,7 +107,7 @@ describe('MediaReprocessController', () => {
     });
 
     it('leaves a running job alone', async () => {
-      mockJobsEnqueue.mockResolvedValue({ id: 'job-run', status: 'running', priority: 100 });
+      givenJob('job-run', 'running', 100);
 
       await controller.reprocessStuck({} as ReprocessStuckBodyDto);
 
@@ -178,30 +150,29 @@ describe('MediaReprocessController', () => {
     it('should enqueue a global thumbnail_repair job at priority 0 with reason rerun', async () => {
       await controller.repairThumbnails();
 
-      expect(mockEnqueue).toHaveBeenCalledTimes(1);
-      expect(mockEnqueue).toHaveBeenCalledWith({
+      expect(mockJobsEnqueue).toHaveBeenCalledTimes(1);
+      expect(mockJobsEnqueue).toHaveBeenCalledWith({
         type: 'thumbnail_repair',
-        mediaItemId: null,
-        circleId: null,
-        reason: JobReason.rerun,
+        reason: 'rerun',
+        payload: {},
         priority: 0,
       });
     });
 
     it('should return { data: { jobId, status } } for a freshly enqueued job without touching its priority', async () => {
-      mockEnqueue.mockResolvedValue({ id: 'job-fresh-42', status: MhLegacyJobStatus.pending, priority: 0 });
+      givenJob('job-fresh-42', 'pending', 0);
 
       const result = await controller.repairThumbnails();
 
-      expect(result).toEqual({ data: { jobId: 'job-fresh-42', status: MhLegacyJobStatus.pending } });
+      expect(result).toEqual({ data: { jobId: 'job-fresh-42', status: 'pending' } });
       // Already at priority 0 — no promotion write needed
       expect(mockJobUpdate).not.toHaveBeenCalled();
     });
 
     it('should promote an existing PENDING lower-priority job (cron, priority 100) to priority 0 and return its id', async () => {
-      // EnrichmentJobService.enqueue dedups (type, mediaItemId IS NULL) jobs and
-      // returns the existing pending/running row instead of creating a new one.
-      mockEnqueue.mockResolvedValue({ id: 'job-cron-9', status: MhLegacyJobStatus.pending, priority: 100 });
+      // The queue dedups a global job and returns the existing pending/running row
+      // instead of creating a new one.
+      givenJob('job-cron-9', 'pending', 100);
 
       const result = await controller.repairThumbnails();
 
@@ -210,21 +181,21 @@ describe('MediaReprocessController', () => {
         where: { id: 'job-cron-9' },
         data: { priority: 0 },
       });
-      expect(result).toEqual({ data: { jobId: 'job-cron-9', status: MhLegacyJobStatus.pending } });
+      expect(result).toEqual({ data: { jobId: 'job-cron-9', status: 'pending' } });
     });
 
     it("should surface an existing RUNNING job's id without updating its priority", async () => {
-      mockEnqueue.mockResolvedValue({ id: 'job-existing-7', status: MhLegacyJobStatus.running, priority: 100 });
+      givenJob('job-existing-7', 'running', 100);
 
       const result = await controller.repairThumbnails();
 
       // Running jobs are already being worked on — never touched
       expect(mockJobUpdate).not.toHaveBeenCalled();
-      expect(result).toEqual({ data: { jobId: 'job-existing-7', status: MhLegacyJobStatus.running } });
+      expect(result).toEqual({ data: { jobId: 'job-existing-7', status: 'running' } });
     });
 
     it('should propagate enqueue failures', async () => {
-      mockEnqueue.mockRejectedValue(new Error('DB unavailable'));
+      mockJobsEnqueue.mockRejectedValue(new Error('DB unavailable'));
 
       await expect(controller.repairThumbnails()).rejects.toThrow('DB unavailable');
     });

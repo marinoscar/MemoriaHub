@@ -1,65 +1,56 @@
 /**
  * Unit tests — MediaOrientationEditService
  *
- * Mirrors the mocking conventions used by media-thumbnail-rerun.controller.spec.ts
- * (OwnerAccessService.requireOwnerRole mock, createMockPrismaService) and
- * media-reprocess.service.spec.ts (StorageProviderResolver.getProviderFor
- * returning a stubbed provider, jest.fn()-based dependency mocks assembled via
- * Test.createTestingModule).
+ * The service is built over the ports: the access port's `requireOwnerRole`, the object-store port's
+ * `forLocation` (returning a stubbed provider), the object reprocessor and thumbnail pruner hooks, the jobs port
+ * (a facade mock translating the enqueue shape) and the settings port.
  *
- * `image-orientation.util` is jest.mock()'d wholesale so this suite never
- * touches the real sharp binary — applyOrientationTransform's own behavior is
- * covered separately (with a real sharp round-trip) in
- * image-orientation.util.spec.ts.
+ * `@marinoscar/memoriahub-compute/image` is jest.mock()'d wholesale so this suite never touches the real sharp
+ * binary — applyOrientationTransform's own behavior is covered separately (with a real sharp round-trip) in the
+ * compute package.
  *
  * Covers:
- *  - Happy path: same storage key overwritten, MediaItem updated with
- *    orientation=1 and the swapped width/height, reprocessNow invoked,
- *    and the resolved return shape.
+ *  - Happy path: same storage key overwritten, MediaItem updated with orientation=1 and the swapped
+ *    width/height, reprocessNow invoked, and the resolved return shape.
  *  - BadRequestException for non-photo / non-image media items.
  *  - NotFoundException for missing / soft-deleted / storageObject-less items.
- *  - requireOwnerRole called with the 'collaborator' role, and that a
- *    rejection from it propagates without touching storage or Prisma writes.
- *  - Face re-enqueue is best-effort: an EnrichmentJobService.enqueue failure
- *    must not fail editOrientation.
- *  - Issue #434: the metadata sync is AWAITED inside the request (so the
- *    MediaItem points at the new, content-addressed thumbnail key before the
- *    response returns) and the superseded thumbnail is pruned only afterwards.
+ *  - requireOwnerRole called with the 'editor' role, and that a rejection from it propagates without touching
+ *    storage or Prisma writes.
+ *  - Face re-enqueue is best-effort: an enqueue failure must not fail editOrientation.
+ *  - Issue #434: the metadata sync is AWAITED inside the request (so the MediaItem points at the new,
+ *    content-addressed thumbnail key before the response returns) and the superseded thumbnail is pruned only
+ *    afterwards.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { MediaType } from '@prisma/client';
 import { Readable } from 'stream';
+import { applyOrientationTransform } from '@marinoscar/memoriahub-compute/image';
 
-import { MediaOrientationEditService } from './media-orientation-edit.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../test/mocks/prisma.mock';
-import { createMockStorageProvider } from '../../test/mocks/storage-provider.mock';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { applyOrientationTransform } from '../media-processing/image-orientation.util';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { MediaOrientationEditService } from '../../src/media/index.js';
+import type { MemoriahubRequestUser } from '../../src/core/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
 
-jest.mock('../media-processing/image-orientation.util', () => ({
+// The media type enum the web app's generated client carried (the package imports no generated client).
+const MediaType = { photo: 'photo', video: 'video' } as const;
+
+jest.mock('@marinoscar/memoriahub-compute/image', () => ({
   applyOrientationTransform: jest.fn(),
 }));
 
 const mockApplyOrientationTransform = applyOrientationTransform as jest.Mock;
 
+/** The two storage provider calls an orientation edit makes. */
+function createMockStorageProvider() {
+  return { upload: jest.fn().mockResolvedValue({ key: 'k', bucket: 'b' }), download: jest.fn() };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
+function makeUser(overrides: Partial<MemoriahubRequestUser> = {}): MemoriahubRequestUser {
   return {
     id: 'user-1',
     email: 'user@example.com',
@@ -67,7 +58,7 @@ function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
     permissions: ['media:read', 'media:write'],
     isActive: true,
     ...overrides,
-  };
+  } as MemoriahubRequestUser;
 }
 
 function makeStorageObject(overrides: Partial<Record<string, unknown>> = {}) {
@@ -101,7 +92,7 @@ describe('MediaOrientationEditService', () => {
   let service: MediaOrientationEditService;
   let mockPrisma: MockPrismaService;
   let mockOwnerAccessService: { requireOwnerRole: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockResolver: { forLocation: jest.Mock };
   let mockStorageProvider: ReturnType<typeof createMockStorageProvider>;
   let mockRecoveryService: { reprocessNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
@@ -109,12 +100,12 @@ describe('MediaOrientationEditService', () => {
   /** Records sync-vs-prune ordering (issue #434). */
   let callOrder: string[];
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock };
+  let settingsDoc: Record<string, unknown>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
 
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: unknown) => {
       if (Array.isArray(ops)) return Promise.all(ops);
       if (typeof ops === 'function') return (ops as (tx: unknown) => unknown)(mockPrisma);
@@ -128,7 +119,7 @@ describe('MediaOrientationEditService', () => {
     mockStorageProvider = createMockStorageProvider();
     mockStorageProvider.download.mockResolvedValue(Readable.from([Buffer.from('original-bytes')]));
 
-    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    mockResolver = { forLocation: jest.fn().mockResolvedValue(mockStorageProvider) };
 
     callOrder = [];
     mockRecoveryService = {
@@ -154,9 +145,7 @@ describe('MediaOrientationEditService', () => {
       enqueue: jest.fn().mockResolvedValue({ id: 'job-1' }),
     };
 
-    mockSystemSettings = {
-      getSettings: jest.fn().mockResolvedValue({ features: { faceRecognition: true } }),
-    };
+    settingsDoc = { features: { faceRecognition: true } };
 
     mockApplyOrientationTransform.mockResolvedValue({
       buffer: Buffer.from('transformed-bytes'),
@@ -164,21 +153,16 @@ describe('MediaOrientationEditService', () => {
       height: 400,
     });
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MediaOrientationEditService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: ObjectReprocessService, useValue: mockRecoveryService },
-        { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
-        { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
-      ],
-    }).compile();
-
-    service = module.get<MediaOrientationEditService>(MediaOrientationEditService);
+    service = new MediaOrientationEditService(
+      mockPrisma as never,
+      mockOwnerAccessService as never,
+      mockResolver as never,
+      mockRecoveryService,
+      mockMetadataSync as never,
+      mockThumbnailPrune,
+      jobsPortOverFacade(mockEnrichmentJobService) as never,
+      settingsPortFrom(() => settingsDoc) as never,
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -205,7 +189,7 @@ describe('MediaOrientationEditService', () => {
     it('downloads original bytes via the resolved per-object provider', async () => {
       await service.editOrientation('media-1', 'rotate_right', makeUser());
 
-      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'test-bucket');
+      expect(mockResolver.forLocation).toHaveBeenCalledWith('s3', 'test-bucket');
       expect(mockStorageProvider.download).toHaveBeenCalledWith(
         'originals/circle-1/photo.jpg',
       );
@@ -375,7 +359,7 @@ describe('MediaOrientationEditService', () => {
         service.editOrientation('media-1', 'rotate_right', makeUser()),
       ).rejects.toThrow(accessError);
 
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockStorageProvider.download).not.toHaveBeenCalled();
       expect(mockStorageProvider.upload).not.toHaveBeenCalled();
       expect(mockApplyOrientationTransform).not.toHaveBeenCalled();
@@ -414,7 +398,7 @@ describe('MediaOrientationEditService', () => {
     });
 
     it('does not re-enqueue face detection when features.faceRecognition is off', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ features: { faceRecognition: false } });
+      settingsDoc = { features: { faceRecognition: false } };
 
       await service.editOrientation('media-1', 'rotate_right', makeUser());
 

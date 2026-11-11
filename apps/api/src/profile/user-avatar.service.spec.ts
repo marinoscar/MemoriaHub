@@ -2,7 +2,7 @@
  * Unit tests for UserAvatarService (issue #354, profile picture management).
  *
  * Mocking strategy (mirrors picture-enhancement.handler.spec.ts /
- * media-orientation-edit.service.spec.ts):
+ * packages/memoriahub-api/test/media/media-orientation-edit.service.spec.ts):
  *   - `../media-processing/image-orientation.util` is module-mocked so
  *     `prepareImageForProcessing` never touches sharp/libvips by default — it
  *     resolves a deterministic "prepared" buffer + dimensions. Individual tests
