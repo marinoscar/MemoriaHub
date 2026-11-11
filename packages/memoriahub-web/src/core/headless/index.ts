@@ -4,3 +4,5 @@ export * from './api.js';
 export * from './hooks.js';
 export * from './useIsMounted.js';
 export * from './useIntersectionObserver.js';
+export * from './useCircleRole.js';
+export * from './useLongPress.js';

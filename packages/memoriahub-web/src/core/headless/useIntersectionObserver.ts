@@ -9,6 +9,7 @@ import type { RefObject } from 'react';
 export interface UseIntersectionObserverOptions {
   /** rootMargin to trigger before reaching the sentinel (default: '200px') */
   rootMargin?: string;
+  /** The `threshold`. */
   threshold?: number;
   /** Whether to disable the observer (e.g. when hasMore is false) */
   disabled?: boolean;

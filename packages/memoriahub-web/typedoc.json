@@ -9,7 +9,9 @@
     "./src/brand/index.ts",
     "./src/shell/index.ts",
     "./src/media/headless/index.ts",
-    "./src/media/ui/index.ts"
+    "./src/media/ui/index.ts",
+    "./src/memories/headless/index.ts",
+    "./src/memories/ui/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-web",

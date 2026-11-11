@@ -185,8 +185,16 @@ const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
-const MemoriesPage = lazy(() => import('./pages/Memories/MemoriesPage'));
-const MemoryDetailPage = lazy(() => import('./pages/Memories/MemoryDetailPage'));
+// RETRO-J11: the memories pages are the packaged slice's.
+type MemoriesUiModule = typeof import('@marinoscar/memoriahub-web/memories/ui');
+const lazyMemoriesPage = <K extends keyof MemoriesUiModule>(name: K) =>
+  lazy(() =>
+    import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({
+      default: m[name] as unknown as ComponentType<any>,
+    })),
+  );
+const MemoriesPage = lazyMemoriesPage('MemoriesPage');
+const MemoryDetailPage = lazyMemoriesPage('MemoryDetailPage');
 // RETRO-T2 (#625): the telemetry slice's three pages, each from its own package
 // entry so a lazy route keeps its own chunk (the `telemetry/ui` barrel would put
 // all three, the charts and the SQL editor in one).

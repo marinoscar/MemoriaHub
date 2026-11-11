@@ -44,7 +44,7 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 // The memories carousel owns its own feature-flag gating and feed request;
 // mocking it keeps this file's assertions about HomePage chrome isolated from
 // both. Its default mock renders nothing, matching the flag-off default.
-vi.mock('../../components/memories/MemoriesCarousel', () => ({
+vi.mock('@marinoscar/memoriahub-web/memories/ui', () => ({
   MemoriesCarousel: vi.fn(() => null),
 }));
 
@@ -54,7 +54,7 @@ vi.mock('../../components/memories/MemoriesCarousel', () => ({
 
 import HomePage from '../../pages/HomePage';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { MemoriesCarousel } from '../../components/memories/MemoriesCarousel';
+import { MemoriesCarousel } from '@marinoscar/memoriahub-web/memories/ui';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockMemoriesCarousel = vi.mocked(MemoriesCarousel);

@@ -60,16 +60,16 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 
 import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useMemoriesEnabled } from '../../hooks/useMemoriesEnabled';
+import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { usePeople } from '../../hooks/usePeople';
 import { PersonAvatar } from '../people/PersonAvatar';
 import type { PersonListItem } from '../../services/face';
 import type { UserSettings, UserSettingsUpdate } from '../../types';
-import type { MemoryHiddenDateRange } from '../../types/memories';
+import type { MemoryHiddenDateRange } from '@marinoscar/memoriahub-web/memories/headless';
 import {
   MEMORIES_MAX_HIDDEN_DATE_RANGES,
   MEMORIES_MAX_HIDDEN_PERSON_IDS,
-} from '../../types/memories';
+} from '@marinoscar/memoriahub-web/memories/headless';
 
 interface MemoriesSettingsProps {
   settings: UserSettings;

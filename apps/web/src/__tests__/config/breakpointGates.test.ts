@@ -56,9 +56,9 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
   'components/media/MediaLightbox.tsx': WHY.media,
   'components/media/VideoPlayer.tsx': WHY.media,
-  'components/memories/MemoriesCarousel.tsx': WHY.media,
-  'components/memories/MemoryCard.tsx': WHY.media,
-  'components/memories/MemoryStoryPlayer.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoriesCarousel.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoryCard.tsx': WHY.media,
+  'memoriahub-web/memories/ui/components/MemoryStoryPlayer.tsx': WHY.media,
 
   'components/review/MemberComparison.tsx': WHY.panel,
   'components/settings/mediaSync/DiagnosticsSection.tsx': WHY.panel,
