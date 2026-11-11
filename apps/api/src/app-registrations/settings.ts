@@ -147,8 +147,8 @@ export const APP_SYSTEM_SETTINGS_DEFAULTS: readonly SettingsDefaultsOverride[] =
   {
     // RETRO-C2 (#581): the fleet policy keeps the values the hand-written node plane read from
     // `NODE_HEARTBEAT_STALE_SECONDS` (60), `NODE_OFFLINE_STALE_MULTIPLIER` (10) and
-    // `NODE_OFFLINE_RETENTION_DAYS` (14). The variables only seed these DEFAULTS now (the
-    // `ENRICHMENT_STUCK_MINUTES` precedent); once the namespace is saved in the admin UI a stored
+    // `NODE_OFFLINE_RETENTION_DAYS` (14). The variables only seed these DEFAULTS now (they no
+    // longer drive a separate node plane); once the namespace is saved in the admin UI a stored
     // value wins. The platform's own stale window is 90 s.
     key: 'nodes',
     defaults: legacyNodesDefaults(),
