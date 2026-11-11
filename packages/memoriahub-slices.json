@@ -150,6 +150,14 @@
       "core",
       "testing",
       "media"
+    ],
+    "burst": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "dedup",
+      "review-runs"
     ]
   },
   "memoriahub-web": {

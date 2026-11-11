@@ -1,4 +1,4 @@
-import { burstQuerySchema } from './burst-query.dto';
+import { burstQuerySchema } from '@marinoscar/memoriahub-contract/burst';
 
 const CIRCLE_ID = '11111111-1111-4111-8111-111111111111';
 

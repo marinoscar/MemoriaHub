@@ -24,7 +24,7 @@ import {
 } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { hammingDistance } from '../burst/burst-detection.service';
+import { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { DuplicateQueryDto } from './dto/duplicate-query.dto';
 import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';

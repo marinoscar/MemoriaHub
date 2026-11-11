@@ -22,53 +22,32 @@
  */
 
 // ---------------------------------------------------------------------------
-// Module-level mock: computeVisualHash only (toSignedInt64 no longer exists)
+// Module-level mock: computeVisualHash only (the compute package's real popcount stays)
 // ---------------------------------------------------------------------------
-jest.mock('../media-processing/visual-hash.util', () => ({
+jest.mock('@marinoscar/memoriahub-compute/dhash', () => ({
+  ...jest.requireActual('@marinoscar/memoriahub-compute/dhash'),
   computeVisualHash: jest.fn(),
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { BurstDetectionService } from './burst-detection.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { BurstGroupStatus, EnrichmentJob, JobReason, MhLegacyJobStatus, MediaType } from '@prisma/client';
-import { computeVisualHash } from '../media-processing/visual-hash.util';
+import { computeVisualHash } from '@marinoscar/memoriahub-compute/dhash';
 import { Readable } from 'stream';
+
+import { BurstDetectionService } from '../../src/burst/index.js';
+import { DuplicateDetectionService } from '../../src/dedup/index.js';
+import { MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '../../src/ports/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+
+const BurstGroupStatus = { pending: 'pending' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeJob(overrides: Partial<EnrichmentJob> = {}): EnrichmentJob {
-  return {
-    id: 'job-1',
-    type: 'burst_detection',
-    mediaItemId: 'media-1',
-    circleId: 'circle-1',
-    status: MhLegacyJobStatus.running,
-    reason: JobReason.upload,
-    priority: 10,
-    providerKey: null,
-    modelVersion: null,
-    payload: null,
-    attempts: 0,
-    lastError: null,
-    startedAt: null,
-    finishedAt: null,
-    scheduledFor: null,
-    rateLimitedAt: null,
-    rateLimitHits: 0,
-    claimedByNodeId: null,
-    leaseExpiresAt: null,
-    executor: null,
-    createdAt: new Date(),
-    ...overrides,
-  };
+/** What the burst_detection handler resolved: the job's id and the media item it is about. */
+function makeJob(overrides: Partial<{ id: string; mediaItemId: string | null }> = {}): { id: string; mediaItemId: string | null } {
+  return { id: 'job-1', mediaItemId: 'media-1', ...overrides };
 }
 
 const BASE_TIME = new Date('2026-06-15T14:32:00.000Z');
@@ -130,26 +109,21 @@ function makeNeighbor(overrides: Partial<{
 describe('BurstDetectionService', () => {
   let service: BurstDetectionService;
   let mockPrisma: MockPrismaService;
-  let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { download: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockObjectStore: { forLocation: jest.Mock };
+  let mockSettings: ReturnType<typeof settingsPortFrom>;
   let mockDuplicateDetectionService: { evictFromDuplicateGroups: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
-    mockEnrichmentJobService = { enqueue: jest.fn() };
+    mockPrisma = createMockDb();
     mockStorageProvider = { download: jest.fn() };
-    // Resolver returns mockStorageProvider so download assertions are unchanged.
-    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    // The object store returns mockStorageProvider so download assertions are unchanged.
+    mockObjectStore = { forLocation: jest.fn().mockResolvedValue(mockStorageProvider) };
+    // Default system settings: standard burst config
+    mockSettings = settingsPortFrom({ burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } });
     // Burst wins over duplicate detection (Step 7): mocked as a collaborator,
     // never the real DuplicateDetectionService.
     mockDuplicateDetectionService = { evictFromDuplicateGroups: jest.fn().mockResolvedValue(undefined) };
-
-    // Default system settings: standard burst config
-    (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
-      key: 'global',
-      value: { burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } },
-    });
 
     // Default: $transaction executes array operations in parallel
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
@@ -159,10 +133,9 @@ describe('BurstDetectionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BurstDetectionService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: mockObjectStore },
+        { provide: MEMORIAHUB_SETTINGS, useValue: mockSettings },
         { provide: DuplicateDetectionService, useValue: mockDuplicateDetectionService },
       ],
     }).compile();
@@ -173,10 +146,11 @@ describe('BurstDetectionService', () => {
     jest.clearAllMocks();
 
     // Re-apply defaults cleared by clearAllMocks
-    (mockPrisma.systemSettings.findUnique as jest.Mock).mockResolvedValue({
-      key: 'global',
-      value: { burst: { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } },
-    });
+    mockSettings.readSystem.mockImplementation(async (name: string) => ({
+      value: name === 'burst' ? { timeGapSeconds: 10, hashDistance: 10, minGroupSize: 3 } : undefined,
+      version: 1,
+    }));
+    mockObjectStore.forLocation.mockResolvedValue(mockStorageProvider);
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
       Promise.all(ops),
     );
@@ -198,7 +172,7 @@ describe('BurstDetectionService', () => {
     it('returns early when mediaItem is not found', async () => {
       (mockPrisma.mediaItem.findUnique as jest.Mock).mockResolvedValue(null);
       await service.processMediaItem(makeJob());
-      expect(mockPrisma.systemSettings.findUnique).not.toHaveBeenCalled();
+      expect(mockSettings.readSystem).not.toHaveBeenCalled();
     });
 
     it('returns early when mediaItem is soft-deleted', async () => {
@@ -206,7 +180,7 @@ describe('BurstDetectionService', () => {
         makeMediaItem({ deletedAt: new Date() }),
       );
       await service.processMediaItem(makeJob());
-      expect(mockPrisma.systemSettings.findUnique).not.toHaveBeenCalled();
+      expect(mockSettings.readSystem).not.toHaveBeenCalled();
     });
 
     it('returns early when mediaItem has no capturedAt', async () => {
@@ -482,8 +456,7 @@ describe('BurstDetectionService', () => {
   describe('on-demand perceptual hash (perceptualHash === null, storageObjectId present)', () => {
     const STORAGE_OBJECT_ID = 'sobj-legacy-1';
     const STORAGE_KEY = 'originals/legacy-photo.jpg';
-    // computeVisualHash returns a bigint; the service converts to string for storage
-    const COMPUTED_HASH_BIGINT = 99999n;
+    // computeVisualHash returns the unsigned decimal string the TEXT column stores
     const COMPUTED_HASH_STRING = '99999'; // what gets persisted and patched in-memory
     const COMPUTED_SHARPNESS = 250.5;
 
@@ -525,7 +498,7 @@ describe('BurstDetectionService', () => {
     it('persists computed hash as unsigned decimal string and sharpnessScore via prisma.mediaItem.update', async () => {
       setupLegacyItem();
       (computeVisualHash as jest.Mock).mockResolvedValue({
-        perceptualHash: COMPUTED_HASH_BIGINT,
+        perceptualHash: COMPUTED_HASH_STRING,
         sharpnessScore: COMPUTED_SHARPNESS,
       });
       // No candidates → returns early after hash computation
@@ -548,7 +521,7 @@ describe('BurstDetectionService', () => {
     it('uses the freshly computed hash string for burst grouping (links to a matching neighbor)', async () => {
       setupLegacyItem();
       (computeVisualHash as jest.Mock).mockResolvedValue({
-        perceptualHash: COMPUTED_HASH_BIGINT,
+        perceptualHash: COMPUTED_HASH_STRING,
         sharpnessScore: COMPUTED_SHARPNESS,
       });
 
@@ -630,13 +603,13 @@ describe('BurstDetectionService', () => {
 
     it('high-bit hash (previously overflow-prone) is stored and read as correct unsigned decimal string', async () => {
       // 16488331711678253075 is the exact value that overflowed in production.
-      // computeVisualHash returns a bigint; the service must store bigint.toString().
+      // computeVisualHash returns the unsigned decimal string; the service stores it as is.
       const highBitHash = 16488331711678253075n;
       const highBitHashStr = '16488331711678253075';
 
       setupLegacyItem();
       (computeVisualHash as jest.Mock).mockResolvedValue({
-        perceptualHash: highBitHash,
+        perceptualHash: highBitHashStr,
         sharpnessScore: 100,
       });
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);

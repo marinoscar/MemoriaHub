@@ -1,12 +1,6 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
-import {
-  BurstGroupStatus,
-  Prisma,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { BurstService } from '../../burst/burst.service';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
 import {
   ReviewRunSubjectRegistry,
   type ReviewRunCursor,
@@ -15,7 +9,11 @@ import {
   type ReviewRunRow,
   type ReviewRunSubjectPreview,
   type ReviewRunSubjectStrategy,
-} from '@marinoscar/memoriahub-api/review-runs';
+} from '../review-runs/index.js';
+import { BurstService } from './burst.service.js';
+import type { BurstDb } from './data/burst-db.js';
+
+const BURST_GROUP_PENDING = 'pending';
 
 /** Keyset cursor for the (capturedAt DESC NULLS LAST, id DESC) scan. */
 interface BurstCursor extends ReviewRunCursor {
@@ -24,7 +22,8 @@ interface BurstCursor extends ReviewRunCursor {
 }
 
 /**
- * Burst review queue strategy (issue #190).
+ * Burst review queue strategy (issue #190), registered with the review-run engine's
+ * `ReviewRunSubjectRegistry` when the module starts.
  *
  * Resolve keeps each group's `suggestedBestItemId` and archives/trashes the
  * rest; dismiss ungroups every member. Both delegate straight to
@@ -36,20 +35,24 @@ interface BurstCursor extends ReviewRunCursor {
  * batched here: one `deferredEffects` pass per execute-batch job instead of one
  * enqueue loop per group.
  */
+/**
+ * The burst-group review strategy.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnModuleInit {
-  readonly subject = ReviewRunSubject.burst_group;
+  /** The review queue this strategy serves. */
+  readonly subject = 'burst_group' as const;
+  /** The `review_run_items` column the subject ids live in. */
   readonly subjectColumn = 'burstGroupId' as const;
-  readonly supportedActions = [
-    ReviewRunAction.resolve_archive,
-    ReviewRunAction.resolve_trash,
-    ReviewRunAction.dismiss,
-  ] as const;
+  /** Bulk resolve (archive or trash the rest) and dismiss. */
+  readonly supportedActions = ['resolve_archive', 'resolve_trash', 'dismiss'] as const;
 
   private readonly logger = new Logger(BurstGroupReviewStrategy.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: BurstDb,
     private readonly burstService: BurstService,
     private readonly registry: ReviewRunSubjectRegistry,
   ) {}
@@ -63,6 +66,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
   // Evaluate
   // ---------------------------------------------------------------------------
 
+  /** One keyset page of pending groups on the side of the confidence threshold the run's action names. */
   async evaluatePage(
     run: ReviewRunRow,
     cursor: ReviewRunCursor | null,
@@ -74,18 +78,18 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
     // null-confidence legacy groups are never auto-resolved AND never
     // auto-dismissed, matching the pre-run synchronous behaviour.
     const floor = run.threshold / 100;
-    const confidence: Prisma.FloatNullableFilter =
-      run.action === ReviewRunAction.dismiss
+    const confidence: Record<string, unknown> =
+      run.action === 'dismiss'
         ? { not: null, lt: floor }
         : { not: null, gte: floor };
 
-    const baseWhere: Prisma.BurstGroupWhereInput = {
+    const baseWhere: Record<string, unknown> = {
       circleId: run.circleId,
-      status: BurstGroupStatus.pending,
+      status: BURST_GROUP_PENDING,
       confidence,
     };
     const c = cursor as BurstCursor | null;
-    const where: Prisma.BurstGroupWhereInput = c
+    const where: Record<string, unknown> = c
       ? { AND: [baseWhere, buildAfterCursor(c)] }
       : baseWhere;
 
@@ -109,6 +113,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
   // Execute
   // ---------------------------------------------------------------------------
 
+  /** Resolves or dismisses one group through the review service's primitives; skips one resolved by hand since evaluation. */
   async executeItem(
     run: ReviewRunRow,
     groupId: string,
@@ -127,7 +132,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
 
     // Gone, or already resolved/dismissed by hand since evaluation → skip; never
     // clobber a manual decision.
-    if (!group || group.status !== BurstGroupStatus.pending) return 'skipped';
+    if (!group || group.status !== BURST_GROUP_PENDING) return 'skipped';
 
     // The run's authority was checked once at creation; `startedById` is
     // nullable only because the starting user may have been deleted since, and
@@ -135,7 +140,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
     // nullable columns, so a null actor is recorded rather than rejected.
     const actorId = run.startedById as string;
 
-    if (run.action === ReviewRunAction.dismiss) {
+    if (run.action === 'dismiss') {
       await this.burstService.dismissOneBurstGroup(group, actorId, {
         deferDuplicateDetection: true,
       });
@@ -150,7 +155,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
       return 'applied';
     }
 
-    const liveMemberIds = group.items.map((i) => i.id);
+    const liveMemberIds = group.items.map((i: { id: string }) => i.id);
     // Same skip conditions as the id-based bulk resolve: no suggested-best item,
     // or a suggested-best that is no longer a live member.
     if (!group.suggestedBestItemId || !liveMemberIds.includes(group.suggestedBestItemId)) {
@@ -158,8 +163,8 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
     }
 
     const keepIds = [group.suggestedBestItemId];
-    const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
-    const action = run.action === ReviewRunAction.resolve_trash ? 'trash' : 'archive';
+    const removeIds = liveMemberIds.filter((id: string) => id !== group.suggestedBestItemId);
+    const action = run.action === 'resolve_trash' ? 'trash' : 'archive';
 
     await this.burstService.resolveOneBurstGroup(group, keepIds, removeIds, action, actorId, {
       deferDuplicateDetection: true,
@@ -202,6 +207,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
   // Hydrate
   // ---------------------------------------------------------------------------
 
+  /** The preview of each group: its suggested best, else its earliest member. */
   async hydrateItems(groupIds: string[]): Promise<Map<string, ReviewRunSubjectPreview>> {
     const groups = await this.prisma.burstGroup.findMany({
       where: { id: { in: groupIds } },
@@ -257,7 +263,7 @@ export class BurstGroupReviewStrategy implements ReviewRunSubjectStrategy, OnMod
  * Keyset "strictly after cursor" predicate for the (capturedAt DESC NULLS LAST,
  * id DESC) ordering — same shape as the trash-empty / workflow evaluate scans.
  */
-function buildAfterCursor(cursor: BurstCursor): Prisma.BurstGroupWhereInput {
+function buildAfterCursor(cursor: BurstCursor): Record<string, unknown> {
   if (cursor.capturedAt === null) {
     return { capturedAt: null, id: { lt: cursor.id } };
   }

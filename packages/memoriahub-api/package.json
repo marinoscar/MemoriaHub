@@ -103,6 +103,14 @@
       "types": "./dist/workflows/testing/index.d.ts",
       "default": "./dist/workflows/testing/index.js"
     },
+    "./burst": {
+      "types": "./dist/burst/index.d.ts",
+      "default": "./dist/burst/index.js"
+    },
+    "./burst/testing": {
+      "types": "./dist/burst/testing/index.d.ts",
+      "default": "./dist/burst/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -119,6 +127,7 @@
     "dedup",
     "review-runs",
     "workflows",
+    "burst",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

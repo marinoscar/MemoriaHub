@@ -1,13 +1,16 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+
+import { resolveMediaItemJob } from '../media/index.js';
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
-import { PrismaService } from '../prisma/prisma.service';
-import { BurstDetectionService } from './burst-detection.service';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import type { BurstDb } from './data/burst-db.js';
+import { BurstDetectionService } from './burst-detection.service.js';
 
 /**
  * `burst_detection`: a native platform `JobHandler` (RETRO-C5, #594).
@@ -23,27 +26,35 @@ import { BurstDetectionService } from './burst-detection.service';
  *
  * The subject is the media item; a media item that no longer exists settles the
  * job as a no-op.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class BurstDetectionHandler implements JobHandler, OnModuleInit {
+export class BurstDetectionHandler implements MemoriahubJobHandler, OnModuleInit {
+  /** The job type. Permanent. */
   readonly type = 'burst_detection';
+
+  /** The label in the admin job list. */
   readonly label = 'Burst detection';
+
   /** A timeline-window read, at most one download for a legacy hash, a few writes: minutes. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 300_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(BurstDetectionHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: BurstDb,
     private readonly burstDetectionService: BurstDetectionService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one attempt on the server. */
+  async process(job: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
     await this.burstDetectionService.processMediaItem(context);

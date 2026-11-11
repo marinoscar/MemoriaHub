@@ -1,26 +1,34 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { MediaType, BurstGroupStatus, JobReason } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { hammingDistanceBigInt as hammingDistance, computeVisualHash } from '@marinoscar/memoriahub-compute/dhash';
+
+import { DuplicateDetectionService } from '../dedup/index.js';
+import { streamToBuffer } from '../core/index.js';
 import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { computeAndPersistVisualHash } from '../media-processing/hash-backfill.util';
-import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
-import type { MediaJobContext } from '../platform/jobs/media-item-job';
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import type { BurstDb } from './data/burst-db.js';
+
+const MediaType = { photo: 'photo' } as const;
+const BurstGroupStatus = { pending: 'pending' } as const;
+
+/** What an on-demand hash computation produced. */
+interface HashBackfillResult {
+  perceptualHash: string;
+  sharpnessScore: number;
+}
 
 /**
- * Hamming distance between two 64-bit perceptual hashes (bigint form).
+ * Hamming distance between two 64-bit perceptual hashes (bigint form): the shared popcount of the
+ * compute package (burst detection, duplicate detection and worker nodes use the same one).
  *
- * The implementation lives in the shared parity package so burst detection,
- * duplicate detection, and distributed worker nodes all share one popcount.
- * Re-exported here under the historical name/signature for existing callers.
+ * @stability experimental
  */
-import { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
-
 export { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
 
 /**
@@ -35,27 +43,33 @@ function normalize(values: number[]): number[] {
   return values.map((v) => (v - min) / (max - min));
 }
 
+/**
+ * BurstDetectionService: groups a photo with its burst neighbours (Apple BurstUUID, or the same device within
+ * `burst.timeGapSeconds` and `burst.hashDistance` dHash bits), scores each member and suggests the best shot.
+ * SERVER-ONLY: grouping reads the item's neighbours across the timeline mid-computation and merges groups as
+ * it goes.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class BurstDetectionService {
   private readonly logger = new Logger(BurstDetectionService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    @Inject(STORAGE_PROVIDER)
-    private readonly storageProvider: StorageProvider,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: BurstDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     // App metrics (RETRO-T3, #628): `app.media.bursts.grouped`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {}
 
   /**
    * Group one photo with its burst neighbours. `job` is what the native
-   * `burst_detection` handler resolved (`MediaJobContext`, RETRO-C5): its id for
+   * `burst_detection` handler resolved (`MediaItemJobContext` of the media slice, RETRO-C5): its id for
    * log lines and the media item it is about.
    */
-  async processMediaItem(job: Pick<MediaJobContext, 'id' | 'mediaItemId'>): Promise<void> {
+  async processMediaItem(job: { id: string; mediaItemId: string | null }): Promise<void> {
     const mediaItemId = job.mediaItemId;
     if (!mediaItemId) {
       this.logger.warn(`burst_detection job ${job.id} has no mediaItemId; skipping`);
@@ -112,18 +126,12 @@ export class BurstDetectionService {
     // by the existing null-hash guard in Step 4).
     if (item.perceptualHash === null && item.storageObjectId) {
       try {
-        const computed = await computeAndPersistVisualHash(
-          this.prisma,
-          this.resolver,
-          item.id,
-          item.storageObjectId,
-          this.logger,
-        );
+        const computed = await this.computeAndPersistVisualHash(item.id, item.storageObjectId);
         if (computed) {
           // Convert bigint → unsigned decimal string to match the DB column type.
           item = {
             ...item,
-            perceptualHash: computed.perceptualHash.toString(),
+            perceptualHash: computed.perceptualHash,
             sharpnessScore: computed.sharpnessScore,
           };
         }
@@ -140,12 +148,9 @@ export class BurstDetectionService {
     }
 
     // Step 2: Load system settings for burst config
-    const settings = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-      select: { value: true },
-    });
-    const value = (settings?.value as Record<string, unknown> | null) ?? {};
-    const burstConfig = value['burst'] as { timeGapSeconds?: number; hashDistance?: number; minGroupSize?: number } | undefined;
+    const { value: burstConfig } = await this.settings.readSystem<
+      { timeGapSeconds?: number; hashDistance?: number; minGroupSize?: number } | undefined
+    >('burst');
     const timeGapSeconds = burstConfig?.timeGapSeconds ?? 10;
     const hashDistance = burstConfig?.hashDistance ?? 10;
 
@@ -499,23 +504,56 @@ export class BurstDetectionService {
     return signals.reduce((sum, s) => sum + s, 0) / signals.length;
   }
 
-  async processMediaItemRerun(mediaItemId: string): Promise<{ jobId: string; status: string }> {
-    const mediaItem = await this.prisma.mediaItem.findUnique({
-      where: { id: mediaItemId },
-      select: { id: true, circleId: true },
+  /**
+   * Downloads the image bytes for `storageObjectId`, computes the dHash and sharpness score and persists both
+   * onto the MediaItem row (the on-demand backfill for a legacy photo). Transient storage errors propagate so
+   * the queue retries; a permanently undecodable image answers null and the item skips hash matching.
+   */
+  private async computeAndPersistVisualHash(
+    mediaItemId: string,
+    storageObjectId: string,
+  ): Promise<HashBackfillResult | null> {
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: storageObjectId },
+      select: { storageKey: true, storageProvider: true, bucket: true },
     });
-    if (!mediaItem) {
-      throw new Error(`MediaItem ${mediaItemId} not found`);
+
+    if (!storageObject?.storageKey) {
+      this.logger.warn(
+        `MediaItem ${mediaItemId}: storageObject ${storageObjectId} not found or has no storageKey; cannot compute hash`,
+      );
+      return null;
     }
 
-    const job = await this.enrichmentJobService.enqueue({
-      type: 'burst_detection',
-      mediaItemId: mediaItem.id,
-      circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
-      priority: 0,
+    // Stream the object bytes from the object's own provider+bucket.
+    const provider = await this.objectStore.forLocation(storageObject.storageProvider, storageObject.bucket);
+    const stream = await provider.download(storageObject.storageKey);
+    const buffer = await streamToBuffer(stream);
+
+    const result = await computeVisualHash(buffer);
+    if (!result) {
+      this.logger.warn(
+        `MediaItem ${mediaItemId}: computeVisualHash returned null for key ${storageObject.storageKey}; item will skip hash-based matching`,
+      );
+      return null;
+    }
+
+    const { perceptualHash, sharpnessScore } = result;
+
+    // Persist so subsequent runs (burst grouping, dedup matching, score recompute) benefit without re-downloading.
+    await this.prisma.mediaItem.update({
+      where: { id: mediaItemId },
+      data: {
+        // Unsigned decimal string: the TEXT column accepts any uint64.
+        perceptualHash,
+        sharpnessScore,
+      },
     });
 
-    return { jobId: job.id, status: job.status };
+    this.logger.log(
+      `MediaItem ${mediaItemId}: on-demand hash computed and persisted (dHash=${perceptualHash}, sharpness=${sharpnessScore.toFixed(2)})`,
+    );
+
+    return { perceptualHash, sharpnessScore };
   }
 }

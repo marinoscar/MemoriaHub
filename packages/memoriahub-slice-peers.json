@@ -317,6 +317,15 @@
         "nestjs-zod",
         "zod"
       ]
+    },
+    "burst": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "nestjs-zod"
+      ]
     }
   },
   "memoriahub-web": {

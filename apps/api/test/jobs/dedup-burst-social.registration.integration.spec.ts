@@ -11,7 +11,7 @@
 
 import { JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
-import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
+import { BurstDetectionHandler } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';

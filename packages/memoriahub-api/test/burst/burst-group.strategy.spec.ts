@@ -31,13 +31,13 @@
  * strategy is constructed directly (plain class, no Nest wiring needed).
  */
 
-import { BurstGroupStatus, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { BurstGroupReviewStrategy } from './burst-group.strategy';
-import { PrismaService } from '../../prisma/prisma.service';
-import { BurstService } from '../../burst/burst.service';
-import { createExecutionContext } from '@marinoscar/memoriahub-api/review-runs';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { BurstGroupReviewStrategy, BurstService } from '../../src/burst/index.js';
+import { createExecutionContext } from '../../src/review-runs/index.js';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+const BurstGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
 
 const CIRCLE_ID = randomUUID();
 const CIRCLE_B_ID = randomUUID();
@@ -64,7 +64,7 @@ describe('BurstGroupReviewStrategy', () => {
   >;
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
+    prisma = createMockDb();
     burstService = {
       resolveOneBurstGroup: jest.fn().mockResolvedValue(undefined),
       dismissOneBurstGroup: jest.fn().mockResolvedValue(3),
@@ -72,7 +72,7 @@ describe('BurstGroupReviewStrategy', () => {
     };
 
     strategy = new BurstGroupReviewStrategy(
-      prisma as unknown as PrismaService,
+      prisma as never,
       burstService as unknown as BurstService,
       { register: jest.fn() } as never,
     );
@@ -389,5 +389,30 @@ describe('BurstGroupReviewStrategy', () => {
         metadata: null,
       });
     });
+  });
+});
+
+// The null-confidence exclusion (issue #190): a resolve run filters `confidence { not: null, gte: floor }`, a
+// dismiss run `{ not: null, lt: floor }`: legacy groups with no confidence are never auto-resolved and never
+// auto-dismissed. Strategy-owned logic, so it is asserted against the real strategy rather than a stub.
+describe('BurstGroupReviewStrategy: null-confidence exclusion', () => {
+  const build = () => {
+    const prisma = createMockDb();
+    (prisma.burstGroup.findMany as jest.Mock).mockResolvedValue([]);
+    return { prisma, strategy: new BurstGroupReviewStrategy(prisma as never, {} as never, { register: jest.fn() } as never) };
+  };
+
+  it('a resolve run filters confidence { not: null, gte: floor }', async () => {
+    const { prisma, strategy } = build();
+    await strategy.evaluatePage(makeRun({ action: ReviewRunAction.resolve_archive, threshold: 60 }) as any, null, 1000);
+    const where = (prisma.burstGroup.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.confidence).toEqual({ not: null, gte: 0.6 });
+  });
+
+  it('a dismiss run filters confidence { not: null, lt: floor }', async () => {
+    const { prisma, strategy } = build();
+    await strategy.evaluatePage(makeRun({ action: ReviewRunAction.dismiss, threshold: 60 }) as any, null, 1000);
+    const where = (prisma.burstGroup.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.confidence).toEqual({ not: null, lt: 0.6 });
   });
 });

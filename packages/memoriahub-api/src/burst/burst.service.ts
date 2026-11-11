@@ -1,55 +1,79 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
-import { BurstGroupStatus, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
-import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { FEATURE_KEYS } from '../settings/feature-gates';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
-import { BurstQueryDto } from './dto/burst-query.dto';
-import { ResolveBurstDto } from './dto/resolve-burst.dto';
-import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
-import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
-import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 
+import { DuplicateDetectionService } from '../dedup/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS, MediaThumbnailService, enqueueEnrichmentJob } from '../media/index.js';
+import { isFeatureEnabled } from '../core/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import { ReviewRunService } from '../review-runs/index.js';
+import { BURST_OBSERVER, type BurstObserver } from './burst-observer.js';
+import type {
+  BulkDismissBurstThresholdDto,
+  BulkResolveBurstDto,
+  BulkResolveBurstThresholdDto,
+  BurstQueryDto,
+  ResolveBurstDto,
+} from './burst.dto.js';
+import type { BurstDb } from './data/burst-db.js';
+
+/** A member of a burst group as the detail read selects it (the hash is never selected: BigInt-unsafe). */
+interface BurstMemberRow {
+  id: string;
+  capturedAt: Date | null;
+  burstScore: number | null;
+  sharpnessScore: number | null;
+  width: number | null;
+  height: number | null;
+  metadata: unknown;
+}
+
+/** A burst group as the review list selects it. */
+interface BurstListRow {
+  id: string;
+  circleId: string;
+  status: string;
+  mediaCount: number;
+  capturedAt: Date | null;
+  confidence: number | null;
+  suggestedBestItemId: string | null;
+  createdAt: Date;
+  suggestedBestItem: { metadata: unknown } | null;
+  items: Array<{ id: string; metadata: unknown }>;
+}
+
+const BurstGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
+const MediaType = { photo: 'photo' } as const;
+
+/**
+ * BurstService: the burst review queue (list, detail, resolve, dismiss, bulk and threshold runs) and the
+ * admin backfill. Its resolve and dismiss primitives are public because the review-run strategy wraps them.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class BurstService {
   private readonly logger = new Logger(BurstService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly membership: OwnerAccessService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    @Inject(STORAGE_PROVIDER)
-    private readonly storageProvider: StorageProvider,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: BurstDb,
+    // Owner access (RETRO-K1): the first, unchanged check of every route.
+    @Inject(MEMORIAHUB_ACCESS) private readonly membership: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly mediaThumbnailService: MediaThumbnailService,
-    private readonly systemSettings: AppSystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
     // The review-run engine (RETRO-J9): these threshold endpoints start runs; the registered burst strategy
     // wraps this service's resolve/dismiss primitives.
     private readonly reviewRuns: ReviewRunService,
-    // Every library for the admin backfill (RETRO-K1): groups through the platform, personal libraries from the store.
-    private readonly scopes: OwnerScopeSweepService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
-    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    @Optional() @Inject(BURST_OBSERVER) private readonly observer?: BurstObserver,
   ) {}
 
   /**
@@ -68,15 +92,15 @@ export class BurstService {
   async reenqueueDuplicateDetection(circleId: string, mediaItemIds: string[]): Promise<void> {
     if (mediaItemIds.length === 0) return;
     try {
-      const dedupOn = await this.systemSettings.isFeatureEnabled(FEATURE_KEYS.DUPLICATE_DETECTION);
+      const dedupOn = await isFeatureEnabled(this.settings, 'duplicateDetection');
       if (!dedupOn) return;
 
       for (const mediaItemId of mediaItemIds) {
-        await this.enrichmentJobService.enqueue({
+        await enqueueEnrichmentJob(this.jobs, {
           type: 'duplicate_detection',
           mediaItemId,
           circleId,
-          reason: JobReason.rerun,
+          reason: 'rerun',
           priority: 10,
         });
       }
@@ -91,22 +115,8 @@ export class BurstService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  /**
-   * Single-item thumbnail signing. Delegates to the shared
-   * MediaThumbnailService so provider resolution + fallback + error handling
-   * live in one place. List paths batch signing via `signThumbsBatched`.
-   */
-  private async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    return this.mediaThumbnailService.signThumb(metadata);
-  }
-
   private async getBurstMinGroupSize(): Promise<number> {
-    const settings = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-      select: { value: true },
-    });
-    const value = (settings?.value as Record<string, unknown> | null) ?? {};
-    const burstConfig = value['burst'] as { minGroupSize?: number } | undefined;
+    const { value: burstConfig } = await this.settings.readSystem<{ minGroupSize?: number } | undefined>('burst');
     return burstConfig?.minGroupSize ?? 3;
   }
 
@@ -114,6 +124,7 @@ export class BurstService {
   // List burst groups
   // ---------------------------------------------------------------------------
 
+  /** Lists a circle's burst groups for the review queue (viewer). */
   async listBurstGroups(query: BurstQueryDto, userId: string, perms: string[]) {
     const { circleId, status, page, pageSize } = query;
     // Service specs construct this DTO from a bare object literal (bypassing the
@@ -128,7 +139,7 @@ export class BurstService {
 
     const where = {
       circleId,
-      status: status as BurstGroupStatus,
+      status,
       mediaCount: { gte: minGroupSize },
     };
 
@@ -137,20 +148,20 @@ export class BurstService {
     const tail = [
       { capturedAt: { sort: 'asc', nulls: 'last' } },
       { id: 'asc' },
-    ] as Prisma.BurstGroupOrderByWithRelationInput[];
+    ];
 
     // `capturedAt`/`confidence` are nullable (object form OK); `mediaCount` is
     // non-null (plain direction only). The default path (capturedAt/asc) yields
     // NULLS LAST, which is already Postgres's default for ASC — so the omitted
     // -params ordering is unchanged.
-    const orderBy: Prisma.BurstGroupOrderByWithRelationInput[] =
+    const orderBy: Array<Record<string, unknown>> =
       by === 'confidence'
         ? [{ confidence: { sort: dir, nulls: 'last' } }, ...tail]
         : by === 'mediaCount'
           ? [{ mediaCount: dir }, ...tail]
           : [{ capturedAt: { sort: dir, nulls: 'last' } }, { id: dir }];
 
-    const [groups, total] = await Promise.all([
+    const [groupRows, total] = await Promise.all([
       this.prisma.burstGroup.findMany({
         where,
         orderBy,
@@ -179,6 +190,8 @@ export class BurstService {
       this.prisma.burstGroup.count({ where }),
     ]);
 
+    const groups = groupRows as BurstListRow[];
+
     // Collect all thumbnail keys across every group (member covers +
     // suggested-best) and sign them with a single batched StorageObject query.
     const keys: string[] = [];
@@ -193,14 +206,14 @@ export class BurstService {
       if (sk) keys.push(sk);
     }
     const keyToUrl = await this.mediaThumbnailService.signThumbsBatched(keys);
-    const urlFor = (metadata: Prisma.JsonValue | null): string | null => {
+    const urlFor = (metadata: unknown): string | null => {
       const k = this.mediaThumbnailService.extractThumbKey(metadata);
       return k ? keyToUrl.get(k) ?? null : null;
     };
 
     const data = groups.map((group) => {
       const coverThumbnailUrls = group.items
-        .map((item) => urlFor(item.metadata))
+        .map((item: { metadata: unknown }) => urlFor(item.metadata))
         .filter((url): url is string => url !== null);
 
       const suggestedBestThumbnailUrl = group.suggestedBestItem
@@ -231,6 +244,7 @@ export class BurstService {
   // Get single burst group detail
   // ---------------------------------------------------------------------------
 
+  /** One burst group with its members and signed thumbnails (viewer). */
   async getBurstGroup(id: string, userId: string, perms: string[]) {
     const group = await this.prisma.burstGroup.findUnique({
       where: { id },
@@ -267,9 +281,7 @@ export class BurstService {
 
     await this.membership.requireOwnerRole(userId, group.circleId, perms, 'viewer');
 
-    const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
-      group.items,
-    );
+    const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(group.items as BurstMemberRow[]);
     const membersWithUrls = itemsWithUrls.map((item) => ({
       id: item.id,
       capturedAt: item.capturedAt,
@@ -301,6 +313,7 @@ export class BurstService {
   // Resolve burst group
   // ---------------------------------------------------------------------------
 
+  /** Resolves a pending group: keeps the chosen members, archives or trashes the rest (editor; trash needs `media:delete`). */
   async resolveBurstGroup(id: string, dto: ResolveBurstDto, userId: string, perms: string[]) {
     const group = await this.prisma.burstGroup.findUnique({
       where: { id },
@@ -331,7 +344,7 @@ export class BurstService {
       );
     }
 
-    const groupMemberIds = new Set(group.items.map((i) => i.id));
+    const groupMemberIds = new Set(group.items.map((i: { id: string }) => i.id));
     const invalidIds = dto.keepIds.filter((k) => !groupMemberIds.has(k));
     if (invalidIds.length > 0) {
       throw new BadRequestException(
@@ -339,7 +352,7 @@ export class BurstService {
       );
     }
 
-    const deleteIds = group.items.map((i) => i.id).filter((id) => !dto.keepIds.includes(id));
+    const deleteIds = group.items.map((i: { id: string }) => i.id).filter((id: string) => !dto.keepIds.includes(id));
 
     await this.resolveOneBurstGroup(group, dto.keepIds, deleteIds, dto.action, userId);
 
@@ -393,7 +406,7 @@ export class BurstService {
     ]);
 
     // Webhook `media.item.trashed` (RETRO-H4) once the transaction committed; batched, never throws.
-    if (action === 'trash') this.webhookEvents?.mediaTrashed(group.circleId, removeIds);
+    if (action === 'trash') this.observer?.mediaTrashed(group.circleId, removeIds);
 
     await this.createAuditEvent(userId, 'burst_group:resolved', group.id, {
       keepIds,
@@ -417,6 +430,7 @@ export class BurstService {
   // Bulk resolve burst groups (auto-keep suggestedBest)
   // ---------------------------------------------------------------------------
 
+  /** Resolves up to 100 pending groups, keeping each group's suggested best (editor). */
   async bulkResolveBurstGroups(dto: BulkResolveBurstDto, userId: string, perms: string[]) {
     await this.membership.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
@@ -458,7 +472,7 @@ export class BurstService {
     let removedCount = 0;
 
     for (const group of groups) {
-      const liveMemberIds = group.items.map((i) => i.id);
+      const liveMemberIds = group.items.map((i: { id: string }) => i.id);
 
       // A group is skipped when it is not pending, has no suggested-best item,
       // or its suggested-best item is no longer a live member.
@@ -472,7 +486,7 @@ export class BurstService {
       }
 
       const keepIds = [group.suggestedBestItemId];
-      const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
+      const removeIds = liveMemberIds.filter((id: string) => id !== group.suggestedBestItemId);
 
       try {
         await this.resolveOneBurstGroup(group, keepIds, removeIds, dto.action, userId);
@@ -522,11 +536,9 @@ export class BurstService {
   ) {
     const run = await this.reviewRuns.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.burst_group,
+      subjectType: 'burst_group',
       action:
-        dto.action === 'trash'
-          ? ReviewRunAction.resolve_trash
-          : ReviewRunAction.resolve_archive,
+        dto.action === 'trash' ? 'resolve_trash' : 'resolve_archive',
       threshold: dto.threshold,
       userId,
       perms,
@@ -539,6 +551,7 @@ export class BurstService {
   // Dismiss burst group
   // ---------------------------------------------------------------------------
 
+  /** Dismisses a pending group as not a burst: ungroups every member (editor). */
   async dismissBurstGroup(id: string, userId: string, perms: string[]) {
     const group = await this.prisma.burstGroup.findUnique({
       where: { id },
@@ -616,7 +629,7 @@ export class BurstService {
     if (!opts.deferDuplicateDetection) {
       await this.reenqueueDuplicateDetection(
         group.circleId,
-        group.items.map((i) => i.id),
+        group.items.map((i: { id: string }) => i.id),
       );
     }
 
@@ -640,8 +653,8 @@ export class BurstService {
   ) {
     const run = await this.reviewRuns.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.burst_group,
-      action: ReviewRunAction.dismiss,
+      subjectType: 'burst_group',
+      action: 'dismiss',
       threshold: dto.threshold,
       userId,
       perms,
@@ -685,11 +698,11 @@ export class BurstService {
 
       let enqueued = 0;
       for (const item of items) {
-        await this.enrichmentJobService.enqueue({
+        await enqueueEnrichmentJob(this.jobs, {
           type: 'burst_detection',
           mediaItemId: item.id,
           circleId,
-          reason: JobReason.backfill,
+          reason: 'backfill',
           priority: 100,
         });
         enqueued++;
@@ -728,11 +741,11 @@ export class BurstService {
 
       let enqueued = 0;
       for (const item of items) {
-        await this.enrichmentJobService.enqueue({
+        await enqueueEnrichmentJob(this.jobs, {
           type: 'burst_detection',
           mediaItemId: item.id,
           circleId,
-          reason: JobReason.backfill,
+          reason: 'backfill',
           priority: 100,
         });
         enqueued++;
@@ -749,12 +762,14 @@ export class BurstService {
   // Backfill burst detection across ALL circles (Admin)
   // ---------------------------------------------------------------------------
 
+  /** Queues `burst_detection` for every library, then evicts the photos already double-listed in a duplicate group. */
   async backfillAllCircles(opts: {
     from?: string;
     to?: string;
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number; evictedDuplicateOverlaps: number }> {
-    const allCircles = (await this.scopes.allScopeIds()).map((id) => ({ id }));
+    // Every shared library (a platform group) plus every personal library.
+    const allCircles = (await this.membership.allScopeIds()).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;
@@ -801,7 +816,7 @@ export class BurstService {
         action,
         targetType: 'burst_group',
         targetId,
-        meta: meta as Prisma.InputJsonValue,
+        meta,
       },
     });
   }

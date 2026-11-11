@@ -17,16 +17,22 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { BurstService } from './burst.service';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { BurstQueryDto } from './dto/burst-query.dto';
-import { ResolveBurstDto } from './dto/resolve-burst.dto';
-import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
-import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
-import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../core/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS } from '../media/index.js';
+import { BurstService } from './burst.service.js';
+import {
+  BulkDismissBurstThresholdDto,
+  BulkResolveBurstDto,
+  BulkResolveBurstThresholdDto,
+  BurstQueryDto,
+  ResolveBurstDto,
+} from './burst.dto.js';
 
+/**
+ * The `BurstController` routes (review queue); mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Bursts')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
@@ -38,7 +44,7 @@ export class BurstController {
    * List burst groups for a circle, filtered by status.
    */
   @Get('bursts')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List burst groups for a circle' })
   @ApiQuery({ name: 'circleId', type: String, required: true })
   @ApiQuery({ name: 'status', type: String, required: false, enum: ['pending', 'resolved', 'dismissed'] })
@@ -49,7 +55,7 @@ export class BurstController {
   @ApiResponse({ status: 200, description: 'Burst groups listed' })
   async listBurstGroups(
     @Query() query: BurstQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.listBurstGroups(query, user.id, user.permissions);
   }
@@ -63,7 +69,7 @@ export class BurstController {
    * is not captured by the `:id` param.
    */
   @Post('bursts/bulk/resolve')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk-resolve burst groups (auto-keep suggested best, archive or trash the rest)',
@@ -82,7 +88,7 @@ export class BurstController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkResolveBurstGroups(
     @Body() dto: BulkResolveBurstDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.bulkResolveBurstGroups(dto, user.id, user.permissions);
   }
@@ -96,7 +102,7 @@ export class BurstController {
    * is not captured by the `:id` param.
    */
   @Post('bursts/bulk/resolve-by-threshold')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start a run resolving burst groups at/above a confidence threshold',
@@ -127,7 +133,7 @@ export class BurstController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkResolveBurstGroupsByThreshold(
     @Body() dto: BulkResolveBurstThresholdDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.bulkResolveBurstGroupsByThreshold(dto, user.id, user.permissions);
   }
@@ -141,7 +147,7 @@ export class BurstController {
    * is not captured by the `:id` param.
    */
   @Post('bursts/bulk/dismiss-by-threshold')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start a run dismissing burst groups below a confidence threshold',
@@ -166,7 +172,7 @@ export class BurstController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkDismissBurstGroupsByThreshold(
     @Body() dto: BulkDismissBurstThresholdDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.bulkDismissBurstGroupsByThreshold(dto, user.id, user.permissions);
   }
@@ -176,14 +182,14 @@ export class BurstController {
    * Get full detail for a single burst group.
    */
   @Get('bursts/:id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get burst group detail' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Burst group returned' })
   @ApiResponse({ status: 404, description: 'Burst group not found' })
   async getBurstGroup(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.getBurstGroup(id, user.id, user.permissions);
   }
@@ -193,7 +199,7 @@ export class BurstController {
    * Resolve a burst group, soft-deleting all non-kept members.
    */
   @Post('bursts/:id/resolve')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resolve a burst group (keep selected, archive or trash the rest)',
@@ -209,7 +215,7 @@ export class BurstController {
   async resolveBurstGroup(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolveBurstDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.resolveBurstGroup(id, dto, user.id, user.permissions);
   }
@@ -219,7 +225,7 @@ export class BurstController {
    * Dismiss a burst group (not actually a burst; ungroups all members).
    */
   @Post('bursts/:id/dismiss')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Dismiss a burst group (not a burst)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -228,7 +234,7 @@ export class BurstController {
   @ApiResponse({ status: 404, description: 'Burst group not found' })
   async dismissBurstGroup(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.burstService.dismissBurstGroup(id, user.id, user.permissions);
   }
