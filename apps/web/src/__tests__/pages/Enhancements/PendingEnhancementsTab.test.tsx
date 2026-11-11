@@ -298,6 +298,21 @@ describe('PendingEnhancementsTab', () => {
       expect(img).toHaveAttribute('src', 'https://cdn/e-full.jpg');
     });
 
+    it('labels a cancelled card honestly and offers no review actions', () => {
+      mockList([
+        makeItem({
+          status: 'cancelled',
+          enhanced: { thumbnailUrl: null, previewUrl: null, width: null, height: null, size: null },
+        }),
+      ]);
+      render(<PendingEnhancementsTab circleId="circle-1" />);
+
+      const card = cardFor('enh-1');
+      expect(within(card).getByText('Cancelled')).toBeInTheDocument();
+      expect(within(card).queryByText('Failed')).toBeNull();
+      expect(within(card).queryByRole('button', { name: 'Keep both' })).toBeNull();
+    });
+
     it('renders a failed card with the error and only a Discard action', () => {
       mockList([
         makeItem({

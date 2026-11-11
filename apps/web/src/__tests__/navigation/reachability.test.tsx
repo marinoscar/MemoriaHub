@@ -183,8 +183,12 @@ describe('navigation reachability — the Review hub (issue #390)', () => {
     // than replacing. Pin that each is a real `<Route path="..." element={<...Page />}>`,
     // not a `<Navigate to="/review" .../>`.
     REVIEW_WRAPPED_STANDALONE_PATHS.forEach((path) => {
+      // The element may be wrapped in a guard (`RequireAiEnabled`, RETRO-E2):
+      // skip guard tags and pin the first real page tag.
       const match = appSource.match(
-        new RegExp(`<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{<([^\\s/>]+)`),
+        new RegExp(
+          `<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{\\s*(?:<Require[A-Za-z]*[^>]*>\\s*)*<([^\\s/>]+)`,
+        ),
       );
       expect(match).not.toBeNull();
       expect(match![1]).not.toBe('Navigate');
@@ -249,8 +253,12 @@ describe('navigation reachability — the Collections hub (issue #391)', () => {
 
   it('none of the seven standalone browse routes redirect to /collections — each still renders its own page', () => {
     COLLECTIONS_STANDALONE_PATHS.forEach((path) => {
+      // The element may be wrapped in a guard (`RequireAiEnabled`, RETRO-E2):
+      // skip guard tags and pin the first real page tag.
       const match = appSource.match(
-        new RegExp(`<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{<([^\\s/>]+)`),
+        new RegExp(
+          `<Route\\s+path="${path.replace('/', '\\/')}"\\s+element=\\{\\s*(?:<Require[A-Za-z]*[^>]*>\\s*)*<([^\\s/>]+)`,
+        ),
       );
       expect(match).not.toBeNull();
       expect(match![1]).not.toBe('Navigate');
