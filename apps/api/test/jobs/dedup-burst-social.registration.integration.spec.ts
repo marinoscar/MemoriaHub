@@ -16,7 +16,7 @@ import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/d
 import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
-import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
+import { SocialMediaDetectionHandler } from '@marinoscar/memoriahub-api/social-media';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
 const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [

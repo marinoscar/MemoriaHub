@@ -24,7 +24,7 @@ import {
   ReviewRunExecuteBatchHandler,
 } from '@marinoscar/memoriahub-api/review-runs';
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
-import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
+import { SocialMediaDetectionHandler } from '@marinoscar/memoriahub-api/social-media';
 import { StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
 import { RetiredStorageMigrationHandler } from '../../src/platform/jobs/retired-job-types';
 import { ThumbnailRegenHandler } from '@marinoscar/memoriahub-api/media';

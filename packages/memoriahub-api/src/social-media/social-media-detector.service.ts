@@ -26,6 +26,11 @@ import {
 
 export type { VideoDetectionInput, DetectionResult, SocialPlatform, DetectionMethod };
 
+/**
+ * The Tier-1 (container metadata and filename) and Tier-2 (OCR text) detectors of the shared rule catalog.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class SocialMediaDetectorService {
   /** See @marinoscar/memoriahub-compute/social's detectTier1 for full docs. */

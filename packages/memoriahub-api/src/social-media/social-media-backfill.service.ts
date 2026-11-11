@@ -1,10 +1,15 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, MediaSocialStatusType, MediaType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { OWNER_SCOPE_SWEEP_REASON } from '../app-registrations/system-access-reasons';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { whereDateRange } from '@marinoscar/memoriahub-api/media';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+
+import { enqueueEnrichmentJob, whereDateRange } from '../media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+} from '../ports/index.js';
+import { SOCIAL_JOB_REASON, SOCIAL_MEDIA_JOB_TYPE, SOCIAL_MEDIA_TYPE, SOCIAL_STATUS } from './constants.js';
+import type { SocialMediaDb } from './data/social-media-db.js';
 
 /**
  * SocialMediaBackfillService
@@ -15,15 +20,17 @@ import { whereDateRange } from '@marinoscar/memoriahub-api/media';
  *   - per-circle and global backfill (priority 100, reason=backfill) for admins
  *
  * Detection only targets videos — photos are never social-media re-uploads.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class SocialMediaBackfillService {
   private readonly logger = new Logger(SocialMediaBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly scopes: OwnerScopeSweepService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: SocialMediaDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
   ) {}
 
   /**
@@ -44,7 +51,7 @@ export class SocialMediaBackfillService {
     const mediaItems = await this.prisma.mediaItem.findMany({
       where: {
         circleId,
-        type: MediaType.video,
+        type: SOCIAL_MEDIA_TYPE.video,
         deletedAt: null,
         ...dateWhere,
         ...(force
@@ -54,7 +61,7 @@ export class SocialMediaBackfillService {
                 { socialStatus: null },
                 {
                   socialStatus: {
-                    status: { not: MediaSocialStatusType.processed },
+                    status: { not: SOCIAL_STATUS.processed },
                   },
                 },
               ],
@@ -65,11 +72,11 @@ export class SocialMediaBackfillService {
 
     let enqueued = 0;
     for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'social_media_detection',
+      await enqueueEnrichmentJob(this.jobs, {
+        type: SOCIAL_MEDIA_JOB_TYPE,
         mediaItemId: item.id,
         circleId: item.circleId,
-        reason: JobReason.backfill,
+        reason: SOCIAL_JOB_REASON.backfill,
         priority: 100,
       });
 
@@ -77,10 +84,10 @@ export class SocialMediaBackfillService {
         where: { mediaItemId: item.id },
         create: {
           mediaItemId: item.id,
-          status: MediaSocialStatusType.pending,
+          status: SOCIAL_STATUS.pending,
         },
         update: {
-          status: MediaSocialStatusType.pending,
+          status: SOCIAL_STATUS.pending,
         },
       });
 
@@ -104,7 +111,7 @@ export class SocialMediaBackfillService {
     force?: boolean;
   }): Promise<{ enqueued: number; circles: number }> {
     // Every shared library (a platform group) plus every personal library (RETRO-N29).
-    const allCircles = (await this.scopes.allScopeIds(OWNER_SCOPE_SWEEP_REASON)).map((id) => ({ id }));
+    const allCircles = (await this.access.allScopeIds()).map((id) => ({ id }));
 
     let totalEnqueued = 0;
     const circleCount = allCircles.length;
@@ -142,11 +149,11 @@ export class SocialMediaBackfillService {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    const job = await this.enrichmentJobService.enqueue({
-      type: 'social_media_detection',
+    const job = await enqueueEnrichmentJob(this.jobs, {
+      type: SOCIAL_MEDIA_JOB_TYPE,
       mediaItemId,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
+      reason: SOCIAL_JOB_REASON.rerun,
       priority: 0,
     });
 
@@ -154,15 +161,16 @@ export class SocialMediaBackfillService {
       where: { mediaItemId },
       create: {
         mediaItemId,
-        status: MediaSocialStatusType.pending,
+        status: SOCIAL_STATUS.pending,
       },
-      update: { status: MediaSocialStatusType.pending },
+      update: { status: SOCIAL_STATUS.pending },
     });
 
     this.logger.log(
       `Social-media rerun job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${userId}`,
     );
-    return { jobId: job.id, status: job.status };
+    // A freshly queued job is `pending`; the queue facade reported the row's status the same way.
+    return { jobId: job.id, status: 'pending' };
   }
 
   /**

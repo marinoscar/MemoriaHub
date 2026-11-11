@@ -167,6 +167,13 @@
       "media",
       "dedup",
       "review-runs"
+    ],
+    "social-media": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "face"
     ]
   },
   "memoriahub-web": {

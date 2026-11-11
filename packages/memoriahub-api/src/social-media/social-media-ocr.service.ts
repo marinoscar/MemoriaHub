@@ -28,9 +28,13 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
 import { createOcrEngine, OcrEngine } from '@marinoscar/memoriahub-compute/ocr';
-import { VideoFrameExtractionService } from '@marinoscar/memoriahub-api/face';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { VideoFrameExtractionService } from '../face/index.js';
 
+/**
+ * What one OCR pass over a video needs.
+ *
+ * @stability experimental
+ */
 export interface RecognizeVideoOpts {
   durationMs?: number;
   fileExtension?: string;
@@ -42,6 +46,11 @@ export interface RecognizeVideoOpts {
   timeoutMs: number;
 }
 
+/**
+ * Whether the OCR engine is usable.
+ *
+ * @stability experimental
+ */
 export interface OcrStatus {
   ocrAvailable: boolean;
   degraded: boolean;
@@ -49,6 +58,12 @@ export interface OcrStatus {
   languages: string[];
 }
 
+/**
+ * The Tier-2 OCR fallback: samples frames near the start and end of a video and recognizes their text.
+ * Degrades to Tier-1-only (never throws) when the engine cannot start.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class SocialMediaOcrService implements OnModuleDestroy {
   private readonly logger = new Logger(SocialMediaOcrService.name);
@@ -62,11 +77,8 @@ export class SocialMediaOcrService implements OnModuleDestroy {
   private degradedWarned = false;
 
   constructor(
+    // recognizeVideo receives its knobs via opts (resolved by the caller from the `socialMedia` settings).
     private readonly frameExtractor: VideoFrameExtractionService,
-    // Injected so the service participates in the settings-aware DI graph and so
-    // future per-call setting reads have a handle; recognizeVideo receives its
-    // knobs via opts (resolved by the caller from AppSystemSettingsService).
-    private readonly systemSettings: AppSystemSettingsService,
   ) {}
 
   async onModuleDestroy(): Promise<void> {

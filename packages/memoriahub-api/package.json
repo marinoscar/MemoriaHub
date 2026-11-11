@@ -111,6 +111,14 @@
       "types": "./dist/burst/testing/index.d.ts",
       "default": "./dist/burst/testing/index.js"
     },
+    "./social-media": {
+      "types": "./dist/social-media/index.d.ts",
+      "default": "./dist/social-media/index.js"
+    },
+    "./social-media/testing": {
+      "types": "./dist/social-media/testing/index.d.ts",
+      "default": "./dist/social-media/testing/index.js"
+    },
     "./package.json": "./package.json",
     "./memories": {
       "types": "./dist/memories/index.d.ts",
@@ -137,6 +145,7 @@
     "review-runs",
     "workflows",
     "burst",
+    "social-media",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

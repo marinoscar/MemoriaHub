@@ -21,7 +21,7 @@
 //       (video_face_detection) that was withheld while classification was pending.
 //   8. On error: mark failed + rethrow so the worker retries.
 //
-// A native platform `JobHandler` (RETRO-C5, #594). The subject is the media item
+// A `MemoriahubJobHandler` registered through the jobs port (RETRO-J10, #624). The subject is the media item
 // (`job.subjectType === 'media_item'`); a media item that no longer exists
 // settles the job as a no-op on both paths.
 //
@@ -31,10 +31,10 @@
 // `media_social_status`, the tags and the source column, and on a CLEAN verdict
 // fans out the withheld video enrichment. A DETECTED verdict stops the chain.
 //
-// THE FAN-OUT. `MediaEnrichmentService.enqueueVideoPostDetectionEnrichment`
-// enqueues `video_face_detection` (and `video_auto_tagging` when enabled)
-// through the C1 facade, which writes through the platform `JobsService` with
-// the job's organization. It runs AFTER the clean-status transaction commits,
+// THE FAN-OUT. The host's `SOCIAL_MEDIA_POST_DETECTION` hook (its media
+// enrichment service) enqueues `video_face_detection` (and `video_auto_tagging`
+// when enabled) through the jobs port, with the job's organization. It runs
+// AFTER the clean-status transaction commits,
 // never inside it, and the queue's dedup (one pending/running job per type and
 // subject) makes a retried or re-delivered CLEAN fan out once.
 //
@@ -47,35 +47,52 @@
 // runs here.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import { JobReason, MediaSocialStatusType, MediaTagSource, MediaType } from '@prisma/client';
-import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { tmpdir } from 'os';
-import { join, extname } from 'path';
-import { randomUUID } from 'crypto';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { promises as fs } from 'fs';
+import { extname } from 'path';
 import { socialMediaDetectionResultSchema, type SocialMediaDetectionResult } from '@marinoscar/memoriahub-compute/dto';
-import { resolveMediaItemJob } from '../platform/jobs/media-item-job';
-import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { downloadToTempFile } from '../media-processing/processors/stream-utils';
-import { probeVideoFile, extractContainerMetadata } from '../media-processing/processors/ffprobe.util';
+import { probeVideoFile, extractContainerMetadata } from '@marinoscar/memoriahub-compute/metadata';
+
+import { downloadToTempFile } from '../core/index.js';
+import { resolveMediaItemJob } from '../media/index.js';
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import {
+  SOCIAL_JOB_REASON,
+  SOCIAL_MEDIA_JOB_TYPE,
+  SOCIAL_MEDIA_TYPE,
+  SOCIAL_STATUS,
+  SOCIAL_TAG_SOURCE,
+  type SocialJobReason,
+  type SocialStatus,
+} from './constants.js';
+import type { SocialMediaDb, SocialMediaTx } from './data/social-media-db.js';
+import {
+  DEFAULT_SOCIAL_VIDEO_JOB_TIMEOUT_MS,
+  SOCIAL_MEDIA_OPTIONS,
+  SOCIAL_MEDIA_POST_DETECTION,
+  type SocialMediaModuleOptions,
+  type SocialMediaPostDetection,
+} from './social-media-host-hooks.js';
 import {
   SocialMediaDetectorService,
   VideoDetectionInput,
   DetectionResult,
   SocialPlatform,
-} from './social-media-detector.service';
-import { SocialMediaOcrService } from './social-media-ocr.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+} from './social-media-detector.service.js';
+import { SocialMediaOcrService } from './social-media-ocr.service.js';
 
 /** The canonical "umbrella" tag applied to every detected social-media item. */
 const SOCIAL_TAG = 'Social Media';
@@ -99,31 +116,40 @@ const ALL_SOCIAL_TAG_NAMES = [SOCIAL_TAG, 'TikTok', 'Instagram', 'Facebook'];
 const VIDEO_ENRICHMENT_MAX_BYTES = (): number =>
   parseInt(process.env['VIDEO_ENRICHMENT_MAX_BYTES'] ?? '0', 10);
 
-/** What the persist half needs of a job: its id, its media item and why it was queued. */
+/**
+ * What the persist half needs of a job: its id, its media item and why it was queued.
+ *
+ * @stability experimental
+ */
 export interface SocialMediaJobContext {
   readonly id: string;
   readonly mediaItemId: string;
   /** The enqueue reason, which sets the priority of the withheld video jobs. */
-  readonly reason: JobReason;
+  readonly reason: SocialJobReason;
 }
 
-/** The platform job's reason as the legacy enum the fan-out takes (the strings are the same). */
-function toJobReason(reason: Job['reason']): JobReason {
+/** The queue's job reason as one of the three the fan-out takes (anything else reads as an upload). */
+function toJobReason(reason: MemoriahubJob['reason']): SocialJobReason {
   const value = String(reason);
-  return value === JobReason.rerun || value === JobReason.backfill ? (value as JobReason) : JobReason.upload;
+  return value === SOCIAL_JOB_REASON.rerun || value === SOCIAL_JOB_REASON.backfill ? value : SOCIAL_JOB_REASON.upload;
 }
 
+/**
+ * The `social_media_detection` job handler (node-eligible: a node submits the verdict, the server persists it).
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
-  readonly type = 'social_media_detection';
+export class SocialMediaDetectionHandler implements MemoriahubJobHandler, OnModuleInit {
+  readonly type = SOCIAL_MEDIA_JOB_TYPE;
   readonly label = 'Social media detection';
   /**
    * A video download (legacy re-probe or OCR), ffprobe and up to a few OCR
    * frames: 20 minutes by default, the same video bucket as video face
    * detection, still overridable for one release through
-   * ENRICHMENT_VIDEO_JOB_TIMEOUT_MS.
+   * ENRICHMENT_VIDEO_JOB_TIMEOUT_MS (the host passes it as `videoJobTimeoutMs`).
    */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: videoJobTimeoutMs(), maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile;
 
   /**
    * Node-eligibility (distributed workers): the payload a node submits via
@@ -138,26 +164,30 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
   private readonly logger = new Logger(SocialMediaDetectionHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: SocialMediaDb,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly detector: SocialMediaDetectorService,
     private readonly ocr: SocialMediaOcrService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly mediaEnrichment: MediaEnrichmentService,
-    // App metrics (RETRO-T3, #628): `app.media.social.classified`, system tags in `app.media.tags.applied`.
-    @Optional() private readonly metrics?: AppMetricsService,
-  ) {}
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    @Inject(SOCIAL_MEDIA_POST_DETECTION) private readonly postDetection: SocialMediaPostDetection,
+    @Optional() @Inject(SOCIAL_MEDIA_OPTIONS) options?: SocialMediaModuleOptions,
+    // Metrics: `app.media.social.classified`, system tags in `app.media.tags.applied`.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+  ) {
+    this.profile = { maxRuntimeMs: options?.videoJobTimeoutMs ?? DEFAULT_SOCIAL_VIDEO_JOB_TIMEOUT_MS, maxAttempts: 3 };
+  }
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
   // ---------------------------------------------------------------------------
   // process
   // ---------------------------------------------------------------------------
 
-  async process(platformJob: Job): Promise<void> {
+  async process(platformJob: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, platformJob, this.logger);
     if (!context) return;
     const job: SocialMediaJobContext = {
@@ -197,14 +227,14 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     if (
       !mediaItem ||
       mediaItem.deletedAt ||
-      mediaItem.type !== MediaType.video ||
+      mediaItem.type !== SOCIAL_MEDIA_TYPE.video ||
       !mediaItem.storageObject
     ) {
       this.logger.debug(
         `social_media_detection job ${job.id}: MediaItem ${mediaItemId} not an active video (or missing storageObject); skipping`,
       );
       await this.upsertStatus(mediaItemId, {
-        status: MediaSocialStatusType.not_processed,
+        status: SOCIAL_STATUS.not_processed,
       });
       return;
     }
@@ -217,8 +247,8 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
 
     try {
       // --- 2. Feature gate ---
-      const settings = await this.systemSettings.getSettings();
-      const featureOn = settings.features?.['socialMediaDetection'] === true;
+      const { value: features } = await this.settings.readSystem<Record<string, unknown>>('features');
+      const featureOn = features?.['socialMediaDetection'] === true;
       const killed = process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false';
 
       if (!featureOn || killed) {
@@ -226,16 +256,17 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
           `social_media_detection job ${job.id}: feature disabled; marking not_processed`,
         );
         await this.upsertStatus(mediaItemId, {
-          status: MediaSocialStatusType.not_processed,
+          status: SOCIAL_STATUS.not_processed,
         });
         return;
       }
 
-      const minConfidence = settings.socialMedia?.minConfidence ?? 0.8;
+      const { value: socialMedia } = await this.settings.readSystem<SocialMediaSettings | undefined>('socialMedia');
+      const minConfidence = socialMedia?.minConfidence ?? 0.8;
 
       // --- 3. Status → processing ---
       await this.upsertStatus(mediaItemId, {
-        status: MediaSocialStatusType.processing,
+        status: SOCIAL_STATUS.processing,
       });
 
       // --- 4. Build VideoDetectionInput ---
@@ -254,8 +285,8 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
       // is checked first and unconditionally.
       const knownDurationMs = probe?.durationMs ?? mediaItem.durationMs ?? undefined;
       const sizeBytes = mediaItem.storageObject.size;
-      const maxDurationSeconds = settings.socialMedia?.maxDurationSeconds ?? 300;
-      const maxSizeBytes = settings.socialMedia?.maxSizeBytes ?? 500_000_000;
+      const maxDurationSeconds = socialMedia?.maxDurationSeconds ?? 300;
+      const maxSizeBytes = socialMedia?.maxSizeBytes ?? 500_000_000;
       const hardCapBytes = VIDEO_ENRICHMENT_MAX_BYTES();
 
       let skipRule: string | null = null;
@@ -276,7 +307,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
           `social_media_detection job ${job.id}: MediaItem ${mediaItemId} skipped as clean (${skipRule}) — ` +
             `duration=${knownDurationMs !== undefined ? `${knownDurationMs}ms` : 'unknown'}, size=${sizeBytes} bytes`,
         );
-        await this.mediaEnrichment.enqueueVideoPostDetectionEnrichment(
+        await this.postDetection.enqueueVideoPostDetectionEnrichment(
           {
             id: mediaItem.id,
             type: mediaItem.type,
@@ -306,7 +337,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
       // the same download.
       const downloadVideo = async (): Promise<string> => {
         if (downloadedVideoPath) return downloadedVideoPath;
-        const provider = await this.resolver.getProviderFor(
+        const provider = await this.objectStore.forLocation(
           mediaItem.storageObject!.storageProvider,
           mediaItem.storageObject!.bucket,
         );
@@ -371,7 +402,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
       }
 
       // --- 5-6. Compute half: Tier-1 detection + Tier-2 OCR fallback ---
-      const ocrEnabled = settings.socialMedia?.ocrEnabled !== false;
+      const ocrEnabled = socialMedia?.ocrEnabled !== false;
       const computed = await this.computeSocialMedia(input, {
         minConfidence,
         isLandscape,
@@ -379,9 +410,9 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
         downloadVideo,
         durationMs,
         fileExt,
-        ocrMaxFrames: settings.socialMedia?.ocrMaxFrames ?? 4,
-        ocrLanguages: settings.socialMedia?.ocrLanguages ?? ['eng'],
-        ocrTimeoutMs: (settings.socialMedia?.ocrTimeoutSeconds ?? 60) * 1000,
+        ocrMaxFrames: socialMedia?.ocrMaxFrames ?? 4,
+        ocrLanguages: socialMedia?.ocrLanguages ?? ['eng'],
+        ocrTimeoutMs: (socialMedia?.ocrTimeoutSeconds ?? 60) * 1000,
       });
 
       // --- 7. Persist half ---
@@ -402,7 +433,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
       const errMsg = err instanceof Error ? err.message : String(err);
       this.logger.error(`social_media_detection job ${job.id}: ${errMsg}`);
       await this.upsertStatus(mediaItemId, {
-        status: MediaSocialStatusType.failed,
+        status: SOCIAL_STATUS.failed,
         lastError: errMsg,
       }).catch(() => {});
       throw err;
@@ -514,7 +545,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     preloadedMediaItem?: {
       id: string;
       circleId: string;
-      type: MediaType;
+      type: string;
       deletedAt: Date | null;
       addedById: string;
       socialMediaSource: string | null;
@@ -560,7 +591,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
 
     // Fan out the downstream video enrichment that was withheld while
     // classification was pending.
-    await this.mediaEnrichment.enqueueVideoPostDetectionEnrichment(
+    await this.postDetection.enqueueVideoPostDetectionEnrichment(
       {
         id: mediaItem.id,
         type: mediaItem.type,
@@ -577,7 +608,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
    * type narrowing, mirroring DuplicateDetectionHandler's precedent). A media
    * item deleted since the job was claimed settles as a no-op.
    */
-  async persistNodeResult(job: Job, result: unknown): Promise<void> {
+  async persistNodeResult(job: MemoriahubJob, result: unknown): Promise<void> {
     const parsed = socialMediaDetectionResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
@@ -602,7 +633,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     const platformTag = PLATFORM_TAG[result.platform];
     if (platformTag) tagNames.push(platformTag);
 
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx: SocialMediaTx) => {
       for (const name of tagNames) {
         const tag = await tx.tag.upsert({
           where: { circleId_name: { circleId, name } },
@@ -612,14 +643,14 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
         // Create the join as a system tag; never downgrade an existing manual row.
         await tx.mediaTag.upsert({
           where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId } },
-          create: { tagId: tag.id, mediaItemId, source: MediaTagSource.system },
+          create: { tagId: tag.id, mediaItemId, source: SOCIAL_TAG_SOURCE.system },
           update: {},
         });
         // Promote an existing AI-applied row (but not manual) to system so the
         // system provenance wins for these labels.
         await tx.mediaTag.updateMany({
-          where: { tagId: tag.id, mediaItemId, source: MediaTagSource.ai },
-          data: { source: MediaTagSource.system },
+          where: { tagId: tag.id, mediaItemId, source: SOCIAL_TAG_SOURCE.ai },
+          data: { source: SOCIAL_TAG_SOURCE.system },
         });
       }
 
@@ -627,7 +658,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
         where: { mediaItemId },
         create: {
           mediaItemId,
-          status: MediaSocialStatusType.processed,
+          status: SOCIAL_STATUS.processed,
           isSocialMedia: true,
           platform: result.platform,
           detectionMethod: result.method,
@@ -637,7 +668,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
           lastError: null,
         },
         update: {
-          status: MediaSocialStatusType.processed,
+          status: SOCIAL_STATUS.processed,
           isSocialMedia: true,
           platform: result.platform,
           detectionMethod: result.method,
@@ -669,12 +700,12 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
     matchedRule: string | null = null,
     method: string | null = null,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx: SocialMediaTx) => {
       await tx.mediaSocialStatus.upsert({
         where: { mediaItemId },
         create: {
           mediaItemId,
-          status: MediaSocialStatusType.processed,
+          status: SOCIAL_STATUS.processed,
           isSocialMedia: false,
           platform: null,
           detectionMethod: null,
@@ -684,7 +715,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
           lastError: null,
         },
         update: {
-          status: MediaSocialStatusType.processed,
+          status: SOCIAL_STATUS.processed,
           isSocialMedia: false,
           platform: null,
           detectionMethod: null,
@@ -700,7 +731,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
         await tx.mediaTag.deleteMany({
           where: {
             mediaItemId,
-            source: MediaTagSource.system,
+            source: SOCIAL_TAG_SOURCE.system,
             tag: { name: { in: ALL_SOCIAL_TAG_NAMES } },
           },
         });
@@ -724,7 +755,7 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
   private async upsertStatus(
     mediaItemId: string,
     data: {
-      status: MediaSocialStatusType;
+      status: SocialStatus;
       lastError?: string | null;
     },
   ): Promise<void> {
@@ -752,6 +783,17 @@ export class SocialMediaDetectionHandler implements JobHandler, OnModuleInit {
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
+
+/** The `socialMedia` settings namespace as the handler reads it (every field optional; the defaults are the schema's). */
+interface SocialMediaSettings {
+  minConfidence?: number;
+  ocrEnabled?: boolean;
+  ocrMaxFrames?: number;
+  ocrLanguages?: string[];
+  ocrTimeoutSeconds?: number;
+  maxDurationSeconds?: number;
+  maxSizeBytes?: number;
+}
 
 interface PersistedProbe {
   formatTags?: Record<string, string>;

@@ -21,7 +21,7 @@ import type { MemoriahubEnqueueInput, MemoriahubJobsPort } from '@marinoscar/mem
 import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { registerSocialMediaUploadEnrichment } from '../../src/social-media/social-media-upload-enrichment';
+import { registerSocialMediaUploadEnrichment } from '@marinoscar/memoriahub-api/social-media';
 import { registerTaggingUploadEnrichment } from '@marinoscar/memoriahub-api/tagging';
 
 /** Builds the service with every slice's upload fan-out registered, over the given collaborators. */
@@ -62,7 +62,7 @@ export function buildMediaEnrichment(
   };
   registerTaggingUploadEnrichment(registry, taggingJobsPort as never, prisma as never);
   registerFaceUploadEnrichment(registry, jobs, prisma);
-  registerSocialMediaUploadEnrichment(registry, jobs, prisma, (item) =>
+  registerSocialMediaUploadEnrichment(registry, facadeAsJobsPort(jobs), prisma as never, (item) =>
     service.enqueueVideoPostDetectionEnrichment(item as never, JobReason.upload),
   );
   registerBurstUploadEnrichment(registry, facadeAsJobsPort(jobs));
