@@ -21,8 +21,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { BurstDetectionHandler } from '../../src/burst/burst-detection.handler';
-import { BurstDetectionService } from '../../src/burst/burst-detection.service';
+import { BurstDetectionHandler, BurstDetectionService } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -43,11 +42,10 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
   const objects: string[] = [];
 
   const registry = { register: jest.fn() };
-  const noDownload = {
-    getProviderFor: async () => {
-      throw new Error('no download expected: the hash is present');
-    },
+  const noDownloadError = () => {
+    throw new Error('no download expected: the hash is present');
   };
+  const noDownload = { getProviderFor: async () => noDownloadError(), forLocation: async () => noDownloadError() };
   /** CLIP in degraded mode: dHash-only matching, no embedding rows. */
   const degradedClip = {
     isAvailable: () => false,
@@ -68,7 +66,10 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
     userId = user.id;
 
     const settings = {
-      getSettings: async () => ({ dedup: { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 } }),
+      readSystem: async (name: string) => ({
+        value: name === 'dedup' ? { similarityThreshold: 0.96, hashMaxDistance: 6, knnCandidates: 20 } : undefined,
+        version: 1,
+      }),
     };
     const dedupService = new DuplicateDetectionService(
       prisma,
@@ -77,10 +78,9 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
       degradedClip as never,
     );
     const burstService = new BurstDetectionService(
-      prisma,
-      { enqueue: jest.fn() } as never,
-      {} as never,
+      prisma as never,
       noDownload as never,
+      settings as never,
       dedupService,
     );
     dedupHandler = new DuplicateDetectionHandler(registry as never, prisma, dedupService);

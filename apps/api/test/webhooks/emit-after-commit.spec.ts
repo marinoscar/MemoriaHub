@@ -7,8 +7,8 @@
 // makes it succeed and proves the event was raised with the committed ids.
 // =============================================================================
 
-import { BurstService } from '../../src/burst/burst.service';
-import { DuplicateService } from '../../src/dedup/duplicate.service';
+import { BurstService } from '@marinoscar/memoriahub-api/burst';
+import { DuplicateService } from '@marinoscar/memoriahub-api/dedup';
 import { MediaService } from '../../src/media/media.service';
 
 const GROUP = { id: 'group-1', circleId: 'circle-1' };
@@ -32,9 +32,9 @@ function prismaWithTransaction(outcome: 'commit' | 'rollback') {
 
 describe.each([
   ['burst', (prisma: unknown, events: unknown) =>
-    new BurstService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
+    new BurstService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
   ['duplicate', (prisma: unknown, events: unknown) =>
-    new DuplicateService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
+    new DuplicateService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
 ])('%s group resolution with action trash', (kind, build) => {
   const resolve = (service: unknown) =>
     kind === 'burst'

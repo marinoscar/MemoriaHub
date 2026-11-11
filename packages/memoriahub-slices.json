@@ -124,7 +124,8 @@
       "ports",
       "core",
       "testing",
-      "media"
+      "media",
+      "review-runs"
     ],
     "tagging": [
       "ports",
@@ -158,6 +159,14 @@
       "media",
       "face",
       "location"
+    ],
+    "burst": [
+      "ports",
+      "core",
+      "testing",
+      "media",
+      "dedup",
+      "review-runs"
     ]
   },
   "memoriahub-web": {
