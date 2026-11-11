@@ -11,8 +11,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { PersonAvatar } from '../../../components/people/PersonAvatar';
-import type { PersonAvatarPerson } from '../../../components/people/PersonAvatar';
+import { PersonAvatar } from '../../src/people/ui/components/PersonAvatar.js';
+import type { PersonAvatarPerson } from '../../src/people/ui/components/PersonAvatar.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must appear before any import that transitively loads them
@@ -20,7 +20,7 @@ import type { PersonAvatarPerson } from '../../../components/people/PersonAvatar
 
 vi.mock('react-easy-crop', () => ({ default: () => null }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
 
@@ -30,7 +30,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 // Imports that depend on mocks
 // ---------------------------------------------------------------------------
 
-import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { getMedia } from '../../src/media/headless/index.js';
 
 const mockGetMedia = vi.mocked(getMedia);
 

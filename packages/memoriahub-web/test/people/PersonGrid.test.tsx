@@ -6,19 +6,19 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PersonGrid } from '../../../components/people/PersonGrid';
-import type { PersonListItem } from '../../../services/face';
+import { PersonGrid } from '../../src/people/ui/components/PersonGrid.js';
+import type { PersonListItem } from '../../src/people/headless/services/people.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
 // Stub PersonAvatar so PersonGrid tests don't depend on async getMedia calls
-vi.mock('../../../components/people/PersonAvatar', () => ({
+vi.mock('../../src/people/ui/components/PersonAvatar.js', () => ({
   PersonAvatar: () => <div data-testid="person-avatar" />,
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
   getMedia: vi.fn().mockResolvedValue({
@@ -29,7 +29,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-vi.mock('../../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listPeople: vi.fn(),
   getPerson: vi.fn(),
   createPerson: vi.fn(),

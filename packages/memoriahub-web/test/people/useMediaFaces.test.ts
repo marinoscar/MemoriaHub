@@ -7,13 +7,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useMediaFaces } from '../../hooks/useMediaFaces';
+import { useMediaFaces } from '../../src/people/headless/hooks/useMediaFaces.js';
 
 // ---------------------------------------------------------------------------
 // Mock the face service module
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   getMediaFaces: vi.fn(),
   getMediaFaceStatus: vi.fn(),
   rerunMediaFaces: vi.fn(),
@@ -23,8 +23,8 @@ import {
   getMediaFaces,
   getMediaFaceStatus,
   rerunMediaFaces,
-} from '../../services/face';
-import type { DetectedFaceDto, MediaFaceStatusDto } from '../../services/face';
+} from '../../src/people/headless/services/people.js';
+import type { DetectedFaceDto, MediaFaceStatusDto } from '../../src/people/headless/services/people.js';
 
 const mockGetMediaFaces = vi.mocked(getMediaFaces);
 const mockGetMediaFaceStatus = vi.mocked(getMediaFaceStatus);

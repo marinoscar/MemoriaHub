@@ -15,17 +15,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must appear before consuming imports
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useUnassignedFaces', () => ({
+vi.mock('../../src/people/headless/hooks/useUnassignedFaces.js', () => ({
   useUnassignedFaces: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn().mockResolvedValue({
     id: 'media-1',
@@ -48,9 +48,9 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import ArchivedFacesPage from '../../pages/People/ArchivedFacesPage';
-import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
-import type { UnassignedFaceDto } from '../../services/face';
+import ArchivedFacesPage from '../../src/people/ui/pages/ArchivedFacesPage.js';
+import { useUnassignedFaces } from '../../src/people/headless/hooks/useUnassignedFaces.js';
+import type { UnassignedFaceDto } from '../../src/people/headless/services/people.js';
 
 const mockUseUnassignedFaces = vi.mocked(useUnassignedFaces);
 

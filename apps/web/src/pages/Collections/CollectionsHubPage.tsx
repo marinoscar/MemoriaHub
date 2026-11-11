@@ -47,7 +47,7 @@ import {
   collectionCount,
   formatCollectionCount,
 } from '../../components/collections/CollectionsList';
-import { PersonAvatar } from '../../components/people/PersonAvatar';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
 import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
 import type { CollectionCount, CollectionSummary } from '../../hooks/useCollectionSummaries';
 import { useScrollRestoration } from '../../hooks/useScrollRestoration';

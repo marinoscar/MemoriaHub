@@ -17,9 +17,9 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useNavigate } from 'react-router-dom';
-import { PersonGrid } from '../people/PersonGrid';
-import { listPeople } from '../../services/face';
-import type { PersonListItem } from '../../services/face';
+import { PersonGrid } from '@marinoscar/memoriahub-web/people/ui';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 
 interface AlbumPeopleDialogProps {
   open: boolean;

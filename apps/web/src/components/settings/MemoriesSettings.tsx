@@ -61,9 +61,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
-import { usePeople } from '../../hooks/usePeople';
-import { PersonAvatar } from '../people/PersonAvatar';
-import type { PersonListItem } from '../../services/face';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 import type { UserSettings, UserSettingsUpdate } from '../../types';
 import type { MemoryHiddenDateRange } from '@marinoscar/memoriahub-web/memories/headless';
 import {

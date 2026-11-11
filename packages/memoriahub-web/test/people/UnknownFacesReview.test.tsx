@@ -4,20 +4,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { UnknownFacesReview } from '../../../components/people/UnknownFacesReview';
-import type { PersonListItem, ClusterResult } from '../../../services/face';
+import { UnknownFacesReview } from '../../src/people/ui/components/UnknownFacesReview.js';
+import type { PersonListItem, ClusterResult } from '../../src/people/headless/services/people.js';
 
 // ---------------------------------------------------------------------------
 // Mock PersonGrid's dependency on services/media
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
 
 }));
 
-vi.mock('../../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listPeople: vi.fn(),
   getPerson: vi.fn(),
   createPerson: vi.fn(),

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { MergePeopleDialog } from '../../../components/people/MergePeopleDialog';
-import type { PersonListItem } from '../../../services/face';
+import { render } from '../utils/test-utils.js';
+import { MergePeopleDialog } from '../../src/people/ui/components/MergePeopleDialog.js';
+import type { PersonListItem } from '../../src/people/headless/services/people.js';
 
 function makePerson(id: string, name: string | null = 'Alice', faceCount = 2): PersonListItem {
   return {

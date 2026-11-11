@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { FaceCrop } from '../../../components/people/FaceCrop';
+import { FaceCrop } from '../../src/people/ui/components/FaceCrop.js';
 
 const TEST_URL = 'https://example.com/photo.jpg';
 

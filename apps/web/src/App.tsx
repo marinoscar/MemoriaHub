@@ -157,8 +157,8 @@ const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettings
 const SearchPage = lazy(() =>
   import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
 );
-const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
-const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
+const PeoplePage = lazy(() => import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.PeoplePage })));
+const ArchivedFacesPage = lazy(() => import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.ArchivedFacesPage })));
 const AlbumsPage = lazyMediaPage('AlbumsPage');
 const AlbumPage = lazyMediaPage('AlbumPage');
 const TagsBrowsePage = lazy(() =>

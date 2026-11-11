@@ -1,7 +1,7 @@
 /**
  * Tests for CollectionsHubPage (issue #391, spec §3.1 / §4.6 / §6.1).
  *
- * Mocks the SERVICE layer (services/media, services/face, services/memories)
+ * Mocks the SERVICE layer (services/media, people/headless, services/memories)
  * rather than `useCollectionSummaries`, mirroring `CollectionsList.test.tsx` /
  * `ReviewHubPage.test.tsx` — this page renders the real hook, so each case
  * can drive genuine async resolution timing (the whole point of the
@@ -13,7 +13,7 @@ import { Routes, Route } from 'react-router-dom';
 import { render } from '../utils/test-utils';
 import CollectionsHubPage from '../../pages/Collections/CollectionsHubPage';
 import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListResponse } from '../../services/face';
+import type { PersonListResponse } from '@marinoscar/memoriahub-web/people/headless';
 import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
 
@@ -22,8 +22,8 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
-vi.mock('../../services/face', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/face')>()),
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
   listPeople: vi.fn(),
 }));
 vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
@@ -43,7 +43,7 @@ vi.mock('../../hooks/useScrollRestoration', () => ({
 }));
 
 import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '../../services/face';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
 import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 
 const mockListAlbums = vi.mocked(listAlbums);

@@ -26,8 +26,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getExploreLocations, listAlbums } from '@marinoscar/memoriahub-web/media/headless';
 import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '../services/face';
-import type { PersonListItem } from '../services/face';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { COLLECTIONS } from '../config/collections';
 import type { CollectionDef, CollectionFlag, CollectionSource } from '../config/collections';

@@ -9,7 +9,7 @@
  */
 
 import { Tooltip, Box } from '@mui/material';
-import type { DetectedFaceDto } from '../../services/face';
+import type { DetectedFaceDto } from '@marinoscar/memoriahub-web/people/headless';
 
 // ---------------------------------------------------------------------------
 // Helpers

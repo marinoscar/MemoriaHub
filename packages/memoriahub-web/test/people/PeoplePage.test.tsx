@@ -14,18 +14,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be BEFORE imports that consume them
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePeople', () => ({
+vi.mock('../../src/people/headless/hooks/usePeople.js', () => ({
   usePeople: vi.fn(),
   usePerson: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn().mockResolvedValue({ items: [], meta: {} }),
   // Used by UnassignedFacesSection's FaceThumbGrid to resolve fallback
@@ -38,7 +38,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listPeople: vi.fn(),
   getPerson: vi.fn(),
   createPerson: vi.fn(),
@@ -80,9 +80,9 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import PeoplePage from '../../pages/People/PeoplePage';
-import { usePeople, usePerson } from '../../hooks/usePeople';
-import * as faceService from '../../services/face';
+import PeoplePage from '../../src/people/ui/pages/PeoplePage.js';
+import { usePeople, usePerson } from '../../src/people/headless/hooks/usePeople.js';
+import * as faceService from '../../src/people/headless/services/people.js';
 
 const mockUsePeople = vi.mocked(usePeople);
 const mockUsePerson = vi.mocked(usePerson);
@@ -94,7 +94,7 @@ const mockBulkHideFaces = vi.mocked(faceService.bulkHideFaces);
 // Default mock return values
 // ---------------------------------------------------------------------------
 
-import type { PersonListItem, PersonDetail, UnassignedFaceDto } from '../../services/face';
+import type { PersonListItem, PersonDetail, UnassignedFaceDto } from '../../src/people/headless/services/people.js';
 
 function makeUnassignedFace(overrides: Partial<UnassignedFaceDto> = {}): UnassignedFaceDto {
   return {

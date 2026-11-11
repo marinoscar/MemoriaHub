@@ -10,7 +10,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // Mock the face service module
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listPeople: vi.fn(),
   getPerson: vi.fn(),
   createPerson: vi.fn(),
@@ -34,9 +34,9 @@ import {
   bulkHidePeople,
   bulkUnhidePeople,
   purgePeople,
-} from '../../services/face';
-import type { PersonListResponse, PersonDetail, ClusterResult } from '../../services/face';
-import { usePeople, usePerson } from '../../hooks/usePeople';
+} from '../../src/people/headless/services/people.js';
+import type { PersonListResponse, PersonDetail, ClusterResult } from '../../src/people/headless/services/people.js';
+import { usePeople, usePerson } from '../../src/people/headless/hooks/usePeople.js';
 
 const mockListPeople = vi.mocked(listPeople);
 const mockGetPerson = vi.mocked(getPerson);

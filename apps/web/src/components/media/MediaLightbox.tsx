@@ -51,7 +51,7 @@ import {
   bulkUnarchive,
   bulkDelete,
 } from '@marinoscar/memoriahub-web/media/headless';
-import { rerunMediaFaces } from '../../services/face';
+import { rerunMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
 import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
 import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
 import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';

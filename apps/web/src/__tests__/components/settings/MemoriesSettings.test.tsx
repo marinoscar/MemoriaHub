@@ -21,25 +21,14 @@ vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) =
   useMemoriesEnabled: vi.fn(),
 }));
 
-vi.mock('../../../services/face', () => ({
-  listPeople: vi.fn(),
-  getPerson: vi.fn(),
-  createPerson: vi.fn(),
-  updatePerson: vi.fn(),
-  assignFaces: vi.fn(),
-  unassignFace: vi.fn(),
-  clusterUnknownFaces: vi.fn(),
-  bulkHidePeople: vi.fn(),
-  bulkUnhidePeople: vi.fn(),
-  purgePeople: vi.fn(),
-}));
-
 import { MemoriesSettings } from '../../../components/settings/MemoriesSettings';
 import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
-import { listPeople } from '../../../services/face';
+import { http, HttpResponse } from 'msw';
+import { server } from '../../mocks/server';
 
 const mockFlags = vi.mocked(useMemoriesEnabled);
-const mockListPeople = vi.mocked(listPeople);
+// The packaged people hook lists through the host's API client, so the list is answered at the network layer.
+const listPeopleRequests = vi.fn();
 
 function setFlags(memories: boolean | null, isLoading = false) {
   mockFlags.mockReturnValue(isLoading || memories === null ? null : memories);
@@ -69,7 +58,10 @@ function renderSection(
 beforeEach(() => {
   vi.clearAllMocks();
   setFlags(true);
-  mockListPeople.mockResolvedValue({
+  server.use(
+    http.get('*/api/people', () => {
+      listPeopleRequests();
+      return HttpResponse.json({
     items: [
       {
         id: '11111111-1111-4111-8111-111111111111',
@@ -83,7 +75,9 @@ beforeEach(() => {
       },
     ],
     meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
-  });
+      });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -95,7 +89,7 @@ describe('MemoriesSettings — feature gating', () => {
 
     expect(screen.queryByText('Memories')).not.toBeInTheDocument();
     // Not merely unrendered — the request must never be made.
-    await waitFor(() => expect(mockListPeople).not.toHaveBeenCalled());
+    await waitFor(() => expect(listPeopleRequests).not.toHaveBeenCalled());
   });
 
   it('stays hidden while the flags are still resolving', () => {

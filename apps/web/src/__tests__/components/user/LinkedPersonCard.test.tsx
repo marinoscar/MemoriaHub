@@ -19,12 +19,13 @@ vi.mock('../../../hooks/useFeatureFlags', () => ({
   useFeatureFlags: vi.fn(),
 }));
 
-vi.mock('../../../services/face', () => ({
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
   listPeople: vi.fn(),
 }));
 
 import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
-import { listPeople } from '../../../services/face';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockListPeople = vi.mocked(listPeople);

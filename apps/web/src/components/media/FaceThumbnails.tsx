@@ -16,15 +16,14 @@ import FaceIcon from '@mui/icons-material/Face';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import { useMediaFaces } from '../../hooks/useMediaFaces';
-import type { MediaFaceStatusType, DetectedFaceDto } from '../../services/face';
 import {
+  useMediaFaces,
   listPeople,
   addPersonToMedia,
   removePersonFromMedia,
-} from '../../services/face';
-import type { PersonListItem } from '../../services/face';
-import { PersonAvatar } from '../people/PersonAvatar';
+} from '@marinoscar/memoriahub-web/people/headless';
+import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
 import { AssignFaceDialog } from './AssignFaceDialog';
 
 function statusChipProps(status: MediaFaceStatusType): {

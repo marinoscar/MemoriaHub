@@ -6,21 +6,21 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { PersonCard } from '../../../components/people/PersonCard';
-import type { PersonListItem } from '../../../services/face';
+import { PersonCard } from '../../src/people/ui/components/PersonCard.js';
+import type { PersonListItem } from '../../src/people/headless/services/people.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
 // Stub out PersonAvatar so PersonCard tests don't depend on async media fetching
-vi.mock('../../../components/people/PersonAvatar', () => ({
+vi.mock('../../src/people/ui/components/PersonAvatar.js', () => ({
   PersonAvatar: () => <div data-testid="person-avatar" />,
 }));
 
 // PersonCard doesn't call getMedia directly any more, but mock it just in case
 // a transitive import resolves it.
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn().mockResolvedValue({
     id: 'media-1',

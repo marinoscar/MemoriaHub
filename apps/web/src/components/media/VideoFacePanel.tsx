@@ -32,15 +32,14 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PersonIcon from '@mui/icons-material/Person';
 import EditIcon from '@mui/icons-material/Edit';
-import { useMediaFaces } from '../../hooks/useMediaFaces';
-import type { MediaFaceStatusType, DetectedFaceDto } from '../../services/face';
 import {
+  useMediaFaces,
   listPeople,
   addPersonToMedia,
   removePersonFromMedia,
-} from '../../services/face';
-import type { PersonListItem } from '../../services/face';
-import { PersonAvatar } from '../people/PersonAvatar';
+} from '@marinoscar/memoriahub-web/people/headless';
+import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
 import { AssignFaceDialog } from './AssignFaceDialog';
 
 // ---------------------------------------------------------------------------

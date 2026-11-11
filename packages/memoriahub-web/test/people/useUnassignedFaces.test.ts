@@ -18,7 +18,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // Mock the face service module
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listUnassignedFaces: vi.fn(),
   bulkHideFaces: vi.fn(),
   bulkUnhideFaces: vi.fn(),
@@ -32,9 +32,9 @@ import {
   bulkUnhideFaces,
   purgeFaces,
   purgeArchivedFaces,
-} from '../../services/face';
-import type { UnassignedFacesResponse, UnassignedFaceDto } from '../../services/face';
-import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
+} from '../../src/people/headless/services/people.js';
+import type { UnassignedFacesResponse, UnassignedFaceDto } from '../../src/people/headless/services/people.js';
+import { useUnassignedFaces } from '../../src/people/headless/hooks/useUnassignedFaces.js';
 
 const mockListUnassignedFaces = vi.mocked(listUnassignedFaces);
 const mockBulkHideFaces = vi.mocked(bulkHideFaces);

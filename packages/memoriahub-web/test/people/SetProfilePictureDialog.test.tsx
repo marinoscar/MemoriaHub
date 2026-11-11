@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be BEFORE imports that consume them
@@ -19,23 +19,23 @@ import { render } from '../utils/test-utils';
 
 vi.mock('react-easy-crop', () => ({ default: () => <div data-testid="mock-cropper" /> }));
 
-vi.mock('../../hooks/usePeople', () => ({
+vi.mock('../../src/people/headless/hooks/usePeople.js', () => ({
   usePeople: vi.fn(),
   usePerson: vi.fn(),
 }));
 
-vi.mock('../../hooks/useUnassignedFaces', () => ({
+vi.mock('../../src/people/headless/hooks/useUnassignedFaces.js', () => ({
   useUnassignedFaces: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn(),
   getMedia: vi.fn(),
 
 }));
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/people/headless/services/people.js', () => ({
   listPeople: vi.fn(),
   getPerson: vi.fn(),
   createPerson: vi.fn(),
@@ -63,12 +63,12 @@ vi.mock('react-router-dom', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import PeoplePage from '../../pages/People/PeoplePage';
-import { usePeople, usePerson } from '../../hooks/usePeople';
-import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
-import * as mediaService from '@marinoscar/memoriahub-web/media/headless';
-import * as faceService from '../../services/face';
-import type { PersonListItem, PersonDetail } from '../../services/face';
+import PeoplePage from '../../src/people/ui/pages/PeoplePage.js';
+import { usePeople, usePerson } from '../../src/people/headless/hooks/usePeople.js';
+import { useUnassignedFaces } from '../../src/people/headless/hooks/useUnassignedFaces.js';
+import * as mediaService from '../../src/media/headless/index.js';
+import * as faceService from '../../src/people/headless/services/people.js';
+import type { PersonListItem, PersonDetail } from '../../src/people/headless/services/people.js';
 
 const mockUsePeople = vi.mocked(usePeople);
 const mockUsePerson = vi.mocked(usePerson);

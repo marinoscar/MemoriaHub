@@ -62,7 +62,7 @@ import { TagAutocomplete } from '@marinoscar/memoriahub-web/media/ui';
 import { FaceThumbnails } from './FaceThumbnails';
 import { VideoFacePanel } from './VideoFacePanel';
 import { FaceMarkerStrip } from './FaceMarkerStrip';
-import { useMediaFaces } from '../../hooks/useMediaFaces';
+import { useMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
 import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
 import type { MediaTagStatusType } from '@marinoscar/memoriahub-web/tagging/headless';
 import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';

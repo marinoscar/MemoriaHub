@@ -18,9 +18,9 @@ import { Link as RouterLink } from 'react-router-dom';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { usePermissions } from '../../hooks/usePermissions';
-import { PersonAvatar } from '../people/PersonAvatar';
-import { listPeople } from '../../services/face';
-import type { PersonListItem } from '../../services/face';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 import type { UserProfile } from '../../services/userProfile';
 
 /**

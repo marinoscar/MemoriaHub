@@ -19,22 +19,19 @@ import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { VideoFacePanel } from '../../../components/media/VideoFacePanel';
-import type { DetectedFaceDto, MediaFaceStatusDto } from '../../../services/face';
+import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub-web/people/headless';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useMediaFaces', () => ({
-  useMediaFaces: vi.fn(),
-}));
-
 // Mock face service — listPeople, addPersonToMedia, removePersonFromMedia,
 // assignFaces, unassignFace, createPerson, purgeFaces (AssignFaceDialog deps)
-vi.mock('../../../services/face', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../services/face')>();
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>();
   return {
     ...original,
+    useMediaFaces: vi.fn(),
     listPeople: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     addPersonToMedia: vi.fn().mockResolvedValue({ personId: 'p1', personName: 'Alice', faceId: 'f1', mediaItemId: 'm1' }),
     removePersonFromMedia: vi.fn().mockResolvedValue(undefined),
@@ -45,13 +42,13 @@ vi.mock('../../../services/face', async (importOriginal) => {
   };
 });
 
-import { useMediaFaces } from '../../../hooks/useMediaFaces';
 import {
+  useMediaFaces,
   listPeople,
   assignFaces,
   unassignFace,
   purgeFaces,
-} from '../../../services/face';
+} from '@marinoscar/memoriahub-web/people/headless';
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
 const mockListPeople = vi.mocked(listPeople);
 const mockAssignFaces = vi.mocked(assignFaces);
