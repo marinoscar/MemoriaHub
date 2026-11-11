@@ -103,7 +103,15 @@
       "types": "./dist/workflows/testing/index.d.ts",
       "default": "./dist/workflows/testing/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./memories": {
+      "types": "./dist/memories/index.d.ts",
+      "default": "./dist/memories/index.js"
+    },
+    "./memories/testing": {
+      "types": "./dist/memories/testing/index.d.ts",
+      "default": "./dist/memories/testing/index.js"
+    }
   },
   "files": [
     "dist",
@@ -117,6 +125,7 @@
     "insights",
     "location",
     "dedup",
+    "memories",
     "review-runs",
     "workflows",
     "README.md",

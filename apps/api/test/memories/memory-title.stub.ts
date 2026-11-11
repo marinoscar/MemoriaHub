@@ -13,12 +13,12 @@
 // discover it as a mysterious extra query.
 // =============================================================================
 
-import { MemoryTitleService } from '../../src/memories/titles/memory-title.service';
+import { MemoryTitleService } from '@marinoscar/memoriahub-api/memories';
 import {
   MemoryAiTitle,
   MemoryTitleRequest,
   MemoryTitleRun,
-} from '../../src/memories/titles/memory-title.types';
+} from '@marinoscar/memoriahub-api/memories';
 
 /** A `MemoryTitleService` that throws if anything actually calls it. */
 export function neverCalledTitleService(): MemoryTitleService {

@@ -27,14 +27,14 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { MemoryCurationService } from '@marinoscar/memoriahub-api/memories';
 import { neverCalledTitleService } from './memory-title.stub';
 import {
   ON_THIS_DAY_RETENTION_DAYS,
   OnThisDayCurator,
-} from '../../src/memories/curators/on-this-day.curator';
-import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
-import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
+} from '@marinoscar/memoriahub-api/memories';
+import { MemoryCuratorContext } from '@marinoscar/memoriahub-api/memories';
+import { resolveMemoriesSettings } from '@marinoscar/memoriahub-api/memories';
 import { defaultOrgId } from '../helpers/default-org';
 
 function resolveDatabaseUrl(): string {

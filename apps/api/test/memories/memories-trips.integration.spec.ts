@@ -26,11 +26,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
+import { MemoryCurationService } from '@marinoscar/memoriahub-api/memories';
 import { neverCalledTitleService } from './memory-title.stub';
-import { TripCurator } from '../../src/memories/curators/trip.curator';
-import { MemoryCuratorContext } from '../../src/memories/curators/memory-curator.interface';
-import { resolveMemoriesSettings } from '../../src/memories/memories-settings.util';
+import { TripCurator } from '@marinoscar/memoriahub-api/memories';
+import { MemoryCuratorContext } from '@marinoscar/memoriahub-api/memories';
+import { resolveMemoriesSettings } from '@marinoscar/memoriahub-api/memories';
 import { MemoriesSettingsValue } from '../../src/settings/registry/namespaces/system/memories';
 import { defaultOrgId } from '../helpers/default-org';
 

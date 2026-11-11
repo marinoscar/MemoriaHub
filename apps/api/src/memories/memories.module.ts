@@ -1,115 +1,55 @@
 // =============================================================================
-// Memories Module (epic #300, issue #302)
+// Memories Module: the web app's binding of the memories slice (epic #300; RETRO-J8, #619)
 // =============================================================================
 //
-// Owns the Memories generation plumbing: the hourly per-circle scheduling cron,
-// the `memory_generation` enrichment handler, the shared curation engine and the
-// curator registry. Later issues in the epic add more curators (#304–#305), AI
-// titles (#306) and the email digest (#311) here. Issue #307 added the read/act
-// HTTP surface (MemoriesController + MemoriesService) under `api/`.
+// The slice (curation, the seven curators, AI titles, the digest, the `memories_ready` producer, the
+// generation and digest jobs, the read API) lives in `@marinoscar/memoriahub-api/memories`. This module
+// supplies what is the web app's own and mounts the slice's controllers (not registered by
+// `forRoot()`, which would change the OpenAPI path order):
 //
-// Minimal-template module (mirrors InsightsModule): PrismaModule for DB access,
-// SettingsModule for the cached feature-flag/settings reads, EnrichmentModule
-// for the job service and the handler registry.
+//   * MEMORIES_ALBUMS           save-as-album over `MediaService` (platform-memoriahub/memories/)
+//   * MEMORIES_EMAIL_READINESS  the platform email settings (the digest cron's gate)
+//   * MEMORIES_GENERATION_HOOK  `MemoriaHubWebhooks.memoriesCreated` (the `memories.memory.created` event)
+//   * digest.signingKey         `deriveSubKey(purpose)`: derived from `SECRETS_ENCRYPTION_KEY`, so a
+//                               token minted before the move still verifies (the key never enters the package)
 //
-// THE CURATOR REGISTRY is provided as an injected array under the
-// MEMORY_CURATORS token (see curators/memory-curators.provider.ts) rather than
-// hard-coded in the handler, so a new curator is a provider + one entry in that
-// factory and nothing else changes.
+// The edges are one-way: MediaModule (the album code) and the email module import nothing of Memories.
 // =============================================================================
 
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { AiPortModule } from '../ai-port/ai-port.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
+import {
+  AdminMemoriesController,
+  MEMORIES_ALBUMS,
+  MEMORIES_EMAIL_READINESS,
+  MEMORIES_GENERATION_HOOK,
+  MemoriesController,
+  MemoriesModule as MemoriesSliceModule,
+  PublicMemoryDigestController,
+} from '@marinoscar/memoriahub-api/memories';
+import { MediaModule as MediaCoreModule } from '@marinoscar/memoriahub-api/media';
+
+import { deriveSubKey } from '../legacy/legacy-secret-cipher';
 import { MediaModule } from '../media/media.module';
 import { emailModule } from '../platform/email/email.config';
-import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { MemoriesNotificationService } from './notifications/memories-notification.service';
-import { MemoryDigestService } from './digest/memory-digest.service';
-import { MemoryDigestHandler } from './digest/memory-digest.handler';
-import { MemoryDigestTask } from './digest/memory-digest.task';
-import { PublicMemoryDigestController } from './digest/public-memory-digest.controller';
-import { AdminMemoriesController } from './admin/admin-memories.controller';
-import { MemoryBackfillService } from './admin/memory-backfill.service';
-import { MemoriesController } from './api/memories.controller';
-import { MemoriesService } from './api/memories.service';
-import { MemoryTitleService } from './titles/memory-title.service';
-import { MemoriesGenerationTask } from './memories-generation.task';
-import { MemoryGenerationHandler } from './memory-generation.handler';
-import { MemoryCurationService } from './curation/memory-curation.service';
-import { OnThisDayCurator } from './curators/on-this-day.curator';
-import { TripCurator } from './curators/trip.curator';
-import { PersonHighlightsCurator } from './curators/person-highlights.curator';
-import { PersonOverYearsCurator } from './curators/person-over-years.curator';
-import { ThemeCurator } from './curators/theme.curator';
-import { SeasonalCurator } from './curators/seasonal.curator';
-import { YearInReviewCurator } from './curators/year-in-review.curator';
-import { memoryCuratorsProvider } from './curators/memory-curators.provider';
+import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
+import { MemoriesAlbumsAdapter } from '../platform-memoriahub/memories/memories-albums.adapter';
+import { PlatformMemoriesEmailReadiness } from '../platform-memoriahub/memories/memories-email-readiness';
+
+const memoriesSlice = MemoriesSliceModule.forRoot({
+  digest: { signingKey: (purpose) => deriveSubKey(purpose) },
+  imports: [MediaModule, emailModule],
+  providers: [
+    MemoriesAlbumsAdapter,
+    PlatformMemoriesEmailReadiness,
+    { provide: MEMORIES_ALBUMS, useExisting: MemoriesAlbumsAdapter },
+    { provide: MEMORIES_EMAIL_READINESS, useExisting: PlatformMemoriesEmailReadiness },
+    { provide: MEMORIES_GENERATION_HOOK, useExisting: MemoriaHubWebhooks },
+  ],
+});
 
 @Module({
-  // AiPortModule supplies the platform AiService to MemoryTitleService (#306; a system call, the
-  // `memory_titles` feature routed by `ai.features.memories`). The edge points one way only —
-  // AiPortModule imports no feature module — so there is no cycle to break.
-  //
-  // #307's API layer adds two edges: OwnerAccessModule (OwnerAccessService,
-  // the per-circle role checks) and MediaModule (MediaThumbnailService for
-  // batched signing, MediaService for the album path save-as-album reuses
-  // rather than duplicating). Both point one way — neither imports
-  // MemoriesModule — so there is no cycle and no forwardRef.
-  //
-  // MemoriesNotificationService and the digest send through the platform
-  // NotificationsService (RETRO-D3), whose module is global: no import edge.
-  // The digest reads the email settings through `emailModule` (one edge, the
-  // ONE email module object) and adds MediaProcessingModule (StorageProviderResolver, so the public digest-image
-  // route can stream thumbnail bytes the way PublicShareController does).
-  // Neither imports MemoriesModule, so no cycle and no forwardRef. The
-  // unsubscribe write reuses SettingsModule's UserSettingsService, already
-  // imported above.
-  imports: [
-    PrismaModule,
-    
-    EnrichmentModule,
-    AiPortModule,
-    OwnerAccessModule,
-    MediaModule,
-    emailModule,
-    MediaProcessingModule,
-  ],
-  // #315's AdminMemoriesController is mounted here rather than in a separate
-  // admin module: it needs MemoryBackfillService and MEMORY_GENERATION_JOB_TYPE,
-  // both of which live in this module, and every other feature's admin backfill
-  // controller (AdminBurstController, AdminLocationInferenceController) sits in
-  // its own feature module for the same reason.
+  imports: [memoriesSlice, MediaCoreModule.forRoot()],
   controllers: [MemoriesController, AdminMemoriesController, PublicMemoryDigestController],
-  providers: [
-    MemoriesService,
-    MemoryBackfillService,
-    MemoriesNotificationService,
-    MemoryDigestService,
-    MemoryDigestHandler,
-    MemoryDigestTask,
-    MemoriesGenerationTask,
-    MemoryGenerationHandler,
-    MemoryCurationService,
-    MemoryTitleService,
-    OnThisDayCurator,
-    TripCurator,
-    PersonHighlightsCurator,
-    PersonOverYearsCurator,
-    ThemeCurator,
-    SeasonalCurator,
-    YearInReviewCurator,
-    memoryCuratorsProvider,
-  ],
-  exports: [
-    MemoriesGenerationTask,
-    MemoryBackfillService,
-    MemoryCurationService,
-    MemoriesService,
-    MemoryDigestTask,
-    MemoryDigestService,
-  ],
+  exports: [memoriesSlice],
 })
 export class MemoriesModule {}

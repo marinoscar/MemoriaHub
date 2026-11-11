@@ -33,9 +33,16 @@ import {
   setupMockUserSettings,
 } from '../fixtures/mock-setup.helper';
 import {
-  signDigestImageToken,
-  signDigestUnsubscribeToken,
-} from '../../src/memories/digest/digest-token.util';
+  signDigestImageToken as signImage,
+  signDigestUnsubscribeToken as signUnsubscribe,
+} from '@marinoscar/memoriahub-api/memories';
+import { deriveSubKey } from '../../src/legacy/legacy-secret-cipher';
+
+// The host derives the signing keys from `SECRETS_ENCRYPTION_KEY` (the same derivation the slice is
+// given in `MemoriesModule`), so a token minted before the move still verifies.
+const keyOf = (purpose: string) => deriveSubKey(purpose);
+const signDigestImageToken = (mediaItemId: string, ttlDays: number) => signImage(keyOf, mediaItemId, ttlDays);
+const signDigestUnsubscribeToken = (userId: string, ttlDays?: number) => signUnsubscribe(keyOf, userId, ttlDays);
 
 const MEDIA_ID = '7e310000-0000-4000-8000-000000000001';
 const USER_ID = '7e310000-0000-4000-8000-000000000002';
@@ -131,7 +138,7 @@ describe('Memory digest public routes (integration)', () => {
     });
 
     it('accepts an RFC 8058 one-click POST — form-urlencoded body, no session', async () => {
-      context.prismaMock.user.findUnique.mockResolvedValue({ id: USER_ID });
+      context.prismaMock.user.findMany.mockResolvedValue([{ id: USER_ID, email: 'user@example.test', displayName: 'User A', providerDisplayName: null }]);
 
       const response = await request(context.app.getHttpServer())
         .post(`${UNSUB_BASE}/${signDigestUnsubscribeToken(USER_ID)}`)
@@ -161,7 +168,7 @@ describe('Memory digest public routes (integration)', () => {
     });
 
     it('POST 404s for a user who no longer exists', async () => {
-      context.prismaMock.user.findUnique.mockResolvedValue(null);
+      context.prismaMock.user.findMany.mockResolvedValue([]);
 
       await request(context.app.getHttpServer())
         .post(`${UNSUB_BASE}/${signDigestUnsubscribeToken(USER_ID)}`)
