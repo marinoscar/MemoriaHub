@@ -2,7 +2,12 @@ import { Box } from '@mui/material';
 import type { SxProps } from '@mui/material';
 import type { BoundingBox } from '../../headless/services/people.js';
 
-interface FaceCropProps {
+/**
+ * Props of {@link FaceCrop}.
+ *
+ * @stability experimental
+ */
+export interface FaceCropProps {
   imageUrl: string;
   boundingBox: BoundingBox;  // normalized 0–1 values: x, y, w, h
   size?: number;             // px size of the square crop (default 80)
@@ -25,6 +30,8 @@ interface FaceCropProps {
  *     top    = -(y/h)*100 %  (offset so bb top edge aligns with container top)
  *
  * This is mathematically equivalent to the former CSS background-position approach.
+ *
+ * @stability experimental
  */
 export function FaceCrop({ imageUrl, boundingBox, size = 80, sx }: FaceCropProps) {
   const { x, y, w, h } = boundingBox;

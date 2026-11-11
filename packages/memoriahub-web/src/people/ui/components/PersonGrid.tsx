@@ -2,19 +2,37 @@ import { Grid, Typography, Box, CircularProgress } from '@mui/material';
 import { PersonCard } from './PersonCard.js';
 import type { PersonListItem } from '../../headless/services/people.js';
 
-interface PersonGridProps {
+/**
+ * Props of {@link PersonGrid}.
+ *
+ * @stability experimental
+ */
+export interface PersonGridProps {
   people: PersonListItem[];
+  /** Opens a person. */
   onPersonClick: (person: PersonListItem) => void;
   loading?: boolean;
   emptyMessage?: string;
+  /** Marks or unmarks a person as a favorite. */
   onToggleFavorite?: (person: PersonListItem) => void;
+  /** Hides a person. */
   onHide?: (person: PersonListItem) => void;
+  /** Restores a hidden person. */
   onUnhide?: (person: PersonListItem) => void;
   selectionMode?: boolean;
   selectedIds?: Set<string>;
+  /** Adds or removes a person from the selection. */
   onToggleSelect?: (person: PersonListItem) => void;
 }
 
+/**
+ * A responsive grid of {@link PersonCard}s.
+ *
+ * @param props - the people and the callbacks.
+ * @returns the grid.
+ *
+ * @stability experimental
+ */
 export function PersonGrid({
   people,
   onPersonClick,

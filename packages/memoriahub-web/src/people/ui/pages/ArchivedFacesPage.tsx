@@ -25,6 +25,13 @@ import { useUnassignedFaces } from '../../headless/hooks/useUnassignedFaces.js';
 import { FaceThumbGrid } from '../components/FaceThumbGrid.js';
 import { PurgeFacesDialog } from '../components/PurgeFacesDialog.js';
 
+/**
+ * The archived-faces page: the unassigned faces that were archived, with restore and permanent delete.
+ *
+ * @returns the page.
+ *
+ * @stability experimental
+ */
 export default function ArchivedFacesPage() {
   const navigate = useNavigate();
   const { activeCircleId, activeCircleRole } = useOwnerScope();

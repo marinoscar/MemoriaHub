@@ -8,6 +8,11 @@ import { getMedia } from '../../../media/headless/index.js';
  * Renders a selectable grid of face thumbnails, resolving each face's media
  * thumbnail URL on demand. Used by both the live unassigned pool and the
  * archived faces sub-view.
+ *
+ * @param props - the faces, the selection and the toggle.
+ * @returns the grid.
+ *
+ * @stability experimental
  */
 export function FaceThumbGrid({
   faces,

@@ -1447,6 +1447,13 @@ function HiddenPeopleView({
 // Main page
 // ---------------------------------------------------------------------------
 
+/**
+ * The People page (`/people`): the people of the active library with search, rename, merge, hide, delete and cover picking, the unknown-faces review and the circle settings (delete biometrics).
+ *
+ * @returns the page.
+ *
+ * @stability experimental
+ */
 export default function PeoplePage() {
   const { activeCircleId, activeCircleRole } = useOwnerScope();
   const navigate = useNavigate();

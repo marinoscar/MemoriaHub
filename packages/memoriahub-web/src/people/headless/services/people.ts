@@ -4,6 +4,11 @@ import { api } from '../../../core/headless/index.js';
 // Phase 2 Types — per-media face detection
 // ---------------------------------------------------------------------------
 
+/**
+ * A face bounding box, normalized to 0..1.
+ *
+ * @stability experimental
+ */
 export interface BoundingBox {
   x: number; // normalized 0–1
   y: number;
@@ -11,6 +16,11 @@ export interface BoundingBox {
   h: number;
 }
 
+/**
+ * One detected face of a media item.
+ *
+ * @stability experimental
+ */
 export interface DetectedFaceDto {
   id: string;
   boundingBox: BoundingBox;
@@ -29,6 +39,11 @@ export interface DetectedFaceDto {
   faceThumbnailUrl: string | null;
 }
 
+/**
+ * The face-detection status of a media item.
+ *
+ * @stability experimental
+ */
 export type MediaFaceStatusType =
   | 'not_processed'
   | 'pending'
@@ -37,6 +52,11 @@ export type MediaFaceStatusType =
   | 'failed'
   | 'no_faces';
 
+/**
+ * The face-detection status record of a media item.
+ *
+ * @stability experimental
+ */
 export interface MediaFaceStatusDto {
   status: MediaFaceStatusType;
   faceCount: number;
@@ -46,11 +66,21 @@ export interface MediaFaceStatusDto {
   lastError: string | null;
 }
 
+/**
+ * The answer of a face-detection re-run.
+ *
+ * @stability experimental
+ */
 export interface RerunResult {
   jobId: string;
   status: string;
 }
 
+/**
+ * The answer of a face-detection backfill.
+ *
+ * @stability experimental
+ */
 export interface BackfillResult {
   queued: number;
 }
@@ -59,14 +89,29 @@ export interface BackfillResult {
 // Phase 2 API functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Lists the faces detected on a media item.
+ *
+ * @stability experimental
+ */
 export async function getMediaFaces(mediaId: string): Promise<DetectedFaceDto[]> {
   return api.get<DetectedFaceDto[]>(`/media/${mediaId}/faces`);
 }
 
+/**
+ * Reads the face-detection status of a media item.
+ *
+ * @stability experimental
+ */
 export async function getMediaFaceStatus(mediaId: string): Promise<MediaFaceStatusDto> {
   return api.get<MediaFaceStatusDto>(`/media/${mediaId}/faces/status`);
 }
 
+/**
+ * Re-enqueues face detection for a media item (photo or video).
+ *
+ * @stability experimental
+ */
 export async function rerunMediaFaces(mediaId: string): Promise<RerunResult> {
   return api.post<RerunResult>(`/media/${mediaId}/faces/rerun`);
 }
@@ -75,6 +120,11 @@ export async function rerunMediaFaces(mediaId: string): Promise<RerunResult> {
 // Phase 3 Types — people management
 // ---------------------------------------------------------------------------
 
+/**
+ * The face a person card crops its picture from.
+ *
+ * @stability experimental
+ */
 export interface PersonCoverFace {
   faceId: string;
   mediaItemId: string;
@@ -83,6 +133,11 @@ export interface PersonCoverFace {
   faceThumbnailUrl: string | null;
 }
 
+/**
+ * A person as the list shows them.
+ *
+ * @stability experimental
+ */
 export interface PersonListItem {
   id: string;
   name: string | null;
@@ -96,6 +151,11 @@ export interface PersonListItem {
   favorite: boolean;
 }
 
+/**
+ * One page of people.
+ *
+ * @stability experimental
+ */
 export interface PersonListResponse {
   items: PersonListItem[];
   meta: {
@@ -106,6 +166,11 @@ export interface PersonListResponse {
   };
 }
 
+/**
+ * A face of a person.
+ *
+ * @stability experimental
+ */
 export interface PersonFace {
   faceId: string;
   mediaItemId: string;
@@ -117,6 +182,11 @@ export interface PersonFace {
   faceThumbnailUrl: string | null;
 }
 
+/**
+ * A person with their faces.
+ *
+ * @stability experimental
+ */
 export interface PersonDetail {
   id: string;
   name: string | null;
@@ -131,6 +201,11 @@ export interface PersonDetail {
   favorite?: boolean;
 }
 
+/**
+ * The answer of clustering the unknown faces.
+ *
+ * @stability experimental
+ */
 export interface ClusterResult {
   clustersCreated: number;
   facesAssigned: number;
@@ -140,6 +215,11 @@ export interface ClusterResult {
 // Phase 3 API functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Lists the people of a circle (paginated, optionally the hidden ones).
+ *
+ * @stability experimental
+ */
 export async function listPeople(
   circleId: string,
   opts?: {
@@ -164,6 +244,11 @@ export async function listPeople(
 // Bulk hide / unhide / purge
 // ---------------------------------------------------------------------------
 
+/**
+ * Hides people from the People surfaces; faces and media are untouched.
+ *
+ * @stability experimental
+ */
 export async function bulkHidePeople(
   circleId: string,
   ids: string[],
@@ -171,6 +256,11 @@ export async function bulkHidePeople(
   return api.patch<{ hidden: number }>('/people/bulk/hide', { circleId, ids });
 }
 
+/**
+ * Restores hidden people.
+ *
+ * @stability experimental
+ */
 export async function bulkUnhidePeople(
   circleId: string,
   ids: string[],
@@ -178,6 +268,11 @@ export async function bulkUnhidePeople(
   return api.patch<{ unhidden: number }>('/people/bulk/unhide', { circleId, ids });
 }
 
+/**
+ * Permanently deletes people and their faces; the media is kept.
+ *
+ * @stability experimental
+ */
 export async function purgePeople(
   circleId: string,
   ids: string[],
@@ -185,10 +280,20 @@ export async function purgePeople(
   return api.post<{ deleted: number }>('/people/bulk/purge', { circleId, ids });
 }
 
+/**
+ * Reads one person with their faces.
+ *
+ * @stability experimental
+ */
 export async function getPerson(id: string): Promise<PersonDetail> {
   return api.get<PersonDetail>(`/people/${id}`);
 }
 
+/**
+ * Creates a person, optionally with initial faces.
+ *
+ * @stability experimental
+ */
 export async function createPerson(body: {
   circleId: string;
   name?: string;
@@ -197,6 +302,11 @@ export async function createPerson(body: {
   return api.post<{ id: string; name: string | null; circleId: string }>('/people', body);
 }
 
+/**
+ * Renames a person or sets the cover face.
+ *
+ * @stability experimental
+ */
 export async function updatePerson(
   id: string,
   body: {
@@ -210,10 +320,20 @@ export async function updatePerson(
   return api.patch<{ id: string; name: string | null; coverFaceId: string | null; updatedAt: string }>(`/people/${id}`, body);
 }
 
+/**
+ * Marks or unmarks a person as a favorite.
+ *
+ * @stability experimental
+ */
 export async function setPersonFavorite(id: string, favorite: boolean): Promise<void> {
   await updatePerson(id, { favorite });
 }
 
+/**
+ * Assigns faces to a person (a manual assignment).
+ *
+ * @stability experimental
+ */
 export async function assignFaces(
   personId: string,
   faceIds: string[],
@@ -221,10 +341,20 @@ export async function assignFaces(
   return api.post<{ personId: string; assignedCount: number }>(`/people/${personId}/faces`, { faceIds });
 }
 
+/**
+ * Returns a face to the unknown pool.
+ *
+ * @stability experimental
+ */
 export async function unassignFace(personId: string, faceId: string): Promise<void> {
   await api.delete<void>(`/people/${personId}/faces/${faceId}`);
 }
 
+/**
+ * Groups the unknown faces of a circle into provisional people.
+ *
+ * @stability experimental
+ */
 export async function clusterUnknownFaces(circleId: string): Promise<ClusterResult> {
   return api.post<ClusterResult>('/people/cluster', { circleId });
 }
@@ -233,6 +363,11 @@ export async function clusterUnknownFaces(circleId: string): Promise<ClusterResu
 // Phase 4 Types — merge, delete, circle face settings, biometrics
 // ---------------------------------------------------------------------------
 
+/**
+ * The answer of a merge.
+ *
+ * @stability experimental
+ */
 export interface MergePeopleResult {
   id: string;
   name: string | null;
@@ -241,6 +376,11 @@ export interface MergePeopleResult {
   updatedAt: string;
 }
 
+/**
+ * The answer of erasing a circle's biometrics.
+ *
+ * @stability experimental
+ */
 export interface DeleteBiometricsResult {
   deletedFaces: number;
   deletedPeople: number;
@@ -250,6 +390,11 @@ export interface DeleteBiometricsResult {
 // Phase 4 API functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Merges one person into another.
+ *
+ * @stability experimental
+ */
 export async function mergePeople(
   sourceId: string,
   targetId: string,
@@ -257,10 +402,20 @@ export async function mergePeople(
   return api.post<MergePeopleResult>('/people/merge', { sourceId, targetId });
 }
 
+/**
+ * Deletes a person; their faces return to the unknown pool.
+ *
+ * @stability experimental
+ */
 export async function deletePerson(personId: string): Promise<void> {
   await api.delete<void>(`/people/${personId}`);
 }
 
+/**
+ * Permanently erases every face and person of a circle.
+ *
+ * @stability experimental
+ */
 export async function deleteCircleBiometrics(circleId: string): Promise<DeleteBiometricsResult> {
   const result = await api.delete<{ data: DeleteBiometricsResult } | DeleteBiometricsResult>(
     `/face/biometrics?circleId=${encodeURIComponent(circleId)}`,
@@ -276,6 +431,11 @@ export async function deleteCircleBiometrics(circleId: string): Promise<DeleteBi
 // Phase 5 Types — unassigned faces (lone detected faces not yet in any Person)
 // ---------------------------------------------------------------------------
 
+/**
+ * A face that belongs to no person.
+ *
+ * @stability experimental
+ */
 export interface UnassignedFaceDto {
   faceId: string;
   mediaItemId: string;
@@ -288,6 +448,11 @@ export interface UnassignedFaceDto {
   hiddenAt: string | null;
 }
 
+/**
+ * One page of unassigned faces.
+ *
+ * @stability experimental
+ */
 export interface UnassignedFacesResponse {
   items: UnassignedFaceDto[];
   meta: { page: number; pageSize: number; totalItems: number; totalPages: number };
@@ -297,6 +462,11 @@ export interface UnassignedFacesResponse {
 // Phase 5 API functions
 // ---------------------------------------------------------------------------
 
+/**
+ * Lists the faces that belong to no person (live, or the archived ones).
+ *
+ * @stability experimental
+ */
 export async function listUnassignedFaces(
   circleId: string,
   opts?: { page?: number; pageSize?: number; archived?: boolean },
@@ -312,6 +482,11 @@ export async function listUnassignedFaces(
 // Bulk hide / unhide / purge — individual faces
 // ---------------------------------------------------------------------------
 
+/**
+ * Archives unassigned faces.
+ *
+ * @stability experimental
+ */
 export async function bulkHideFaces(
   circleId: string,
   ids: string[],
@@ -319,6 +494,11 @@ export async function bulkHideFaces(
   return api.patch<{ hidden: number }>('/people/faces/bulk/hide', { circleId, ids });
 }
 
+/**
+ * Restores archived unassigned faces.
+ *
+ * @stability experimental
+ */
 export async function bulkUnhideFaces(
   circleId: string,
   ids: string[],
@@ -326,6 +506,11 @@ export async function bulkUnhideFaces(
   return api.patch<{ unhidden: number }>('/people/faces/bulk/unhide', { circleId, ids });
 }
 
+/**
+ * Permanently deletes unassigned faces.
+ *
+ * @stability experimental
+ */
 export async function purgeFaces(
   circleId: string,
   ids: string[],
@@ -333,6 +518,11 @@ export async function purgeFaces(
   return api.post<{ deleted: number }>('/people/faces/bulk/purge', { circleId, ids });
 }
 
+/**
+ * Permanently deletes every archived unassigned face of a circle.
+ *
+ * @stability experimental
+ */
 export async function purgeArchivedFaces(
   circleId: string,
 ): Promise<{ deleted: number }> {
@@ -343,6 +533,11 @@ export async function purgeArchivedFaces(
 // Manual people association
 // ---------------------------------------------------------------------------
 
+/**
+ * The answer of associating a person with a media item.
+ *
+ * @stability experimental
+ */
 export interface AddPersonToMediaResult {
   personId: string;
   personName: string | null;
@@ -350,6 +545,11 @@ export interface AddPersonToMediaResult {
   mediaItemId: string;
 }
 
+/**
+ * Associates a person (by id, or by name, created when new) with a media item without a bounding box.
+ *
+ * @stability experimental
+ */
 export async function addPersonToMedia(
   mediaId: string,
   body: { personId?: string; name?: string },
@@ -358,6 +558,11 @@ export async function addPersonToMedia(
   return result.data;
 }
 
+/**
+ * Removes the manual association of a person with a media item.
+ *
+ * @stability experimental
+ */
 export async function removePersonFromMedia(
   mediaId: string,
   personId: string,

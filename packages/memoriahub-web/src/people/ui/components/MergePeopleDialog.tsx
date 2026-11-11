@@ -14,14 +14,29 @@ import {
 } from '@mui/material';
 import type { PersonListItem } from '../../headless/services/people.js';
 
-interface MergePeopleDialogProps {
+/**
+ * Props of {@link MergePeopleDialog}.
+ *
+ * @stability experimental
+ */
+export interface MergePeopleDialogProps {
   open: boolean;
+  /** Closes the dialog. */
   onClose: () => void;
   sourcePerson: PersonListItem;
   people: PersonListItem[];
+  /** Merges the chosen source person into the target. */
   onMerge: (targetId: string) => Promise<void>;
 }
 
+/**
+ * The dialog that merges one person into another.
+ *
+ * @param props - the people and the callbacks.
+ * @returns the dialog.
+ *
+ * @stability experimental
+ */
 export function MergePeopleDialog({
   open,
   onClose,

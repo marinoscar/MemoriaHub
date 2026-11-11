@@ -10,13 +10,28 @@ import {
   Typography,
 } from '@mui/material';
 
-interface PurgeFacesDialogProps {
+/**
+ * Props of {@link PurgeFacesDialog}.
+ *
+ * @stability experimental
+ */
+export interface PurgeFacesDialogProps {
   open: boolean;
   count: number;
+  /** Closes the dialog. */
   onClose: () => void;
+  /** Confirms the permanent deletion. */
   onConfirm: () => Promise<void>;
 }
 
+/**
+ * The confirmation dialog of permanently deleting faces.
+ *
+ * @param props - the count and the callbacks.
+ * @returns the dialog.
+ *
+ * @stability experimental
+ */
 export function PurgeFacesDialog({ open, count, onClose, onConfirm }: PurgeFacesDialogProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);

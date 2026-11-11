@@ -9,6 +9,15 @@ import {
 import { useIsMounted } from '../../../core/headless/index.js';
 import type { UnassignedFaceDto } from '../services/people.js';
 
+/**
+ * Loads the unassigned faces of a circle (live or archived) page by page.
+ *
+ * @param circleId - the circle, or `null` to load nothing.
+ * @param opts - archived or live faces and the page size.
+ * @returns the faces, their state and the mutations.
+ *
+ * @stability experimental
+ */
 export function useUnassignedFaces(
   circleId: string | null,
   opts?: { archived?: boolean; pageSize?: number },
@@ -103,14 +112,20 @@ export function useUnassignedFaces(
     faces,
     total,
     hasMore,
+    /** Loads the next page. */
     loadMore,
     loadingMore,
     loading,
     error,
+    /** Reloads from the first page. */
     refresh,
+    /** Archives faces. */
     hide,
+    /** Restores archived faces. */
     unhide,
+    /** Permanently deletes faces. */
     purge,
+    /** Permanently deletes every archived face of the circle. */
     purgeArchived,
   };
 }

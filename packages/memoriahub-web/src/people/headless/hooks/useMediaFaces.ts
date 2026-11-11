@@ -7,6 +7,14 @@ const TERMINAL_STATUSES: MediaFaceStatusType[] = ['processed', 'failed', 'no_fac
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLLS = 60;
 
+/**
+ * Loads the faces and detection status of a media item and polls a running detection to a terminal status.
+ *
+ * @param mediaId - the media item.
+ * @returns the faces, the status and the re-run.
+ *
+ * @stability experimental
+ */
 export function useMediaFaces(mediaId: string) {
   const [faces, setFaces] = useState<DetectedFaceDto[]>([]);
   const [status, setStatus] = useState<MediaFaceStatusDto | null>(null);
@@ -104,5 +112,15 @@ export function useMediaFaces(mediaId: string) {
     }
   }, [mediaId, stopPolling, isMounted]);
 
-  return { faces, status, loading, error, rerun, rerunLoading, refresh: loadData };
+  return {
+    faces,
+    status,
+    loading,
+    error,
+    /** Re-runs face detection and polls the status until it is terminal. */
+    rerun,
+    rerunLoading,
+    /** Reloads the faces and the status. */
+    refresh: loadData,
+  };
 }

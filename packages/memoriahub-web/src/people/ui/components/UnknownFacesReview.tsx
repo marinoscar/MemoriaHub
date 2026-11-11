@@ -15,10 +15,18 @@ import ClusterIcon from '@mui/icons-material/AutoFixHigh';
 import { PersonGrid } from './PersonGrid.js';
 import type { PersonListItem, ClusterResult } from '../../headless/services/people.js';
 
-interface UnknownFacesReviewProps {
+/**
+ * Props of {@link UnknownFacesReview}.
+ *
+ * @stability experimental
+ */
+export interface UnknownFacesReviewProps {
   unlabeledPeople: PersonListItem[];
+  /** Opens a cluster. */
   onPersonClick: (person: PersonListItem) => void;
+  /** Clusters the unknown faces. */
   onCluster: () => Promise<ClusterResult>;
+  /** Names a cluster. */
   onRename: (personId: string, name: string) => Promise<void>;
   canCluster: boolean;   // true if user has collaborator+ role in the circle
   loading?: boolean;
@@ -32,6 +40,14 @@ interface UnknownFacesReviewProps {
   onToggleSelect?: (person: PersonListItem) => void;
 }
 
+/**
+ * The review panel of unknown people: the clustered groups with the actions to name, merge or hide them.
+ *
+ * @param props - the people and the callbacks.
+ * @returns the panel.
+ *
+ * @stability experimental
+ */
 export function UnknownFacesReview({
   unlabeledPeople,
   onPersonClick,

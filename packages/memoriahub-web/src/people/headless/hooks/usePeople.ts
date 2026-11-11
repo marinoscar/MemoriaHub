@@ -15,6 +15,15 @@ import { useIsMounted } from '../../../core/headless/index.js';
 import type { PersonListResponse, PersonDetail, ClusterResult } from '../services/people.js';
 
 // Hook for listing people in a circle
+/**
+ * Loads the people of a circle and exposes the mutations over them.
+ *
+ * @param circleId - the circle, or `null` to load nothing.
+ * @param opts - which people to list and the page size.
+ * @returns the list, its state and the mutations.
+ *
+ * @stability experimental
+ */
 export function usePeople(
   circleId: string | null,
   opts?: {
@@ -133,19 +142,36 @@ export function usePeople(
     data,
     loading,
     error,
+    /** Reloads the list. */
     refresh,
+    /** Creates a person, optionally with initial faces, and reloads. */
     create,
+    /** Renames a person and reloads. */
     rename,
+    /** Clusters the unknown faces and reloads. */
     cluster,
+    /** Assigns faces to a person and reloads. */
     assignFaces: doAssignFaces,
+    /** Unassigns a face and reloads. */
     unassignFace: doUnassignFace,
+    /** Hides people and reloads. */
     hide,
+    /** Unhides people and reloads. */
     unhide,
+    /** Permanently deletes people and reloads. */
     purge,
   };
 }
 
 // Hook for a single person's detail
+/**
+ * Loads one person with their faces.
+ *
+ * @param personId - the person, or `null` to load nothing.
+ * @returns the person and its state.
+ *
+ * @stability experimental
+ */
 export function usePerson(personId: string | null) {
   const [person, setPerson] = useState<PersonDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -172,5 +198,11 @@ export function usePerson(personId: string | null) {
     void refresh();
   }, [refresh]);
 
-  return { person, loading, error, refresh };
+  return {
+    person,
+    loading,
+    error,
+    /** Reloads the person. */
+    refresh,
+  };
 }

@@ -23,16 +23,34 @@ function fetchMediaCached(id: string): Promise<MediaItem> {
 // PersonAvatar
 // ---------------------------------------------------------------------------
 
+/**
+ * The fields of a person the avatar needs.
+ *
+ * @stability experimental
+ */
 export type PersonAvatarPerson = Pick<
   PersonListItem,
   'id' | 'name' | 'coverFace' | 'profileMediaItemId' | 'profileCrop'
 >;
 
-interface PersonAvatarProps {
+/**
+ * Props of {@link PersonAvatar}.
+ *
+ * @stability experimental
+ */
+export interface PersonAvatarProps {
   person: PersonAvatarPerson;
   size?: number;
 }
 
+/**
+ * A person's round picture: the cover face cropped from its photo, or their initial.
+ *
+ * @param props - the person and the size.
+ * @returns the avatar.
+ *
+ * @stability experimental
+ */
 export function PersonAvatar({ person, size = 48 }: PersonAvatarProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
 

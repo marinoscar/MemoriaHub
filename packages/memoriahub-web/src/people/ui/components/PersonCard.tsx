@@ -16,9 +16,16 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { PersonAvatar } from './PersonAvatar.js';
 import type { PersonListItem } from '../../headless/services/people.js';
 
-interface PersonCardProps {
+/**
+ * Props of {@link PersonCard}.
+ *
+ * @stability experimental
+ */
+export interface PersonCardProps {
   person: PersonListItem;
+  /** Opens the person. */
   onClick: (person: PersonListItem) => void;
+  /** Marks or unmarks the person as a favorite. */
   onToggleFavorite?: (person: PersonListItem) => void;
   /** Called when the hide icon-button is clicked. If provided, the hide button appears. */
   onHide?: (person: PersonListItem) => void;
@@ -27,9 +34,18 @@ interface PersonCardProps {
   /** When true, the card shows a selection checkbox for bulk-selection mode. */
   selectionMode?: boolean;
   selected?: boolean;
+  /** Adds or removes the person from the selection. */
   onToggleSelect?: (person: PersonListItem) => void;
 }
 
+/**
+ * A selectable person card: avatar, name, face count and the favorite and rename affordances.
+ *
+ * @param props - the person and the callbacks.
+ * @returns the card.
+ *
+ * @stability experimental
+ */
 export function PersonCard({
   person,
   onClick,
