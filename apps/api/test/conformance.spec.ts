@@ -283,7 +283,8 @@ runPlatformConformance({
     //   - ai-orchestration-boundary: no orchestration library anywhere (`allowedRoots: {}`).
     aiNoSdkLeak: {
       apiTrees: [
-        { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 500 },
+        // A vacuity floor: the media slices keep moving into packages/memoriahub-api (RETRO-J5..J10), so the app's tree shrinks.
+        { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 400 },
         { name: 'apps/cli', root: join(REPO_ROOT, 'apps', 'cli', 'src'), minFiles: 50 },
       ],
       webTrees: [{ name: 'apps/web', root: join(REPO_ROOT, 'apps', 'web', 'src'), minFiles: 200 }],
