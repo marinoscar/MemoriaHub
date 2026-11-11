@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import {
-  WORKFLOW_RUN_OBSERVER,
   WorkflowRunsController,
   WorkflowsAdminController,
   WorkflowsController,
@@ -20,7 +19,7 @@ import { WorkflowActionsHandler } from './actions/workflow-actions.handler';
 import { registerReviewCatalog } from './registry/review-catalog';
 import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
 import { WorkflowRunsRetentionHandler } from './runs/workflow-runs-retention.handler';
-import { AppWorkflowRunObserver } from './workflow-run-observer.adapter';
+import { WorkflowRunObserverModule } from './workflow-run-observer.module';
 
 // The review-queue half of the Media Item catalog (burst, duplicate and location-suggestion fields and actions):
 // the slice's built-in catalog knows no review queue, so the app registers these once, in catalog order.
@@ -37,7 +36,7 @@ registerReviewCatalog();
  *     services verbatim, registered with the slice's action handler registry;
  *   - the review-queue field and action catalog (`registerReviewCatalog`);
  *   - `WorkflowTriggerListener`: the two upstream events, bound to the slice's settlement service;
- *   - `AppWorkflowRunObserver` (`WORKFLOW_RUN_OBSERVER`): the webhook events and the run-completed notification;
+ *   - `WorkflowRunObserverModule` (global; binds `WORKFLOW_RUN_OBSERVER` to `AppWorkflowRunObserver`): the webhook events and the run-completed notification;
  *   - `WorkflowRunsRetentionHandler`: the nightly `workflow_history_purge`, bound to the platform's retention policy.
  *
  * The modules imported here own the services the actions reuse (each re-exports the injected service); none of
@@ -47,6 +46,7 @@ registerReviewCatalog();
 @Module({
   imports: [
     WorkflowsSliceModule.forRoot(),
+    WorkflowRunObserverModule,
     PrismaModule,
     OwnerAccessModule,
     MediaModule,
@@ -62,8 +62,6 @@ registerReviewCatalog();
     WorkflowActionsHandler,
     WorkflowTriggerListener,
     WorkflowRunsRetentionHandler,
-    AppWorkflowRunObserver,
-    { provide: WORKFLOW_RUN_OBSERVER, useExisting: AppWorkflowRunObserver },
   ],
   exports: [WorkflowsSliceModule],
 })
