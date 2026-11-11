@@ -17,7 +17,12 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 // the parent owns the setting value and the save handler.
 // ---------------------------------------------------------------------------
 
-interface WorkflowsDangerCardProps {
+/**
+ * The props or shape of `WorkflowsDangerCardProps`.
+ *
+ * @stability experimental
+ */
+export interface WorkflowsDangerCardProps {
   /** Current value of `workflows.allowHardDelete`. */
   allowHardDelete: boolean;
   /** True while a save is in flight (disables the toggle). */
@@ -28,6 +33,11 @@ interface WorkflowsDangerCardProps {
   onToggle: (next: boolean) => void;
 }
 
+/**
+ * The workflows danger card of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function WorkflowsDangerCard({
   allowHardDelete,
   saving,

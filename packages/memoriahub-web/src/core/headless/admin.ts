@@ -45,6 +45,8 @@ export interface MemoriahubDataTableColumn<Row> {
   width?: number;
   /** The narrowest width in pixels. */
   minWidth?: number;
+  /** False keeps the column out of the user's column picker (it always shows). */
+  hideable?: boolean;
   /** Share of the free width. */
   flex?: number;
 }

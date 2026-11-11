@@ -32,16 +32,16 @@
  */
 
 import { Box, Chip, Stack, Typography } from '@mui/material';
-import type { AdminWorkflowListItem } from '../../../services/adminWorkflows';
+import type { AdminWorkflowListItem } from '../../headless/index.js';
 import {
   triggerLabel,
   runStatusColor,
   runStatusLabel,
   formatRelativeTime,
   formatCount,
-} from '@marinoscar/memoriahub-web/workflows/headless';
-import type { WorkflowSubjectType } from '@marinoscar/memoriahub-web/workflows/headless';
-import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
+} from '../../headless/index.js';
+import type { WorkflowSubjectType } from '../../headless/index.js';
+import type { MemoriahubDataTableColumn } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -51,6 +51,8 @@ import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headles
  * Persistence key for the user's column/density choices
  * (`user_settings.dataTables['admin-workflows']`). Chosen here and never
  * derived from the route — it must survive a URL change.
+ *
+ * @stability experimental
  */
 export const WORKFLOWS_OVERSIGHT_TABLE_ID = 'admin-workflows';
 
@@ -58,11 +60,21 @@ const SUBJECT_LABELS: Record<WorkflowSubjectType, string> = {
   media_item: 'Media item',
 };
 
+/**
+ * The subject label of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function subjectLabel(subject: WorkflowSubjectType): string {
   return SUBJECT_LABELS[subject] ?? subject;
 }
 
 /** One-line summary of a workflow's most recent run, or null when never run. */
+/**
+ * The last run summary of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function lastRunSummary(item: AdminWorkflowListItem): string | null {
   const run = item.lastRun;
   if (!run) return null;
@@ -76,7 +88,12 @@ export function lastRunSummary(item: AdminWorkflowListItem): string | null {
 // Columns
 // ---------------------------------------------------------------------------
 
-export function buildWorkflowOversightColumns(): DataTableColumn<AdminWorkflowListItem>[] {
+/**
+ * The build workflow oversight columns of the workflows admin page.
+ *
+ * @stability experimental
+ */
+export function buildWorkflowOversightColumns(): MemoriahubDataTableColumn<AdminWorkflowListItem>[] {
   return [
     // --- primary ------------------------------------------------------------
     {

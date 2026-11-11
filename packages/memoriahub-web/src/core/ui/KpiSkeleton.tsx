@@ -1,5 +1,12 @@
 import { Grid, Card, CardContent, Skeleton, Box } from '@mui/material';
 
+/**
+ * The loading placeholder of a row of four {@link KpiCard}s.
+ *
+ * @returns the skeleton row.
+ *
+ * @stability experimental
+ */
 export function KpiSkeleton() {
   return (
     <Grid container spacing={3}>

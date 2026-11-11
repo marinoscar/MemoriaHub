@@ -29,12 +29,12 @@ import {
   resetContainerWidth,
   VIEWPORT_WIDTH,
 } from '@marinoscar/platform-web/datatable/testing';
-import { WorkflowRunsDrawer } from '../../../../components/workflows/admin/WorkflowRunsDrawer';
+import { WorkflowRunsDrawer } from '@marinoscar/memoriahub-web/workflows/ui';
 import {
   buildWorkflowRunColumns,
   shortRunId,
-} from '../../../../components/workflows/admin/workflowRunsColumns';
-import type { AdminWorkflowRun } from '../../../../services/adminWorkflows';
+} from '@marinoscar/memoriahub-web/workflows/ui';
+import type { AdminWorkflowRun } from '@marinoscar/memoriahub-web/workflows/headless';
 import { api } from '../../../../services/api';
 
 /**

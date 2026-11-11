@@ -136,7 +136,9 @@ const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 // entry chunk.
 const AdminMaintenancePage = lazy(() => import('./pages/Admin/MaintenancePage'));
 const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
-const WorkflowsSettingsPage = lazy(() => import('./pages/Admin/WorkflowsSettingsPage'));
+const WorkflowsSettingsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowsSettingsPage })),
+);
 const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
 const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));

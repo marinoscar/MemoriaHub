@@ -38,16 +38,21 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import StopIcon from '@mui/icons-material/Stop';
-import type { AdminWorkflowRun } from '../../../services/adminWorkflows';
-import { isTerminalRunStatus } from '@marinoscar/memoriahub-web/workflows/headless';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+import type { AdminWorkflowRun } from '../../headless/index.js';
+import { isTerminalRunStatus } from '../../headless/index.js';
+import { useMemoriahubAdmin } from '../../../core/headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
 import {
   WORKFLOW_RUNS_TABLE_ID,
   buildWorkflowRunColumns,
-} from './workflowRunsColumns';
+} from './workflowRunsColumns.js';
 
-interface WorkflowRunsDrawerProps {
+/**
+ * The props or shape of `WorkflowRunsDrawerProps`.
+ *
+ * @stability experimental
+ */
+export interface WorkflowRunsDrawerProps {
   open: boolean;
   workflowName: string | null;
   runs: AdminWorkflowRun[];
@@ -55,10 +60,17 @@ interface WorkflowRunsDrawerProps {
   error: string | null;
   canCancel: boolean;
   cancellingRunId: string | null;
+  /** Cancels a run. */
   onCancel: (run: AdminWorkflowRun) => void;
+  /** Closes the drawer. */
   onClose: () => void;
 }
 
+/**
+ * The workflow runs drawer of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function WorkflowRunsDrawer({
   open,
   workflowName,
@@ -70,9 +82,10 @@ export function WorkflowRunsDrawer({
   onCancel,
   onClose,
 }: WorkflowRunsDrawerProps) {
+  const { DataTable } = useMemoriahubAdmin();
   const columns = useMemo(() => buildWorkflowRunColumns(), []);
 
-  const rowActions = useMemo<DataTableRowAction<AdminWorkflowRun>[]>(() => {
+  const rowActions = useMemo<MemoriahubDataTableRowAction<AdminWorkflowRun>[]>(() => {
     if (!canCancel) return [];
     return [
       {

@@ -29,27 +29,39 @@
  */
 
 import { Chip, Typography } from '@mui/material';
-import type { AdminWorkflowRun } from '../../../services/adminWorkflows';
+import type { AdminWorkflowRun } from '../../headless/index.js';
 import {
   runStatusColor,
   runStatusLabel,
   formatRelativeTime,
   formatCount,
-} from '@marinoscar/memoriahub-web/workflows/headless';
-import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
+} from '../../headless/index.js';
+import type { MemoriahubDataTableColumn } from '../../../core/headless/index.js';
 
 /**
  * Persistence key for the user's column/density choices
  * (`user_settings.dataTables['admin-workflow-runs']`).
+ *
+ * @stability experimental
  */
 export const WORKFLOW_RUNS_TABLE_ID = 'admin-workflow-runs';
 
 /** A run's human handle — the first 8 characters of its id. */
+/**
+ * The short run id of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function shortRunId(id: string): string {
   return id.slice(0, 8);
 }
 
-export function buildWorkflowRunColumns(): DataTableColumn<AdminWorkflowRun>[] {
+/**
+ * The build workflow run columns of the workflows admin page.
+ *
+ * @stability experimental
+ */
+export function buildWorkflowRunColumns(): MemoriahubDataTableColumn<AdminWorkflowRun>[] {
   return [
     // --- primary ------------------------------------------------------------
     {

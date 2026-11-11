@@ -30,27 +30,41 @@ import { Card, CardContent, Typography } from '@mui/material';
 import BlockIcon from '@mui/icons-material/Block';
 import HistoryIcon from '@mui/icons-material/History';
 import { useMemo } from 'react';
-import type { AdminWorkflowListItem } from '../../../services/adminWorkflows';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+import type { AdminWorkflowListItem } from '../../headless/index.js';
+import { useMemoriahubAdmin } from '../../../core/headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
 import {
   WORKFLOWS_OVERSIGHT_TABLE_ID,
   buildWorkflowOversightColumns,
-} from './workflowsOversightColumns';
+} from './workflowsOversightColumns.js';
 
-interface WorkflowsOversightTableProps {
+/**
+ * The props or shape of `WorkflowsOversightTableProps`.
+ *
+ * @stability experimental
+ */
+export interface WorkflowsOversightTableProps {
   items: AdminWorkflowListItem[];
   loading: boolean;
   totalItems: number;
   page: number; // zero-based (MUI convention)
   pageSize: number;
   canManage: boolean;
+  /** Called with the next zero-based page. */
   onPageChange: (page: number) => void;
+  /** Called with the next page size (the parent resets the offset). */
   onPageSizeChange: (pageSize: number) => void;
+  /** Force-disables the workflow. */
   onDisable: (item: AdminWorkflowListItem) => void;
+  /** Opens the workflow's run history. */
   onViewRuns: (item: AdminWorkflowListItem) => void;
 }
 
+/**
+ * The workflows oversight table of the workflows admin page.
+ *
+ * @stability experimental
+ */
 export function WorkflowsOversightTable({
   items,
   loading,
@@ -63,10 +77,11 @@ export function WorkflowsOversightTable({
   onDisable,
   onViewRuns,
 }: WorkflowsOversightTableProps) {
+  const { DataTable } = useMemoriahubAdmin();
   const columns = useMemo(() => buildWorkflowOversightColumns(), []);
 
-  const rowActions = useMemo<DataTableRowAction<AdminWorkflowListItem>[]>(() => {
-    const actions: DataTableRowAction<AdminWorkflowListItem>[] = [
+  const rowActions = useMemo<MemoriahubDataTableRowAction<AdminWorkflowListItem>[]>(() => {
+    const actions: MemoriahubDataTableRowAction<AdminWorkflowListItem>[] = [
       {
         id: 'runs',
         label: 'Runs',

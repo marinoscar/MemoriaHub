@@ -26,12 +26,12 @@ import {
   installLayoutStubs,
   resetContainerWidth,
 } from '@marinoscar/platform-web/datatable/testing';
-import { WorkflowsOversightTable } from '../../../../components/workflows/admin/WorkflowsOversightTable';
+import { WorkflowsOversightTable } from '@marinoscar/memoriahub-web/workflows/ui';
 import {
   buildWorkflowOversightColumns,
   lastRunSummary,
-} from '../../../../components/workflows/admin/workflowsOversightColumns';
-import type { AdminWorkflowListItem } from '../../../../services/adminWorkflows';
+} from '@marinoscar/memoriahub-web/workflows/ui';
+import type { AdminWorkflowListItem } from '@marinoscar/memoriahub-web/workflows/headless';
 import { api } from '../../../../services/api';
 
 function makeItem(overrides: Partial<AdminWorkflowListItem> = {}): AdminWorkflowListItem {
