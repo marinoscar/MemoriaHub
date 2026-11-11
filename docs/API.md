@@ -2008,7 +2008,7 @@ The route is registered before `GET /api/media/:id` in the controller so that th
 - 401 Unauthorized — missing or expired JWT
 - 403 Forbidden — caller lacks `media:read` permission
 
-**DTO source:** `apps/api/src/media/dto/media-locations-query.dto.ts`
+**DTO source:** `packages/memoriahub-api/src/media/dto/media-locations-query.dto.ts`
 **Service method:** `MediaService.listLocations`
 
 ---

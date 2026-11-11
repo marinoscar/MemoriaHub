@@ -1,0 +1,3682 @@
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  HttpException,
+  Inject,
+  ServiceUnavailableException,
+  Optional,
+} from '@nestjs/common';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubRecordAction,
+  type MemoriahubRecordType,
+  type MemoriahubScopeRole,
+} from '../../ports/index.js';
+import { Prisma } from '../../core/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_CSV_STRINGIFIER, type MediaCsvStringifier, type MediaReply } from './media-reply.js';
+import {
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_WEBHOOK_EVENTS,
+  type MediaEnrichment,
+  type MediaForwardGeocoder,
+  type MediaGeoLocationProvider,
+  type MediaWebhookEvents,
+} from '../hooks/media-host-hooks.js';
+import { MEDIA_LOCATION_RESOLVER, type MediaLocationResolver } from '../location/media-location-resolver.js';
+import { applyLocation } from '../location/apply-location.js';
+import { GEO_CLEAR_COLUMNS } from '../location/geo-result.mapper.js';
+import { fold } from '../location/fold.js';
+import { andWhere, buildMediaWhere, wherePeople } from '../where/media-where.builder.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
+import { MediaThumbnailService } from '../thumbnails/media-thumbnail.service.js';
+import { MediaTouchService } from '../touch/media-touch.service.js';
+import { UploadNotificationService } from '../producers/upload-notification.service.js';
+import { assertMediaSyncSourceDevice } from '../media-sync/media-sync-source.js';
+import type { CreateMediaDto } from '../dto/create-media.dto.js';
+import type { UpdateMediaDto } from '../dto/update-media.dto.js';
+import type { MediaQueryDto } from '../dto/media-query.dto.js';
+import type { AttachTagsDto } from '../dto/attach-tags.dto.js';
+import type { CreateAlbumDto } from '../dto/create-album.dto.js';
+import type { UpdateAlbumDto } from '../dto/update-album.dto.js';
+import type { AlbumQueryDto } from '../dto/album-query.dto.js';
+import type { SharedWithMeQueryDto } from '../dto/shared-with-me-query.dto.js';
+import type { AddAlbumItemsDto } from '../dto/add-album-items.dto.js';
+import type { AddAlbumItemsByFilterDto } from '../dto/add-album-items-by-filter.dto.js';
+import type { ExportQueryDto } from '../dto/export-query.dto.js';
+import type { MediaLocationsQueryDto } from '../dto/media-locations-query.dto.js';
+import type { MediaLocationsAggregateQueryDto } from '../dto/media-locations-aggregate-query.dto.js';
+import type { MediaLocationsExtentQueryDto } from '../dto/media-locations-extent-query.dto.js';
+import type { MediaThumbnailsQueryDto } from '../dto/media-thumbnails-query.dto.js';
+import type { BulkUpdateMediaDto } from '../dto/bulk-update-media.dto.js';
+import type { BulkTagsDto } from '../dto/bulk-tags.dto.js';
+import type { BulkDeleteDto } from '../dto/bulk-delete.dto.js';
+import type { BulkArchiveDto } from '../dto/bulk-archive.dto.js';
+import type { ListArchivedQueryDto } from '../dto/list-archived-query.dto.js';
+import type { ListTrashQueryDto } from '../dto/list-trash-query.dto.js';
+import type { RestoreFromTrashDto } from '../dto/restore-from-trash.dto.js';
+import type { DeleteForeverDto } from '../dto/delete-forever.dto.js';
+import type { EmptyTrashDto } from '../dto/empty-trash.dto.js';
+import type { DashboardQueryDto } from '../dto/dashboard-query.dto.js';
+import type { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
+
+// Structural stand-ins for the generated client's types (the slice imports no generated client).
+type MediaItemWhereInput = Record<string, any>;
+type AlbumWhereInput = Record<string, any>;
+type MediaItemOrderByWithRelationInput = Record<string, any>;
+/**
+ * Where a tag came from: a user, the AI tagger or an automated system feature.
+ *
+ * @stability experimental
+ */
+export type MediaTagSource = 'manual' | 'ai' | 'system';
+type JsonValue = any;
+type InputJsonValue = any;
+type OwnerRole = MemoriahubScopeRole;
+type RecordType = MemoriahubRecordType;
+type RecordAction = MemoriahubRecordAction;
+
+/** `viewer` reads, `editor` writes; `admin` has no grant fallback (group-admin-only actions never fall back). */
+function actionForRole(minRole: OwnerRole): RecordAction | null {
+  if (minRole === 'viewer') return 'read';
+  if (minRole === 'editor') return 'write';
+  return null;
+}
+
+/** A refusal a grant may override: the owner check's 404 (non-member) or 403 (role too low). */
+function isAccessRefusal(err: unknown): boolean {
+  return err instanceof NotFoundException || err instanceof ForbiddenException;
+}
+
+/** A count as a non-negative finite number (a BigInt byte count included); 0 otherwise. */
+function metricNumber(value: unknown): number {
+  const n = typeof value === 'bigint' ? Number(value) : typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** A Prisma unique-constraint violation (`P2002`), seen structurally. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002';
+}
+
+/**
+ * Key for the tiered-browsing group-cover override map (Location Grouping,
+ * issue #374).
+ *
+ * `''` is the UNSCOPED country sentinel, matching `LocationGroup.countryCode`'s
+ * NOT NULL DEFAULT '' — a nullable scope would make two same-named groups
+ * indistinguishable here for exactly the reason the column is not nullable in
+ * the schema.
+ */
+function groupCoverKey(countryCode: string | null, name: string): string {
+  return `${countryCode ?? ''}|${fold(name)}`;
+}
+
+/**
+ * Shape of each element returned by listLocations.
+ *
+ * @stability experimental
+ */
+export interface MediaLocation {
+  id: string;
+  takenLat: number;
+  takenLng: number;
+  capturedAt: Date | null;
+  geoLocality: string | null;
+}
+
+/**
+ * Web-Mercator pixel-grid cell size (in map tile pixels) used by the
+ * zoom-keyed clustering path in aggregateLocations(). A larger value produces
+ * fewer, coarser clusters; 64 px matches typical marker-cluster spacing.
+ */
+const CLUSTER_CELL_PX = 64;
+
+/**
+ * The gallery service: registration with content-hash dedup, the keyset and offset listings, albums,
+ * tags, the map, explore and places queries, archive and trash, the bulk actions, the export, the
+ * review-queue counts and the batched hard delete.
+ *
+ * @stability experimental
+ */
+@Injectable()
+export class MediaService {
+  private readonly logger = new Logger(MediaService.name);
+
+  constructor(
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
+    private readonly mediaMetadataSyncService: MediaMetadataSyncService,
+    @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
+    @Inject(MEDIA_GEO_LOCATION_PROVIDER) private readonly geoProvider: MediaGeoLocationProvider,
+    @Inject(MEDIA_FORWARD_GEOCODER) private readonly forwardGeocodeService: MediaForwardGeocoder,
+    @Inject(MEDIA_ENRICHMENT) private readonly mediaEnrichmentService: MediaEnrichment,
+    private readonly mediaThumbnailService: MediaThumbnailService,
+    private readonly uploadNotificationService: UploadNotificationService,
+    private readonly mediaTouch: MediaTouchService,
+    @Inject(MEDIA_LOCATION_RESOLVER) private readonly locationGroupResolver: MediaLocationResolver,
+    // Webhooks (RETRO-H4, #603). Optional so a host without webhooks binds nothing.
+    @Optional() @Inject(MEDIA_WEBHOOK_EVENTS) private readonly webhookEvents?: MediaWebhookEvents,
+    // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. An unbound port is a no-op.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+    // CSV export writer (the host binds `csv-stringify`); the CSV format answers 503 without it.
+    @Optional() @Inject(MEDIA_CSV_STRINGIFIER) private readonly csv?: MediaCsvStringifier,
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // Access (RETRO-I3, #573): owner scope first, then a grant on the record
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The owner-scope check (members keep exactly today's access), then, only
+   * when it refused, `AccessPolicy` for a grant on the record. The original
+   * refusal is rethrown when no grant allows the action. Returns `true` when
+   * the caller passed through a grant.
+   */
+  private async requireRecord(
+    userId: string,
+    perms: string[],
+    scopeId: string,
+    minRole: OwnerRole,
+    type: RecordType,
+    id: string,
+    action?: RecordAction,
+  ): Promise<boolean> {
+    try {
+      await this.access.requireOwnerRole(userId, scopeId, perms, minRole);
+      return false;
+    } catch (err) {
+      const wanted = action ?? actionForRole(minRole);
+      if (!wanted || !isAccessRefusal(err)) throw err;
+      if (await this.access.grantAllows(userId, perms, wanted, type, id)) return true;
+      throw err;
+    }
+  }
+
+  /**
+   * A scope-wide list check: the owner-scope check, then, for a refused caller,
+   * the records of `type` shared with them through grants (`accessibleWhere`,
+   * scope `shared`) as an extra AND filter. A member gets `undefined` (no extra
+   * filter: the list keeps its `circle_id` filter and its index plan); a
+   * non-member with no grants keeps the refusal.
+   */
+  private async requireListScope(
+    userId: string,
+    perms: string[],
+    scopeId: string,
+    type: RecordType,
+  ): Promise<Record<string, unknown> | undefined> {
+    try {
+      await this.access.requireOwnerRole(userId, scopeId, perms, 'viewer');
+      return undefined;
+    } catch (err) {
+      if (!isAccessRefusal(err)) throw err;
+      const shared = await this.access.sharedWhere(userId, perms, type);
+      if (!shared) throw err;
+      return shared;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // MediaItem CRUD
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register a StorageObject as a MediaItem.
+   * Validates that the referenced StorageObject exists and is owned by the caller.
+   *
+   * Deduplication by content hash:
+   *   If `dto.contentHash` is supplied the service checks whether the caller
+   *   already owns a non-deleted MediaItem with the same hash (fast path).
+   *   If found the redundant StorageObject blob is cleaned up best-effort and
+   *   the existing MediaItem is returned with `deduplicated: true`.
+   *
+   *   If no pre-existing item is found the MediaItem is created with the hash
+   *   already set.  A concurrent registration of the same hash may still win
+   *   the race and cause `prisma.mediaItem.create` to throw a P2002
+   *   (partial unique index violation).  That is caught, the winner is fetched,
+   *   the redundant blob cleaned up, and the winner returned as a dedup hit.
+   *
+   *   The `deduplicated` field is non-persisted — it is added to the returned
+   *   object to signal to callers whether the result is a fresh create or a
+   *   dedup hit (clients may use it to decide HTTP status codes or UI feedback).
+   */
+  async createMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
+    try {
+      return await this.registerMedia(dto, userId, userPermissions);
+    } catch (err) {
+      // A client error (missing object, not owner, already linked, no access) is a rejected upload.
+      if (err instanceof HttpException && err.getStatus() < 500) {
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'rejected' });
+      }
+      throw err;
+    }
+  }
+
+  private async registerMedia(dto: CreateMediaDto, userId: string, userPermissions: string[]) {
+    // Verify the StorageObject exists and belongs to the caller
+    const storageObject = await this.prisma.storageObject.findUnique({
+      where: { id: dto.storageObjectId },
+    });
+
+    if (!storageObject) {
+      throw new NotFoundException(
+        `StorageObject with id ${dto.storageObjectId} not found`,
+      );
+    }
+
+    if (storageObject.uploadedById !== userId) {
+      throw new ForbiddenException(
+        'You do not own the referenced StorageObject',
+      );
+    }
+
+    // Ensure this StorageObject is not already linked to a MediaItem
+    const existing = await this.prisma.mediaItem.findUnique({
+      where: { storageObjectId: dto.storageObjectId },
+    });
+
+    if (existing) {
+      throw new BadRequestException(
+        'This StorageObject is already linked to a MediaItem',
+      );
+    }
+
+    await this.access.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
+
+    // Android Media Sync attribution (#505): an android upload naming a
+    // device must name an active device of the caller's.
+    await assertMediaSyncSourceDevice(this.prisma, userId, dto.source, dto.sourceDeviceId);
+
+    // Normalize the client-supplied hash once
+    const hash = dto.contentHash?.toLowerCase() ?? null;
+
+    // -----------------------------------------------------------------------
+    // Fast-path dedup: if the hash is known, check before hitting the DB
+    // -----------------------------------------------------------------------
+    if (hash) {
+      const duplicate = await this.prisma.mediaItem.findFirst({
+        where: { circleId: dto.circleId, contentHash: hash, deletedAt: null },
+      });
+
+      if (duplicate) {
+        this.logger.log(
+          `Dedup hit (pre-check): MediaItem ${duplicate.id} already owns hash ${hash}; ` +
+            `cleaning up redundant StorageObject ${dto.storageObjectId}`,
+        );
+        await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
+        return { ...duplicate, deduplicated: true as const, mediaItemId: duplicate.id };
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Create path — may race with a concurrent register for the same hash
+    // -----------------------------------------------------------------------
+    let mediaItem: Awaited<ReturnType<typeof this.prisma.mediaItem.create>>;
+
+    try {
+      mediaItem = await this.prisma.mediaItem.create({
+        data: {
+          storageObjectId: dto.storageObjectId,
+          addedById: userId,
+          circleId: dto.circleId,
+          type: dto.type,
+          source: dto.source,
+          originalFilename: dto.originalFilename,
+          capturedAt: dto.capturedAt ?? null,
+          capturedAtOffset: dto.capturedAtOffset ?? null,
+          description: dto.description ?? null,
+          favorite: dto.favorite ?? false,
+          metadata: dto.metadata ? (dto.metadata as InputJsonValue) : Prisma.JsonNull,
+          originalCreatedAt: dto.originalCreatedAt ?? null,
+          sourcePath: dto.sourcePath ?? null,
+          sourceDeviceId: dto.sourceDeviceId ?? null,
+          sourceDeviceName: dto.sourceDeviceName ?? null,
+          contentHash: hash,
+        },
+      });
+    } catch (err) {
+      // P2002 = unique constraint violation — the partial index on
+      // (circle_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL
+      // fired because a concurrent request registered the same hash first.
+      if (
+        isUniqueViolation(err) &&
+        hash
+      ) {
+        this.logger.warn(
+          `Dedup hit (P2002 race): concurrent register won for hash ${hash}; ` +
+            `fetching winner and cleaning up redundant StorageObject ${dto.storageObjectId}`,
+        );
+
+        const winner = await this.prisma.mediaItem.findFirst({
+          where: { circleId: dto.circleId, contentHash: hash, deletedAt: null },
+        });
+
+        if (!winner) {
+          // Extremely unlikely: the winner was hard-deleted between our create
+          // and this re-query. Rethrow so the caller gets a 500 and can retry.
+          throw err;
+        }
+
+        await this.cleanupRedundantStorageObject(dto.storageObjectId, storageObject.storageKey);
+        this.metrics?.add('mediaUploads', 1, { media_type: dto.type, source: dto.source, outcome: 'deduplicated' });
+        return { ...winner, deduplicated: true as const, mediaItemId: winner.id };
+      }
+
+      throw err;
+    }
+
+    this.logger.log(`MediaItem created: ${mediaItem.id} by user ${userId}`);
+    this.metrics?.add('mediaUploads', 1, { media_type: mediaItem.type, source: mediaItem.source, outcome: 'created' });
+    this.metrics?.add('mediaUploadSize', metricNumber(storageObject.size), {
+      media_type: mediaItem.type,
+      source: mediaItem.source,
+    });
+
+    // Best-effort: if processing already finished before this createMedia call
+    // (i.e. OBJECT_PROCESSED_EVENT fired and no-op'd because no MediaItem
+    // existed yet), apply the processor metadata now so the item is immediately
+    // enriched rather than staying permanently un-enriched.
+    // If processing has not run yet the call is a no-op (_processing absent).
+    // If processing runs again after this, the event handler reapplies the same
+    // values — idempotent by design (present-only overwrites).
+    try {
+      await this.mediaMetadataSyncService.syncFromStorageObject(mediaItem.storageObjectId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Post-create metadata sync failed for MediaItem ${mediaItem.id} ` +
+          `(StorageObject ${mediaItem.storageObjectId}): ${msg}`,
+      );
+      // Never fail createMedia because of a sync issue
+    }
+
+    // Fallback location: apply the client-supplied coordinates ONLY when the
+    // server-extracted EXIF did not set a location. The metadata sync above may
+    // have just written EXIF coords directly to the DB, so re-read the row fresh
+    // rather than trusting the stale in-memory `mediaItem`. A geo/reverse-geocode
+    // failure must never fail createMedia — mirror the sync try/catch posture.
+    if (dto.takenLat != null && dto.takenLng != null) {
+      try {
+        const current = await this.prisma.mediaItem.findUnique({
+          where: { id: mediaItem.id },
+          select: { takenLat: true },
+        });
+
+        if (current?.takenLat == null) {
+          const patch = await applyLocation(
+            this.geoProvider,
+            dto.takenLat,
+            dto.takenLng,
+            dto.takenAltitude ?? null,
+            'manual',
+            this.locationGroupResolver,
+          );
+          await this.prisma.mediaItem.update({
+            where: { id: mediaItem.id },
+            data: patch,
+          });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `Fallback location apply failed for MediaItem ${mediaItem.id}: ${msg}`,
+        );
+        // Never fail createMedia because of a fallback-location issue
+      }
+    }
+
+    // Synchronously enqueue all upload-time enrichment jobs (auto_tagging,
+    // face_detection, burst_detection) before returning. This is the single
+    // authoritative trigger — job rows exist before createMedia returns,
+    // regardless of client (CLI, web, Android) or timing. The service reads
+    // feature flags and env kill-switches internally and never rethrows.
+    await this.mediaEnrichmentService.enqueueUploadEnrichment({
+      id: mediaItem.id,
+      type: mediaItem.type,
+      circleId: mediaItem.circleId,
+      deletedAt: mediaItem.deletedAt,
+    });
+
+    // In-app `upload_completed` notification (epic #240, issue #247).
+    // Deliberately placed on the NON-DEDUPLICATED path only — the two dedup
+    // returns above exit before reaching here, and a dedup hit is not an
+    // upload: nothing new landed in the circle.
+    //
+    // Fire-and-forget (returns void, never rejects), so a 4 000-file import
+    // pays no added latency per file and a notification failure can never fail
+    // a registration. Fan-out is bounded server-side by a 15-minute rolling
+    // window — see UploadNotificationService.
+    this.uploadNotificationService.recordUploadAsync({
+      circleId: mediaItem.circleId,
+      uploaderId: userId,
+    });
+
+    // Webhooks `media.item.created` and `media.upload.completed` (RETRO-H4, #603): the row is
+    // committed (the create above is its own statement), the call does no I/O and never throws,
+    // and the events go out in batches of up to 100 items (see MemoriaHubWebhooks).
+    this.webhookEvents?.mediaCreated({
+      id: mediaItem.id,
+      circleId: mediaItem.circleId,
+      type: mediaItem.type,
+      capturedAt: mediaItem.capturedAt,
+      addedById: mediaItem.addedById,
+    });
+
+    return { ...mediaItem, deduplicated: false as const, mediaItemId: mediaItem.id };
+  }
+
+  /**
+   * Best-effort cleanup of a redundant StorageObject and its blob.
+   *
+   * Called when a duplicate is detected (pre-check or P2002 race) so that the
+   * newly-uploaded but ultimately unused blob does not linger in storage.
+   *
+   * Both the blob delete and the DB row delete are wrapped independently: a
+   * failure in either only logs a warning rather than failing the parent request.
+   * The storage key is different from the original (it is the redundant one),
+   * so deleting it is safe.
+   */
+  /** Deletes one blob from the ACTIVE store (a redundant upload is never on another provider). */
+  private async deleteBlob(storageKey: string): Promise<void> {
+    const { store } = await this.objectStore.active();
+    await store.delete(storageKey);
+  }
+
+  private async cleanupRedundantStorageObject(
+    storageObjectId: string,
+    storageKey: string,
+  ): Promise<void> {
+    try {
+      await this.deleteBlob(storageKey);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to delete redundant blob (key=${storageKey}): ${msg} — continuing`,
+      );
+    }
+
+    try {
+      await this.prisma.storageObject.delete({ where: { id: storageObjectId } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Failed to delete redundant StorageObject row (id=${storageObjectId}): ${msg} — continuing`,
+      );
+    }
+  }
+
+  /**
+   * List caller's media with pagination and filters. Excludes soft-deleted items.
+   */
+  async listMedia(query: MediaQueryDto, userId: string, userPermissions: string[]) {
+    const {
+      circleId,
+      pageSize,
+      cursor,
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      albumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      sortBy,
+      sortOrder,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+      noFaces,
+      personId,
+      personIds,
+      peopleMatch,
+    } = query;
+
+    // Members: no extra filter (the `circle_id` keyset plan is unchanged). A non-member
+    // holding grants: the scope's media AND the records shared with them (RETRO-I3).
+    const grantWhere = await this.requireListScope(userId, userPermissions, circleId, 'media_item');
+
+    // Resolve which person filter to apply (personIds takes precedence over personId)
+    const effectivePersonIds =
+      personIds && personIds.length > 0
+        ? personIds
+        : personId
+          ? [personId]
+          : [];
+    const effectiveMode = peopleMatch ?? 'any';
+
+    // AND-compose the people fragment rather than spreading it: wherePeople in
+    // 'all' mode returns a top-level `AND`, which an object spread would use to
+    // REPLACE the builder's own `AND` array, silently dropping every other
+    // filter and widening the result set (#431).
+    const where = andWhere(
+      buildMediaWhere(circleId, {
+        type,
+        capturedAtFrom,
+        capturedAtTo,
+        albumId,
+        favorite,
+        tag,
+        country,
+        region,
+        locality,
+        place,
+        location,
+        contentHash,
+        cameraMake,
+        cameraModel,
+        sourceDeviceId,
+        sourceDeviceName,
+        missingGeo,
+        noFaces,
+        excludeArchived: true,
+      }),
+      effectivePersonIds.length > 0 ? wherePeople(effectivePersonIds, effectiveMode) : undefined,
+      grantWhere as MediaItemWhereInput | undefined,
+    );
+
+    const dir = sortOrder;
+    const orderBy = [
+      { [sortBy]: dir },
+      { id: dir },
+    ] as MediaItemOrderByWithRelationInput[];
+
+    // Keyset mode: page omitted → cursor-based pagination (no COUNT).
+    if (query.page === undefined) {
+      const rows = await this.prisma.mediaItem.findMany({
+        where,
+        orderBy,
+        take: pageSize + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      const hasMore = rows.length > pageSize;
+      const items = hasMore ? rows.slice(0, pageSize) : rows;
+      const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+      // Sign thumbnail URLs for all items with a single batched StorageObject
+      // query (thumbnailStorageKey is already embedded in item.metadata).
+      const itemsWithUrls =
+        await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+      return {
+        items: itemsWithUrls,
+        meta: { pageSize, nextCursor, hasMore },
+      };
+    }
+
+    // Legacy offset mode: explicit page number → offset pagination with COUNT.
+    const page = query.page;
+    const skip = (page - 1) * pageSize;
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy,
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+
+    // Sign thumbnail URLs for all items with a single batched StorageObject
+    // query (thumbnailStorageKey is already embedded in item.metadata).
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+    return {
+      items: itemsWithUrls,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Return ALL geotagged (takenLat + takenLng non-null) non-deleted media items
+   * for the caller — no pagination. Used by the map view.
+   *
+   * An optional `limit` caps the row count for preview callers (e.g. the map's
+   * cluster drawer, which renders only a couple dozen thumbnails out of a
+   * cluster's bbox). With the `capturedAt desc` ordering below that means "the
+   * most recent N in the box". When omitted, every matching point is returned.
+   *
+   * Applies the same ownership guard and geo/date/type filters as listMedia
+   * but returns only the fields needed to render map pins:
+   *   id, takenLat, takenLng, capturedAt, geoLocality, thumbnailUrl.
+   *
+   * thumbnailUrl is signed in parallel (same signThumb helper as listMedia).
+   */
+  async listLocations(
+    query: MediaLocationsQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<MediaLocation[]> {
+    const {
+      circleId,
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      albumId,
+      bbox,
+      limit,
+    } = query;
+
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    const where: MediaItemWhereInput = {
+      circleId,
+      // Must have coordinates; when a viewport bbox is supplied, merge the
+      // range constraints with the existing not-null guards.
+      takenLat: bbox
+        ? { not: null, gte: bbox.minLat, lte: bbox.maxLat }
+        : { not: null },
+      takenLng: bbox
+        ? { not: null, gte: bbox.minLng, lte: bbox.maxLng }
+        : { not: null },
+      // Exclude implausible (0,0) "Null Island" coordinates written by devices
+      // that failed to acquire a GPS fix — only when BOTH are exactly zero, so a
+      // legitimate photo on the equator or prime meridian is kept.
+      NOT: { takenLat: 0, takenLng: 0 },
+      // Exclude soft-deleted and archived items
+      deletedAt: null,
+      archivedAt: null,
+      // Optional album scope
+      ...(albumId && { albumItems: { some: { albumId } } }),
+      // Optional type filter
+      ...(type && { type }),
+      // Date range
+      ...(capturedAtFrom || capturedAtTo
+        ? {
+            capturedAt: {
+              ...(capturedAtFrom && { gte: capturedAtFrom }),
+              ...(capturedAtTo && { lte: capturedAtTo }),
+            },
+          }
+        : {}),
+      // Individual geo filters
+      ...(country
+        ? {
+            OR: [
+              {
+                geoCountry: { contains: country, mode: 'insensitive' as const },
+              },
+              {
+                geoCountryCode: { equals: country, mode: 'insensitive' as const },
+              },
+            ],
+          }
+        : {}),
+      ...(region
+        ? { geoAdmin1: { contains: region, mode: 'insensitive' as const } }
+        : {}),
+      ...(locality
+        ? { geoLocality: { contains: locality, mode: 'insensitive' as const } }
+        : {}),
+      ...(place
+        ? { geoPlaceName: { contains: place, mode: 'insensitive' as const } }
+        : {}),
+      // Combined free-text location search across all geo tiers
+      ...(location
+        ? {
+            OR: [
+              {
+                geoCountry: { contains: location, mode: 'insensitive' as const },
+              },
+              {
+                geoCountryCode: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                geoAdmin1: { contains: location, mode: 'insensitive' as const },
+              },
+              {
+                geoLocality: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                geoPlaceName: {
+                  contains: location,
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const rows = await this.prisma.mediaItem.findMany({
+      where,
+      select: {
+        id: true,
+        takenLat: true,
+        takenLng: true,
+        capturedAt: true,
+        geoLocality: true,
+        geoCanonicalLocality: true,
+      },
+      orderBy: { capturedAt: 'desc' },
+      // Optional preview bound. Absent (e.g. the album map view) => every point.
+      ...(limit !== undefined && { take: limit }),
+    });
+
+    // Lightweight map-pin payload — no per-row thumbnail signing. Thumbnails
+    // are fetched on demand in batches via getThumbnails().
+    //
+    // The pin LABEL is the canonical locality (Location Grouping, issue #374),
+    // so a map pin and the /places entry it belongs to read the same name. The
+    // response FIELD keeps its `geoLocality` name so no client changes.
+    return rows.map((row) => ({
+      id: row.id,
+      takenLat: row.takenLat as number,
+      takenLng: row.takenLng as number,
+      capturedAt: row.capturedAt,
+      geoLocality: row.geoCanonicalLocality ?? row.geoLocality,
+    }));
+  }
+
+  /**
+   * GET /api/media/locations/aggregate
+   *
+   * Server-side spatial clustering for the map view. Groups geotagged,
+   * non-deleted / non-archived items in the circle into a grid whose cell size
+   * is controlled by `precision` (decimal places of lat/lng rounding), returning
+   * one cluster per occupied cell with a representative sample id.
+   *
+   * Optional filters (date range, type, viewport bbox) narrow the set before
+   * grouping. All user input is parameterized; the only values embedded as
+   * numeric literals are the validated integers `precision` (legacy grid) or
+   * `zoom` (mercator grid) plus the code constant CLUSTER_CELL_PX.
+   *
+   * Two grid modes:
+   *  - `zoom` omitted (legacy): equirectangular grid via round(lat/lng, precision).
+   *    Cells shrink toward the poles because a degree of longitude covers less
+   *    ground at high latitude — kept for back-compat.
+   *  - `zoom` provided: Web-Mercator PIXEL-uniform grid. Points are projected to
+   *    the tile-pixel plane at the given zoom, then bucketed into
+   *    CLUSTER_CELL_PX-sized cells, so clusters are uniformly spaced on screen at
+   *    every latitude.
+   *
+   * In addition to the cell's centroid (avg lat/lng), each cluster reports the
+   * TRUE bounding box of its member points (minLat/maxLat/minLng/maxLng). The
+   * centroid alone carries no cell extent, so a client wanting to list "the
+   * photos in this cluster" had to guess a box around it — and a guess is
+   * hopeless here, since one 64px cell spans `90 / 2^zoom` degrees of longitude
+   * (hundreds of km at low zoom). Returning the real extent lets the client
+   * refetch the cell's actual photos via GET /api/media/locations?bbox=... The
+   * min/max aggregates ride along on the existing GROUP BY, so they cost no
+   * extra scan and add no bound parameters.
+   */
+  async aggregateLocations(
+    query: MediaLocationsAggregateQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<
+    Array<{
+      lat: number;
+      lng: number;
+      count: number;
+      sampleId: string;
+      minLat: number;
+      maxLat: number;
+      minLng: number;
+      maxLng: number;
+    }>
+  > {
+    const { circleId, precision, zoom, bbox, capturedAtFrom, capturedAtTo, type } = query;
+
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    // Build optional WHERE fragments; user input is always parameterized.
+    const fragments: ReturnType<typeof Prisma.sql>[] = [
+      capturedAtFrom ? Prisma.sql`AND captured_at >= ${capturedAtFrom}` : Prisma.empty,
+      capturedAtTo ? Prisma.sql`AND captured_at <= ${capturedAtTo}` : Prisma.empty,
+      type ? Prisma.sql`AND type::text = ${type}` : Prisma.empty,
+      bbox
+        ? Prisma.sql`AND taken_lat BETWEEN ${bbox.minLat} AND ${bbox.maxLat} AND taken_lng BETWEEN ${bbox.minLng} AND ${bbox.maxLng}`
+        : Prisma.empty,
+    ];
+
+    // Choose the SELECT/GROUP BY grid. Both share the WHERE clause + fragments +
+    // return mapping below. `precision` (0–5), `zoom` (0–22), and CLUSTER_CELL_PX
+    // are validated ints / a code constant — safe to embed as numeric literals;
+    // everything else stays a bound parameter.
+    const legacyGrid = Prisma.sql`
+      SELECT round(taken_lat::numeric, ${Prisma.raw(String(precision))}) AS gy,
+             round(taken_lng::numeric, ${Prisma.raw(String(precision))}) AS gx,
+             count(*)::int AS n,
+             avg(taken_lat) AS lat,
+             avg(taken_lng) AS lng,
+             min(taken_lat) AS min_lat,
+             max(taken_lat) AS max_lat,
+             min(taken_lng) AS min_lng,
+             max(taken_lng) AS max_lng,
+             min(id::text) AS sample_id
+    `;
+
+    const mercatorGrid = Prisma.sql`
+      SELECT floor( ((taken_lng + 180) / 360) * (256 * pow(2, ${Prisma.raw(String(zoom))})) / ${Prisma.raw(String(CLUSTER_CELL_PX))} ) AS cx,
+             floor( ( (1 - ln( tan(radians( least(greatest(taken_lat, -85.05112878), 85.05112878) ))
+                              + 1 / cos(radians( least(greatest(taken_lat, -85.05112878), 85.05112878) )) ) / pi()
+                     ) / 2 ) * (256 * pow(2, ${Prisma.raw(String(zoom))})) / ${Prisma.raw(String(CLUSTER_CELL_PX))} ) AS cy,
+             count(*)::int AS n,
+             avg(taken_lat) AS lat,
+             avg(taken_lng) AS lng,
+             min(taken_lat) AS min_lat,
+             max(taken_lat) AS max_lat,
+             min(taken_lng) AS min_lng,
+             max(taken_lng) AS max_lng,
+             min(id::text) AS sample_id
+    `;
+
+    const isMercator = zoom !== undefined;
+    const selectGrid = isMercator ? mercatorGrid : legacyGrid;
+    const groupBy = isMercator ? Prisma.sql`GROUP BY cx, cy` : Prisma.sql`GROUP BY gy, gx`;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        n: number;
+        lat: string | number;
+        lng: string | number;
+        min_lat: string | number;
+        max_lat: string | number;
+        min_lng: string | number;
+        max_lng: string | number;
+        sample_id: string;
+      }>
+    >(Prisma.sql`
+      ${selectGrid}
+      FROM media_items
+      WHERE circle_id = ${circleId}::uuid
+        AND deleted_at IS NULL AND archived_at IS NULL
+        AND taken_lat IS NOT NULL AND taken_lng IS NOT NULL
+        AND NOT (taken_lat = 0 AND taken_lng = 0)
+        ${Prisma.join(fragments, ' ')}
+      ${groupBy}
+    `);
+
+    return rows.map((row) => ({
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      count: row.n,
+      sampleId: row.sample_id,
+      minLat: Number(row.min_lat),
+      maxLat: Number(row.max_lat),
+      minLng: Number(row.min_lng),
+      maxLng: Number(row.max_lng),
+    }));
+  }
+
+  /**
+   * GET /api/media/locations/extent
+   *
+   * Computes the true geographic bounding box (min/max lat/lng) across ALL of
+   * the circle's geotagged, non-deleted/non-archived media items — not scoped
+   * to a viewport. Used by the frontend to frame the map's initial camera
+   * position on exactly the area the circle's photos cover, instead of
+   * deriving it from whatever an arbitrary default-viewport cluster fetch
+   * happens to return.
+   *
+   * Known limitation: plain MIN/MAX does not special-case a photo set that
+   * spans the antimeridian (e.g. Alaska + Fiji in the same circle) — that
+   * would require an antimeridian-aware bounding algorithm. This is
+   * deliberately out of scope for the primary use case (regional bounding: a
+   * city, a state, a country, a continent).
+   */
+  async getLocationsExtent(
+    query: MediaLocationsExtentQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ minLat: number; minLng: number; maxLat: number; maxLng: number; count: number } | null> {
+    const { circleId, capturedAtFrom, capturedAtTo, type } = query;
+
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const where: MediaItemWhereInput = {
+      circleId,
+      takenLat: { not: null },
+      takenLng: { not: null },
+      // Exclude implausible (0,0) "Null Island" coordinates written by devices
+      // that failed to acquire a GPS fix — only when BOTH are exactly zero, so a
+      // legitimate photo on the equator or prime meridian is kept.
+      NOT: { takenLat: 0, takenLng: 0 },
+      deletedAt: null,
+      archivedAt: null,
+      ...(type && { type }),
+      ...(capturedAtFrom || capturedAtTo
+        ? {
+            capturedAt: {
+              ...(capturedAtFrom && { gte: capturedAtFrom }),
+              ...(capturedAtTo && { lte: capturedAtTo }),
+            },
+          }
+        : {}),
+    };
+
+    const agg = await this.prisma.mediaItem.aggregate({
+      where,
+      _min: { takenLat: true, takenLng: true },
+      _max: { takenLat: true, takenLng: true },
+      _count: true,
+    });
+
+    if (agg._count === 0 || agg._min.takenLat == null || agg._min.takenLng == null) {
+      return null;
+    }
+
+    return {
+      minLat: agg._min.takenLat,
+      minLng: agg._min.takenLng,
+      maxLat: agg._max.takenLat as number,
+      maxLng: agg._max.takenLng as number,
+      count: agg._count,
+    };
+  }
+
+  /**
+   * GET /api/media/thumbnails
+   *
+   * Batched thumbnail signing for the map view (and any surface that needs many
+   * thumbnails at once). Given a set of media item ids in a circle, returns a
+   * signed thumbnail URL per requested id (null when the item has no thumbnail
+   * or the storage object row is missing).
+   *
+   * Storage-object rows are looked up in a single query, and providers are
+   * resolved once per (provider|bucket) group to avoid redundant resolver calls.
+   */
+  async getThumbnails(
+    query: MediaThumbnailsQueryDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ id: string; thumbnailUrl: string | null }>> {
+    const { circleId, ids } = query;
+
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const itemsWithUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      await this.prisma.mediaItem.findMany({
+        where: { id: { in: ids }, circleId },
+        select: { id: true, metadata: true },
+      }),
+    );
+
+    return itemsWithUrls.map((item) => ({
+      id: item.id,
+      thumbnailUrl: item.thumbnailUrl,
+    }));
+  }
+
+  /**
+   * Get one MediaItem. Ownership or media:read_any required.
+   *
+   * Returns the item with two additional signed-URL fields:
+   *   thumbnailUrl  — fresh signed URL for the thumbnail (null if no thumbnail)
+   *   downloadUrl   — fresh signed URL for the original full-res blob (null if
+   *                   the linked StorageObject row is missing)
+   *
+   * BigInt safety: we only select `storageKey` from StorageObject, so the
+   * BigInt `size` field never appears in the returned object.
+   */
+  async getMedia(id: string, userId: string, userPermissions: string[]) {
+    const item = await this.prisma.mediaItem.findUnique({
+      where: { id },
+      include: {
+        mediaTags: {
+          include: { tag: true },
+        },
+      },
+    });
+
+    if (!item || item.deletedAt !== null) {
+      throw new NotFoundException(`MediaItem with id ${id} not found`);
+    }
+
+    await this.requireRecord(userId, userPermissions, item.circleId, 'viewer', 'media_item', item.id);
+
+    // Fetch only the fields needed to sign the download URL (avoids spreading
+    // BigInt `size` into the response; storageProvider + bucket are needed to
+    // route signing through the correct per-object provider).
+    const storageObj = await this.prisma.storageObject.findUnique({
+      where: { id: item.storageObjectId },
+      select: { storageKey: true, storageProvider: true, bucket: true },
+    });
+
+    const [thumbnailUrl, downloadUrl] = await Promise.all([
+      this.signThumb(item.metadata),
+      storageObj
+        ? this.objectStore
+            .forLocation(storageObj.storageProvider, storageObj.bucket)
+            .then((p) => p.getSignedDownloadUrl(storageObj.storageKey))
+        : Promise.resolve(null),
+    ]);
+
+    const { mediaTags, ...rest } = item;
+
+    return {
+      ...rest,
+      tags: mediaTags.map((mt: any) => mt.tag.name),
+      thumbnailUrl,
+      downloadUrl,
+    };
+  }
+
+  /**
+   * Update mutable fields on a MediaItem.
+   */
+  async updateMedia(
+    id: string,
+    dto: UpdateMediaDto,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const item = await this.getMediaWithOwnershipCheck(
+      id,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    const updated = await this.prisma.mediaItem.update({
+      where: { id: item.id },
+      data: {
+        ...(dto.capturedAt !== undefined && { capturedAt: dto.capturedAt }),
+        ...(dto.capturedAtOffset !== undefined && {
+          capturedAtOffset: dto.capturedAtOffset,
+        }),
+        ...(dto.metadata !== undefined && {
+          metadata:
+            dto.metadata !== null
+              ? (dto.metadata as InputJsonValue)
+              : Prisma.JsonNull,
+        }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.favorite !== undefined && { favorite: dto.favorite }),
+      },
+    });
+
+    this.logger.log(`MediaItem updated: ${id} by user ${userId}`);
+
+    return updated;
+  }
+
+  /**
+   * Soft-delete a MediaItem. Sets deletedAt; does NOT touch the StorageObject.
+   */
+  async deleteMedia(id: string, userId: string, userPermissions: string[]) {
+    // A grantee never trashes a record: the policy's `delete` needs the owner.
+    const item = await this.getMediaWithOwnershipCheck(
+      id,
+      userId,
+      userPermissions,
+      'editor',
+      'delete',
+    );
+
+    await this.prisma.mediaItem.update({
+      where: { id: item.id },
+      data: { deletedAt: new Date() },
+    });
+
+    this.logger.log(`MediaItem soft-deleted: ${id} by user ${userId}`);
+    // Webhook `media.item.trashed` (RETRO-H4), after the write committed; batched, never throws.
+    this.webhookEvents?.mediaTrashed(item.circleId, [item.id]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tag endpoints
+  // ---------------------------------------------------------------------------
+
+  /**
+   * List the caller's tags with the count of active (non-deleted) MediaItems attached.
+   */
+  async listTags(circleId: string, userId: string, userPermissions: string[]) {
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    const tags = await this.prisma.tag.findMany({
+      where: { circleId },
+      include: {
+        _count: {
+          select: {
+            mediaTags: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return tags.map((t) => ({
+      id: t.id,
+      name: t.name,
+      createdAt: t.createdAt,
+      count: t._count.mediaTags,
+    }));
+  }
+
+  /**
+   * Attach one or more tags (by name) to a MediaItem. Creates Tag rows idempotently.
+   */
+  async attachTags(
+    mediaItemId: string,
+    dto: AttachTagsDto,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const item = await this.getMediaWithOwnershipCheck(
+      mediaItemId,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    const result: Array<{ tagId: string; name: string }> = [];
+
+    for (const name of dto.names) {
+      // Upsert Tag (idempotent per circleId + name unique constraint)
+      const tag = await this.prisma.tag.upsert({
+        where: { circleId_name: { circleId: item.circleId, name } },
+        create: { addedById: userId, circleId: item.circleId, name },
+        update: {},
+      });
+
+      // Upsert MediaTag join; create as manual. On conflict, promote only an
+      // AI-applied row to manual — never downgrade a 'system' row (e.g. the
+      // social-media detection tags) or touch an existing 'manual' row.
+      await this.prisma.mediaTag.upsert({
+        where: { tagId_mediaItemId: { tagId: tag.id, mediaItemId: item.id } },
+        create: { tagId: tag.id, mediaItemId: item.id, source: 'manual' },
+        update: {},
+      });
+      await this.prisma.mediaTag.updateMany({
+        where: { tagId: tag.id, mediaItemId: item.id, source: 'ai' },
+        data: { source: 'manual' },
+      });
+
+      result.push({ tagId: tag.id, name: tag.name });
+    }
+
+    // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
+    await this.mediaTouch.touchMediaItems([item.id]);
+    this.metrics?.add('mediaTagsApplied', result.length, { media_type: item.type, source: 'manual' });
+
+    this.logger.log(
+      `Attached ${dto.names.length} tag(s) to MediaItem ${mediaItemId}`,
+    );
+
+    return result;
+  }
+
+  /**
+   * Remove a tag from a MediaItem (removes the MediaTag join only; Tag record persists).
+   */
+  async removeTag(
+    mediaItemId: string,
+    tagId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    await this.getMediaWithOwnershipCheck(
+      mediaItemId,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    const mediaTag = await this.prisma.mediaTag.findUnique({
+      where: { tagId_mediaItemId: { tagId, mediaItemId } },
+    });
+
+    if (!mediaTag) {
+      throw new NotFoundException(
+        `Tag ${tagId} is not attached to media item ${mediaItemId}`,
+      );
+    }
+
+    await this.prisma.mediaTag.delete({
+      where: { tagId_mediaItemId: { tagId, mediaItemId } },
+    });
+
+    // Backup change feed: tag joins don't touch the MediaItem row (issue #310).
+    await this.mediaTouch.touchMediaItems([mediaItemId]);
+
+    this.logger.log(`Removed tag ${tagId} from MediaItem ${mediaItemId}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Album CRUD
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Create a new album owned by the caller.
+   */
+  async createAlbum(dto: CreateAlbumDto, userId: string, userPermissions: string[]) {
+    await this.access.requireOwnerRole(userId, dto.circleId, userPermissions, 'editor');
+
+    const album = await this.prisma.album.create({
+      data: {
+        addedById: userId,
+        circleId: dto.circleId,
+        name: dto.name,
+        description: dto.description ?? null,
+      },
+    });
+
+    this.logger.log(`Album created: ${album.id} by user ${userId}`);
+
+    return album;
+  }
+
+  /**
+   * List caller's albums with pagination.
+   */
+  async listAlbums(query: AlbumQueryDto, userId: string, userPermissions: string[]) {
+    const { circleId, page, pageSize, sortBy, sortOrder } = query;
+    const skip = (page - 1) * pageSize;
+
+    const grantWhere = await this.requireListScope(userId, userPermissions, circleId, 'album');
+
+    const where: AlbumWhereInput = grantWhere
+      ? { AND: [{ circleId }, grantWhere as AlbumWhereInput] }
+      : { circleId };
+
+    const [albums, totalItems] = await Promise.all([
+      this.prisma.album.findMany({
+        where,
+        orderBy: { [sortBy]: sortOrder },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.album.count({ where }),
+    ]);
+
+    const items = await this.enrichAlbums(albums);
+
+    return {
+      items,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Enrich albums with an item count, a resolved cover thumbnail, and the
+   * captured-at date range across their non-deleted / non-archived members.
+   */
+  private async enrichAlbums<A extends { id: string; coverMediaItemId: string | null }>(albums: A[]) {
+    // Enrich each album with an item count, a resolved cover thumbnail, and the
+    // captured-at date range across its non-deleted / non-archived members.
+    return Promise.all(
+      albums.map(async (album) => {
+        const memberWhere: MediaItemWhereInput = {
+          albumItems: { some: { albumId: album.id } },
+          deletedAt: null,
+          archivedAt: null,
+        };
+
+        const [agg, coverThumbnailUrl] = await Promise.all([
+          this.prisma.mediaItem.aggregate({
+            where: memberWhere,
+            _count: { _all: true },
+            _min: { capturedAt: true },
+            _max: { capturedAt: true },
+          }),
+          this.resolveAlbumCoverThumb(album.id, album.coverMediaItemId),
+        ]);
+
+        const min = agg._min.capturedAt;
+        const max = agg._max.capturedAt;
+        const dateRange =
+          min && max
+            ? { min: min.toISOString(), max: max.toISOString() }
+            : null;
+
+        return {
+          ...album,
+          itemCount: agg._count._all,
+          coverMediaItemId: album.coverMediaItemId,
+          coverThumbnailUrl,
+          dateRange,
+        };
+      }),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared with me (RETRO-I6, #588)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The media items shared with the caller through grants (user or group
+   * grants on `media_item`), across every owner scope, newest capture first.
+   * Only records granted to the caller: a member's own libraries are not
+   * repeated here. An empty page when nothing is shared.
+   */
+  async listSharedMedia(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
+    const { page, pageSize } = query;
+    const shared = await this.access.sharedWhere(userId, userPermissions, 'media_item');
+    if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
+    const where: MediaItemWhereInput = { AND: [shared as MediaItemWhereInput, { deletedAt: null }] };
+    const [rows, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: [{ capturedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+    const items = await this.mediaThumbnailService.attachThumbnailUrls(rows);
+    return { items, meta: { page, pageSize, totalItems, totalPages: Math.ceil(totalItems / pageSize) } };
+  }
+
+  /** The albums shared with the caller through grants, newest first; same item shape as `listAlbums`. */
+  async listSharedAlbums(query: SharedWithMeQueryDto, userId: string, userPermissions: string[]) {
+    const { page, pageSize } = query;
+    const shared = await this.access.sharedWhere(userId, userPermissions, 'album');
+    if (!shared) return { items: [], meta: { page, pageSize, totalItems: 0, totalPages: 0 } };
+    const where = shared as AlbumWhereInput;
+    const [albums, totalItems] = await Promise.all([
+      this.prisma.album.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.album.count({ where }),
+    ]);
+    const items = await this.enrichAlbums(albums);
+    return { items, meta: { page, pageSize, totalItems, totalPages: Math.ceil(totalItems / pageSize) } };
+  }
+
+  /**
+   * Get one album (with its items). Ownership or media:read_any required.
+   */
+  async getAlbum(id: string, userId: string, userPermissions: string[]) {
+    const album = await this.prisma.album.findUnique({
+      where: { id },
+      include: {
+        items: {
+          where: { mediaItem: { deletedAt: null, archivedAt: null } },
+          include: { mediaItem: true },
+          orderBy: { addedAt: 'asc' },
+        },
+      },
+    });
+
+    if (!album) {
+      throw new NotFoundException(`Album with id ${id} not found`);
+    }
+
+    await this.requireRecord(userId, userPermissions, album.circleId, 'viewer', 'album', album.id);
+
+    // Flatten AlbumItem join rows into full MediaItem-shaped objects, each with
+    // a signed thumbnailUrl (matching listMedia / listLocations item shape).
+    const { items: albumItems, ...albumFields } = album;
+    const items = await this.mediaThumbnailService.attachThumbnailUrls(
+      albumItems.map((ai: any) => ai.mediaItem),
+    );
+
+    const coverThumbnailUrl = await this.resolveAlbumCoverThumb(
+      album.id,
+      album.coverMediaItemId,
+    );
+
+    return {
+      ...albumFields,
+      coverMediaItemId: album.coverMediaItemId,
+      coverThumbnailUrl,
+      items,
+    };
+  }
+
+  /**
+   * Update an album's mutable fields.
+   */
+  async updateAlbum(
+    id: string,
+    dto: UpdateAlbumDto,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const album = await this.getAlbumWithOwnershipCheck(
+      id,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    // Resolve the cover pointer only when the field was actually supplied.
+    // Omitted → leave existing cover untouched; null → clear; UUID → validate
+    // that the item is a member of this album before persisting.
+    const coverProvided = 'coverMediaItemId' in dto;
+    if (coverProvided && dto.coverMediaItemId != null) {
+      const member = await this.prisma.albumItem.findFirst({
+        where: { albumId: album.id, mediaItemId: dto.coverMediaItemId },
+        select: { id: true },
+      });
+      if (!member) {
+        throw new BadRequestException(
+          'Cover photo must be an item in this album',
+        );
+      }
+    }
+
+    const updated = await this.prisma.album.update({
+      where: { id: album.id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(coverProvided && { coverMediaItemId: dto.coverMediaItemId ?? null }),
+      },
+    });
+
+    // Backup change feed: sidecars embed album names, so a rename must surface
+    // every member item in the incremental scan (issue #310). Renames are rare;
+    // an updateMany over thousands of members is acceptable.
+    if (dto.name !== undefined && dto.name !== album.name) {
+      await this.touchAlbumMembers(album.id);
+    }
+
+    this.logger.log(`Album updated: ${id} by user ${userId}`);
+
+    return updated;
+  }
+
+  /**
+   * Delete an album and its AlbumItem joins. Does NOT delete MediaItems.
+   */
+  async deleteAlbum(id: string, userId: string, userPermissions: string[]) {
+    await this.getAlbumWithOwnershipCheck(
+      id,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    // Backup change feed: capture member ids BEFORE the cascade removes the
+    // join rows — the members' sidecars lose this album (issue #310).
+    // Best-effort: a lookup failure must never block the delete.
+    let memberIds: string[] = [];
+    try {
+      const rows = await this.prisma.albumItem.findMany({
+        where: { albumId: id },
+        select: { mediaItemId: true },
+      });
+      memberIds = (rows ?? []).map((m) => m.mediaItemId);
+    } catch {
+      // swallowed — feed bookkeeping only
+    }
+
+    // Cascade in the schema deletes AlbumItems when Album is deleted. The
+    // album's grants (user, group and link) go in the SAME transaction: a grant
+    // has no foreign key to its record (RETRO-I6, #588).
+    await this.prisma.$transaction(async (tx) => {
+      await tx.album.delete({ where: { id } });
+      await this.access.deleteGrantsFor(tx, 'album', [id]);
+    });
+
+    await this.mediaTouch.touchMediaItems(memberIds);
+
+    this.logger.log(`Album deleted: ${id} by user ${userId}`);
+  }
+
+  /**
+   * Add MediaItems to an album (idempotent for existing joins).
+   */
+  async addAlbumItems(
+    albumId: string,
+    dto: AddAlbumItemsDto,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    const album = await this.getAlbumWithOwnershipCheck(
+      albumId,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    // Verify all mediaItemIds exist and belong to the same circle
+    const mediaItems = await this.prisma.mediaItem.findMany({
+      where: {
+        id: { in: dto.mediaItemIds },
+        deletedAt: null,
+        circleId: album.circleId,
+      },
+    });
+
+    if (mediaItems.length !== dto.mediaItemIds.length) {
+      const foundIds = new Set(mediaItems.map((m) => m.id));
+      const missing = dto.mediaItemIds.filter((id) => !foundIds.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
+    }
+
+    const created: Array<{ id: string; albumId: string; mediaItemId: string; addedAt: Date }> = [];
+
+    for (const mediaItemId of dto.mediaItemIds) {
+      const item = await this.prisma.albumItem.upsert({
+        where: { albumId_mediaItemId: { albumId: album.id, mediaItemId } },
+        create: { albumId: album.id, mediaItemId },
+        update: {},
+      });
+      created.push(item);
+    }
+
+    // Backup change feed: AlbumItem joins don't bump MediaItem.updatedAt (issue #310).
+    await this.mediaTouch.touchMediaItems(dto.mediaItemIds);
+
+    this.logger.log(
+      `Added ${dto.mediaItemIds.length} item(s) to album ${albumId}`,
+    );
+
+    return created;
+  }
+
+  /**
+   * Add all MediaItems matching a filter set to an album (idempotent for existing joins).
+   * Forces the effective circleId to match the album's circle, ignoring any client-supplied mismatch.
+   */
+  async addAlbumItemsByFilter(
+    albumId: string,
+    dto: AddAlbumItemsByFilterDto,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{ added: number }> {
+    const album = await this.getAlbumWithOwnershipCheck(albumId, userId, userPermissions, 'editor');
+
+    // Force the circle to match the album's circle — ignore any client-supplied circleId mismatch
+    const {
+      type,
+      capturedAtFrom,
+      capturedAtTo,
+      albumId: filterAlbumId,
+      favorite,
+      tag,
+      country,
+      region,
+      locality,
+      place,
+      location,
+      contentHash,
+      cameraMake,
+      cameraModel,
+      sourceDeviceId,
+      sourceDeviceName,
+      missingGeo,
+      noFaces,
+      personId,
+      personIds,
+      peopleMatch,
+    } = dto;
+
+    // Same composition rule as listMedia above — and it matters more here,
+    // because this path WRITES: a widened match set is added to the album (#431).
+    const where = andWhere(
+      buildMediaWhere(album.circleId, {
+        type,
+        capturedAtFrom,
+        capturedAtTo,
+        albumId: filterAlbumId,
+        favorite,
+        tag,
+        country,
+        region,
+        locality,
+        place,
+        location,
+        contentHash,
+        cameraMake,
+        cameraModel,
+        sourceDeviceId,
+        sourceDeviceName,
+        missingGeo,
+        noFaces,
+        excludeArchived: true,
+      }),
+      (() => {
+        const effectivePersonIds =
+          personIds && personIds.length > 0
+            ? personIds
+            : personId
+              ? [personId]
+              : [];
+        const effectiveMode = peopleMatch ?? 'any';
+        return effectivePersonIds.length > 0
+          ? wherePeople(effectivePersonIds, effectiveMode)
+          : undefined;
+      })(),
+    );
+
+    const matches = await this.prisma.mediaItem.findMany({
+      where,
+      select: { id: true },
+    });
+
+    // Batch inserts in chunks of 1000
+    const CHUNK_SIZE = 1000;
+    let totalAdded = 0;
+    for (let i = 0; i < matches.length; i += CHUNK_SIZE) {
+      const chunk = matches.slice(i, i + CHUNK_SIZE);
+      const result = await this.prisma.albumItem.createMany({
+        data: chunk.map((m) => ({ albumId: album.id, mediaItemId: m.id })),
+        skipDuplicates: true,
+      });
+      totalAdded += result.count;
+    }
+
+    // Backup change feed (issue #310). skipDuplicates hides which rows were
+    // actually inserted, so touch the whole matched set when anything landed —
+    // an over-touch only re-syncs an unchanged sidecar, never loses a change.
+    if (totalAdded > 0) {
+      await this.mediaTouch.touchMediaItems(matches.map((m) => m.id));
+    }
+
+    this.logger.log(`Added ${totalAdded} item(s) to album ${albumId} by filter`);
+    return { added: totalAdded };
+  }
+
+  /**
+   * Backup change feed helper (issue #310): touch every member item of an
+   * album. Best-effort — a lookup failure is logged and swallowed so backup
+   * bookkeeping can never fail the triggering album mutation.
+   */
+  private async touchAlbumMembers(albumId: string): Promise<void> {
+    try {
+      const members = await this.prisma.albumItem.findMany({
+        where: { albumId },
+        select: { mediaItemId: true },
+      });
+      await this.mediaTouch.touchMediaItems(
+        (members ?? []).map((m) => m.mediaItemId),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `touchAlbumMembers failed for album ${albumId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Remove a MediaItem from an album.
+   */
+  async removeAlbumItem(
+    albumId: string,
+    itemId: string,
+    userId: string,
+    userPermissions: string[],
+  ) {
+    await this.getAlbumWithOwnershipCheck(
+      albumId,
+      userId,
+      userPermissions,
+      'editor',
+    );
+
+    const albumItem = await this.prisma.albumItem.findUnique({
+      where: { albumId_mediaItemId: { albumId, mediaItemId: itemId } },
+    });
+
+    if (!albumItem) {
+      throw new NotFoundException(
+        `MediaItem ${itemId} is not in album ${albumId}`,
+      );
+    }
+
+    await this.prisma.albumItem.delete({
+      where: { albumId_mediaItemId: { albumId, mediaItemId: itemId } },
+    });
+
+    // Backup change feed: AlbumItem joins don't bump MediaItem.updatedAt (issue #310).
+    await this.mediaTouch.touchMediaItems([itemId]);
+
+    this.logger.log(
+      `Removed MediaItem ${itemId} from album ${albumId} by user ${userId}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Metadata export (streaming, cursor-based)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Stream all MediaItem metadata for the target owner in JSON (NDJSON) or CSV format.
+   *
+   * Ownership resolution:
+   *   - If dto.ownerId is provided and differs from userId → requires MEDIA_READ_ANY.
+   *   - If dto.ownerId is omitted → target = userId (own records only).
+   *   - If caller holds MEDIA_READ_ANY and sets ownerId → use ownerId as target.
+   *
+   * The 403 check is performed BEFORE any response bytes are written so the
+   * Nest exception filter can still produce a proper error response.
+   *
+   * BigInt safety: storageObject.size is a PostgreSQL bigint (Prisma maps it
+   * to JS BigInt). We convert it to Number via Number(size) before any
+   * JSON.stringify call so we never hit the "BigInt cannot be serialised"
+   * TypeError.
+   */
+  async streamExport(
+    dto: ExportQueryDto,
+    userId: string,
+    userPermissions: string[],
+    res: MediaReply,
+  ): Promise<void> {
+    // ------------------------------------------------------------------
+    // 1. Circle access check (MUST happen before first write)
+    // ------------------------------------------------------------------
+    const { circleId, type, from, to } = dto;
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    // ------------------------------------------------------------------
+    // 2. Build Prisma where clause
+    // ------------------------------------------------------------------
+    const where: MediaItemWhereInput = {
+      circleId,
+      deletedAt: null,
+      ...(type && { type }),
+      ...((from ?? to)
+        ? {
+            capturedAt: {
+              ...(from && { gte: from }),
+              ...(to && { lte: to }),
+            },
+          }
+        : {}),
+    };
+
+    // ------------------------------------------------------------------
+    // 3. Set streaming response headers (before first write)
+    // ------------------------------------------------------------------
+    const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const isJson = dto.format === 'json';
+    const ext = isJson ? 'json' : 'csv';
+    const contentType = isJson
+      ? 'application/json'
+      : 'text/csv; charset=utf-8';
+
+    if (!isJson && !this.csv) throw new ServiceUnavailableException('CSV export is not available');
+
+    res.raw.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="memoriahub-export-${dateStr}.${ext}"`,
+      'Transfer-Encoding': 'chunked',
+    });
+
+    // ------------------------------------------------------------------
+    // 4. Stream records using cursor-based pagination (no full-load)
+    // ------------------------------------------------------------------
+    const BATCH_SIZE = 100;
+
+    /** Build the export-record object from a raw Prisma row. */
+    const toRecord = (item: {
+      id: string;
+      originalFilename: string;
+      type: string;
+      capturedAt: Date | null;
+      importedAt: Date;
+      source: string;
+      width: number | null;
+      height: number | null;
+      durationMs: number | null;
+      takenLat: number | null;
+      takenLng: number | null;
+      cameraMake: string | null;
+      cameraModel: string | null;
+      contentHash: string | null;
+      metadata: JsonValue | null;
+      storageObject: {
+        storageProvider: string;
+        storageKey: string;
+        size: bigint;
+      } | null;
+    }) => ({
+      id: item.id,
+      originalFilename: item.originalFilename,
+      type: item.type,
+      capturedAt: item.capturedAt?.toISOString() ?? null,
+      importedAt: item.importedAt.toISOString(),
+      source: item.source,
+      width: item.width,
+      height: item.height,
+      durationMs: item.durationMs,
+      takenLat: item.takenLat,
+      takenLng: item.takenLng,
+      cameraMake: item.cameraMake,
+      cameraModel: item.cameraModel,
+      contentHash: item.contentHash,
+      metadata: item.metadata ?? {},
+      storage: item.storageObject
+        ? {
+            provider: item.storageObject.storageProvider,
+            key: item.storageObject.storageKey,
+            // Convert BigInt → Number before serialisation
+            size: Number(item.storageObject.size),
+          }
+        : null,
+    });
+
+    if (isJson) {
+      // ----------------------------------------------------------------
+      // JSON path: newline-delimited JSON (NDJSON), one object per line
+      // ----------------------------------------------------------------
+      let cursor: string | undefined;
+      let done = false;
+
+      while (!done) {
+        const batch = await this.prisma.mediaItem.findMany({
+          where,
+          include: {
+            storageObject: {
+              select: {
+                storageProvider: true,
+                storageKey: true,
+                size: true,
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: BATCH_SIZE,
+          ...(cursor
+            ? { cursor: { id: cursor }, skip: 1 }
+            : {}),
+        });
+
+        for (const item of batch) {
+          const record = toRecord(item);
+          res.raw.write(JSON.stringify(record) + '\n');
+        }
+
+        if (batch.length < BATCH_SIZE) {
+          done = true;
+        } else {
+          cursor = batch[batch.length - 1].id;
+        }
+      }
+
+      res.raw.end();
+    } else {
+      // ----------------------------------------------------------------
+      // CSV path: RFC 4180 via csv-stringify streaming API
+      // ----------------------------------------------------------------
+      const CSV_COLUMNS = [
+        'id',
+        'originalFilename',
+        'type',
+        'capturedAt',
+        'importedAt',
+        'source',
+        'width',
+        'height',
+        'durationMs',
+        'takenLat',
+        'takenLng',
+        'cameraMake',
+        'cameraModel',
+        'contentHash',
+        'storage_provider',
+        'storage_key',
+        'storage_size',
+        'metadata',
+      ] as const;
+
+      const stringifier = this.csv!.create(CSV_COLUMNS as unknown as string[]);
+
+      // Pipe the stringifier output into the raw Node response stream.
+      stringifier.pipe(res.raw);
+
+      let cursor: string | undefined;
+      let done = false;
+
+      while (!done) {
+        const batch = await this.prisma.mediaItem.findMany({
+          where,
+          include: {
+            storageObject: {
+              select: {
+                storageProvider: true,
+                storageKey: true,
+                size: true,
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take: BATCH_SIZE,
+          ...(cursor
+            ? { cursor: { id: cursor }, skip: 1 }
+            : {}),
+        });
+
+        for (const item of batch) {
+          const record = toRecord(item);
+          // Flatten nested storage.* and serialize metadata as JSON string
+          stringifier.write({
+            id: record.id,
+            originalFilename: record.originalFilename,
+            type: record.type,
+            capturedAt: record.capturedAt,
+            importedAt: record.importedAt,
+            source: record.source,
+            width: record.width,
+            height: record.height,
+            durationMs: record.durationMs,
+            takenLat: record.takenLat,
+            takenLng: record.takenLng,
+            cameraMake: record.cameraMake,
+            cameraModel: record.cameraModel,
+            contentHash: record.contentHash,
+            storage_provider: record.storage?.provider ?? null,
+            storage_key: record.storage?.key ?? null,
+            storage_size: record.storage?.size ?? null,
+            metadata: JSON.stringify(record.metadata ?? {}),
+          });
+        }
+
+        if (batch.length < BATCH_SIZE) {
+          done = true;
+        } else {
+          cursor = batch[batch.length - 1].id;
+        }
+      }
+
+      // Signal end; 'finish' on the underlying stream closes res.raw
+      stringifier.end();
+    }
+
+    this.logger.log(
+      `Media export (${dto.format}) streamed for circle ${circleId} by user ${userId}`,
+    );
+  }
+
+  /** Reverse-geocodes a coordinate pair through the active provider (`GET /api/media/geo/reverse`). */
+  async reverseGeocodeOnDemand(lat: number, lng: number) {
+    return this.geoProvider.reverseGeocode(lat, lng);
+  }
+
+  /** Searches places by typed text through the forward geocoder (`GET /api/media/geo/search`). */
+  async searchPlaces(q: string, limit: number) {
+    return this.forwardGeocodeService.searchPlaces(q, limit);
+  }
+
+  /**
+   * Review-queue counts for a circle — the four pending* integers the dashboard
+   * exposes under `counts`, with none of its On This Day / recent / favorites
+   * payload and no thumbnail signing.
+   *
+   * Backs GET /api/media/review-counts, which exists so a client that only needs
+   * a nav badge does not have to pull the whole dashboard aggregation.
+   *
+   * The counts themselves come from computeReviewCounts(), shared verbatim with
+   * getDashboard so the two endpoints cannot drift. The circle access check
+   * lives here rather than in the shared helper so getDashboard (which runs its
+   * own) never pays for a second circle-membership lookup.
+   */
+  async getReviewCounts(query: ReviewCountsQueryDto, userId: string, perms: string[]) {
+    const { circleId } = query;
+
+    await this.access.requireOwnerRole(userId, circleId, perms, 'viewer');
+
+    return this.computeReviewCounts(circleId);
+  }
+
+  /**
+   * Single implementation of the four review-queue counts, shared by
+   * getReviewCounts and getDashboard. Callers are responsible for the circle
+   * access check.
+   *
+   * PUBLIC (issue #246) so the notification review-queue reconcile can consume
+   * the same four integers rather than opening a parallel counting path that
+   * could drift from the dashboard's. It stays access-check-free by design —
+   * the reconcile is a server-side sweep with no requesting user, and the two
+   * HTTP callers above run their own membership check.
+   */
+  async computeReviewCounts(circleId: string) {
+    // Load burst minGroupSize from system settings for the burst count filter
+    const burstSettings = await this.prisma.systemSettings.findUnique({
+      where: { key: 'global' },
+      select: { value: true },
+    });
+    const burstValue = (burstSettings?.value as Record<string, unknown> | null) ?? {};
+    const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
+    const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
+
+    const [
+      pendingBurstGroups,
+      pendingDuplicateGroups,
+      pendingLocationSuggestions,
+      pendingEnhancements,
+    ] = await Promise.all([
+      this.prisma.burstGroup.count({
+        where: {
+          circleId,
+          status: 'pending',
+          mediaCount: { gte: burstMinGroupSize },
+        },
+      }),
+      this.prisma.duplicateGroup.count({
+        where: {
+          circleId,
+          status: 'pending',
+        },
+      }),
+      this.prisma.locationSuggestion.count({
+        where: {
+          circleId,
+          status: 'pending',
+        },
+      }),
+      // "Pending review" for an enhancement means STAGED and awaiting a human
+      // keep-both/replace/discard decision — i.e. `ready`. The `pending` status
+      // means "queued for the model" and is not user-actionable, so it is
+      // deliberately excluded. Served by the existing @@index([circleId, status]).
+      this.prisma.mediaEnhancement.count({
+        where: {
+          circleId,
+          status: 'ready',
+        },
+      }),
+    ]);
+
+    return {
+      pendingBurstGroups,
+      pendingDuplicateGroups,
+      pendingLocationSuggestions,
+      pendingEnhancements,
+    };
+  }
+
+  /** The circle dashboard: On This Day, recent, favorites and the review-queue counts. */
+  async getDashboard(query: DashboardQueryDto, userId: string, perms: string[]) {
+    const { circleId } = query;
+
+    await this.access.requireOwnerRole(userId, circleId, perms, 'viewer');
+
+    const now = new Date();
+    const month = now.getUTCMonth() + 1; // 1-12
+    const day = now.getUTCDate();        // 1-31
+
+    // On This Day: raw SQL query using the functional index on
+    // EXTRACT(MONTH/DAY FROM (captured_at AT TIME ZONE 'UTC')).
+    // The AT TIME ZONE 'UTC' cast converts timestamptz → timestamp so that
+    // EXTRACT is IMMUTABLE and the index expression matches exactly.
+    // month/day are computed via getUTCMonth()/getUTCDate() above, so UTC
+    // semantics are consistent between the index and this query.
+    const onThisDayRaw = await this.prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT id FROM media_items
+        WHERE circle_id = ${circleId}::uuid
+          AND deleted_at IS NULL
+          AND archived_at IS NULL
+          AND captured_at IS NOT NULL
+          AND EXTRACT(MONTH FROM (captured_at AT TIME ZONE 'UTC')) = ${month}
+          AND EXTRACT(DAY FROM (captured_at AT TIME ZONE 'UTC')) = ${day}
+        ORDER BY captured_at DESC
+        LIMIT 24
+      `,
+    );
+
+    const onThisDayIds = onThisDayRaw.map((r) => r.id);
+
+    const [
+      onThisDayItems,
+      recentItems,
+      favoriteItems,
+      totalCount,
+      missingGeoCount,
+      reviewCounts,
+    ] =
+      await Promise.all([
+        onThisDayIds.length > 0
+          ? this.prisma.mediaItem.findMany({
+              where: { id: { in: onThisDayIds } },
+              orderBy: { capturedAt: 'desc' },
+            })
+          : Promise.resolve([]),
+        this.prisma.mediaItem.findMany({
+          where: { circleId, deletedAt: null, archivedAt: null },
+          orderBy: { importedAt: 'desc' },
+          take: 12,
+        }),
+        this.prisma.mediaItem.findMany({
+          where: { circleId, deletedAt: null, archivedAt: null, favorite: true },
+          orderBy: { capturedAt: 'desc' },
+          take: 12,
+        }),
+        this.prisma.mediaItem.count({ where: { circleId, deletedAt: null, archivedAt: null } }),
+        this.prisma.mediaItem.count({
+          where: { circleId, deletedAt: null, archivedAt: null, takenLat: null },
+        }),
+        // Shared with GET /api/media/review-counts — see computeReviewCounts().
+        // Kept inside this Promise.all so the review-queue counts still run
+        // concurrently with the item queries above.
+        this.computeReviewCounts(circleId),
+      ]);
+
+    const [onThisDay, recent, favorites] = await Promise.all([
+      this.mediaThumbnailService.attachThumbnailUrls(onThisDayItems),
+      this.mediaThumbnailService.attachThumbnailUrls(recentItems),
+      this.mediaThumbnailService.attachThumbnailUrls(favoriteItems),
+    ]);
+
+    return {
+      onThisDay,
+      recent,
+      favorites,
+      // The pending* review-queue counts live INSIDE `counts` because that is the
+      // client contract: the web app types them under `counts` and reads
+      // `data.counts.pendingBurstGroups` (see apps/web/src/types/media.ts and
+      // HomePage.tsx). Emitting them at the top level left every Home
+      // review-queue banner permanently hidden.
+      counts: {
+        total: totalCount,
+        missingGeo: missingGeoCount,
+        ...reviewCounts,
+      },
+    };
+  }
+
+  /** Bulk-updates the location, favorite flag or capture date of 1 to 500 items (collaborator role). */
+  async bulkUpdateMedia(
+    dto: BulkUpdateMediaDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ updated: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    const data: Record<string, unknown> = {};
+
+    if (dto.set.favorite !== undefined) {
+      data['favorite'] = dto.set.favorite;
+    }
+
+    if (dto.set.location === null) {
+      Object.assign(data, GEO_CLEAR_COLUMNS);
+    } else if (dto.set.location !== undefined) {
+      const { lat, lng, altitude } = dto.set.location;
+      Object.assign(
+        data,
+        await applyLocation(
+          this.geoProvider,
+          lat,
+          lng,
+          altitude,
+          'manual',
+          this.locationGroupResolver,
+        ),
+      );
+    }
+
+    if (dto.set.capturedAt !== undefined) {
+      data['capturedAt'] = dto.set.capturedAt; // Date | null (coerced by the DTO)
+    }
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data,
+    });
+
+    this.logger.log(
+      `bulkUpdateMedia: updated ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+
+    return { updated: count };
+  }
+
+  /** Bulk-adds or removes tags on 1 to 500 items (collaborator role). */
+  async bulkTags(
+    dto: BulkTagsDto,
+    userId: string,
+    perms: string[],
+    opts?: { addSource?: MediaTagSource; removeSources?: MediaTagSource[] },
+  ): Promise<{ added: number; removed: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    let added = 0;
+    let removed = 0;
+
+    // Default add source is `manual` (HTTP callers) — unchanged behavior.
+    // Workflow actions pass `system` so automated tagging never masquerades as
+    // a user-applied tag.
+    const addSource = opts?.addSource ?? 'manual';
+
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.add && dto.add.length > 0) {
+        const tagIds: string[] = [];
+        for (const name of dto.add) {
+          const tag = await tx.tag.upsert({
+            where: { circleId_name: { circleId: dto.circleId, name } },
+            create: { addedById: userId, circleId: dto.circleId, name },
+            update: {},
+          });
+          tagIds.push(tag.id);
+        }
+
+        const pairsWithSource = dto.ids.flatMap((mediaItemId) =>
+          tagIds.map((tagId) => ({ mediaItemId, tagId, source: addSource })),
+        );
+        const result = await tx.mediaTag.createMany({ data: pairsWithSource, skipDuplicates: true });
+        // Source-aware promotion of existing ai-sourced rows (createMany's
+        // skipDuplicates already leaves manual rows untouched). `manual` add
+        // promotes ai→manual; `system` add promotes ai→system (mirrors
+        // SocialMediaDetectionHandler). A `source='manual'` row is never
+        // downgraded because the filter targets `source='ai'` only.
+        await tx.mediaTag.updateMany({
+          where: {
+            tagId: { in: tagIds },
+            mediaItemId: { in: dto.ids },
+            source: 'ai',
+          },
+          data: { source: addSource },
+        });
+        added = result.count;
+      }
+
+      if (dto.remove && dto.remove.length > 0) {
+        const tags = await tx.tag.findMany({
+          where: {
+            circleId: dto.circleId,
+            name: { in: dto.remove },
+          },
+          select: { id: true },
+        });
+        if (tags.length > 0) {
+          const removeTagIds = tags.map((t: any) => t.id);
+          const result = await tx.mediaTag.deleteMany({
+            where: {
+              tagId: { in: removeTagIds },
+              mediaItemId: { in: dto.ids },
+              // Scope removal to specific sources when requested (workflow
+              // remove_tags); omitted → all sources (HTTP callers), unchanged.
+              ...(opts?.removeSources ? { source: { in: opts.removeSources } } : {}),
+            },
+          });
+          removed = result.count;
+        }
+      }
+    });
+
+    // Backup change feed: MediaTag joins don't bump MediaItem.updatedAt (issue #310).
+    if (added > 0 || removed > 0) {
+      await this.mediaTouch.touchMediaItems(dto.ids);
+    }
+    if (added > 0 && this.metrics) await this.countBulkTagsApplied(dto, added, addSource);
+
+    this.logger.log(
+      `bulkTags: added=${added} removed=${removed} for ${dto.ids.length} items by user ${userId}`,
+    );
+
+    return { added, removed };
+  }
+
+  /**
+   * `app.media.tags.applied` for a bulk add (RETRO-T3): the joins created, split by media type in
+   * proportion to the selection (one extra read of the selected items' types). Never throws.
+   */
+  private async countBulkTagsApplied(dto: BulkTagsDto, added: number, source: MediaTagSource): Promise<void> {
+    try {
+      const rows = await this.prisma.mediaItem.groupBy({
+        by: ['type'],
+        where: { id: { in: dto.ids }, circleId: dto.circleId },
+        _count: { _all: true },
+      });
+      const total = rows.reduce((sum, row) => sum + row._count._all, 0);
+      for (const row of rows) {
+        if (total > 0) {
+          this.metrics?.add('mediaTagsApplied', Math.round((added * row._count._all) / total), {
+            media_type: row.type,
+            source,
+          });
+        }
+      }
+    } catch {
+      // Metrics never fail a tag write.
+    }
+  }
+
+  /** Bulk soft-deletes 1 to 500 items: they move to Trash (collaborator role). */
+  async bulkDelete(
+    dto: BulkDeleteDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    // The ids actually moved (already-trashed ones are not reported again), read before the write.
+    const trashable = this.webhookEvents
+      ? await this.prisma.mediaItem.findMany({
+          where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+          select: { id: true },
+        })
+      : [];
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+
+    this.logger.log(
+      `bulkDelete: soft-deleted ${count} items in circle ${dto.circleId} by user ${userId}`,
+    );
+    // Webhook `media.item.trashed` (RETRO-H4), after the write committed; batched, never throws.
+    if (count > 0) this.webhookEvents?.mediaTrashed(dto.circleId, trashable.map((row) => row.id));
+
+    return { deleted: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Archive / Trash methods
+  // ---------------------------------------------------------------------------
+
+  /** Bulk-archives 1 to 500 items: `archivedAt` is set (collaborator role). */
+  async bulkArchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ archived: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: null },
+      data: { archivedAt: new Date() },
+    });
+
+    this.logger.log(`bulkArchive: archived ${count} items in circle ${dto.circleId} by user ${userId}`);
+    return { archived: count };
+  }
+
+  /** Bulk-unarchives 1 to 500 items: `archivedAt` is cleared (collaborator role). */
+  async bulkUnarchive(dto: BulkArchiveDto, userId: string, perms: string[]): Promise<{ unarchived: number }> {
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+
+    const { count } = await this.prisma.mediaItem.updateMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: null, archivedAt: { not: null } },
+      data: { archivedAt: null },
+    });
+
+    this.logger.log(`bulkUnarchive: unarchived ${count} items in circle ${dto.circleId} by user ${userId}`);
+    return { unarchived: count };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selection-scoped bulk enrichment reruns
+  //
+  // Each verifies circle collaborator access + that every id is a live member of
+  // the circle (assertAllInCircle), then delegates per-item to the shared
+  // MediaEnrichmentService rerun helpers so enqueue+status-upsert logic is not
+  // duplicated from the single-item rerun controllers. Enqueue is idempotent
+  // (dedups pending/running per (type, mediaItemId)), so the loop is safe.
+  // ---------------------------------------------------------------------------
+
+  /** Queues an AI tagging rerun per selected item, routed by media type (collaborator role). */
+  async bulkRerunTags(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    const uniqueIds = [...new Set(dto.ids)];
+
+    // AI tagging routes on media type (photo -> auto_tagging, video ->
+    // video_auto_tagging), so fetch each item's type — exactly as
+    // bulkRerunFaces below already does. Before issue #458 this loop enqueued
+    // `auto_tagging` for every id with no type filter, so selecting a video in
+    // the gallery and choosing "Re-run AI tagging" — an action the UI offers —
+    // produced a job the handler then failed.
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId: dto.circleId, deletedAt: null },
+      select: { id: true, type: true },
+    });
+
+    let queued = 0;
+    for (const item of items) {
+      await this.mediaEnrichmentService.enqueueTagRerun({
+        id: item.id,
+        type: item.type,
+        circleId: dto.circleId,
+      });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunTags: queued ${queued} AI tagging reruns in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
+  /** Queues a face detection rerun per selected item, routed by media type (collaborator role). */
+  async bulkRerunFaces(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    const uniqueIds = [...new Set(dto.ids)];
+
+    // Face detection routes on media type (photo → face_detection, video →
+    // video_face_detection), so fetch each item's type.
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId: dto.circleId, deletedAt: null },
+      select: { id: true, type: true },
+    });
+
+    let queued = 0;
+    for (const item of items) {
+      await this.mediaEnrichmentService.enqueueFaceRerun({
+        id: item.id,
+        type: item.type,
+        circleId: dto.circleId,
+      });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunFaces: queued ${queued} face detection reruns in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
+  /** Queues the asynchronous thumbnail regeneration job per selected item (collaborator role). */
+  async bulkRerunThumbnails(
+    dto: BulkArchiveDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ queued: number }> {
+    await this.assertAllInCircle(dto.ids, dto.circleId, userId, perms, 'editor');
+
+    const uniqueIds = [...new Set(dto.ids)];
+    let queued = 0;
+    for (const id of uniqueIds) {
+      await this.mediaEnrichmentService.enqueueThumbnailRerun({ id, circleId: dto.circleId });
+      queued++;
+    }
+
+    this.logger.log(`bulkRerunThumbnails: queued ${queued} thumbnail_regen jobs in circle ${dto.circleId} by user ${userId}`);
+    return { queued };
+  }
+
+  /** Lists the archived, non-deleted items of a circle, newest archive first (viewer role). */
+  async listArchived(query: ListArchivedQueryDto, userId: string, userPermissions: string[]) {
+    const { circleId, page, pageSize } = query;
+    const skip = (page - 1) * pageSize;
+
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    const where: MediaItemWhereInput = {
+      circleId,
+      deletedAt: null,
+      archivedAt: { not: null },
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: { archivedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+    return {
+      items: itemsWithUrls,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /** Lists the trashed items of a circle, newest deletion first (viewer role). */
+  async listTrash(query: ListTrashQueryDto, userId: string, userPermissions: string[]) {
+    const { circleId, page, pageSize } = query;
+    const skip = (page - 1) * pageSize;
+
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    const where: MediaItemWhereInput = {
+      circleId,
+      deletedAt: { not: null },
+    };
+
+    const [items, totalItems] = await Promise.all([
+      this.prisma.mediaItem.findMany({
+        where,
+        orderBy: { deletedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.mediaItem.count({ where }),
+    ]);
+
+    const itemsWithUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(items);
+
+    return {
+      items: itemsWithUrls,
+      meta: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / pageSize),
+      },
+    };
+  }
+
+  /** Restores trashed items; an item whose content hash collides with an active item is skipped and reported as a conflict (collaborator role). */
+  async restoreFromTrash(
+    dto: RestoreFromTrashDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ restored: number; conflicts: string[] }> {
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+
+    let restored = 0;
+    const conflicts: string[] = [];
+
+    for (const id of dto.ids) {
+      const item = await this.prisma.mediaItem.findFirst({
+        where: { id, circleId: dto.circleId, deletedAt: { not: null } },
+        select: { id: true, contentHash: true },
+      });
+      if (!item) continue;
+
+      try {
+        await this.prisma.mediaItem.update({
+          where: { id },
+          data: { deletedAt: null },
+        });
+        restored++;
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
+          conflicts.push(id);
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    this.logger.log(
+      `restoreFromTrash: restored=${restored} conflicts=${conflicts.length} in circle ${dto.circleId} by user ${userId}`,
+    );
+    return { restored, conflicts };
+  }
+
+  /**
+   * Hard-delete a list of MediaItem IDs: deletes the DB row, removes the blob
+   * from object storage, and removes the StorageObject row.
+   * Each item is processed independently — failures are logged and skipped
+   * rather than aborting the entire batch.
+   */
+  /**
+   * Hard-deletes media item rows and, in the same transaction, every grant on
+   * them (user, group and link; RETRO-I6, #588): a grant has no foreign key to
+   * its polymorphic record, so a deleted item must never leave one behind. The
+   * slice's daily `sharing.grants.prune` catches anything older.
+   *
+   * @returns how many media item rows were deleted.
+   */
+  private async deleteMediaRowsWithGrants(ids: readonly string[], mode: 'one' | 'many' = 'one'): Promise<number> {
+    if (ids.length === 0) return 0;
+    return this.prisma.$transaction(async (tx) => {
+      // `one` keeps `delete` (it throws on a missing row, which the per-item callers rely on).
+      let count: number;
+      if (mode === 'one' && ids.length === 1) {
+        await tx.mediaItem.delete({ where: { id: ids[0] } });
+        count = 1;
+      } else {
+        ({ count } = await tx.mediaItem.deleteMany({ where: { id: { in: [...ids] } } }));
+      }
+      await this.access.deleteGrantsFor(tx, 'media_item', ids);
+      return count;
+    });
+  }
+
+  /** Hard-deletes items one at a time (row with its grants, blob, storage object); a failure is logged and skipped. */
+  async purgeMediaItems(ids: string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        circleId: true,
+        storageObjectId: true,
+        storageObject: { select: { id: true, storageKey: true } },
+      },
+    });
+
+    let purged = 0;
+    const deletedRows: { id: string; circleId: string }[] = [];
+    for (const item of items) {
+      try {
+        await this.deleteMediaRowsWithGrants([item.id]);
+        deletedRows.push({ id: item.id, circleId: item.circleId });
+
+        if (item.storageObject?.storageKey) {
+          try {
+            await this.deleteBlob(item.storageObject.storageKey);
+          } catch (blobErr) {
+            const msg = blobErr instanceof Error ? blobErr.message : String(blobErr);
+            this.logger.warn(`purgeMediaItems: blob delete failed for key=${item.storageObject.storageKey}: ${msg}`);
+          }
+        }
+
+        if (item.storageObjectId) {
+          try {
+            await this.prisma.storageObject.delete({ where: { id: item.storageObjectId } });
+          } catch (soErr) {
+            const msg = soErr instanceof Error ? soErr.message : String(soErr);
+            this.logger.warn(`purgeMediaItems: StorageObject delete failed for id=${item.storageObjectId}: ${msg}`);
+          }
+        }
+
+        purged++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`purgeMediaItems: failed to purge item ${item.id}: ${msg}`);
+      }
+    }
+
+    // Webhook `media.item.deleted` (RETRO-H4) for the rows actually removed; batched, never throws.
+    if (deletedRows.length > 0) this.webhookEvents?.mediaDeleted(deletedRows);
+    return purged;
+  }
+
+  /**
+   * Batched hard-delete of many MediaItem IDs — the efficiency-oriented
+   * counterpart to `purgeMediaItems` (which does one round-trip PER item).
+   *
+   * Round-trips collapse from ~3N (one MediaItem delete + one blob delete + one
+   * StorageObject delete per item) to a handful:
+   *   1. A single `mediaItem.deleteMany` for the whole batch (with a per-item
+   *      fallback ONLY if the batch delete throws, so one bad row can't strand
+   *      the rest and we can report precisely which ids failed).
+   *   2. Best-effort blob deletes grouped by `(storageProvider, bucket)` — one
+   *      platform `deleteStorageKeys` per distinct group (the S3 drivers'
+   *      `deleteMany`: `DeleteObjects`, up to 1000 keys per call). Blob-delete failures are non-fatal (warn only), matching
+   *      `purgeMediaItems` semantics — an item still counts as deleted.
+   *   3. A single `storageObject.deleteMany` for the objects of the rows that
+   *      were actually deleted (skipping any whose MediaItem delete failed, since
+   *      that row's FK still references the StorageObject).
+   *
+   * @returns `deleted` = count of MediaItem rows actually removed from the DB;
+   *   `failedIds` = ids whose row delete genuinely failed (still present).
+   */
+  async purgeMediaItemsBatched(
+    ids: string[],
+  ): Promise<{ deleted: number; failedIds: string[] }> {
+    if (ids.length === 0) return { deleted: 0, failedIds: [] };
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        circleId: true,
+        storageObjectId: true,
+        storageObject: {
+          select: { id: true, storageKey: true, storageProvider: true, bucket: true },
+        },
+      },
+    });
+    if (items.length === 0) return { deleted: 0, failedIds: [] };
+
+    const itemIds = items.map((i) => i.id);
+    const failedIds: string[] = [];
+    let deleted = 0;
+
+    // 1. Delete the MediaItem rows. Fast path: one deleteMany. On failure, fall
+    //    back to per-item deletes so a single bad row doesn't strand the batch
+    //    and we can report exactly which ids failed.
+    try {
+      deleted = await this.deleteMediaRowsWithGrants(itemIds, 'many');
+    } catch (batchErr) {
+      const batchMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+      this.logger.warn(
+        `purgeMediaItemsBatched: batch delete of ${itemIds.length} items failed (${batchMsg}); falling back to per-item`,
+      );
+      for (const id of itemIds) {
+        try {
+          await this.deleteMediaRowsWithGrants([id]);
+          deleted++;
+        } catch (perErr) {
+          const msg = perErr instanceof Error ? perErr.message : String(perErr);
+          this.logger.warn(`purgeMediaItemsBatched: failed to purge item ${id}: ${msg}`);
+          failedIds.push(id);
+        }
+      }
+    }
+
+    // 2. Best-effort blob deletes, grouped by (storageProvider, bucket) so each
+    //    provider's native batched delete is used. Skip rows whose MediaItem
+    //    delete failed (their StorageObject must survive — the FK still points at it).
+    const failedSet = new Set(failedIds);
+    // Webhook `media.item.deleted` (RETRO-H4) for the rows actually removed (each delete above is its
+    // own committed statement); batched per circle, never throws.
+    const removed = items.filter((item) => !failedSet.has(item.id));
+    if (removed.length > 0) this.webhookEvents?.mediaDeleted(removed.map((item) => ({ id: item.id, circleId: item.circleId })));
+    const groups = new Map<
+      string,
+      { provider: string; bucket: string | null; keys: string[] }
+    >();
+    const storageObjectIds: string[] = [];
+    for (const item of items) {
+      if (failedSet.has(item.id)) continue;
+      const so = item.storageObject;
+      if (item.storageObjectId) storageObjectIds.push(item.storageObjectId);
+      if (!so?.storageKey) continue;
+      const groupKey = `${so.storageProvider} ${so.bucket ?? ''}`;
+      let group = groups.get(groupKey);
+      if (!group) {
+        group = { provider: so.storageProvider, bucket: so.bucket, keys: [] };
+        groups.set(groupKey, group);
+      }
+      group.keys.push(so.storageKey);
+    }
+
+    for (const group of groups.values()) {
+      try {
+        const store = await this.objectStore.forLocation(group.provider, group.bucket);
+        const result = await store.deleteMany(group.keys);
+        if (result.failed.length > 0) {
+          this.logger.warn(
+            `purgeMediaItemsBatched: ${result.failed.length}/${group.keys.length} blob deletes failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}`,
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `purgeMediaItemsBatched: blob delete group failed for provider=${group.provider} bucket=${group.bucket ?? 'default'}: ${msg}`,
+        );
+      }
+    }
+
+    // 3. Delete the StorageObject rows for the successfully-deleted items.
+    if (storageObjectIds.length > 0) {
+      try {
+        await this.prisma.storageObject.deleteMany({ where: { id: { in: storageObjectIds } } });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`purgeMediaItemsBatched: StorageObject batch delete failed: ${msg}`);
+      }
+    }
+
+    return { deleted, failedIds };
+  }
+
+  /** Permanently deletes the given trashed items of a circle through the batched purge (collaborator role). */
+  async deleteForever(
+    dto: DeleteForeverDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'editor');
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { id: { in: dto.ids }, circleId: dto.circleId, deletedAt: { not: null } },
+      select: { id: true },
+    });
+
+    const { deleted } = await this.purgeMediaItemsBatched(items.map((i) => i.id));
+    this.logger.log(`deleteForever: purged ${deleted} items in circle ${dto.circleId} by user ${userId}`);
+    return { deleted };
+  }
+
+  /** Permanently deletes every trashed item of a circle (circle admin role); the web app starts the asynchronous run instead. */
+  async emptyTrash(
+    dto: EmptyTrashDto,
+    userId: string,
+    perms: string[],
+  ): Promise<{ deleted: number }> {
+    await this.access.requireOwnerRole(userId, dto.circleId, perms, 'admin');
+
+    const items = await this.prisma.mediaItem.findMany({
+      where: { circleId: dto.circleId, deletedAt: { not: null } },
+      select: { id: true },
+    });
+
+    const deleted = await this.purgeMediaItems(items.map((i) => i.id));
+    this.logger.log(`emptyTrash: purged ${deleted} items in circle ${dto.circleId} by user ${userId}`);
+    return { deleted };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Verify circle access, then confirm all ids are non-deleted members of circleId.
+   * Mirrors addAlbumItems cross-circle guard.
+   * Throws NotFoundException if any id is missing, deleted, or in a different circle.
+   */
+  private async assertAllInCircle(
+    ids: string[],
+    circleId: string,
+    userId: string,
+    perms: string[],
+    role: OwnerRole,
+  ): Promise<void> {
+    const uniqueIds = [...new Set(ids)];
+
+    try {
+      await this.access.requireOwnerRole(userId, circleId, perms, role);
+    } catch (err) {
+      // RETRO-I3: a caller refused on the owner scope may still hold grants on EVERY
+      // id. ONE AccessPolicy.decideMany for the whole batch, never one call per id.
+      const action = actionForRole(role);
+      if (!action || !isAccessRefusal(err)) throw err;
+      if (!(await this.access.grantsAllowAll(userId, perms, action, 'media_item', uniqueIds))) throw err;
+    }
+
+    const found = await this.prisma.mediaItem.findMany({
+      where: { id: { in: uniqueIds }, circleId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (found.length !== uniqueIds.length) {
+      const foundSet = new Set(found.map((f) => f.id));
+      const missing = uniqueIds.filter((id) => !foundSet.has(id));
+      throw new NotFoundException(
+        `MediaItems not found or not accessible: ${missing.join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * Fetch a MediaItem (excluding soft-deleted) and enforce ownership/any-permission.
+   * Throws 404 if not found (or deleted), 403 if ownership denied.
+   */
+  async getMediaWithOwnershipCheck(
+    id: string,
+    userId: string,
+    userPermissions: string[],
+    required: OwnerRole,
+    action?: RecordAction,
+  ) {
+    const item = await this.prisma.mediaItem.findUnique({ where: { id } });
+
+    if (!item || item.deletedAt !== null) {
+      throw new NotFoundException(`MediaItem with id ${id} not found`);
+    }
+
+    await this.requireRecord(userId, userPermissions, item.circleId, required, 'media_item', item.id, action);
+
+    return item;
+  }
+
+  // ---------------------------------------------------------------------------
+  // URL signing helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Sign a fresh download URL for a thumbnail, or return null if the item has
+   * no thumbnail yet (processor has not run / image not yet uploaded).
+   *
+   * Reads `thumbnailStorageKey` from the JSONB metadata field.  This is a
+   * stable key (never signed), so it is safe to store in the DB.
+   */
+  /**
+   * Resolve the signed cover thumbnail URL for an album.
+   *
+   * Preference order:
+   *   1. The explicitly-set `coverMediaItemId`, but only if it is still a
+   *      valid non-deleted / non-archived member of the album.
+   *   2. Otherwise the most recent (capturedAt desc, then createdAt desc)
+   *      non-deleted / non-archived member.
+   * Returns null when the album has no eligible members.
+   */
+  private async resolveAlbumCoverThumb(
+    albumId: string,
+    coverMediaItemId: string | null,
+  ): Promise<string | null> {
+    const memberWhere: MediaItemWhereInput = {
+      albumItems: { some: { albumId } },
+      deletedAt: null,
+      archivedAt: null,
+    };
+
+    if (coverMediaItemId) {
+      const cover = await this.prisma.mediaItem.findFirst({
+        where: { ...memberWhere, id: coverMediaItemId },
+        select: { metadata: true },
+      });
+      if (cover) {
+        return this.signThumb(cover.metadata);
+      }
+    }
+
+    const fallback = await this.prisma.mediaItem.findFirst({
+      where: memberWhere,
+      orderBy: [{ capturedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { metadata: true },
+    });
+    return this.signThumb(fallback?.metadata ?? null);
+  }
+
+  /**
+   * Single-item thumbnail signing. Delegates to the shared
+   * MediaThumbnailService so all signing logic (provider resolution + fallback
+   * + error handling) lives in one place. List paths use
+   * `signThumbsBatched`/`attachThumbnailUrls` to avoid the N+1 pattern.
+   */
+  private async signThumb(
+    metadata: JsonValue | null,
+  ): Promise<string | null> {
+    return this.mediaThumbnailService.signThumb(metadata);
+  }
+
+  /**
+   * Explore: aggregate media by place (locality or place name).
+   * Groups non-deleted geotagged items in the circle by their most specific
+   * available geo tier (geoCanonicalLocality > geoLocality > geoPlaceName),
+   * returning up to 50 places ordered by item count descending with a cover
+   * thumbnail.
+   *
+   * Location Grouping (issue #374): the group key is the CANONICAL locality, so
+   * "Heredia", "Heredia Province" and "Provincia de Heredia" collapse into one
+   * entry. The `?? geoLocality` step is belt-and-braces rather than a real
+   * fallback — the canonical column is populated whenever the raw one is — and
+   * `geoPlaceName` remains the last resort because it deliberately does not
+   * participate in grouping.
+   */
+  async explorePlaces(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    // Fetch all geotagged items with the fields we need (no pagination — we aggregate)
+    const items = await this.prisma.mediaItem.findMany({
+      where: {
+        circleId,
+        deletedAt: null,
+        archivedAt: null,
+        OR: [
+          { geoLocality: { not: null } },
+          { geoPlaceName: { not: null } },
+        ],
+      },
+      select: {
+        geoCanonicalLocality: true,
+        geoLocality: true,
+        geoPlaceName: true,
+        metadata: true,
+      },
+    });
+
+    // Group by most specific geo tier
+    const placeMap = new Map<
+      string,
+      { count: number; coverMetadata: JsonValue | null }
+    >();
+
+    for (const item of items) {
+      const name = item.geoCanonicalLocality ?? item.geoLocality ?? item.geoPlaceName;
+      if (!name) continue;
+
+      const existing = placeMap.get(name);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        placeMap.set(name, { count: 1, coverMetadata: item.metadata });
+      }
+    }
+
+    // Sort by count desc, cap at 50
+    const sorted = Array.from(placeMap.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 50);
+
+    // Sign cover thumbnails with a single batched StorageObject query.
+    const withUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      sorted.map(([name, { count, coverMetadata }]) => ({
+        name,
+        count,
+        metadata: coverMetadata,
+      })),
+    );
+    return withUrls.map(({ name, count, thumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
+  }
+
+  /**
+   * Explore: list tags in the circle with item counts and a cover thumbnail.
+   * Returns up to 50 tags ordered by count descending.
+   */
+  async exploreTags(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<Array<{ name: string; count: number; coverThumbnailUrl: string | null }>> {
+    await this.access.requireOwnerRole(userId, circleId, userPermissions, 'viewer');
+
+    // Fetch tags with count and one cover media item's metadata
+    const tags = await this.prisma.tag.findMany({
+      where: { circleId },
+      include: {
+        _count: {
+          select: { mediaTags: true },
+        },
+        mediaTags: {
+          take: 1,
+          include: {
+            mediaItem: {
+              select: { metadata: true, deletedAt: true, archivedAt: true },
+            },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    // Sort by count desc, cap at 50
+    const sorted = tags
+      .filter((t) => t._count.mediaTags > 0)
+      .sort((a, b) => b._count.mediaTags - a._count.mediaTags)
+      .slice(0, 50);
+
+    // Sign cover thumbnails with a single batched StorageObject query.
+    const withUrls = await this.mediaThumbnailService.attachThumbnailUrls(
+      sorted.map((tag) => {
+        const coverMedia = tag.mediaTags[0]?.mediaItem;
+        const coverMeta =
+          coverMedia && !coverMedia.deletedAt && !coverMedia.archivedAt
+            ? coverMedia.metadata
+            : null;
+        return {
+          name: tag.name,
+          count: tag._count.mediaTags,
+          metadata: coverMeta,
+        };
+      }),
+    );
+    return withUrls.map(({ name, count, thumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Explore: tiered location browsing
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run the shared geo groupBy used by both tiered-location endpoints.
+   *
+   * A single Prisma groupBy over the geo columns gives us per-combination
+   * counts, which we then fold into per-tier maps in application code.  This is
+   * intentionally NOT the full-metadata scan explorePlaces performs — covers
+   * are fetched lazily per surviving group in {@link buildLocationLevel}.
+   *
+   * Location Grouping (issue #374): the three CANONICAL columns are ADDED to
+   * `by:` rather than replacing their raw counterparts. `groupBy` cannot
+   * express a `COALESCE(canonical, raw)` projection, so the canonical column
+   * has to be a real grouping key; keeping the raw columns alongside costs
+   * nothing in practice (canonical equals raw for every ungrouped value, so the
+   * row cardinality is unchanged) and leaves the raw spelling available to any
+   * future consumer of these rows. {@link buildLocationLevel} folds on the
+   * canonical value, which is what actually collapses variant spellings.
+   */
+  private fetchGeoGroupRows(circleId: string) {
+    return this.prisma.mediaItem.groupBy({
+      by: [
+        'geoCountry',
+        'geoCountryCode',
+        'geoAdmin1',
+        'geoLocality',
+        'geoCanonicalCountry',
+        'geoCanonicalAdmin1',
+        'geoCanonicalLocality',
+      ],
+      where: {
+        circleId,
+        deletedAt: null,
+        // archivedAt: null aligns tiered location browsing with the other
+        // browse surfaces (Home, Albums, People, Map), which all hide archived
+        // items.  This is an intentional divergence from facetsLocations
+        // (search facets), which omits this filter because search includes
+        // archived items by default.
+        archivedAt: null,
+        geoCountry: { not: null },
+      },
+      _count: { _all: true },
+    });
+  }
+
+  /**
+   * Fold the shared groupBy rows into a single tier (countries | regions |
+   * cities), sort by count desc, slice to `cap`, then fetch one cover
+   * thumbnail per surviving group via a bounded, indexed findFirst.
+   *
+   * Cover work is O(surviving groups) single-row lookups — never a scan of
+   * every item's metadata.
+   *
+   * Location Grouping (issue #374), two changes:
+   *
+   *  - The fold key and the cover `where` both use the CANONICAL column, so a
+   *    tier entry is one group rather than one raw spelling. COUNTRIES are the
+   *    exception: they stay keyed by `geoCountryCode`, so renaming a country
+   *    group changes only the DISPLAY name while the grouping key remains the
+   *    ISO code (a code is already canonical — two spellings of "United States"
+   *    were never two entries).
+   *
+   *  - A group carrying an explicit `coverMediaItemId` OVERRIDES the
+   *    most-recently-captured heuristic, and skips the `findFirst` entirely.
+   *    The override is resolved from ONE `location_groups` read for the whole
+   *    tier, not one per entry.
+   */
+  private async buildLocationLevel(
+    rows: Awaited<ReturnType<MediaService['fetchGeoGroupRows']>>,
+    circleId: string,
+    level: 'countries' | 'regions' | 'cities',
+    cap: number,
+  ): Promise<
+    Array<{
+      name: string;
+      countryCode: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>
+  > {
+    const map = new Map<
+      string,
+      { name: string; countryCode: string | null; count: number }
+    >();
+
+    for (const row of rows) {
+      const count = row._count._all;
+
+      if (level === 'countries') {
+        const country = row.geoCanonicalCountry ?? row.geoCountry;
+        if (!country) continue; // filtered NOT NULL above; guard for types
+        // Key by geoCountryCode (indexed) when present so cover lookups can use
+        // the index; fall back to the display name when the code is missing.
+        // A country group therefore renames only the DISPLAY name — the
+        // grouping key stays the ISO code.
+        const key = row.geoCountryCode ?? country;
+        const existing = map.get(key);
+        if (existing) {
+          existing.count += count;
+        } else {
+          map.set(key, {
+            name: country,
+            countryCode: row.geoCountryCode ?? null,
+            count,
+          });
+        }
+      } else if (level === 'regions') {
+        const region = row.geoCanonicalAdmin1 ?? row.geoAdmin1;
+        if (!region) continue;
+        const existing = map.get(region);
+        if (existing) existing.count += count;
+        else map.set(region, { name: region, countryCode: null, count });
+      } else {
+        const city = row.geoCanonicalLocality ?? row.geoLocality;
+        if (!city) continue;
+        const existing = map.get(city);
+        if (existing) existing.count += count;
+        else map.set(city, { name: city, countryCode: null, count });
+      }
+    }
+
+    const sorted = Array.from(map.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, cap);
+
+    // Explicit group covers for this whole tier, in ONE read. Keyed by the
+    // group's normalized name (and country scope), matching how the resolver
+    // identifies a group.
+    const coverOverrides = await this.fetchGroupCoverOverrides(level, sorted);
+
+    // One bounded, indexed cover lookup per surviving group WITHOUT an explicit
+    // group cover, run in parallel.
+    const withCovers = await Promise.all(
+      sorted.map(async (entry) => {
+        const override = coverOverrides.get(
+          groupCoverKey(entry.countryCode, entry.name),
+        );
+        if (override !== undefined) {
+          // An admin chose this photo; the capturedAt heuristic is skipped
+          // entirely rather than run and discarded.
+          return {
+            name: entry.name,
+            countryCode: entry.countryCode,
+            count: entry.count,
+            metadata: override,
+          };
+        }
+
+        const where: MediaItemWhereInput = {
+          circleId,
+          deletedAt: null,
+          archivedAt: null,
+        };
+        if (level === 'countries') {
+          // Prefer the indexed countryCode; fall back to display name.
+          if (entry.countryCode) where.geoCountryCode = entry.countryCode;
+          else where.geoCanonicalCountry = entry.name;
+        } else if (level === 'regions') {
+          where.geoCanonicalAdmin1 = entry.name;
+        } else {
+          where.geoCanonicalLocality = entry.name;
+        }
+
+        const cover = await this.prisma.mediaItem.findFirst({
+          where,
+          orderBy: { capturedAt: 'desc' },
+          select: { metadata: true },
+        });
+
+        return {
+          name: entry.name,
+          countryCode: entry.countryCode,
+          count: entry.count,
+          metadata: cover?.metadata ?? null,
+        };
+      }),
+    );
+
+    // Sign the group covers with a single batched StorageObject query.
+    const withUrls =
+      await this.mediaThumbnailService.attachThumbnailUrls(withCovers);
+    return withUrls.map(({ name, countryCode, count, thumbnailUrl }) => ({
+      name,
+      countryCode,
+      count,
+      coverThumbnailUrl: thumbnailUrl,
+    }));
+  }
+
+  /**
+   * Explicit `LocationGroup.coverMediaItemId` covers for one tier of entries
+   * (Location Grouping, issue #374).
+   *
+   * ONE `location_groups` read for the whole tier, keyed by the group's
+   * normalized name — never one lookup per entry, which is the same "no
+   * per-row lookup" rule the management API's item counts follow.
+   *
+   * A group whose cover item was hard-deleted has `coverMediaItemId` nulled by
+   * the SetNull FK, so it simply falls back to the capturedAt heuristic — the
+   * override map only ever carries groups that really do have a cover.
+   *
+   * NOTE the deliberate absence of a `circleId` filter on the cover item: a
+   * group is GLOBAL (it is a fact about the world, not about one circle), so
+   * its chosen cover may live in a different circle than the one being browsed.
+   * That is accepted — an admin choosing a cover is choosing what the place
+   * looks like, and the alternative (per-circle covers) is an explicit v1
+   * non-goal.
+   */
+  private async fetchGroupCoverOverrides(
+    level: 'countries' | 'regions' | 'cities',
+    entries: Array<{ name: string; countryCode: string | null }>,
+  ): Promise<Map<string, JsonValue | null>> {
+    const overrides = new Map<string, JsonValue | null>();
+    if (entries.length === 0) return overrides;
+
+    const groupLevel =
+      level === 'countries' ? 'country' : level === 'regions' ? 'region' : 'locality';
+
+    const groups = await this.prisma.locationGroup.findMany({
+      where: {
+        level: groupLevel,
+        enabled: true,
+        normalizedName: { in: entries.map((e) => fold(e.name)) },
+        coverMediaItemId: { not: null },
+      },
+      select: {
+        countryCode: true,
+        normalizedName: true,
+        coverMediaItem: { select: { metadata: true, deletedAt: true } },
+      },
+    });
+
+    // Country-SCOPED groups, indexed by normalized name alone. Needed because
+    // the regions and cities tiers aggregate ACROSS countries and therefore
+    // carry no countryCode of their own (see the fallback below).
+    const scopedByName = new Map<string, Array<JsonValue | null>>();
+
+    for (const group of groups) {
+      // A soft-deleted cover is treated as no cover: the SetNull FK only fires
+      // on a HARD delete, so a trashed photo would otherwise keep being served
+      // as a group cover after the user removed it.
+      if (!group.coverMediaItem || group.coverMediaItem.deletedAt) continue;
+      overrides.set(
+        `${group.countryCode}|${group.normalizedName}`,
+        group.coverMediaItem.metadata,
+      );
+      if (group.countryCode !== '') {
+        const bucket = scopedByName.get(group.normalizedName);
+        if (bucket) bucket.push(group.coverMediaItem.metadata);
+        else scopedByName.set(group.normalizedName, [group.coverMediaItem.metadata]);
+      }
+    }
+
+    // Unscoped ('') groups apply in every country, so fill them in for any
+    // entry the exactly-scoped pass did not already claim — "more specific
+    // wins", the same precedence the resolver applies.
+    for (const entry of entries) {
+      const normalized = fold(entry.name);
+      const scoped = groupCoverKey(entry.countryCode, entry.name);
+      if (overrides.has(scoped)) continue;
+
+      const unscoped = overrides.get(`|${normalized}`);
+      if (unscoped !== undefined) {
+        overrides.set(scoped, unscoped);
+        continue;
+      }
+
+      // Country-scoped fallback (issue #407). `buildLocationLevel` aggregates
+      // regions and cities across countries and passes countryCode: null, so
+      // the lookups above only ever match a group whose countryCode is the
+      // unscoped '' sentinel — a region or city group created with an explicit
+      // country from the admin page grouped its members correctly (the resolver
+      // and rebuild are unaffected) but its cover never showed on
+      // /places/regions|cities.
+      //
+      // Only entries with NO country of their own take this path: an entry that
+      // knows its country and missed the exact-key lookup genuinely has no
+      // group, and a differently-scoped group must not answer for it.
+      if (entry.countryCode) continue;
+      const candidates = scopedByName.get(normalized);
+      // Exactly one scoped group ⇒ unambiguous, use it. Several (the same
+      // region name scoped to different countries, e.g. "Ontario" in CA and US)
+      // ⇒ deliberately NO override: with the country erased at this tier there
+      // is nothing to choose on, and picking arbitrarily would show one
+      // country's photo for the other's places. The capturedAt heuristic wins
+      // instead, which at least draws from the circle's own items.
+      if (candidates && candidates.length === 1) overrides.set(scoped, candidates[0]);
+    }
+
+    return overrides;
+  }
+
+  /**
+   * Explore: tiered location browsing.  Returns the top 12 countries, regions,
+   * and cities in the circle (by item count desc), each with a cover
+   * thumbnail.  Countries carry a `countryCode`; regions and cities do not.
+   */
+  async exploreLocations(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<{
+    countries: Array<{
+      name: string;
+      countryCode: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>;
+    regions: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
+    cities: Array<{ name: string; count: number; coverThumbnailUrl: string | null }>;
+  }> {
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const rows = await this.fetchGeoGroupRows(circleId);
+
+    const [countries, regions, cities] = await Promise.all([
+      this.buildLocationLevel(rows, circleId, 'countries', 12),
+      this.buildLocationLevel(rows, circleId, 'regions', 12),
+      this.buildLocationLevel(rows, circleId, 'cities', 12),
+    ]);
+
+    return {
+      countries,
+      // regions/cities carry no meaningful countryCode; drop it from the shape.
+      regions: regions.map(({ name, count, coverThumbnailUrl }) => ({
+        name,
+        count,
+        coverThumbnailUrl,
+      })),
+      cities: cities.map(({ name, count, coverThumbnailUrl }) => ({
+        name,
+        count,
+        coverThumbnailUrl,
+      })),
+    };
+  }
+
+  /**
+   * Explore: full list for a single location tier, capped at 500 and sorted by
+   * count desc.  `level` must be one of countries | regions | cities.
+   */
+  async exploreLocationLevel(
+    circleId: string,
+    level: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<
+    Array<{
+      name: string;
+      countryCode?: string | null;
+      count: number;
+      coverThumbnailUrl: string | null;
+    }>
+  > {
+    const allowed = ['countries', 'regions', 'cities'] as const;
+    if (!(allowed as readonly string[]).includes(level)) {
+      throw new BadRequestException(
+        `Invalid location level '${level}'. Must be one of: ${allowed.join(', ')}`,
+      );
+    }
+
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    const rows = await this.fetchGeoGroupRows(circleId);
+    const items = await this.buildLocationLevel(
+      rows,
+      circleId,
+      level as 'countries' | 'regions' | 'cities',
+      500,
+    );
+
+    // Countries expose countryCode; regions/cities omit it for a cleaner payload.
+    if (level === 'countries') return items;
+    return items.map(({ name, count, coverThumbnailUrl }) => ({
+      name,
+      count,
+      coverThumbnailUrl,
+    }));
+  }
+
+  /**
+   * Fetch an Album and enforce ownership/any-permission.
+   */
+  async getAlbumWithOwnershipCheck(
+    id: string,
+    userId: string,
+    userPermissions: string[],
+    required: OwnerRole,
+  ) {
+    const album = await this.prisma.album.findUnique({ where: { id } });
+
+    if (!album) {
+      throw new NotFoundException(`Album with id ${id} not found`);
+    }
+
+    await this.requireRecord(userId, userPermissions, album.circleId, required, 'album', album.id);
+
+    return album;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Facets
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return the distinct geo hierarchy (Country → Region → Locality) present in
+   * a circle's non-deleted, geocoded media items.
+   *
+   * Built via a single Prisma groupBy over the four geo columns so no extra
+   * round-trips are needed.  Results are folded into a nested structure in
+   * application code and sorted by count descending at every level.
+   *
+   * Response shape:
+   *   Array<{
+   *     country: string;
+   *     countryCode: string | null;
+   *     count: number;            // total items for this country
+   *     regions: Array<{
+   *       name: string;
+   *       count: number;
+   *       localities: Array<{ name: string; count: number }>;
+   *     }>;
+   *   }>
+   */
+  async facetsLocations(
+    circleId: string,
+    userId: string,
+    userPermissions: string[],
+  ): Promise<
+    Array<{
+      country: string;
+      countryCode: string | null;
+      count: number;
+      regions: Array<{
+        name: string;
+        count: number;
+        localities: Array<{ name: string; count: number }>;
+      }>;
+    }>
+  > {
+    await this.access.requireOwnerRole(
+      userId,
+      circleId,
+      userPermissions,
+      'viewer',
+    );
+
+    // Location Grouping (issue #374): the canonical columns are ADDED to `by:`
+    // and the fold below keys on them, so search facets show the same collapsed
+    // names the browse surfaces do. The absence of `archivedAt: null` is
+    // PRESERVED and deliberate — search includes archived items by default,
+    // unlike fetchGeoGroupRows above.
+    const rows = await this.prisma.mediaItem.groupBy({
+      by: [
+        'geoCountry',
+        'geoCountryCode',
+        'geoAdmin1',
+        'geoLocality',
+        'geoCanonicalCountry',
+        'geoCanonicalAdmin1',
+        'geoCanonicalLocality',
+      ],
+      where: {
+        circleId,
+        deletedAt: null,
+        geoCountry: { not: null },
+      },
+      _count: { _all: true },
+    });
+
+    type LocalityEntry = { name: string; count: number };
+    type RegionEntry = { name: string; count: number; localities: LocalityEntry[] };
+    type CountryEntry = {
+      country: string;
+      countryCode: string | null;
+      count: number;
+      regions: RegionEntry[];
+    };
+
+    const countryMap = new Map<string, CountryEntry>();
+
+    for (const row of rows) {
+      const country = (row.geoCanonicalCountry ?? row.geoCountry) as string; // raw filtered NOT NULL above
+      const countryCode = (row.geoCountryCode as string | null) ?? null;
+      const region = (row.geoCanonicalAdmin1 ?? row.geoAdmin1 ?? null) as string | null;
+      const locality = (row.geoCanonicalLocality ?? row.geoLocality ?? null) as string | null;
+      const count = row._count._all;
+
+      let countryEntry = countryMap.get(country);
+      if (!countryEntry) {
+        countryEntry = { country, countryCode, count: 0, regions: [] };
+        countryMap.set(country, countryEntry);
+      }
+      countryEntry.count += count;
+
+      if (region) {
+        let regionEntry = countryEntry.regions.find((r) => r.name === region);
+        if (!regionEntry) {
+          regionEntry = { name: region, count: 0, localities: [] };
+          countryEntry.regions.push(regionEntry);
+        }
+        regionEntry.count += count;
+
+        if (locality) {
+          let localityEntry = regionEntry.localities.find((l) => l.name === locality);
+          if (!localityEntry) {
+            localityEntry = { name: locality, count: 0 };
+            regionEntry.localities.push(localityEntry);
+          }
+          localityEntry.count += count;
+        }
+      }
+    }
+
+    // Sort all levels by count descending
+    const result = Array.from(countryMap.values());
+    result.sort((a, b) => b.count - a.count);
+    for (const country of result) {
+      country.regions.sort((a, b) => b.count - a.count);
+      for (const region of country.regions) {
+        region.localities.sort((a, b) => b.count - a.count);
+      }
+    }
+
+    return result;
+  }
+}

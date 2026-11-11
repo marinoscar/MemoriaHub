@@ -1,0 +1,704 @@
+/**
+ * MediaController — unit tests.
+ *
+ * Focuses on:
+ *   1. listLocations handler: verifies it calls mediaService.listLocations (not getMedia)
+ *      and that the route does not collide with the :id handler for the literal
+ *      path segment "locations".
+ *   2. Route-shadow guard: listLocations and getMedia are distinct handlers.
+ *
+ * Guards and their dependencies are mocked out so we can test the controller
+ * logic without standing up full JWT / PAT / roles infrastructure.
+ */
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { ExecutionContext, CanActivate, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { Reflector } from '@nestjs/core';
+import { MediaController } from '../../src/media/gallery/media.controller.js';
+import { MediaService } from '../../src/media/gallery/media.service.js';
+import { TrashEmptyRunService } from '../../src/media/index.js';
+import { MEDIA_PERMISSIONS } from '../../src/media/constants/permissions.js';
+import { MemoriahubAuthGuard, MEMORIAHUB_PERMISSIONS_KEY as PERMISSIONS_KEY, type MemoriahubRequestUser as RequestUser } from '../../src/core/index.js';
+import type { MediaLocationsQueryDto } from '../../src/media/index.js';
+import type { BulkUpdateMediaDto } from '../../src/media/index.js';
+import type { BulkTagsDto } from '../../src/media/index.js';
+import type { BulkDeleteDto } from '../../src/media/index.js';
+import type { DashboardQueryDto } from '../../src/media/index.js';
+import type { ReviewCountsQueryDto } from '../../src/media/index.js';
+import type { ReverseGeocodeQueryDto } from '../../src/media/index.js';
+import type { GeoSearchQueryDto } from '../../src/media/index.js';
+import type { AddAlbumItemsByFilterDto } from '../../src/media/index.js';
+import { randomUUID } from 'crypto';
+
+const PERMISSIONS = {
+  ...MEDIA_PERMISSIONS,
+  MEDIA_READ_ANY: 'media:read_any',
+  MEDIA_WRITE_ANY: 'media:write_any',
+  MEDIA_DELETE_ANY: 'media:delete_any',
+} as const;
+
+// ---------------------------------------------------------------------------
+// Pass-through guard — allows all requests without DI dependencies
+// ---------------------------------------------------------------------------
+
+class PassThroughGuard implements CanActivate {
+  canActivate(_ctx: ExecutionContext): boolean {
+    return true;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Minimal RequestUser for controller tests
+// ---------------------------------------------------------------------------
+
+function makeUser(overrides: Partial<RequestUser> = {}): RequestUser {
+  return {
+    id: 'user-1',
+    permissions: [PERMISSIONS.MEDIA_READ],
+    roles: [],
+    activeOrgId: null,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mock MediaService — only stub the methods we invoke in the target tests.
+// ---------------------------------------------------------------------------
+
+const mockMediaService = {
+  listLocations: jest.fn(),
+  getMedia: jest.fn(),
+  listMedia: jest.fn(),
+  createMedia: jest.fn(),
+  updateMedia: jest.fn(),
+  deleteMedia: jest.fn(),
+  listTags: jest.fn(),
+  attachTags: jest.fn(),
+  removeTag: jest.fn(),
+  createAlbum: jest.fn(),
+  listAlbums: jest.fn(),
+  getAlbum: jest.fn(),
+  updateAlbum: jest.fn(),
+  deleteAlbum: jest.fn(),
+  addAlbumItems: jest.fn(),
+  addAlbumItemsByFilter: jest.fn(),
+  removeAlbumItem: jest.fn(),
+  streamExport: jest.fn(),
+  bulkUpdateMedia: jest.fn(),
+  bulkTags: jest.fn(),
+  bulkDelete: jest.fn(),
+  reverseGeocodeOnDemand: jest.fn(),
+  searchPlaces: jest.fn(),
+  getDashboard: jest.fn(),
+  getReviewCounts: jest.fn(),
+  exploreLocations: jest.fn(),
+  exploreLocationLevel: jest.fn(),
+};
+
+// ---------------------------------------------------------------------------
+// Mock TrashEmptyRunService (issue #165) — MediaController's emptyTrash
+// handler now delegates to this service instead of MediaService directly.
+// Not exercised by the tests in this file, but the controller's constructor
+// requires it for DI resolution.
+// ---------------------------------------------------------------------------
+
+const mockTrashEmptyRunService = {
+  createRun: jest.fn(),
+};
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('MediaController', () => {
+  let controller: MediaController;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      controllers: [MediaController],
+      providers: [
+        { provide: MediaService, useValue: mockMediaService },
+        { provide: TrashEmptyRunService, useValue: mockTrashEmptyRunService },
+        { provide: Reflector, useValue: new Reflector() },
+      ],
+    })
+      // Override guards with pass-through implementations to avoid DI
+      // requirements for PatService, JwtStrategy, etc.
+      .overrideGuard(MemoriahubAuthGuard)
+      .useClass(PassThroughGuard)
+      .compile();
+
+    controller = module.get<MediaController>(MediaController);
+  });
+
+  // -------------------------------------------------------------------------
+  // listLocations handler
+  // -------------------------------------------------------------------------
+
+  describe('listLocations', () => {
+    it('should call mediaService.listLocations with the query and user context', async () => {
+      const user = makeUser();
+      const query: Partial<MediaLocationsQueryDto> = { type: 'photo' };
+      const expectedResult = [
+        {
+          id: 'item-1',
+          takenLat: 9.93,
+          takenLng: -84.09,
+          capturedAt: new Date('2024-01-01'),
+          geoLocality: 'La Fortuna',
+          thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+        },
+      ];
+
+      mockMediaService.listLocations.mockResolvedValue(expectedResult);
+
+      const result = await controller.listLocations(
+        query as MediaLocationsQueryDto,
+        user,
+      );
+
+      expect(mockMediaService.listLocations).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.listLocations).toHaveBeenCalledWith(
+        query,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should NOT call mediaService.getMedia when listLocations is invoked', async () => {
+      const user = makeUser();
+      mockMediaService.listLocations.mockResolvedValue([]);
+
+      await controller.listLocations({} as MediaLocationsQueryDto, user);
+
+      expect(mockMediaService.getMedia).not.toHaveBeenCalled();
+    });
+
+    it('should forward user.id and user.permissions to the service', async () => {
+      const adminUser = makeUser({
+        id: 'admin-99',
+        permissions: [PERMISSIONS.MEDIA_READ, PERMISSIONS.MEDIA_READ_ANY],
+      });
+      mockMediaService.listLocations.mockResolvedValue([]);
+
+      await controller.listLocations({} as MediaLocationsQueryDto, adminUser);
+
+      expect(mockMediaService.listLocations).toHaveBeenCalledWith(
+        {},
+        'admin-99',
+        expect.arrayContaining([PERMISSIONS.MEDIA_READ_ANY]),
+      );
+    });
+
+    it('should return an empty array when the service returns no geotagged items', async () => {
+      const user = makeUser();
+      mockMediaService.listLocations.mockResolvedValue([]);
+
+      const result = await controller.listLocations({} as MediaLocationsQueryDto, user);
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkUpdateMedia handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkUpdateMedia', () => {
+    it('should call mediaService.bulkUpdateMedia with dto and user context', async () => {
+      const user = makeUser({
+        id: 'user-42',
+        permissions: [PERMISSIONS.MEDIA_WRITE],
+      });
+      const dto: Partial<BulkUpdateMediaDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+        set: { favorite: true },
+      };
+      const expectedResult = { updated: 1 };
+      mockMediaService.bulkUpdateMedia.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkUpdateMedia(dto as BulkUpdateMediaDto, user);
+
+      expect(mockMediaService.bulkUpdateMedia).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.bulkUpdateMedia).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkTags handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkTags', () => {
+    it('should call mediaService.bulkTags with dto and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE] });
+      const dto: Partial<BulkTagsDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+        add: ['nature'],
+      };
+      const expectedResult = { added: 1, removed: 0 };
+      mockMediaService.bulkTags.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkTags(dto as BulkTagsDto, user);
+
+      expect(mockMediaService.bulkTags).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // bulkDelete handler
+  // -------------------------------------------------------------------------
+
+  describe('bulkDelete', () => {
+    it('should call mediaService.bulkDelete with dto and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_DELETE] });
+      const dto: Partial<BulkDeleteDto> = {
+        circleId: randomUUID(),
+        ids: [randomUUID()],
+      };
+      const expectedResult = { deleted: 1 };
+      mockMediaService.bulkDelete.mockResolvedValue(expectedResult);
+
+      const result = await controller.bulkDelete(dto as BulkDeleteDto, user);
+
+      expect(mockMediaService.bulkDelete).toHaveBeenCalledWith(
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDashboard handler
+  // -------------------------------------------------------------------------
+
+  describe('getDashboard', () => {
+    it('should call mediaService.getDashboard with query and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_READ] });
+      const query: DashboardQueryDto = { circleId: randomUUID() };
+      const expectedResult = {
+        onThisDay: [],
+        recent: [],
+        favorites: [],
+        counts: { total: 0, unreviewed: 0, lowValue: 0, missingGeo: 0 },
+      };
+      mockMediaService.getDashboard.mockResolvedValue(expectedResult);
+
+      const result = await controller.getDashboard(query, user);
+
+      expect(mockMediaService.getDashboard).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.getDashboard).toHaveBeenCalledWith(
+        query,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getReviewCounts handler (issue #204)
+  // -------------------------------------------------------------------------
+
+  describe('getReviewCounts', () => {
+    it('should call mediaService.getReviewCounts with query and user context', async () => {
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_READ] });
+      const query: ReviewCountsQueryDto = { circleId: randomUUID() };
+      const expectedResult = {
+        pendingBurstGroups: 1,
+        pendingDuplicateGroups: 2,
+        pendingLocationSuggestions: 3,
+        pendingEnhancements: 4,
+      };
+      mockMediaService.getReviewCounts.mockResolvedValue(expectedResult);
+
+      const result = await controller.getReviewCounts(query, user);
+
+      expect(mockMediaService.getReviewCounts).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.getReviewCounts).toHaveBeenCalledWith(
+        query,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should NOT invoke the heavyweight dashboard aggregation', async () => {
+      // The entire point of issue #204: a nav badge must not pull On This Day /
+      // recent / favorites and their signed thumbnail URLs.
+      const user = makeUser();
+      mockMediaService.getReviewCounts.mockResolvedValue({
+        pendingBurstGroups: 0,
+        pendingDuplicateGroups: 0,
+        pendingLocationSuggestions: 0,
+        pendingEnhancements: 0,
+      });
+
+      await controller.getReviewCounts({ circleId: randomUUID() }, user);
+
+      expect(mockMediaService.getDashboard).not.toHaveBeenCalled();
+    });
+
+    it('requires MEDIA_READ permission (and no other permission)', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.getReviewCounts,
+      );
+      expect(permissions).toEqual([PERMISSIONS.MEDIA_READ]);
+    });
+
+    it('is wired to the literal route "review-counts" via @Get', () => {
+      expect(Reflect.getMetadata(PATH_METADATA, controller.getReviewCounts)).toBe(
+        'review-counts',
+      );
+      expect(Reflect.getMetadata(METHOD_METADATA, controller.getReviewCounts)).toBe(
+        RequestMethod.GET,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Route-shadow guard: review-counts declared BEFORE @Get(':id') (issue #204)
+  //
+  // Nest's RouterExplorer scans handlers in prototype declaration order, so a
+  // literal route only wins over a param route if it is declared first. These
+  // tests read that real declaration order out of the compiled prototype rather
+  // than trusting the source layout.
+  // -------------------------------------------------------------------------
+
+  describe('route ordering — review-counts precedes @Get(:id)', () => {
+    function getRouteDeclarationOrder(): Array<{
+      name: string;
+      path: unknown;
+      method: unknown;
+    }> {
+      const prototype = Object.getPrototypeOf(controller);
+      return Object.getOwnPropertyNames(prototype)
+        .filter((name) => name !== 'constructor')
+        .map((name) => ({
+          name,
+          path: Reflect.getMetadata(PATH_METADATA, prototype[name]),
+          method: Reflect.getMetadata(METHOD_METADATA, prototype[name]),
+        }))
+        .filter((entry) => entry.path !== undefined);
+    }
+
+    it('declares GET review-counts at a lower index than GET :id', () => {
+      const routes = getRouteDeclarationOrder();
+
+      const reviewCountsIdx = routes.findIndex(
+        (r) => r.path === 'review-counts' && r.method === RequestMethod.GET,
+      );
+      const paramIdx = routes.findIndex(
+        (r) => r.path === ':id' && r.method === RequestMethod.GET,
+      );
+
+      expect(reviewCountsIdx).toBeGreaterThanOrEqual(0);
+      expect(paramIdx).toBeGreaterThanOrEqual(0);
+      expect(reviewCountsIdx).toBeLessThan(paramIdx);
+    });
+
+    it('declares GET review-counts alongside the other literal routes (with dashboard)', () => {
+      const routes = getRouteDeclarationOrder();
+
+      const dashboardIdx = routes.findIndex(
+        (r) => r.path === 'dashboard' && r.method === RequestMethod.GET,
+      );
+      const reviewCountsIdx = routes.findIndex(
+        (r) => r.path === 'review-counts' && r.method === RequestMethod.GET,
+      );
+
+      expect(dashboardIdx).toBeGreaterThanOrEqual(0);
+      expect(reviewCountsIdx).toBe(dashboardIdx + 1);
+    });
+
+    it('getReviewCounts is a DIFFERENT handler from getMedia', () => {
+      expect(controller.getReviewCounts).not.toBe(controller.getMedia);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reverseGeocodeOnDemand handler
+  // -------------------------------------------------------------------------
+
+  describe('reverseGeocodeOnDemand', () => {
+    it('should call mediaService.reverseGeocodeOnDemand with lat and lng from query', async () => {
+      const query: ReverseGeocodeQueryDto = { lat: 9.9281, lng: -84.0907 };
+      const expectedResult = {
+        country: 'Costa Rica',
+        countryCode: 'CR',
+        admin1: 'Alajuela',
+        locality: 'La Fortuna',
+      };
+      mockMediaService.reverseGeocodeOnDemand.mockResolvedValue(expectedResult);
+
+      const result = await controller.reverseGeocodeOnDemand(query);
+
+      expect(mockMediaService.reverseGeocodeOnDemand).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.reverseGeocodeOnDemand).toHaveBeenCalledWith(
+        query.lat,
+        query.lng,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // searchPlaces handler
+  // -------------------------------------------------------------------------
+
+  describe('searchPlaces', () => {
+    it('should call mediaService.searchPlaces with q and limit from query', async () => {
+      const query: GeoSearchQueryDto = { q: 'La Fortuna', limit: 5 };
+      const expectedResult = [
+        { lat: 9.9281, lng: -84.0907, label: 'La Fortuna, Alajuela, Costa Rica' },
+      ];
+      mockMediaService.searchPlaces.mockResolvedValue(expectedResult);
+
+      const result = await controller.searchPlaces(query);
+
+      expect(mockMediaService.searchPlaces).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.searchPlaces).toHaveBeenCalledWith(
+        query.q,
+        query.limit,
+      );
+      expect(result).toBe(expectedResult);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // exploreLocations handler
+  // -------------------------------------------------------------------------
+
+  describe('exploreLocations', () => {
+    it('should call mediaService.exploreLocations with circleId, user id, and permissions', async () => {
+      const user = makeUser({
+        id: 'user-77',
+        permissions: [PERMISSIONS.MEDIA_READ],
+      });
+      const expectedResult = {
+        countries: [{ name: 'Costa Rica', countryCode: 'CR', count: 5, coverThumbnailUrl: null }],
+        regions: [],
+        cities: [],
+      };
+      mockMediaService.exploreLocations.mockResolvedValue(expectedResult);
+
+      const result = await controller.exploreLocations('circle-1', user);
+
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledWith(
+        'circle-1',
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should forward the exact user id and permissions to the service', async () => {
+      const adminUser = makeUser({
+        id: 'admin-1',
+        permissions: [PERMISSIONS.MEDIA_READ, PERMISSIONS.MEDIA_READ_ANY],
+      });
+      mockMediaService.exploreLocations.mockResolvedValue({
+        countries: [],
+        regions: [],
+        cities: [],
+      });
+
+      await controller.exploreLocations('circle-9', adminUser);
+
+      expect(mockMediaService.exploreLocations).toHaveBeenCalledWith(
+        'circle-9',
+        'admin-1',
+        expect.arrayContaining([PERMISSIONS.MEDIA_READ_ANY]),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // exploreLocationLevel handler
+  // -------------------------------------------------------------------------
+
+  describe('exploreLocationLevel', () => {
+    it('should call mediaService.exploreLocationLevel with level, circleId, user id, and permissions', async () => {
+      const user = makeUser();
+      const expectedResult = [
+        { name: 'Costa Rica', countryCode: 'CR', count: 5, coverThumbnailUrl: null },
+      ];
+      mockMediaService.exploreLocationLevel.mockResolvedValue(expectedResult);
+
+      const result = await controller.exploreLocationLevel('countries', 'circle-1', user);
+
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledWith(
+        'circle-1',
+        'countries',
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('forwards the :level route param verbatim (validation happens in the service)', async () => {
+      const user = makeUser();
+      mockMediaService.exploreLocationLevel.mockResolvedValue([]);
+
+      await controller.exploreLocationLevel('cities', 'circle-2', user);
+
+      expect(mockMediaService.exploreLocationLevel).toHaveBeenCalledWith(
+        'circle-2',
+        'cities',
+        user.id,
+        user.permissions,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // @Auth metadata wiring — explore/locations routes
+  // -------------------------------------------------------------------------
+
+  describe('@Auth metadata wiring — explore/locations routes', () => {
+    it('exploreLocations requires MEDIA_READ permission', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.exploreLocations,
+      );
+      expect(permissions).toContain(PERMISSIONS.MEDIA_READ);
+    });
+
+    it('exploreLocationLevel requires MEDIA_READ permission', () => {
+      const permissions: string[] = Reflect.getMetadata(
+        PERMISSIONS_KEY,
+        controller.exploreLocationLevel,
+      );
+      expect(permissions).toContain(PERMISSIONS.MEDIA_READ);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // addAlbumItemsByFilter handler
+  // -------------------------------------------------------------------------
+
+  describe('addAlbumItemsByFilter', () => {
+    it('should delegate to mediaService.addAlbumItemsByFilter with albumId, dto, userId, and permissions', async () => {
+      const albumId = randomUUID();
+      const user = makeUser({
+        id: 'user-42',
+        permissions: [PERMISSIONS.MEDIA_WRITE],
+      });
+      const dto: Partial<AddAlbumItemsByFilterDto> = {
+        circleId: randomUUID(),
+        type: 'photo' as const,
+      };
+      const expectedResult = { added: 7 };
+
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue(expectedResult);
+
+      const result = await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        user,
+      );
+
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledWith(
+        albumId,
+        dto,
+        user.id,
+        user.permissions,
+      );
+      expect(result).toBe(expectedResult);
+    });
+
+    it('should NOT call addAlbumItems when addAlbumItemsByFilter is invoked', async () => {
+      const albumId = randomUUID();
+      const user = makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE] });
+      const dto: Partial<AddAlbumItemsByFilterDto> = { circleId: randomUUID() };
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue({ added: 0 });
+
+      await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        user,
+      );
+
+      expect(mockMediaService.addAlbumItems).not.toHaveBeenCalled();
+    });
+
+    it('should forward the exact user id and permissions to the service', async () => {
+      const albumId = randomUUID();
+      const adminUser = makeUser({
+        id: 'admin-99',
+        permissions: [PERMISSIONS.MEDIA_WRITE, PERMISSIONS.MEDIA_WRITE_ANY],
+      });
+      const dto: Partial<AddAlbumItemsByFilterDto> = { circleId: randomUUID() };
+      mockMediaService.addAlbumItemsByFilter.mockResolvedValue({ added: 1 });
+
+      await controller.addAlbumItemsByFilter(
+        albumId,
+        dto as AddAlbumItemsByFilterDto,
+        adminUser,
+      );
+
+      expect(mockMediaService.addAlbumItemsByFilter).toHaveBeenCalledWith(
+        albumId,
+        dto,
+        'admin-99',
+        expect.arrayContaining([PERMISSIONS.MEDIA_WRITE_ANY]),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Route-shadow guard: listLocations declared BEFORE :id
+  // -------------------------------------------------------------------------
+
+  describe('route ordering — listLocations precedes :id', () => {
+    it('listLocations is a method directly on the controller (not confused with getMedia)', () => {
+      // Verify the controller exposes both methods — this confirms both handlers
+      // were compiled and wired up. Ordering is enforced by the Nest metadata
+      // (static routes are matched first).
+      expect(typeof controller.listLocations).toBe('function');
+      expect(typeof controller.getMedia).toBe('function');
+    });
+
+    it('getMedia is a DIFFERENT handler from listLocations', () => {
+      // Paranoia check: they must not be the same function reference.
+      expect(controller.listLocations).not.toBe(controller.getMedia);
+    });
+
+    it('listLocations handler calls listLocations service method, not getMedia', async () => {
+      // This is the key route-shadow guard test:
+      // If NestJS were routing GET /media/locations to @Get(':id'), getMedia
+      // would be called with id='locations'. We verify that calling the
+      // listLocations handler directly invokes the correct service method.
+      const user = makeUser();
+      mockMediaService.listLocations.mockResolvedValue([]);
+
+      // Direct handler invocation — simulates Nest routing GET /media/locations
+      // to the first matching static route handler.
+      await controller.listLocations({} as MediaLocationsQueryDto, user);
+
+      expect(mockMediaService.listLocations).toHaveBeenCalledTimes(1);
+      expect(mockMediaService.getMedia).not.toHaveBeenCalled();
+    });
+  });
+});

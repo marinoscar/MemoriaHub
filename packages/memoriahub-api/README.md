@@ -119,7 +119,12 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `SOCIAL_MEDIA_OPTIONS`, `SocialMediaModuleOptions` | token, interface | set by `SocialMediaModule.forRoot`: the detection job's `maxRuntimeMs` (`videoJobTimeoutMs`) |
 | `BURST_OBSERVER`, `BurstObserver` | token, interface | the burst slice's optional side channel: the `media.item.trashed` webhook after a trash resolve commits |
 | `ReviewRunSubjectRegistry`, `ReviewRunSubjectStrategy` | registry, interface | the review-runs slice's per-queue behaviour: the owner of a review queue registers what is eligible, how to apply the action and how to show a subject |
-| `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
+| `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the batched hard delete of trashed media items (the host binds `MediaService`), called by the trash purge job |
+| `MEDIA_GEO_LOCATION_PROVIDER`, `MediaGeoLocationProvider` | token | reverse geocoding through the deployment's active provider, used by the gallery service's location writes |
+| `MEDIA_FORWARD_GEOCODER`, `MediaForwardGeocoder` | token | place search by typed text for `GET /api/media/geo/search` |
+| `MEDIA_ENRICHMENT`, `MediaEnrichment` | token | the upload-time enrichment jobs of a new item and the per-item tagging, face and thumbnail reruns of the bulk actions |
+| `MEDIA_WEBHOOK_EVENTS`, `MediaWebhookEvents` | token | optional: the `media.item.created`, `.trashed` and `.deleted` webhook events of the media lifecycle |
+| `MEDIA_CSV_STRINGIFIER`, `MediaCsvStringifier` | token | optional: the streaming RFC 4180 writer the CSV export pipes through |
 | `MEDIA_LOCATION_RESOLVER`, `MediaLocationResolver` | token | the canonical place-name resolver of the location slice (`location` depends on `media`, so `media` cannot import it), used by `MediaMetadataSyncService` |
 | `MEDIA_REVERSE_GEOCODER`, `MediaReverseGeocoder` | token | reverse geocoding with the deployment's configured provider and credential, called from the server-only persist half of the `metadata_extraction` job |
 | `MEDIA_OBJECT_REPROCESSOR`, `MediaObjectReprocessor` | token | re-runs the post-upload processors for one stored object, now (the thumbnail jobs call it from inside a job) |

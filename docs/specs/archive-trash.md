@@ -175,7 +175,7 @@ Permission note: both `delete-forever` and `empty` require the `media:delete` sy
 |---|---|---|
 | `TrashPurgeTask` | `apps/api/src/media/trash-purge.task.ts` | Hourly cron; enqueues `trash_purge` job when none is pending/running |
 | `TrashPurgeHandler` | `apps/api/src/media/trash-purge.handler.ts` | Enrichment handler; type `'trash_purge'`; self-registers via `onModuleInit` |
-| `MediaService.purgeMediaItems` | `apps/api/src/media/media.service.ts` | Shared helper; hard-deletes DB rows and S3 blobs for a list of IDs |
+| `MediaService.purgeMediaItems` | `packages/memoriahub-api/src/media/gallery/media.service.ts` | Shared helper; hard-deletes DB rows and S3 blobs for a list of IDs |
 
 ### Flow
 

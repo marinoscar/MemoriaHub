@@ -110,6 +110,10 @@ class FakeTable implements MediaDelegate {
     return { count };
   }
 
+  async aggregate(): Promise<any> {
+    throw new Error('aggregate is not supported by this fake');
+  }
+
   async count(args: Row = {}): Promise<number> {
     return this.rows.filter((r) => matches(r, args['where'])).length;
   }

@@ -62,7 +62,7 @@ See §13 for the full list — most notably, there is no debounced "sweep on new
 | Writer | Sets `coordSource` to | Code location |
 |---|---|---|
 | EXIF metadata sync (upload path + `metadata_extraction` rerun) | `'exif'` | `MediaMetadataSyncService.syncFromStorageObject` (`apps/api/src/media/sync/media-metadata-sync.service.ts:148`) — set **only** when EXIF actually supplied `latitude` in that run (present-only semantics: `if (typeof exifMeta['latitude'] === 'number') { update.takenLat = ...; update.coordSource = 'exif'; }`) |
-| `bulkUpdateMedia` (manual location edit via bulk operations or the properties pane) | `'manual'` | `MediaService.bulkUpdateMedia` → shared `applyLocation()` helper, `apps/api/src/media/media.service.ts:1443` |
+| `bulkUpdateMedia` (manual location edit via bulk operations or the properties pane) | `'manual'` | `MediaService.bulkUpdateMedia` → shared `applyLocation()` helper, `packages/memoriahub-api/src/media/gallery/media.service.ts` |
 | Location inference (auto-apply, accept-unmodified, or bulk-accept) | `'inferred'` (auto-apply/accept-unmodified) or `'manual'` (accept-with-adjustment) | `LocationInferenceService.applyComputedSuggestion`, `LocationSuggestionService.acceptSuggestion`/`bulkAcceptSuggestions` |
 
 Before this migration, the only two writers of `takenLat`/`takenLng` were EXIF sync and `bulkUpdateMedia`. Location inference is the third. A migration backfill assigns provenance to every pre-existing row with coordinates: rows whose `geoSource = 'manual'` (a human-entered location predating this feature) become `coordSource = 'manual'`; every other row that already has `takenLat` becomes `coordSource = 'exif'`.

@@ -1,0 +1,5 @@
+---
+"@marinoscar/memoriahub-api": minor
+---
+
+Move the gallery into `@marinoscar/memoriahub-api/media` (private): `MediaService` (registration with content-hash dedup, the keyset and offset gallery listing, albums, tags, map clustering, explore/places, archive and trash, the bulk actions, export, review counts, the batched hard delete) and `MediaController` (`/api/media`), exported classes over `@MemoriahubAuth` that the web app mounts in its own module. The service reaches the database, access policy (owner scopes plus record grants), object store and metrics through the `ports` slice, and the geocoders, enrichment fan-out helpers, outbound webhooks and the CSV writer through host hooks (`MEDIA_GEO_LOCATION_PROVIDER`, `MEDIA_FORWARD_GEOCODER`, `MEDIA_ENRICHMENT`, `MEDIA_WEBHOOK_EVENTS`, `MEDIA_CSV_STRINGIFIER`). `MediaModels` gains the album, tag, review-queue and location-group delegates and `Prisma.JsonNull` joins the structural raw-SQL helpers of `core`. Routes, permissions, SQL and OpenAPI are unchanged.
