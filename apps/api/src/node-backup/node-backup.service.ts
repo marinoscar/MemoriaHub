@@ -42,7 +42,7 @@ import {
   NodeBackupQueryService,
 } from './node-backup-query.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { isValidCron, nextCronDate } from '../workflows/util/cron.util';
+import { isValidCron, nextCronDate } from '@marinoscar/memoriahub-api/workflows';
 import {
   BackupRunStats,
   BackupAckDto,

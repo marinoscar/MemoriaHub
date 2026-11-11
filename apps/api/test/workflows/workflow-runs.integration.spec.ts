@@ -34,10 +34,9 @@ import {
   createMockContributorUser,
   authHeader,
 } from '../helpers/auth-mock.helper';
+import { WorkflowEvaluateHandler, WorkflowExecuteBatchHandler } from '@marinoscar/memoriahub-api/workflows';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { WorkflowEvaluateHandler } from '../../src/workflows/runs/workflow-evaluate.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
 import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.service';
 
 // ---------------------------------------------------------------------------
@@ -99,6 +98,20 @@ function setupActorPermissions(context: TestContext, perms: string[]): void {
   context.prismaMock.userRole.findMany.mockResolvedValue([
     { role: { rolePermissions: perms.map((name) => ({ permission: { name } })) } },
   ] as any);
+  // Since RETRO-J9 (#622) the slice resolves the actor's permissions through the identity port, whose
+  // binding reads the user row with its roles and role permissions.
+  context.prismaMock.user.findUnique.mockResolvedValue({
+    id: 'actor',
+    isActive: true,
+    userRoles: [
+      {
+        role: {
+          name: 'contributor',
+          rolePermissions: perms.map((name) => ({ permission: { name } })),
+        },
+      },
+    ],
+  } as any);
 }
 
 function makeWorkflowRow(overrides: Record<string, unknown> = {}) {

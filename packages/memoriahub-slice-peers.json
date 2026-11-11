@@ -295,6 +295,28 @@
         "nestjs-zod",
         "zod"
       ]
+    },
+    "review-runs": {
+      "peers": [
+        "@nestjs/common",
+        "@nestjs/swagger",
+        "@marinoscar/memoriahub-contract",
+        "@opentelemetry/api",
+        "nestjs-zod"
+      ]
+    },
+    "workflows": {
+      "peers": [
+        "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "@nestjs/common",
+        "@nestjs/schedule",
+        "@nestjs/swagger",
+        "@opentelemetry/api",
+        "cron",
+        "nestjs-zod",
+        "zod"
+      ]
     }
   },
   "memoriahub-web": {

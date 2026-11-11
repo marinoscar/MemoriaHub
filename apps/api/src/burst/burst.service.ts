@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  forwardRef,
   Optional,
 } from '@nestjs/common';
 import { BurstGroupStatus, JobReason, MediaType, Prisma, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
@@ -27,7 +26,7 @@ import { ResolveBurstDto } from './dto/resolve-burst.dto';
 import { BulkResolveBurstDto } from './dto/bulk-resolve-burst.dto';
 import { BulkResolveBurstThresholdDto } from './dto/bulk-resolve-burst-threshold.dto';
 import { BulkDismissBurstThresholdDto } from './dto/bulk-dismiss-burst-threshold.dto';
-import { ReviewRunService } from '../review-runs/review-run.service';
+import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 @Injectable()
@@ -44,9 +43,8 @@ export class BurstService {
     private readonly mediaThumbnailService: MediaThumbnailService,
     private readonly systemSettings: AppSystemSettingsService,
     private readonly duplicateDetectionService: DuplicateDetectionService,
-    // Circular by nature: the review-run strategies wrap this service's
-    // resolve/dismiss primitives, while these threshold endpoints start runs.
-    @Inject(forwardRef(() => ReviewRunService))
+    // The review-run engine (RETRO-J9): these threshold endpoints start runs; the registered burst strategy
+    // wraps this service's resolve/dismiss primitives.
     private readonly reviewRuns: ReviewRunService,
     // Every library for the admin backfill (RETRO-K1): groups through the platform, personal libraries from the store.
     private readonly scopes: OwnerScopeSweepService,

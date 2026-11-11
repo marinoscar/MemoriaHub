@@ -15,7 +15,7 @@ import type { Job, JobHandlerRegistry } from '@marinoscar/platform-api/jobs';
 
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
+import { WorkflowExecuteBatchHandler } from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
@@ -95,7 +95,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
 
   it('canDelete reads the real run: a pending batch of a running run is vetoed', async () => {
     const run = await workflowRun('running', new Date(), null);
-    const handler = new WorkflowExecuteBatchHandler(registry, prisma, {} as never, {} as never, {} as never);
+    const handler = new WorkflowExecuteBatchHandler({} as never, prisma as never, {} as never, {} as never, {} as never);
     const pending = { status: 'pending', payload: { runId: run.id, itemIds: [] } } as unknown as Job;
     expect(await handler.canDelete(pending)).toContain('Cancel the run');
     await prisma.workflowRun.update({ where: { id: run.id }, data: { status: 'cancelled' } });

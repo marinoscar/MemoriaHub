@@ -1,0 +1,5 @@
+---
+"@marinoscar/memoriahub-api": minor
+---
+
+Add the `workflows` slice to `@marinoscar/memoriahub-api` (private; `@marinoscar/memoriahub-api/workflows` and `.../workflows/testing`): Media Workflow Automation (the definition schema and validator, the condition compiler, the field and action registries, the run lifecycle service, the `workflow_evaluate`, `workflow_evaluate_item`, `workflow_execute_batch` (node-claimable), `workflows.schedule_tick` and `workflows.micro_run_finalize` handlers, the two enqueue-only crons, `WorkflowTriggerService`, the admin service, and the three controllers over `@MemoriahubAuth`), `describeWorkflowsSliceConformance` and `FakeWorkflowsDb`. A host registers the actions' implementation (`WorkflowActionHandlerRegistry`), the review-queue half of the catalog (`registerWorkflowField`, `registerWorkflowAction`) and an optional `WORKFLOW_RUN_OBSERVER` (webhook events and the run-completed notification). Routes, job types, profiles and settings are unchanged; the nightly `workflow_history_purge` stays in the web app.

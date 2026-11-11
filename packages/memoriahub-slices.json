@@ -117,7 +117,8 @@
       "ports",
       "core",
       "testing",
-      "media"
+      "media",
+      "review-runs"
     ],
     "dedup": [
       "ports",
@@ -137,6 +138,18 @@
       "testing",
       "media",
       "tagging"
+    ],
+    "review-runs": [
+      "ports",
+      "core",
+      "testing",
+      "media"
+    ],
+    "workflows": [
+      "ports",
+      "core",
+      "testing",
+      "media"
     ]
   },
   "memoriahub-web": {

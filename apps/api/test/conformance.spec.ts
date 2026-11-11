@@ -233,7 +233,7 @@ runPlatformConformance({
       mustScan: [
         'media/sync/media-metadata-sync.service.ts',
         'media/enrichment/media-enrichment-enqueue.listener.ts',
-        'workflows/runs/workflow-trigger.listener.ts',
+        'workflows/runs/workflow-trigger.listener.ts', // the app's listener over the workflows slice's settlement service
         'notification-producers/enrichment-failure-notification.listener.ts',
         'media-processing/media-object-processing.service.ts',
       ],

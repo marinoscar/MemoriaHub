@@ -1,63 +1,24 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { ReviewRunsController, ReviewRunsModule as ReviewRunsSliceModule } from '@marinoscar/memoriahub-api/review-runs';
+
 import { PrismaModule } from '../prisma/prisma.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { MediaModule } from '../media/media.module';
-import { BurstModule } from '../burst/burst.module';
-import { DedupModule } from '../dedup/dedup.module';
-import { ReviewRunsController } from './review-runs.controller';
-import { ReviewRunService } from './review-run.service';
-import { ReviewRunSubjectRegistry } from './review-run-subject.registry';
-import { ReviewRunEvaluateHandler } from './review-run-evaluate.handler';
-import { ReviewRunExecuteBatchHandler } from './review-run-execute-batch.handler';
 import { ReviewRunsRetentionHandler } from './review-runs-retention.handler';
-import { BurstGroupReviewStrategy } from './strategies/burst-group.strategy';
-import { DuplicateGroupReviewStrategy } from './strategies/duplicate-group.strategy';
-import { LocationSuggestionReviewStrategy } from './strategies/location-suggestion.strategy';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 /**
- * ReviewRunsModule — the shared async run engine behind every bulk review-queue
- * action (issue #190).
+ * The web app's binding of the review-runs slice (RETRO-J9, #622). The shared async run engine behind every
+ * bulk review-queue action (issue #190: the run service, the `review_run_evaluate` and
+ * `review_run_execute_batch` handlers, the deprecated `location_suggestion_run_*` shims, the strategy
+ * registry) lives in `@marinoscar/memoriahub-api/review-runs`; this module mounts its controller and keeps
+ * the nightly `review_run_history_purge`, which is bound to the platform's retention policy.
  *
- * BurstModule and DedupModule are imported through `forwardRef` because the
- * dependency is genuinely mutual: the strategies here wrap `BurstService` /
- * `DuplicateService` primitives, while those services' threshold endpoints call
- * `ReviewRunService.createRun`. MediaModule (MediaThumbnailService), SettingsModule
- * (AppSystemSettingsService, read by ReviewRunsRetentionHandler for the retention
- * window) and the rest are plain imports — none of them import this module.
- *
- * The location-suggestion strategy deliberately does NOT depend on
- * LocationInferenceModule: it owns the accept/reject transaction outright
- * (ported from the old run execute-batch handler), so that module can import
- * this one without a cycle.
+ * The slice knows no review queue: the burst and duplicate strategies are registered by `BurstModule` and
+ * `DedupModule` (their review services stay in the app), the location strategy by the location slice. None
+ * of them imports this module back, so there is no cycle.
  */
 @Module({
-  imports: [
-    PrismaModule,
-    OwnerAccessModule,
-    EnrichmentModule,
-    MediaModule,
-    
-    forwardRef(() => BurstModule),
-    forwardRef(() => DedupModule),
-  ],
+  imports: [ReviewRunsSliceModule.forRoot(), PrismaModule],
   controllers: [ReviewRunsController],
-  providers: [
-    ReviewRunService,
-    ReviewRunSubjectRegistry,
-    BurstGroupReviewStrategy,
-    DuplicateGroupReviewStrategy,
-    LocationSuggestionReviewStrategy,
-    ReviewRunEvaluateHandler,
-    ReviewRunExecuteBatchHandler,
-    ReviewRunsRetentionHandler,
-  ],
-  exports: [
-    ReviewRunService,
-    ReviewRunEvaluateHandler,
-    ReviewRunExecuteBatchHandler,
-    ReviewRunsRetentionHandler,
-  ],
+  providers: [ReviewRunsRetentionHandler],
+  exports: [ReviewRunsSliceModule, ReviewRunsRetentionHandler],
 })
 export class ReviewRunsModule {}

@@ -36,7 +36,7 @@ import { randomUUID } from 'crypto';
 import { BurstGroupReviewStrategy } from './burst-group.strategy';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BurstService } from '../../burst/burst.service';
-import { createExecutionContext } from '../review-run-subject.strategy';
+import { createExecutionContext } from '@marinoscar/memoriahub-api/review-runs';
 import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
 
 const CIRCLE_ID = randomUUID();
@@ -74,6 +74,7 @@ describe('BurstGroupReviewStrategy', () => {
     strategy = new BurstGroupReviewStrategy(
       prisma as unknown as PrismaService,
       burstService as unknown as BurstService,
+      { register: jest.fn() } as never,
     );
   });
 
