@@ -65,15 +65,24 @@ const mockGetMedia = vi.mocked(getMedia);
 // ---------------------------------------------------------------------------
 // Mock face service (avoids hook fetches failing in jsdom)
 // ---------------------------------------------------------------------------
-vi.mock('../../../services/face', () => ({
-  getMediaFaces: vi.fn().mockResolvedValue([]),
-  getMediaFaceStatus: vi.fn().mockResolvedValue({
-    status: 'not_processed',
-    faceCount: 0,
-    providerKey: null,
-    modelVersion: null,
-    processedAt: null,
-    lastError: null,
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+  // The drawer's face hook fetches on mount; a stable stub keeps the file's async work deterministic.
+  useMediaFaces: () => ({
+    faces: [],
+    status: {
+      status: 'not_processed',
+      faceCount: 0,
+      providerKey: null,
+      modelVersion: null,
+      processedAt: null,
+      lastError: null,
+    },
+    loading: false,
+    error: null,
+    rerun: vi.fn(),
+    rerunLoading: false,
+    refresh: vi.fn(),
   }),
   rerunMediaFaces: vi.fn().mockResolvedValue({ jobId: 'job-1', status: 'pending' }),
   listPeople: vi.fn().mockResolvedValue({ items: [], meta: { total: 0, page: 1, pageSize: 100 } }),

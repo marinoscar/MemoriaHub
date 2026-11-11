@@ -25,17 +25,15 @@ import {
   Divider,
   Avatar,
 } from '@mui/material';
-import type { DetectedFaceDto } from '../../services/face';
+import type { DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 import {
   listPeople,
   createPerson,
   assignFaces,
   unassignFace,
   purgeFaces,
-} from '../../services/face';
-import type { PersonListItem } from '../../services/face';
-import { FaceCrop } from '../people/FaceCrop';
-import { PurgeFacesDialog } from '../people/PurgeFacesDialog';
+} from '@marinoscar/memoriahub-web/people/headless';
+import { FaceCrop, PurgeFacesDialog } from '@marinoscar/memoriahub-web/people/ui';
 
 interface AssignFaceDialogProps {
   open: boolean;

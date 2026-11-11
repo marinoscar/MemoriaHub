@@ -6,7 +6,7 @@
  */
 import { Autocomplete, TextField } from '@mui/material';
 import type { WorkflowPersonSelectSlotProps } from '@marinoscar/memoriahub-web/workflows/ui';
-import { usePeople } from '../../hooks/usePeople';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
 
 export function WorkflowPersonSelect({ circleId, value, onChange }: WorkflowPersonSelectSlotProps) {
   const { data: peopleData } = usePeople(circleId);

@@ -150,15 +150,17 @@ const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage')
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
 const EnhancerSettingsPage = lazy(() => import('./pages/Admin/EnhancerSettingsPage'));
-const MemoriesSettingsPage = lazy(() => import('./pages/Admin/MemoriesSettingsPage'));
+const MemoriesSettingsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
+);
 const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
 const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() =>
   import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
 );
-const PeoplePage = lazy(() => import('./pages/People/PeoplePage'));
-const ArchivedFacesPage = lazy(() => import('./pages/People/ArchivedFacesPage'));
+const PeoplePage = lazy(() => import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.PeoplePage })));
+const ArchivedFacesPage = lazy(() => import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.ArchivedFacesPage })));
 const AlbumsPage = lazyMediaPage('AlbumsPage');
 const AlbumPage = lazyMediaPage('AlbumPage');
 const TagsBrowsePage = lazy(() =>

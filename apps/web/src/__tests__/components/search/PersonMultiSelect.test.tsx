@@ -22,11 +22,13 @@ import userEvent from '@testing-library/user-event';
 
 vi.mock('react-easy-crop', () => ({ default: () => null }));
 
-vi.mock('../../../hooks/usePeople', () => ({
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
   usePeople: vi.fn(),
 }));
 
-vi.mock('../../../components/people/PersonAvatar', () => ({
+vi.mock('@marinoscar/memoriahub-web/people/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/ui')>()),
   PersonAvatar: () => <span data-testid="person-avatar" />,
 }));
 
@@ -35,8 +37,8 @@ vi.mock('../../../components/people/PersonAvatar', () => ({
 // ---------------------------------------------------------------------------
 
 import { PersonMultiSelect } from '../../../components/search/PersonMultiSelect';
-import { usePeople } from '../../../hooks/usePeople';
-import type { PersonListItem } from '../../../services/face';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 
 const mockUsePeople = vi.mocked(usePeople);
 

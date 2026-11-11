@@ -218,12 +218,47 @@ export interface MemoriahubWorkflowsSettings {
 }
 
 /**
+ * The memories half of the deployment settings (`memories.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubMemoriesSettings {
+  /** `memories`: generation, per-type curators and the email digest; every key is absent until first saved. */
+  memories?: {
+    generation?: { intervalHours?: number };
+    maxItemsPerMemory?: number;
+    aiTitles?: { enabled?: boolean };
+    onThisDay?: { enabled?: boolean; lookbackYears?: number; minItems?: number };
+    trips?: {
+      enabled?: boolean;
+      minDays?: number;
+      minItems?: number;
+      minDistanceKm?: number;
+      lookbackMonths?: number;
+    };
+    people?: { enabled?: boolean; favoritesOnly?: boolean; minItems?: number };
+    themes?: { enabled?: boolean; minItems?: number; maxPerPeriod?: number };
+    seasonal?: { enabled?: boolean; minItems?: number };
+    yearInReview?: { enabled?: boolean; minItems?: number };
+    digest?: {
+      enabled?: boolean;
+      frequency?: 'off' | 'daily' | 'weekly' | 'monthly';
+      sendHourUtc?: number;
+      imageTokenTtlDays?: number;
+    };
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
  * @stability experimental
  */
-export interface MemoriahubSystemSettings extends MemoriahubTaggingSettings, MemoriahubWorkflowsSettings {
+export interface MemoriahubSystemSettings
+  extends MemoriahubTaggingSettings,
+    MemoriahubWorkflowsSettings,
+    MemoriahubMemoriesSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */
@@ -251,6 +286,62 @@ export interface MemoriahubSystemSettingsState {
 }
 
 /**
+ * One AI provider as the Memories admin page lists it.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAiProvider {
+  /** The provider id. */
+  provider: string;
+  /** True when a credential is stored. */
+  configured: boolean;
+  /** True when the credential is switched on. */
+  enabled: boolean;
+}
+
+/**
+ * The AI settings the Memories admin page reads: the providers and the model chosen for memory titles.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAiSettings {
+  /** The providers with a stored credential. */
+  providers?: MemoriahubAiProvider[];
+  /** Every provider the server can talk to. */
+  knownProviders?: MemoriahubAiProvider[];
+  /** The feature selections. */
+  features?: { memories?: { provider: string | null; model: string | null } | null };
+}
+
+/**
+ * The AI settings state a page reads and writes (the host's AI settings hook).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAiSettingsState {
+  /** The settings, `null` until the first load. */
+  settings: MemoriahubAiSettings | null;
+  /** Loads (or reloads) the settings. */
+  fetchSettings: () => Promise<void>;
+  /** The chat models of a provider. */
+  getModels: (provider: string) => Promise<string[]>;
+  /** Selects the model that writes memory titles; both `null` clears the selection. */
+  saveMemoriesFeature: (provider: string | null, model: string | null) => Promise<void>;
+}
+
+/**
+ * Whether outbound email is usable (the fields of the platform email settings the digest section reads).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubEmailReadiness {
+  /** The selected transport id, or `null`. */
+  provider: string | null;
+  /** Master switch: nothing is sent while false. */
+  enabled: boolean;
+}
+
+/**
  * What the host supplies to the domain admin pages.
  *
  * @stability experimental
@@ -266,6 +357,13 @@ export interface MemoriahubAdminPort {
    * rules of hooks) over the deployment settings document.
    */
   useSystemSettings(): MemoriahubSystemSettingsState;
+  /**
+   * A React hook (the same function for the life of the host) over the AI settings;
+   * the Memories page picks the model that writes memory titles with it.
+   */
+  useAiSettings(): MemoriahubAiSettingsState;
+  /** Whether outbound email is usable, for the Memories digest warning. */
+  getEmailReadiness(): Promise<MemoriahubEmailReadiness>;
 }
 
 /**

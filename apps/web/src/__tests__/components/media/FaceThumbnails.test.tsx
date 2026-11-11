@@ -20,22 +20,19 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 import { FaceThumbnails } from '../../../components/media/FaceThumbnails';
-import type { DetectedFaceDto, MediaFaceStatusDto } from '../../../services/face';
+import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub-web/people/headless';
 
 // ---------------------------------------------------------------------------
 // Mock the useMediaFaces hook directly
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useMediaFaces', () => ({
-  useMediaFaces: vi.fn(),
-}));
-
 // Mock face service — listPeople, assignFaces, unassignFace, createPerson,
 // purgeFaces (the shared AssignFaceDialog's dependencies).
-vi.mock('../../../services/face', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../services/face')>();
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>();
   return {
     ...original,
+    useMediaFaces: vi.fn(),
     listPeople: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     assignFaces: vi.fn().mockResolvedValue({ personId: 'p1', assignedCount: 1 }),
     unassignFace: vi.fn().mockResolvedValue(undefined),
@@ -44,14 +41,14 @@ vi.mock('../../../services/face', async (importOriginal) => {
   };
 });
 
-import { useMediaFaces } from '../../../hooks/useMediaFaces';
 import {
+  useMediaFaces,
   listPeople,
   assignFaces,
   unassignFace,
   createPerson,
   purgeFaces,
-} from '../../../services/face';
+} from '@marinoscar/memoriahub-web/people/headless';
 
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
 const mockListPeople = vi.mocked(listPeople);

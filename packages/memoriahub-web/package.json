@@ -68,6 +68,14 @@
       "types": "./dist/memories/ui/index.d.ts",
       "default": "./dist/memories/ui/index.js"
     },
+    "./people/headless": {
+      "types": "./dist/people/headless/index.d.ts",
+      "default": "./dist/people/headless/index.js"
+    },
+    "./people/ui": {
+      "types": "./dist/people/ui/index.d.ts",
+      "default": "./dist/people/ui/index.js"
+    },
     "./search/headless": {
       "types": "./dist/search/headless/index.d.ts",
       "default": "./dist/search/headless/index.js"
@@ -122,6 +130,7 @@
     "leaflet.markercluster": "^1.5.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-easy-crop": "^6.0.2",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.17.0"
   },
@@ -145,6 +154,9 @@
       "optional": true
     },
     "leaflet.markercluster": {
+      "optional": true
+    },
+    "react-easy-crop": {
       "optional": true
     },
     "react-leaflet": {
@@ -174,6 +186,7 @@
     "leaflet.markercluster": "^1.5.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-easy-crop": "^6.0.2",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.17.0",
     "typescript": "^6.0.3",

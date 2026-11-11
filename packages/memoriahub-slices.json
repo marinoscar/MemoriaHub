@@ -195,7 +195,8 @@
     ],
     "memories": [
       "core",
-      "media"
+      "media",
+      "people"
     ],
     "search": [
       "core",
@@ -206,6 +207,10 @@
       "media"
     ],
     "workflows": [
+      "core",
+      "media"
+    ],
+    "people": [
       "core",
       "media"
     ]

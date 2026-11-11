@@ -9,9 +9,9 @@ import PersonIcon from '@mui/icons-material/Person';
 import { useNavigate } from 'react-router-dom';
 import { ExploreCarousel } from '@marinoscar/memoriahub-web/media/ui';
 import type { SearchPeopleExploreSlotProps } from '@marinoscar/memoriahub-web/search/ui';
-import { usePeople } from '../../hooks/usePeople';
-import type { PersonListItem } from '../../services/face';
-import { PersonAvatar } from '../people/PersonAvatar';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
 
 function renderPersonTile(person: PersonListItem, navigate: ReturnType<typeof useNavigate>) {
   return (

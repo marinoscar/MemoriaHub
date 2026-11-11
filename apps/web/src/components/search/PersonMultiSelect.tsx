@@ -13,9 +13,9 @@ import type {
   AutocompleteOwnerState,
   AutocompleteRenderValue,
 } from '@mui/material/Autocomplete';
-import { usePeople } from '../../hooks/usePeople';
-import { PersonAvatar } from '../people/PersonAvatar';
-import type { PersonListItem } from '../../services/face';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
+import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
 
 // ---------------------------------------------------------------------------
 // Types

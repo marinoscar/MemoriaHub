@@ -1146,7 +1146,7 @@ Introduced by issue [#309](https://github.com/marinoscar/MemoriaHub/issues/309):
 | `apps/web/src/components/memories/MemoryStoryPlayer.tsx` | The full-screen story player (#313) |
 | `apps/web/src/components/memories/storyTiming.ts` | The player's pure timing model (#313) |
 | `apps/web/src/components/memories/MemoryAlbumDialogs.tsx` | Save-as-album naming dialog + share hand-off (#313) |
-| `apps/web/src/components/settings/MemoriesSettings.tsx` | Per-user memory preferences (#313) |
+| `packages/memoriahub-web/src/memories/ui/components/MemoriesSettings.tsx` | Per-user memory preferences (#313) |
 | `apps/web/src/components/memories/memoryTypeMeta.tsx` | Per-type icon + labels |
 | `apps/web/src/components/memories/memoryFormat.ts` | Period, month-group and a11y-label formatting |
 | `apps/web/src/pages/Memories/MemoriesPage.tsx` | `/memories` |
@@ -1334,7 +1334,7 @@ The section is gated strict-true on `useMemoriesEnabled()` and threads that into
 
 ### 8.18 The admin settings page
 
-`apps/web/src/pages/Admin/MemoriesSettingsPage.tsx` (`/admin/settings/memories`, issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315)) is the deployment-wide counterpart to §8.17's per-user preferences, and the two are deliberately different surfaces: one decides what the *feature* does, the other what one *person* sees. It follows `BurstsSettingsPage`/`EnhancerSettingsPage` exactly — admin gate → `Navigate`, `useSystemSettings()`, local state synced with `?? default`, `Paper` sections, snackbars — plus a route in `App.tsx` and a tile in `SettingsHubPage` (AI & Enrichment group, `AutoAwesomeMotion`).
+`packages/memoriahub-web/src/memories/ui/pages/MemoriesSettingsPage.tsx` (`/admin/settings/memories`, issue [#315](https://github.com/marinoscar/MemoriaHub/issues/315)) is the deployment-wide counterpart to §8.17's per-user preferences, and the two are deliberately different surfaces: one decides what the *feature* does, the other what one *person* sees. It follows `BurstsSettingsPage`/`EnhancerSettingsPage` exactly — admin gate → `Navigate`, `useSystemSettings()`, local state synced with `?? default`, `Paper` sections, snackbars — plus a route in `App.tsx` and a tile in `SettingsHubPage` (AI & Enrichment group, `AutoAwesomeMotion`).
 
 Six sections:
 

@@ -10,6 +10,8 @@
     "./src/shell/index.ts",
     "./src/media/headless/index.ts",
     "./src/media/ui/index.ts",
+    "./src/people/headless/index.ts",
+    "./src/people/ui/index.ts",
     "./src/memories/headless/index.ts",
     "./src/memories/ui/index.ts",
     "./src/search/headless/index.ts",

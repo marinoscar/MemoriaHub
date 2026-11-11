@@ -4,6 +4,7 @@ export * from './hooks/useMemoriesFeed.js';
 export * from './hooks/useMemory.js';
 export * from './hooks/useMemoryActions.js';
 export * from './hooks/useMemoryListState.js';
+export * from './services/adminMemories.js';
 export * from './services/memories.js';
 export * from './storyTiming.js';
 export * from './types.js';

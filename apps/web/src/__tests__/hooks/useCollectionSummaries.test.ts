@@ -9,7 +9,7 @@
  * future refactor toward `Promise.all` fails loudly here rather than only in
  * a slow-network bug report.
  *
- * Mocks the SERVICE layer (services/media, services/face, services/memories)
+ * Mocks the SERVICE layer (services/media, people/headless, services/memories)
  * plus the two small hooks (`useOwnerScope`, `useMemoriesEnabled`) the hook reads
  * directly, rather than mocking `useCollectionSummaries` itself — mirrors
  * `Sidebar.test.tsx` / `ReviewHubPage.test.tsx`, so each case can assert what
@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
 import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListResponse } from '../../services/face';
+import type { PersonListResponse } from '@marinoscar/memoriahub-web/people/headless';
 import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
 import type { MemoryCard, MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
 import type { Circle } from '../../types/circles';
@@ -29,8 +29,8 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
-vi.mock('../../services/face', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/face')>()),
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
   listPeople: vi.fn(),
 }));
 vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
@@ -43,7 +43,7 @@ vi.mock('../../hooks/useOwnerScope', () => ({
 }));
 
 import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '../../services/face';
+import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 

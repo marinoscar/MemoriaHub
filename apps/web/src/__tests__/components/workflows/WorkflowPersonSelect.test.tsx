@@ -8,12 +8,13 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../utils/test-utils';
 
-vi.mock('../../../hooks/usePeople', () => ({
+vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
   usePeople: vi.fn(),
 }));
 
 import { WorkflowPersonSelect } from '../../../components/workflows/WorkflowPersonSelect';
-import { usePeople } from '../../../hooks/usePeople';
+import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
 
 const mockUsePeople = vi.mocked(usePeople);
 

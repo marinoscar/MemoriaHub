@@ -8,7 +8,7 @@
 // =============================================================================
 
 import { MemoriahubApiError } from '../headless/api.js';
-import type { MemoriahubSystemSettings } from '../headless/admin.js';
+import type { MemoriahubAiSettings, MemoriahubEmailReadiness, MemoriahubSystemSettings } from '../headless/admin.js';
 import type {
   MemoriahubApiClient,
   MemoriahubFeatures,
@@ -90,6 +90,12 @@ export interface FakeMemoriahubWebHostOptions {
   systemSettings?: Partial<MemoriahubSystemSettings> | null;
   /** With `systemSettings: null`, the load failure the fake settings hook reports. */
   systemSettingsError?: string;
+  /** The AI settings the fake admin port serves (`null` while loading). Default: no providers. */
+  aiSettings?: MemoriahubAiSettings | null;
+  /** The chat models the fake admin port lists for any provider. */
+  aiModels?: string[];
+  /** The email readiness the fake admin port answers with. Default: no provider, disabled. */
+  emailReadiness?: MemoriahubEmailReadiness;
 }
 
 /**
@@ -131,7 +137,11 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
   const calls: FakeCall[] = [];
   const navigations: string[] = [];
   const notifications: Array<{ message: string; severity?: string }> = [];
-  const admin = createFakeAdminPort(options.systemSettings, options.systemSettingsError ?? null);
+  const admin = createFakeAdminPort(options.systemSettings, options.systemSettingsError ?? null, {
+    ai: options.aiSettings,
+    models: options.aiModels,
+    email: options.emailReadiness,
+  });
 
   async function send<T>(method: FakeCall['method'], endpoint: string, body: unknown, opts?: MemoriahubRequestOptions): Promise<T> {
     const [path, qs = ''] = endpoint.split('?');
