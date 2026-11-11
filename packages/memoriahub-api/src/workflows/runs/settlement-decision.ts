@@ -11,6 +11,8 @@ import { WorkflowDependency } from '../registry/field-descriptor.interface.js';
  * (failed / no_faces / no-group-formed / feature-disabled) so a workflow whose
  * conditions depend on an enrichment that produced nothing is never stranded —
  * the listener that builds the DependencyState encodes those rules.
+ *
+ * @stability experimental
  */
 export interface DependencyState {
   metadata: boolean;
@@ -21,7 +23,11 @@ export interface DependencyState {
   locationSuggestions: boolean;
 }
 
-/** True iff every dependency in `deps` is settled in `state`. */
+/**
+ * True iff every dependency in `deps` is settled in `state`.
+ *
+ * @stability experimental
+ */
 export function isFullySettled(
   deps: Set<WorkflowDependency>,
   state: DependencyState,

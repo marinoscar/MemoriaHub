@@ -25,20 +25,34 @@ import type { MemoriahubAccessPort } from '../../ports/index.js';
  * @stability experimental
  */
 export const MOVE_TO_OWNER_ACTION = 'move_to_owner';
-/** Deprecated name, accepted at validation and execution only. */
+/**
+ * Deprecated name, accepted at validation and execution only.
+ *
+ * @stability experimental
+ */
 export const MOVE_TO_CIRCLE_ACTION = 'move_to_circle';
 
-/** Whether an action type is one of the two move actions. */
+/**
+ * Whether an action type is one of the two move actions.
+ *
+ * @stability experimental
+ */
 export function isMoveAction(type: string): boolean {
   return type === MOVE_TO_OWNER_ACTION || type === MOVE_TO_CIRCLE_ACTION;
 }
 
-/** What a move action's params name, before `me` is resolved. */
+/**
+ * What a move action's params name, before `me` is resolved.
+ *
+ * @stability experimental
+ */
 export type MoveTargetRef = { kind: 'me' } | { kind: 'scope'; scopeId: string };
 
 /**
  * Reads the target of a move action from its FLAT params (either type).
  * Throws 400 when neither `target` nor `targetCircleId` is usable.
+ *
+ * @stability experimental
  */
 export function moveTargetRefOf(params: Record<string, unknown>): MoveTargetRef {
   const target = params['target'];
@@ -54,7 +68,11 @@ export function moveTargetRefOf(params: Record<string, unknown>): MoveTargetRef 
   throw new BadRequestException('A move action requires a target');
 }
 
-/** The target scope id of a move action for `actorUserId`. 404 when `me` has no personal library. */
+/**
+ * The target scope id of a move action for `actorUserId`. 404 when `me` has no personal library.
+ *
+ * @stability experimental
+ */
 export async function resolveMoveTargetScope(
   params: Record<string, unknown>,
   actorUserId: string,

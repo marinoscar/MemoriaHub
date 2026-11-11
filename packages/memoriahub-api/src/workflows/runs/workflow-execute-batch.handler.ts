@@ -85,6 +85,8 @@ const tracer = trace.getTracer('workflows');
  * of the three run engines. `canDelete` refuses to delete a pending batch of a
  * run that is still `running`: without it the run never drains and never
  * finalizes.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowExecuteBatchHandler implements MemoriahubJobHandler, OnModuleInit {

@@ -21,6 +21,11 @@ import type { ZodTypeAny } from 'zod';
  * preview. See `media-item-fields.ts` for the specifics.
  */
 
+/**
+ * `WorkflowFieldGroup` of the workflows slice.
+ *
+ * @stability experimental
+ */
 export type WorkflowFieldGroup =
   | 'File'
   | 'Dates'
@@ -34,6 +39,8 @@ export type WorkflowFieldGroup =
 /**
  * High-level control type — a hint for the builder UI on how to render the
  * value input for this field.
+ *
+ * @stability experimental
  */
 export type WorkflowFieldType =
   | 'string'
@@ -49,6 +56,8 @@ export type WorkflowFieldType =
 /**
  * The JSON shape an operator's `value` is expected to take. Used by the
  * validator to reject operator/value-type mismatches.
+ *
+ * @stability experimental
  */
 export type WorkflowValueType =
   | 'string'
@@ -67,6 +76,8 @@ export type WorkflowValueType =
 /**
  * The full operator vocabulary across all fields. Each descriptor advertises the
  * subset it accepts; the validator rejects any op not in that subset.
+ *
+ * @stability experimental
  */
 export type WorkflowOperator =
   | 'contains'
@@ -95,6 +106,8 @@ export type WorkflowOperator =
 /**
  * Which enrichment output a condition reads. Unioned by the compiler into the
  * workflow's dependency set (Phase 4 uses it to gate on-media-enriched runs).
+ *
+ * @stability experimental
  */
 export type WorkflowDependency =
   | 'metadata'
@@ -165,6 +178,8 @@ export interface WorkflowFieldDescriptor {
  *   - `extraPermForTrashVariant` — an extra system permission required ONLY
  *     when the action's `action` param is `'trash'` (the burst/duplicate
  *     resolve actions require `'media:delete'` to trash, not to archive).
+ *
+ * @stability experimental
  */
 export interface WorkflowActionPermission {
   circleRole: 'collaborator';
@@ -189,6 +204,8 @@ export interface WorkflowActionPermission {
  *     `move_to_circle` is reversible but high-impact (re-enrichment fan-out);
  *     everything else is reversible + not high-impact.
  *   - `destructive` — retained from Phase 1; `true` only for `hard_delete`.
+ *
+ * @stability experimental
  */
 export interface WorkflowActionDescriptor {
   type: string;
@@ -215,6 +232,8 @@ export interface WorkflowActionDescriptor {
 /**
  * One Subject's complete registry entry: its field catalog, action catalog, and
  * the trigger options valid for it. v1 registers only `media_item`.
+ *
+ * @stability experimental
  */
 export interface SubjectRegistryEntry {
   subject: string;

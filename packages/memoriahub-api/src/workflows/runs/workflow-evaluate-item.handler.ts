@@ -25,6 +25,8 @@ import {
  * Length of the rolling micro-run collection window, in minutes. A CODE
  * CONSTANT (there is deliberately no system setting for it) shared with
  * WorkflowMicroRunFinalizeTask.
+ *
+ * @stability experimental
  */
 export const MICRO_RUN_WINDOW_MINUTES = 5;
 
@@ -72,6 +74,8 @@ interface WorkflowEvaluateItemPayload {
  * item. No `canDelete`: a micro-run is dispatched by its finalize task, never
  * by this job, so deleting one strands nothing (the item is simply not
  * evaluated).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowEvaluateItemHandler implements MemoriahubJobHandler, OnModuleInit {

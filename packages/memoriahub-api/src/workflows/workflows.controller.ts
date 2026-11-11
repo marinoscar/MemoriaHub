@@ -38,6 +38,8 @@ import { WorkflowsService } from './workflows.service.js';
  * `WORKFLOWS_ENABLED`. Writes require the system `media:write` permission plus
  * the per-circle `collaborator` role; reads require `media:read` plus `viewer`
  * (per-circle roles are enforced in the service, mirroring bulk-media ops).
+ *
+ * @stability experimental
  */
 @ApiTags('Workflows')
 @ApiBearerAuth('JWT-auth')

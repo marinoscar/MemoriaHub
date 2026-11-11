@@ -27,6 +27,8 @@ import {
  * malformed action parameter, can never be persisted.
  *
  * Stateless and pure (no I/O) — trivially unit-testable.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowDefinitionValidator {

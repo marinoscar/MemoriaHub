@@ -101,7 +101,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_METRICS`, `MemoriahubMetricsPort` | token | counters and histograms by registered name |
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
-| `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER` | registry, token | the workflows slice's catalog, action implementation and run side channels a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |
+| `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver`, `WorkflowTriggerService` | registry, token, service | the workflows slice's catalog, action implementation, run side channels (`WorkflowRunObserver`) and settlement entry point (`WorkflowTriggerService.evaluateSettlement`) a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |
 | `ReviewRunSubjectRegistry`, `ReviewRunSubjectStrategy` | registry, interface | the review-runs slice's per-queue behaviour: the owner of a review queue registers what is eligible, how to apply the action and how to show a subject |
 | `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |
 | `FACE_CONFIG`, `FACE_PERSON_AVATARS`, `FACE_STORAGE_ORG` | token | the face slice's three host hooks: the configuration reader, the account-avatar code and the organization of a derived storage row |

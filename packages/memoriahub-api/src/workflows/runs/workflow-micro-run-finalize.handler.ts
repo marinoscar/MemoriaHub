@@ -22,10 +22,18 @@ import { WORKFLOW_MICRO_RUN_FINALIZE_TYPE } from './workflow-cron-jobs.constants
 import { MICRO_RUN_WINDOW_MINUTES } from './workflow-evaluate-item.handler.js';
 import { WorkflowRunService } from './workflow-run.service.js';
 
-/** Cap on micro-runs finalized per tick. */
+/**
+ * Cap on micro-runs finalized per tick.
+ *
+ * @stability experimental
+ */
 export const MAX_PER_TICK = 100;
 
-/** The micro-runs whose collection window has closed by `now` (shared with the cron's due-check). */
+/**
+ * The micro-runs whose collection window has closed by `now` (shared with the cron's due-check).
+ *
+ * @stability experimental
+ */
 export function dueMicroRunsWhere(now: Date): Record<string, unknown> {
   return {
     triggerType: WORKFLOW_TRIGGER.on_media_enriched,
@@ -53,6 +61,8 @@ export function dueMicroRunsWhere(now: Date): Record<string, unknown> {
  * pass is thrown so the queue retries it.
  *
  * A GLOBAL system job (single-flight by the queue's dedup). SERVER-ONLY.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowMicroRunFinalizeHandler implements MemoriahubJobHandler, OnModuleInit {

@@ -21,17 +21,29 @@ import {
 import { WORKFLOW_SCHEDULE_TICK_TYPE } from './workflow-cron-jobs.constants.js';
 import { WorkflowRunService } from './workflow-run.service.js';
 
-/** Statuses that count a run as still in flight (overlap / concurrency gate). */
+/**
+ * Statuses that count a run as still in flight (overlap / concurrency gate).
+ *
+ * @stability experimental
+ */
 export const ACTIVE_RUN_STATUSES: WorkflowRunStatusKey[] = [
   WORKFLOW_RUN_STATUS.evaluating,
   WORKFLOW_RUN_STATUS.awaiting_approval,
   WORKFLOW_RUN_STATUS.running,
 ];
 
-/** Cap on due workflows handled per tick so a backlog can't blow up one run. */
+/**
+ * Cap on due workflows handled per tick so a backlog can't blow up one run.
+ *
+ * @stability experimental
+ */
 export const MAX_DUE_PER_TICK = 100;
 
-/** Enabled `scheduled` workflows whose `nextRunAt` has elapsed by `now` (shared with the cron's due-check). */
+/**
+ * Enabled `scheduled` workflows whose `nextRunAt` has elapsed by `now` (shared with the cron's due-check).
+ *
+ * @stability experimental
+ */
 export function dueScheduledWorkflowsWhere(now: Date): Record<string, unknown> {
   return { trigger: WORKFLOW_TRIGGER.scheduled, enabled: true, nextRunAt: { lte: now } };
 }
@@ -55,6 +67,8 @@ export function dueScheduledWorkflowsWhere(now: Date): Record<string, unknown> {
  * A GLOBAL system job: the queue's single-flight dedup (one pending/running row
  * per type) replaces the old in-process overlap of ticks. SERVER-ONLY (no
  * node-result pair): it writes `workflows` and `workflow_runs`.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowScheduleTickHandler implements MemoriahubJobHandler, OnModuleInit {

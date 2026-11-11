@@ -26,6 +26,8 @@ import { WorkflowRunService } from './workflow-run.service.js';
  * Media Workflow Automation — run inspection + approval API (issue #140).
  * Feature-gated + circle-scoped in the service. Reads require media:read +
  * per-circle viewer; approve/cancel require media:write + collaborator.
+ *
+ * @stability experimental
  */
 @ApiTags('Workflow Runs')
 @ApiBearerAuth('JWT-auth')

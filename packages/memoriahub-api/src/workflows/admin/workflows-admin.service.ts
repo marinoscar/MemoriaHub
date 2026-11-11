@@ -39,6 +39,8 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * via `distinct`. There are NO byte-valued fields on any workflow entity, so
  * the BigInt-serialization gotcha does not apply here (matched/actioned counts
  * are plain `Int`s).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowsAdminService {

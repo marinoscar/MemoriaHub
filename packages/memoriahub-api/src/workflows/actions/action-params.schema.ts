@@ -32,7 +32,11 @@ export const emptyParamsSchema = z.object({}).strict();
 // Item-level actions
 // ---------------------------------------------------------------------------
 
-/** Add to an existing album (`albumId`) XOR create a new one (`createAlbumNamed`). */
+/**
+ * Add to an existing album (`albumId`) XOR create a new one (`createAlbumNamed`).
+ *
+ * @stability experimental
+ */
 export const addToAlbumParamsSchema = z
   .object({
     albumId: z.string().uuid().optional(),
@@ -90,6 +94,8 @@ export const setFavoriteParamsSchema = z.object({ value: z.boolean() }).strict()
  *   - mode 'set'   → requires `value` (ISO-8601), forbids `shiftMinutes`
  *   - mode 'shift' → requires `shiftMinutes` (int), forbids `value`
  *   - mode 'clear' → forbids both
+ *
+ * @stability experimental
  */
 export const setCapturedAtParamsSchema = z
   .object({
@@ -155,12 +161,18 @@ export const setLocationParamsSchema = z
  * definitions, run snapshots and queued `workflow_execute_batch` payloads, and
  * executed exactly as `move_to_owner` with the scope id `targetCircleId`. The
  * builder no longer offers it.
+ *
+ * @stability experimental
  */
 export const moveToCircleParamsSchema = z
   .object({ targetCircleId: z.string().uuid() })
   .strict();
 
-/** The library a `move_to_owner` action moves items into. */
+/**
+ * The library a `move_to_owner` action moves items into.
+ *
+ * @stability experimental
+ */
 export const moveTargetSchema = z.discriminatedUnion('kind', [
   // The ACTING user's own personal library (for an unattended run: the user
   // whose permissions authorize it, i.e. the run's starter or the creator).
@@ -176,7 +188,11 @@ export const moveTargetSchema = z.discriminatedUnion('kind', [
  */
 export type MoveTarget = z.infer<typeof moveTargetSchema>;
 
-/** move_to_owner (RETRO-I6 #588): the owner-scope name of move_to_circle. */
+/**
+ * move_to_owner (RETRO-I6 #588): the owner-scope name of move_to_circle.
+ *
+ * @stability experimental
+ */
 export const moveToOwnerParamsSchema = z.object({ target: moveTargetSchema }).strict();
 
 /**
@@ -214,27 +230,43 @@ export const resolveDuplicateGroupParamsSchema = z.object({ action: resolveActio
 // Permission presets (see WorkflowActionPermission docblock)
 // ---------------------------------------------------------------------------
 
-/** Base: circle collaborator + system media:write. */
+/**
+ * Base: circle collaborator + system media:write.
+ *
+ * @stability experimental
+ */
 export const BASE_ACTION_PERMISSION: WorkflowActionPermission = {
   circleRole: 'collaborator',
   systemPerms: ['media:write'],
 };
 
-/** hard_delete: base + media:delete, gated on workflows.allowHardDelete. */
+/**
+ * hard_delete: base + media:delete, gated on workflows.allowHardDelete.
+ *
+ * @stability experimental
+ */
 export const HARD_DELETE_PERMISSION: WorkflowActionPermission = {
   circleRole: 'collaborator',
   systemPerms: ['media:write', 'media:delete'],
   gates: ['workflows.allowHardDelete'],
 };
 
-/** Burst/duplicate resolve: base, plus media:delete only for the trash variant. */
+/**
+ * Burst/duplicate resolve: base, plus media:delete only for the trash variant.
+ *
+ * @stability experimental
+ */
 export const RESOLVE_GROUP_PERMISSION: WorkflowActionPermission = {
   circleRole: 'collaborator',
   systemPerms: ['media:write'],
   extraPermForTrashVariant: 'media:delete',
 };
 
-/** move_to_owner / move_to_circle: editor + media:write on BOTH the source and the target library. */
+/**
+ * move_to_owner / move_to_circle: editor + media:write on BOTH the source and the target library.
+ *
+ * @stability experimental
+ */
 export const MOVE_TO_CIRCLE_PERMISSION: WorkflowActionPermission = {
   circleRole: 'collaborator',
   systemPerms: ['media:write'],

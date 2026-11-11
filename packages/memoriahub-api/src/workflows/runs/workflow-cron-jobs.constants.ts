@@ -17,10 +17,18 @@
 // (`test/jobs/job-type-snapshot.spec.ts` pins them).
 // =============================================================================
 
-/** `WorkflowScheduleTickHandler`'s permanent job type. */
+/**
+ * `WorkflowScheduleTickHandler`'s permanent job type.
+ *
+ * @stability experimental
+ */
 export const WORKFLOW_SCHEDULE_TICK_TYPE = 'workflows.schedule_tick';
 
-/** `WorkflowMicroRunFinalizeHandler`'s permanent job type. */
+/**
+ * `WorkflowMicroRunFinalizeHandler`'s permanent job type.
+ *
+ * @stability experimental
+ */
 export const WORKFLOW_MICRO_RUN_FINALIZE_TYPE = 'workflows.micro_run_finalize';
 
 /**
@@ -29,5 +37,7 @@ export const WORKFLOW_MICRO_RUN_FINALIZE_TYPE = 'workflows.micro_run_finalize';
  * time even while a bulk import keeps the queue busy, so the ticks take the
  * priority of the run's own `workflow_evaluate` job (20), still behind upload
  * enrichment and reruns. Ascending is more urgent.
+ *
+ * @stability experimental
  */
 export const WORKFLOW_TICK_PRIORITY = 20;

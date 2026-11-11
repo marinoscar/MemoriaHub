@@ -26,7 +26,12 @@ const IN_FLIGHT_PRODUCER_TYPES = [
 ];
 
 /**
- * Map a settled enrichment job type to the workflow dependency it produces. */
+ * Map a settled enrichment job type to the workflow dependency it produces.
+ *
+ * @param type - the settled job type.
+ * @returns the dependency, or null for a type no workflow reads.
+ * @stability experimental
+ */
 export function jobTypeToDependency(type: string): WorkflowDependency | null {
   switch (type) {
     case 'auto_tagging':
@@ -51,7 +56,7 @@ export function jobTypeToDependency(type: string): WorkflowDependency | null {
  * The host-neutral half of the trigger listener. The host listens for its two upstream signals (a media item's
  * processing finished, an enrichment job settled for an upload) and calls {@link evaluateSettlement}; once the
  * item's enrichment dependencies are fully settled, this enqueues a per-workflow `workflow_evaluate_item` job.
- * `reasonSettles` and `jobTypeToDependency` carry the loop-protection decision the listener applies:
+ * `jobTypeToDependency` maps a settled job type to a dependency; the loop-protection the listener applies:
  *
  *  (1) The job-settled path fires ONLY for `reason === upload`. Every workflow-applied re-enqueue uses
  *      `rerun`/`backfill`, except `move_to_circle` (upload-reason enrichment in the TARGET circle: a legitimate

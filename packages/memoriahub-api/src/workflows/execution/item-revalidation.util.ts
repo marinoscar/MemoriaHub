@@ -17,6 +17,8 @@ import { CompiledWorkflow } from '../compiler/workflow-condition.compiler.js';
  *
  * Pure and dependency-light — takes a `PrismaService` or a transaction client
  * so it can run inside or outside a transaction.
+ *
+ * @stability experimental
  */
 export async function revalidateItemMatches(
   prisma: Pick<WorkflowsDb, 'mediaItem'>,

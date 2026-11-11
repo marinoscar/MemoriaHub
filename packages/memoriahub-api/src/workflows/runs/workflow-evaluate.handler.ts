@@ -56,6 +56,8 @@ const tracer = trace.getTracer('workflows');
  * row carries it, so the handler never reads the subject. `canDelete` refuses
  * to delete a pending job of a run still `evaluating`: it is the only thing that
  * would move the run on.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowEvaluateHandler implements MemoriahubJobHandler, OnModuleInit {

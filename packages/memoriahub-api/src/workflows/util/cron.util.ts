@@ -71,6 +71,8 @@ export function isValidCron(expr: string): boolean {
  * node backup schedule (NodeBackupConfig.timezone). Callers must validate the
  * zone name beforehand (e.g. against Intl.supportedValuesOf('timeZone'));
  * CronTime throws on an unknown zone.
+ *
+ * @stability experimental
  */
 export function nextCronDate(expr: string, from: Date, timezone?: string): Date {
   // NOTE: the zone must be passed to getNextDateFrom, not (only) the CronTime
@@ -85,6 +87,8 @@ export function nextCronDate(expr: string, from: Date, timezone?: string): Date 
  * next ~20 fires starting from now and returns the smallest interval — so a
  * dense schedule like `*​/5 * * * *`, a comma list (`0,30 * * * *`), or a burst
  * within an hour is caught even when most gaps are large. Pure.
+ *
+ * @stability experimental
  */
 export function cronMinIntervalMinutes(expr: string): number {
   const cronTime = new CronTime(expr);

@@ -65,6 +65,8 @@ const ACTIVE_RUN_STATUSES: WorkflowRunStatus[] = [
  * move_to_circle both-circle collaborator, trash-variant media:delete) happens
  * here at create AND is re-checked at approval; the queue handlers never
  * re-authorize.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowRunService {

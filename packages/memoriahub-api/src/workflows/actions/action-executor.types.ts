@@ -15,6 +15,8 @@
  *   - `failed`   — the action threw; `detail` carries the error message.
  * `terminal: true` is set ONLY by `hard_delete` when the item was actually
  * purged, signalling the engine to skip any remaining actions for that item.
+ *
+ * @stability experimental
  */
 export interface ActionOutcome {
   status: 'applied' | 'skipped' | 'failed';
@@ -31,6 +33,8 @@ export interface ActionOutcome {
  * actor's system permission-string list, passed straight through to the reused
  * service calls (they perform the per-circle role check and super-admin bypass).
  * `handledGroups` dedups review-queue group actions across items in one run.
+ *
+ * @stability experimental
  */
 export interface WorkflowActionContext {
   runId: string;
@@ -44,6 +48,8 @@ export interface WorkflowActionContext {
 /**
  * Minimal item handle. The executor loads any per-item state it needs
  * (capturedAt, contentHash, type, group/suggestion ids) with targeted selects.
+ *
+ * @stability experimental
  */
 export interface WorkflowActionItem {
   id: string;
@@ -54,6 +60,8 @@ export interface WorkflowActionItem {
  * schema-validated `params`. Defined locally (rather than reusing the
  * definition-schema's passthrough `WorkflowAction`) so `params` is a distinct,
  * parsed bag the executor reads by key.
+ *
+ * @stability experimental
  */
 export interface WorkflowActionInstance {
   type: string;

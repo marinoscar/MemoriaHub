@@ -29,6 +29,8 @@ import { WorkflowsAdminService } from './workflows-admin.service.js';
  * system_settings:read / jobs:read; the admin override (disable) requires
  * system_settings:write and the runaway-run cancel requires jobs:write —
  * mirroring the admin jobs/nodes controllers.
+ *
+ * @stability experimental
  */
 @ApiTags('Admin: Workflows')
 @ApiBearerAuth('JWT-auth')

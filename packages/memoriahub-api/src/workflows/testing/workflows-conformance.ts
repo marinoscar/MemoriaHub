@@ -1,7 +1,6 @@
 import type { MemoriahubConformanceHarness } from '../../testing/index.js';
 import type { MemoriahubJobHandler } from '../../ports/index.js';
 import type { WorkflowActionHandlerRegistry, WorkflowActionExecutor } from '../actions/workflow-action.executor.js';
-import type { WorkflowsModule } from '../workflows.module.js';
 
 // =============================================================================
 // describeWorkflowsSliceConformance (RETRO-J9, #622)
@@ -61,9 +60,6 @@ export interface WorkflowsSliceConformanceOptions {
   /** Builds the slice over fresh ports and an empty database. */
   create(): Promise<WorkflowsSliceUnderTest>;
 }
-
-/** The slice module type, for a host that wants to name it. */
-export type WorkflowsModuleType = typeof WorkflowsModule;
 
 const job = (type: string, payload: unknown, status = 'pending') =>
   ({ id: 'job-1', type, attempts: 1, payload, status, subjectType: 'circle', subjectId: 'circle-1' }) as never;

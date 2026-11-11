@@ -17,6 +17,8 @@ import {
  * root, which makes it sound to apply as a top-level AND post-filter. On any
  * OR-nested path the field contributes only its bounding predicate (an upper
  * bound), and no refinement is emitted.
+ *
+ * @stability experimental
  */
 export interface CompiledRefinement {
   field: string;
@@ -50,6 +52,8 @@ export interface CompiledWorkflow {
  * array — fragments are never merged into one object — so two descriptors that
  * each emit a top-level `OR`/`AND` key never collide (see
  * `docs/audits/search-audit.md`).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class WorkflowConditionCompiler {
