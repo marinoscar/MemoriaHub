@@ -7,6 +7,7 @@ import {
   ReviewInsightsController,
 } from '@marinoscar/memoriahub-api/dedup';
 
+import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { AppDuplicateObserver } from './duplicate-observer.adapter';
 
 /**
@@ -29,7 +30,9 @@ export class DuplicateObserverModule {}
  * itself with the review-runs slice's registry (RETRO-J9), so no module here imports the other way.
  */
 @Module({
-  imports: [DedupSliceModule.forRoot(), DuplicateObserverModule],
+  // The review-runs module (the run engine and its controller) is imported before the slice, as every review
+  // queue module did before the strategies moved: the OpenAPI path order follows the module order.
+  imports: [ReviewRunsModule, DedupSliceModule.forRoot(), DuplicateObserverModule],
   controllers: [DuplicateController, AdminDuplicateController, ReviewInsightsController],
   exports: [DedupSliceModule],
 })

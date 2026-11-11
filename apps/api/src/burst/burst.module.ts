@@ -6,6 +6,7 @@ import {
   BurstModule as BurstSliceModule,
 } from '@marinoscar/memoriahub-api/burst';
 
+import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { AppBurstObserver } from './burst-observer.adapter';
 
 /**
@@ -28,7 +29,9 @@ export class BurstObserverModule {}
  * way and there is no cycle.
  */
 @Module({
-  imports: [BurstSliceModule.forRoot(), BurstObserverModule],
+  // The review-runs module (the run engine and its controller) is imported before the slice, as every review
+  // queue module did before the strategies moved: the OpenAPI path order follows the module order.
+  imports: [ReviewRunsModule, BurstSliceModule.forRoot(), BurstObserverModule],
   controllers: [BurstController, AdminBurstController],
   exports: [BurstSliceModule],
 })
