@@ -1,11 +1,10 @@
-import { Controller, Post, Param, NotFoundException, Logger } from '@nestjs/common';
+import { Controller, Inject, Post, Param, NotFoundException, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_PRISMA, type MemoriahubAccessPort } from '../../ports/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS } from '../constants/permissions.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_OBJECT_REPROCESSOR, type MediaObjectReprocessor } from '../hooks/media-host-hooks.js';
 
 /**
  * POST /api/media/:id/thumbnail/rerun
@@ -13,11 +12,15 @@ import { ObjectReprocessService } from '../media-processing/recovery/object-repr
  * User-facing "Retry thumbnail" action, mirroring the existing
  * POST /api/media/:id/metadata/rerun pattern (MetadataController). Runs
  * synchronously, one object inside the request, through
- * ObjectReprocessService.reprocessNow (the platform's run-processors-now API,
- * RETRO-D1b #567 open decision 1), since thumbnail generation is a few seconds
- * at most and the response reports the outcome. Bypasses the stuck-
- * threshold/retry-cap that gates the automatic recovery cron — an explicit
- * user request should always get a fresh attempt.
+ * the host's object reprocessor (`MEDIA_OBJECT_REPROCESSOR`, the platform's
+ * run-processors-now API, RETRO-D1b #567 open decision 1), since thumbnail
+ * generation is a few seconds at most and the response reports the outcome.
+ * Bypasses the stuck-threshold/retry-cap that gates the automatic recovery
+ * cron — an explicit user request should always get a fresh attempt.
+ *
+ * Mounted by the host in its own module.
+ *
+ * @stability experimental
  */
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -26,19 +29,19 @@ export class MediaThumbnailRerunController {
   private readonly logger = new Logger(MediaThumbnailRerunController.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
-    private readonly recoveryService: ObjectReprocessService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
+    @Inject(MEDIA_OBJECT_REPROCESSOR) private readonly recoveryService: MediaObjectReprocessor,
   ) {}
 
   @Post('media/:id/thumbnail/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run thumbnail generation for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 201, description: '{ status: "ready" | "failed" }' })
   async rerunThumbnail(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<{ data: { status: string } }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },

@@ -1,40 +1,66 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Inject, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { JobReason, MhLegacyJobStatus } from '@prisma/client';
-import { JobsService, type Job } from '@marinoscar/platform-api/jobs';
+import { MemoriahubAuth } from '../../core/index.js';
 import {
-  STORAGE_RECOVER_STUCK_TYPE,
-  STORAGE_REPROCESS_TYPE,
-} from '../media-processing/recovery/storage-recovery.constants';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS, MEDIA_ROLES as ROLES } from '../constants/permissions.js';
+import type { MediaDb } from '../data/media-db.js';
+import { enqueueEnrichmentJob } from '../jobs/enrichment-jobs.js';
+import { STORAGE_RECOVER_STUCK_TYPE, STORAGE_REPROCESS_TYPE } from './storage-recovery-types.js';
 import { reprocessBodySchema, reprocessStuckBodySchema, reprocessFailedBodySchema } from '@marinoscar/memoriahub-contract/media';
 
 // .default({}) on all three so a bodyless POST parses as {} — see issue #289
 // (app.module.ts).
 
+/**
+ * Body of `POST /api/admin/media/reprocess`.
+ *
+ * @stability experimental
+ */
 export class ReprocessBodyDto extends createZodDto(reprocessBodySchema) {}
 
-
+/**
+ * Body of `POST /api/admin/media/reprocess-stuck`.
+ *
+ * @stability experimental
+ */
 export class ReprocessStuckBodyDto extends createZodDto(reprocessStuckBodySchema) {}
 
-
+/**
+ * Body of `POST /api/admin/media/reprocess-failed`.
+ *
+ * @stability experimental
+ */
 export class ReprocessFailedBodyDto extends createZodDto(reprocessFailedBodySchema) {}
 
+/** What the recovery routes report of the job they queued (or collapsed into). */
+interface QueuedJob {
+  id: string;
+  status: string;
+  priority: number;
+}
+
+/**
+ * The admin media recovery routes (`/api/admin/media/*`: `reprocess`, `reprocess-stuck`, `reprocess-failed`,
+ * `thumbnails/repair`). Each only enqueues a job and answers at once; the host mounts the controller in
+ * its own module and registers the two `media.storage.*` handlers.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Media Recovery')
 @Controller('admin/media')
 export class MediaReprocessController {
   constructor(
-    private readonly jobs: JobsService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
   ) {}
 
   @Post('reprocess')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
     summary: 'Queue reprocessing of existing media objects (Admin)',
     description:
@@ -48,7 +74,7 @@ export class MediaReprocessController {
   @ApiResponse({ status: 201, description: '{ data: { jobId: string, status: string } }' })
   async reprocess(@Body() body: ReprocessBodyDto): Promise<{ data: { jobId: string; status: string } }> {
     const circleId = body.circleId;
-    const job = await this.jobs.enqueue({
+    const job = await this.enqueue({
       type: STORAGE_REPROCESS_TYPE,
       reason: 'rerun',
       // One in flight per circle, and one for the whole library.
@@ -61,7 +87,7 @@ export class MediaReprocessController {
   }
 
   @Post('reprocess-stuck')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
     summary: 'Recover StorageObjects orphaned at status=processing (Admin)',
     description:
@@ -79,7 +105,7 @@ export class MediaReprocessController {
     @Body() body: ReprocessStuckBodyDto,
   ): Promise<{ data: { jobId: string; status: string } }> {
     // No subject: collapses onto the cron's in-flight job of the same type.
-    const job = await this.jobs.enqueue({
+    const job = await this.enqueue({
       type: STORAGE_RECOVER_STUCK_TYPE,
       reason: 'rerun',
       payload: { mode: 'stuck', ...(body.olderThanMinutes ? { olderThanMinutes: body.olderThanMinutes } : {}) },
@@ -91,7 +117,7 @@ export class MediaReprocessController {
   }
 
   @Post('reprocess-failed')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
     summary: 'Recover image StorageObjects stuck at status=failed (Admin)',
     description:
@@ -107,7 +133,7 @@ export class MediaReprocessController {
   async reprocessFailed(
     @Body() body: ReprocessFailedBodyDto,
   ): Promise<{ data: { jobId: string; status: string } }> {
-    const job = await this.jobs.enqueue({
+    const job = await this.enqueue({
       type: STORAGE_RECOVER_STUCK_TYPE,
       reason: 'rerun',
       // Its own dedup slot: a failed-mode request never collapses onto a stuck-mode job.
@@ -121,7 +147,7 @@ export class MediaReprocessController {
   }
 
   @Post('thumbnails/repair')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
     summary: 'Trigger a thumbnail repair sweep now (Admin)',
     description:
@@ -136,22 +162,22 @@ export class MediaReprocessController {
   })
   @ApiResponse({ status: 201, description: '{ data: { jobId: string, status: string } }' })
   async repairThumbnails(): Promise<{ data: { jobId: string; status: string } }> {
-    // Dedup is handled inside EnrichmentJobService.enqueue: for global jobs
-    // (mediaItemId: null) it returns the existing pending/running job of the
-    // same type instead of creating a duplicate row.
-    const job = await this.enrichmentJobService.enqueue({
+    // Dedup is handled by the queue: for a global job (no subject) it returns the existing
+    // pending/running job of the same type instead of creating a duplicate row.
+    const { id } = await enqueueEnrichmentJob(this.jobs, {
       type: 'thumbnail_repair',
       mediaItemId: null,
       circleId: null,
-      reason: JobReason.rerun,
+      reason: 'rerun',
       priority: 0, // highest — explicit admin request
     });
+    const job = await this.describe(id);
 
     // If dedup returned an existing job still waiting in the queue at a lower
     // priority (e.g. the hourly cron enqueues at 100), promote it to 0 — an
     // explicit admin request should pre-empt the queue. Running jobs are left
     // untouched (they are already being worked on).
-    if (job.status === MhLegacyJobStatus.pending && job.priority > 0) {
+    if (job.status === 'pending' && job.priority > 0) {
       await this.prisma.job.update({
         where: { id: job.id },
         data: { priority: 0 },
@@ -161,12 +187,24 @@ export class MediaReprocessController {
     return { data: { jobId: job.id, status: job.status } };
   }
 
+  /** Queues a job through the port and reads the row back (the route reports its status and priority). */
+  private async enqueue(input: Parameters<MemoriahubJobsPort['enqueue']>[0]): Promise<QueuedJob> {
+    const { id } = await this.jobs.enqueue(input);
+    return this.describe(id);
+  }
+
+  /** The status and priority of a job row, as the queue holds it now. */
+  private async describe(id: string): Promise<QueuedJob> {
+    const row = await this.prisma.job.findUnique({ where: { id }, select: { status: true, priority: true } });
+    return { id, status: (row?.status as string | undefined) ?? 'pending', priority: (row?.priority as number | undefined) ?? 0 };
+  }
+
   /**
    * A dedup hit returns the job already in flight. A pending one waiting at a
    * lower priority (the cron's 100) is promoted to 0: an explicit admin request
    * pre-empts the queue. A running one is left alone.
    */
-  private async promoteIfWaiting(job: Job): Promise<void> {
+  private async promoteIfWaiting(job: QueuedJob): Promise<void> {
     if (job.status === 'pending' && job.priority > 0) {
       await this.prisma.job.update({ where: { id: job.id }, data: { priority: 0 } });
     }

@@ -1,26 +1,34 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
-import { MediaType, JobReason, MediaFaceStatusType } from '@prisma/client';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Readable } from 'stream';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import {
-  applyOrientationTransform,
-  OrientationOp,
-} from '../media-processing/image-orientation.util';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { applyOrientationTransform, type OrientationOp } from '@marinoscar/memoriahub-compute/image';
 
+import { isFeatureEnabled, streamToBuffer, type MemoriahubRequestUser } from '../../core/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import {
+  MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_THUMBNAIL_PRUNER,
+  type MediaObjectReprocessor,
+  type MediaThumbnailPruner,
+} from '../hooks/media-host-hooks.js';
+import { enqueueEnrichmentJob } from '../jobs/enrichment-jobs.js';
+import { MediaMetadataSyncService } from '../sync/media-metadata-sync.service.js';
+
+/**
+ * What an orientation edit reports.
+ *
+ * @stability experimental
+ */
 export interface OrientationEditResult {
   status: string;
   width: number;
@@ -33,8 +41,8 @@ export interface OrientationEditResult {
  * Backs POST /api/media/:id/edit/orientation — a destructive rotate/flip of a
  * photo's ORIGINAL stored bytes. Mirrors the guard/role model of the
  * "Retry thumbnail" action (MediaThumbnailRerunController): media:write
- * permission + per-circle collaborator role, resolved via
- * OwnerAccessService.requireOwnerRole.
+ * permission + per-circle collaborator role, resolved through the access
+ * port's `requireOwnerRole`.
  *
  * Flow:
  *   1. Load + authorize the MediaItem (with its StorageObject).
@@ -45,7 +53,7 @@ export interface OrientationEditResult {
  *   5. Overwrite the SAME storageKey via the provider, update the row's
  *      size/mimeType and the MediaItem's orientation/width/height.
  *   6. Regenerate the thumbnail by re-running the synchronous recovery pipeline
- *      (ObjectReprocessService.reprocessNow) — the same path the
+ *      (the object reprocessor hook) — the same path the
  *      thumbnail-rerun action uses; this also re-derives dimensions and content
  *      hash from the new bytes.
  *   7. Await MediaMetadataSyncService.syncFromStorageObject so the MediaItem
@@ -55,26 +63,40 @@ export interface OrientationEditResult {
  *      sync runs on a fire-and-forget `emit()` that races the request.
  *   8. Best-effort re-enqueue face detection (rotation invalidates normalized
  *      bounding boxes); enqueue failures never fail the request.
+ *
+ * Provided by the host (it needs the host's two post-upload hooks).
+ *
+ * @stability experimental
  */
 @Injectable()
 export class MediaOrientationEditService {
   private readonly logger = new Logger(MediaOrientationEditService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
-    private readonly resolver: StorageProviderResolver,
-    private readonly recoveryService: ObjectReprocessService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly resolver: MemoriahubObjectStorePort,
+    @Inject(MEDIA_OBJECT_REPROCESSOR) private readonly recoveryService: MediaObjectReprocessor,
     private readonly metadataSync: MediaMetadataSyncService,
-    private readonly thumbnailPrune: ThumbnailPruneService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEDIA_THUMBNAIL_PRUNER) private readonly thumbnailPrune: MediaThumbnailPruner,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
   ) {}
 
+  /**
+   * Applies a rotate or flip to the photo's original bytes, overwriting them, then regenerates the
+   * thumbnail and re-queues face detection.
+   *
+   * @param mediaItemId - the photo.
+   * @param op - the transform.
+   * @param user - the caller (needs the collaborator role of the item's circle).
+   * @returns the resulting storage status and the new dimensions.
+   * @throws NotFoundException for an unknown or trashed item; BadRequestException for a non-photo.
+   */
   async editOrientation(
     mediaItemId: string,
     op: OrientationOp,
-    user: RequestUser,
+    user: MemoriahubRequestUser,
   ): Promise<OrientationEditResult> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -103,7 +125,7 @@ export class MediaOrientationEditService {
 
     // Photos only — reject videos / non-image objects.
     if (
-      mediaItem.type !== MediaType.photo ||
+      mediaItem.type !== 'photo' ||
       !storageObject.mimeType.startsWith('image/')
     ) {
       throw new BadRequestException(
@@ -113,7 +135,7 @@ export class MediaOrientationEditService {
 
     // Resolve the per-object provider (same pattern as ObjectProcessingService)
     // and download the current original bytes.
-    const provider = await this.resolver.getProviderFor(
+    const provider = await this.resolver.forLocation(
       storageObject.storageProvider,
       storageObject.bucket,
     );
@@ -203,19 +225,15 @@ export class MediaOrientationEditService {
     circleId: string,
   ): Promise<void> {
     try {
-      const settings = await this.systemSettings.getSettings();
-      const faceOn = settings.features?.['faceRecognition'] === true;
-      const faceKilled = (process.env['FACE_AUTO_DETECT'] ?? 'true') === 'false';
-
-      if (!faceOn || faceKilled) {
+      if (!(await isFeatureEnabled(this.settings, 'faceRecognition', 'FACE_AUTO_DETECT'))) {
         return;
       }
 
-      const job = await this.enrichmentJobService.enqueue({
+      const job = await enqueueEnrichmentJob(this.jobs, {
         type: 'face_detection',
         mediaItemId,
         circleId,
-        reason: JobReason.rerun,
+        reason: 'rerun',
         priority: 0,
       });
 
@@ -223,11 +241,11 @@ export class MediaOrientationEditService {
         where: { mediaItemId },
         create: {
           mediaItemId,
-          status: MediaFaceStatusType.pending,
+          status: 'pending',
           faceCount: 0,
         },
         update: {
-          status: MediaFaceStatusType.pending,
+          status: 'pending',
         },
       });
 

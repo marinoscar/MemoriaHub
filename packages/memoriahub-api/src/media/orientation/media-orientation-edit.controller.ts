@@ -7,12 +7,10 @@ import {
   ApiProperty,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { IsIn } from 'class-validator';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { OrientationOp } from '../media-processing/image-orientation.util';
-import { MediaOrientationEditService } from './media-orientation-edit.service';
+import type { OrientationOp } from '@marinoscar/memoriahub-compute/image';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { MEDIA_PERMISSIONS as PERMISSIONS } from '../constants/permissions.js';
+import { MediaOrientationEditService } from './media-orientation-edit.service.js';
 
 const ORIENTATION_OPS: OrientationOp[] = [
   'rotate_left',
@@ -21,14 +19,16 @@ const ORIENTATION_OPS: OrientationOp[] = [
   'flip_vertical',
 ];
 
-class OrientationEditDto {
+/**
+ * Body of `POST /api/media/:id/edit/orientation`.
+ *
+ * @stability experimental
+ */
+export class OrientationEditDto {
   @ApiProperty({
     description: 'Orientation operation to apply to the photo original',
     enum: ORIENTATION_OPS,
     example: 'rotate_right',
-  })
-  @IsIn(ORIENTATION_OPS, {
-    message: `op must be one of: ${ORIENTATION_OPS.join(', ')}`,
   })
   op!: OrientationOp;
 }
@@ -40,7 +40,9 @@ class OrientationEditDto {
  * JPEG, overwrites the same storage key, regenerates the thumbnail, and
  * re-enqueues face detection. Photos only. Guard/RBAC model mirrors the
  * "Retry thumbnail" action (media:write permission + per-circle collaborator
- * role, enforced inside the service).
+ * role, enforced inside the service). Mounted by the host in its own module.
+ *
+ * @stability experimental
  */
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
@@ -53,7 +55,7 @@ export class MediaOrientationEditController {
   ) {}
 
   @Post('media/:id/edit/orientation')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({
     summary: "Rotate or flip a photo's original bytes",
     description:
@@ -73,7 +75,7 @@ export class MediaOrientationEditController {
   async editOrientation(
     @Param('id') mediaItemId: string,
     @Body() dto: OrientationEditDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ): Promise<{ data: { status: string; width: number; height: number } }> {
     const result = await this.orientationEditService.editOrientation(
       mediaItemId,
