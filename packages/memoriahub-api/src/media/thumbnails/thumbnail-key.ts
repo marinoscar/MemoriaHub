@@ -35,7 +35,11 @@
  */
 import { createHash, randomBytes } from 'crypto';
 
-/** Prefix every derived thumbnail object lives under. */
+/**
+ * Prefix every derived thumbnail object lives under.
+ *
+ * @stability experimental
+ */
 export const THUMBNAIL_KEY_PREFIX = 'thumbnails/';
 
 /**
@@ -43,12 +47,18 @@ export const THUMBNAIL_KEY_PREFIX = 'thumbnails/';
  * object — the legacy unversioned `thumbnails/<id>.jpg` included. Used to find
  * superseded thumbnails for pruning. Object ids are UUIDs, so this prefix can
  * never match another object's thumbnails.
+ *
+ * @stability experimental
  */
 export function thumbnailKeyPrefixFor(sourceObjectId: string): string {
   return `${THUMBNAIL_KEY_PREFIX}${sourceObjectId}`;
 }
 
-/** Build the versioned thumbnail key for a source object. */
+/**
+ * Build the versioned thumbnail key for a source object.
+ *
+ * @stability experimental
+ */
 export function buildThumbnailKey(sourceObjectId: string, version: string): string {
   return `${thumbnailKeyPrefixFor(sourceObjectId)}-${version}.jpg`;
 }
@@ -57,6 +67,8 @@ export function buildThumbnailKey(sourceObjectId: string, version: string): stri
  * Content-addressed version token: a truncated sha256 of the thumbnail bytes.
  * 16 hex chars (64 bits) is far more than enough to distinguish the handful of
  * renditions one object ever produces, and keeps the key readable.
+ *
+ * @stability experimental
  */
 export function thumbnailVersionFromBytes(thumbBuffer: Buffer): string {
   return createHash('sha256').update(thumbBuffer).digest('hex').slice(0, 16);
@@ -65,6 +77,8 @@ export function thumbnailVersionFromBytes(thumbBuffer: Buffer): string {
 /**
  * Random version token, for the one caller that must name a key before it has
  * the bytes to hash (the node presigned-upload path).
+ *
+ * @stability experimental
  */
 export function randomThumbnailVersion(): string {
   return randomBytes(8).toString('hex');
@@ -77,6 +91,8 @@ export function randomThumbnailVersion(): string {
  * same job (a retried PUT, a lost response), so the version cannot be random;
  * a new job (every regeneration is a new job) still moves the key, which is all
  * the cache-busting rule of issue #434 needs.
+ *
+ * @stability experimental
  */
 export function thumbnailVersionForJob(jobId: string): string {
   return createHash('sha256').update(`thumbnail-job:${jobId}`).digest('hex').slice(0, 16);

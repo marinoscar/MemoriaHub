@@ -40,6 +40,13 @@ export class MetadataController {
   // POST /api/media/:id/metadata/rerun
   // --------------------------------------------------------------------------
 
+  /**
+   * Re-runs metadata extraction for one media item.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the queued job.
+   */
   @Post('media/:id/metadata/rerun')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run metadata extraction for a media item' })
@@ -91,6 +98,13 @@ export class MetadataController {
   // GET /api/media/:id/metadata/status
   // --------------------------------------------------------------------------
 
+  /**
+   * Reads the metadata extraction status of one media item.
+   *
+   * @param mediaItemId - the item.
+   * @param user - the caller.
+   * @returns the status (`not_processed` when none was recorded).
+   */
   @Get('media/:id/metadata/status')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get metadata extraction status for a media item' })

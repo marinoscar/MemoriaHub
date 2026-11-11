@@ -35,6 +35,12 @@ export class AdminMetadataController {
     private readonly metadataBackfillService: MetadataBackfillService,
   ) {}
 
+  /**
+   * Queues metadata extraction for every eligible item of every circle.
+   *
+   * @param dto - the optional date range and `force`.
+   * @returns how many jobs were queued across how many circles.
+   */
   @Post('backfill')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)

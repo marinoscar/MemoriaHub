@@ -71,6 +71,8 @@ export type MediaWriteScope = <R>(fn: (tx: MediaTx) => Promise<R>) => Promise<R>
  *            exactly like the legacy processor loop did. Absent on node
  *            results (a node-side compute error routes to the /failure path
  *            instead).
+ *
+ * @stability experimental
  */
 export interface MetadataComputeResult {
   exif: Record<string, unknown>;
@@ -368,6 +370,13 @@ export class MetadataExtractionService {
   // In-process path: download → computeMetadata → persistMetadata
   // ---------------------------------------------------------------------------
 
+  /**
+   * The in-process path: download the object, compute the metadata, persist it. Marks the status row
+   * `processing`, then `processed` or `failed` (and rethrows so the queue retries).
+   *
+   * @param job - the media-item job context.
+   * @param scope - where the `storage_objects` writes run (the job's organization).
+   */
   async processMediaItem(job: MediaJobContext, scope?: MediaWriteScope): Promise<void> {
     // Guard: mediaItemId must be present
     if (!job.mediaItemId) {
@@ -478,6 +487,8 @@ export class MetadataExtractionService {
  * formatName/formatTags/streamTags, capturedAt derived from creation_time).
  * Exported for the unit tests; the CLI node module replicates the same
  * mapping so node results match byte-for-byte.
+ *
+ * @stability experimental
  */
 export function buildProbeEntry(probeData: FfprobeDataLike): Record<string, unknown> {
   const container = extractContainerMetadata(probeData);

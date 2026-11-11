@@ -59,9 +59,12 @@ export class ThumbnailNodePersistService {
   ) {}
 
   /**
-   * @param scope - where the two `storage_objects` writes run: the handler passes
-   *   the platform `JobScope` (the job's organization, RETRO-C3); omitted, they run
-   *   on the plain client.
+   * Persists the thumbnail a node rendered.
+   *
+   * @param job - the media-item job context.
+   * @param result - what the node submitted (`{ storageKey, width, height, bytes }`).
+   * @param scope - where the two `storage_objects` writes run: the handler passes the job's write
+   *   scope (its organization); omitted, they run on the plain client.
    */
   async persistThumbnail(
     job: MediaJobContext,
