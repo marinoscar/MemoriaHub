@@ -12,14 +12,7 @@
 import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
 
 import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
-import { ThumbnailRegenHandler } from '@marinoscar/memoriahub-api/media';
-import { ThumbnailRepairHandler } from '@marinoscar/memoriahub-api/media';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
-
-const NATIVE: Array<[string, new (...args: never[]) => unknown]> = [
-  ['thumbnail_regen', ThumbnailRegenHandler],
-  ['thumbnail_repair', ThumbnailRepairHandler],
-];
 
 describe('media/face job handlers on the booted app (RETRO-C3)', () => {
   let context: TestContext;
@@ -34,8 +27,12 @@ describe('media/face job handlers on the booted app (RETRO-C3)', () => {
     await closeTestApp(context);
   });
 
-  it.each(NATIVE)('%s dispatches to the native handler class', (type, HandlerClass) => {
-    expect(registry.get(type)).toBeInstanceOf(HandlerClass);
+  // The media slice's thumbnail jobs register through the jobs port too (RETRO-J5).
+  it.each([
+    ['thumbnail_regen', 'Thumbnail regeneration'],
+    ['thumbnail_repair', 'Thumbnail repair sweep'],
+  ])('%s is registered by the media slice through the jobs port', (type, label) => {
+    expect(registry.get(type)).toMatchObject({ type, label });
   });
 
   // The three face types are the packaged face slice's (RETRO-J6): it registers them through the
@@ -56,7 +53,7 @@ describe('media/face job handlers on the booted app (RETRO-C3)', () => {
   it('none of the six goes through the legacy adapter', () => {
     const legacy = context.app.get(EnrichmentHandlerRegistry).types();
     for (const type of ['face_detection', 'video_face_detection', 'face_auto_archive_sweep']) expect(legacy).not.toContain(type);
-    for (const [type] of NATIVE) expect(legacy).not.toContain(type);
+    for (const type of ['thumbnail_regen', 'thumbnail_repair']) expect(legacy).not.toContain(type);
     expect(legacy).not.toContain('metadata_extraction');
   });
 
