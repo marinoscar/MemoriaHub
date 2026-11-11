@@ -10,16 +10,22 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
-import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
-import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { ReviewRunService } from '../../review-runs/index.js';
+import { LocationSuggestionService } from '../inference/location-suggestion.service.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS } from './location-permissions.js';
+import {
+  AcceptLocationSuggestionDto,
+  BulkResolveLocationSuggestionsDto,
+  LocationSuggestionQueryDto,
+} from './location-suggestion.dto.js';
 
+/**
+ * The `LocationSuggestionController` routes (the location review queue); mounted by the host in its own
+ * module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Location Inference')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
@@ -34,7 +40,7 @@ export class LocationSuggestionController {
    * List location suggestions (review queue) for a circle.
    */
   @Get('location-suggestions')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List location suggestions for a circle' })
   @ApiQuery({ name: 'circleId', type: String, required: true })
   @ApiQuery({
@@ -49,7 +55,7 @@ export class LocationSuggestionController {
   @ApiQuery({ name: 'sortBy', type: String, required: false, enum: ['createdAt', 'confidence'] })
   @ApiQuery({ name: 'sortOrder', type: String, required: false, enum: ['asc', 'desc'] })
   @ApiResponse({ status: 200, description: 'Location suggestions listed' })
-  async listSuggestions(@Query() query: LocationSuggestionQueryDto, @CurrentUser() user: RequestUser) {
+  async listSuggestions(@Query() query: LocationSuggestionQueryDto, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.locationSuggestionService.listSuggestions(query, user.id, user.permissions);
   }
 
@@ -60,19 +66,19 @@ export class LocationSuggestionController {
    * at creation and reflects the real total once the run is evaluated.
    */
   @Post('location-suggestions/bulk-accept')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start an async bulk-accept run for pending location suggestions above a threshold' })
   @ApiResponse({ status: 200, description: 'Bulk-accept run started' })
   @ApiResponse({ status: 409, description: 'A run is already in progress for this circle' })
   async bulkAcceptSuggestions(
     @Body() dto: BulkResolveLocationSuggestionsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     const run = await this.runService.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.location_suggestion,
-      action: ReviewRunAction.accept,
+      subjectType: 'location_suggestion',
+      action: 'accept',
       threshold: dto.threshold,
       userId: user.id,
       perms: user.permissions,
@@ -86,19 +92,19 @@ export class LocationSuggestionController {
    * confidence threshold (0-100) — the low-confidence noise.
    */
   @Post('location-suggestions/bulk-reject')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Start an async bulk-reject run for pending location suggestions below a threshold' })
   @ApiResponse({ status: 200, description: 'Bulk-reject run started' })
   @ApiResponse({ status: 409, description: 'A run is already in progress for this circle' })
   async bulkRejectSuggestions(
     @Body() dto: BulkResolveLocationSuggestionsDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     const run = await this.runService.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.location_suggestion,
-      action: ReviewRunAction.reject,
+      subjectType: 'location_suggestion',
+      action: 'reject',
       threshold: dto.threshold,
       userId: user.id,
       perms: user.permissions,
@@ -110,7 +116,7 @@ export class LocationSuggestionController {
    * POST /api/media/location-suggestions/:id/accept
    */
   @Post('location-suggestions/:id/accept')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Accept a location suggestion (optionally adjusting lat/lng)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -120,7 +126,7 @@ export class LocationSuggestionController {
   async acceptSuggestion(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AcceptLocationSuggestionDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.locationSuggestionService.acceptSuggestion(id, dto, user.id, user.permissions);
   }
@@ -129,14 +135,14 @@ export class LocationSuggestionController {
    * POST /api/media/location-suggestions/:id/reject
    */
   @Post('location-suggestions/:id/reject')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reject a location suggestion' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Suggestion rejected' })
   @ApiResponse({ status: 400, description: 'Suggestion is not pending' })
   @ApiResponse({ status: 404, description: 'Suggestion not found' })
-  async rejectSuggestion(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async rejectSuggestion(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.locationSuggestionService.rejectSuggestion(id, user.id, user.permissions);
   }
 
@@ -144,14 +150,14 @@ export class LocationSuggestionController {
    * POST /api/media/location-suggestions/:id/revert
    */
   @Post('location-suggestions/:id/revert')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revert an auto-applied location suggestion' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Suggestion reverted' })
   @ApiResponse({ status: 400, description: 'Suggestion is not auto_applied' })
   @ApiResponse({ status: 404, description: 'Suggestion not found' })
-  async revertSuggestion(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async revertSuggestion(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.locationSuggestionService.revertSuggestion(id, user.id, user.permissions);
   }
 
@@ -160,11 +166,11 @@ export class LocationSuggestionController {
    * Force a fresh location-inference rerun for a single media item.
    */
   @Post(':id/infer-location')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run location inference for a media item' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 201, description: 'Location inference job queued' })
-  async inferLocation(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async inferLocation(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.locationSuggestionService.inferLocation(id, user.id, user.permissions);
   }
 }

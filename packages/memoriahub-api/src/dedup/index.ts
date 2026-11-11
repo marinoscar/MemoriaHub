@@ -12,3 +12,7 @@ export * from './duplicate-observer.js';
 export * from './dedup.dto.js';
 export * from './duplicate.service.js';
 export * from './duplicate-group.strategy.js';
+export * from './http/dedup-permissions.js';
+export * from './http/duplicate.controller.js';
+export * from './http/admin-duplicate.controller.js';
+export * from './http/review-insights.controller.js';

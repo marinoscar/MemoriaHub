@@ -1,10 +1,10 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
-import { RebuildLocationGroupsDto } from './dto/location-group.dto';
+import { MemoriahubAuth } from '../../core/index.js';
+import { LocationGroupsService } from '../groups/location-groups.service.js';
+import { RebuildLocationGroupsDto } from './location-group.dto.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './location-permissions.js';
 
 /**
  * LocationGroupsAdminController — `/api/admin/location-groups/*` (issue #374).
@@ -12,13 +12,19 @@ import { RebuildLocationGroupsDto } from './dto/location-group.dto';
  * Split from `LocationGroupsController` only because the route prefix differs;
  * both reuse the same Admin-only `geo_settings:*` pair (no new permission).
  */
+/**
+ * The `LocationGroupsAdminController` routes (`/api/admin/location-groups/*`); mounted by the host in its own
+ * module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Location Groups')
 @Controller('admin/location-groups')
 export class LocationGroupsAdminController {
   constructor(private readonly service: LocationGroupsService) {}
 
   @Post('rebuild')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
     summary: 'Re-derive media_items.geo_canonical_* from the current groups (Admin)',
     description:

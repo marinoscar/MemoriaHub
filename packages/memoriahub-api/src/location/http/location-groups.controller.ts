@@ -12,10 +12,9 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse } from '@nestjs/swagger';
 
-import { Auth } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
+import { MemoriahubAuth, MemoriahubCurrentUser } from '../../core/index.js';
+import { LocationGroupsService } from '../groups/location-groups.service.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './location-permissions.js';
 import {
   CreateLocationGroupDto,
   ListLocationGroupSuggestionsDto,
@@ -24,7 +23,7 @@ import {
   LocationGroupMembersDto,
   MergeLocationGroupsDto,
   UpdateLocationGroupDto,
-} from './dto/location-group.dto';
+} from './location-group.dto.js';
 
 /**
  * LocationGroupsController — `/api/location-groups/*` (issue #374).
@@ -42,13 +41,18 @@ import {
  * the same reason — it is a static path today only because no `POST /:id`
  * handler exists, and adding one later must not silently swallow it.
  */
+/**
+ * The `LocationGroupsController` routes (`/api/location-groups/*`); mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Location Groups')
 @Controller('location-groups')
 export class LocationGroupsController {
   constructor(private readonly service: LocationGroupsService) {}
 
   @Get()
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
     summary: 'List location groups (Admin)',
     description:
@@ -60,7 +64,7 @@ export class LocationGroupsController {
   }
 
   @Get('values')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
     summary: 'List distinct raw location values app-wide (Admin)',
     description:
@@ -72,7 +76,7 @@ export class LocationGroupsController {
   }
 
   @Get('suggestions')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({
     summary: 'Suggest location groups from ungrouped raw values (Admin)',
     description:
@@ -84,7 +88,7 @@ export class LocationGroupsController {
   }
 
   @Post('merge')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
     summary: 'Merge many raw location values into one group (Admin)',
     description:
@@ -97,12 +101,12 @@ export class LocationGroupsController {
   @ApiResponse({ status: 400, description: 'Both or neither target supplied, or a scope mismatch' })
   @ApiResponse({ status: 404, description: 'targetGroupId not found' })
   @ApiResponse({ status: 409, description: 'A value is already claimed by another group' })
-  async merge(@Body() dto: MergeLocationGroupsDto, @CurrentUser('id') userId: string) {
+  async merge(@Body() dto: MergeLocationGroupsDto, @MemoriahubCurrentUser('id') userId: string) {
     return this.service.merge(dto, userId ?? null);
   }
 
   @Get(':id')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({ summary: 'Get a location group with its full alias list (Admin)' })
   @ApiParam({ name: 'id', description: 'Location group UUID' })
   @ApiResponse({ status: 200, description: 'Group detail' })
@@ -112,7 +116,7 @@ export class LocationGroupsController {
   }
 
   @Post()
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
     summary: 'Create a location group (Admin)',
     description:
@@ -123,13 +127,13 @@ export class LocationGroupsController {
   @ApiResponse({ status: 409, description: 'Member value already claimed' })
   async create(
     @Body() dto: CreateLocationGroupDto,
-    @CurrentUser('id') userId: string,
+    @MemoriahubCurrentUser('id') userId: string,
   ) {
     return this.service.create(dto, userId ?? null);
   }
 
   @Patch(':id')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Update a location group (Admin)' })
   @ApiParam({ name: 'id', description: 'Location group UUID' })
   @ApiResponse({ status: 200, description: 'Group updated' })
@@ -143,7 +147,7 @@ export class LocationGroupsController {
 
   @Delete(':id')
   @HttpCode(204)
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({
     summary: 'Delete a location group (Admin)',
     description:
@@ -156,7 +160,7 @@ export class LocationGroupsController {
   }
 
   @Post(':id/members')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Add raw values to a location group (Admin)' })
   @ApiParam({ name: 'id', description: 'Location group UUID' })
   @ApiResponse({ status: 201, description: '{ added }' })
@@ -169,7 +173,7 @@ export class LocationGroupsController {
   }
 
   @Delete(':id/members')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Remove raw values from a location group (Admin)' })
   @ApiParam({ name: 'id', description: 'Location group UUID' })
   @ApiResponse({ status: 200, description: '{ removed }' })

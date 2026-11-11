@@ -15,7 +15,7 @@ import {
 } from '@marinoscar/memoriahub-contract/location';
 
 // The schemas and the level vocabulary live in `@marinoscar/memoriahub-contract/location`;
-// the classes below add the Swagger metadata and stay here. Re-exported so callers keep this import path.
+// the classes below add the Swagger metadata. Re-exported so callers keep this import path.
 export { GROUPED_FILTERS, LOCATION_GROUP_LEVELS, ListLocationGroupsSchema, CreateLocationGroupSchema, UpdateLocationGroupSchema, LocationGroupMembersSchema, ListLocationValuesSchema, MergeLocationGroupsSchema, ListLocationGroupSuggestionsSchema, RebuildLocationGroupsSchema };
 export type { LocationGroupLevelValue };
 

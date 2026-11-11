@@ -7,39 +7,39 @@
  */
 
 import { BadRequestException } from '@nestjs/common';
-import { AdminLocationInferenceController } from './admin-location-inference.controller';
-import { LocationInferenceBackfillService } from '@marinoscar/memoriahub-api/location';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { FEATURE_KEYS } from '../settings/feature-gates';
+import { AdminLocationInferenceController, type LocationInferenceBackfillService } from '../../src/location/index.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
 
 describe('AdminLocationInferenceController', () => {
   let controller: AdminLocationInferenceController;
   let mockBackfillService: { backfillAllCircles: jest.Mock };
-  let mockSystemSettingsService: { isFeatureEnabled: jest.Mock };
+  let features: Record<string, boolean>;
+  let settings: ReturnType<typeof settingsPortFrom>;
 
   beforeEach(() => {
     mockBackfillService = { backfillAllCircles: jest.fn() };
-    mockSystemSettingsService = { isFeatureEnabled: jest.fn() };
+    features = {};
+    settings = settingsPortFrom(() => ({ features }));
 
     controller = new AdminLocationInferenceController(
       mockBackfillService as unknown as LocationInferenceBackfillService,
-      mockSystemSettingsService as unknown as AppSystemSettingsService,
+      settings as never,
     );
   });
 
   it('throws BadRequestException and never calls backfillAllCircles when locationInference is disabled', async () => {
-    mockSystemSettingsService.isFeatureEnabled.mockResolvedValue(false);
+    features['locationInference'] = false;
 
     await expect(
       controller.backfillAllCircles({ from: undefined, to: undefined, force: false } as any),
     ).rejects.toThrow(BadRequestException);
 
-    expect(mockSystemSettingsService.isFeatureEnabled).toHaveBeenCalledWith(FEATURE_KEYS.LOCATION_INFERENCE);
+    expect(settings.readSystem).toHaveBeenCalledWith('features');
     expect(mockBackfillService.backfillAllCircles).not.toHaveBeenCalled();
   });
 
   it('calls backfillAllCircles with {from,to,force} from the dto and returns {data:result} when enabled', async () => {
-    mockSystemSettingsService.isFeatureEnabled.mockResolvedValue(true);
+    features['locationInference'] = true;
     const backfillResult = { enqueued: 2, circles: 2, estimatedItems: 40 };
     mockBackfillService.backfillAllCircles.mockResolvedValue(backfillResult);
 

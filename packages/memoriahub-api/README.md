@@ -21,7 +21,7 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/location`: the location slice (location grouping so far), `LocationModule.forRoot` and `LocationGroupResolverService` ([slice README](src/location/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/location/testing`: `describeLocationSliceConformance` ([slice README](src/location/README.md#extension-point-catalog)).
-- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection and the review queue), `DedupModule.forRoot`, `DuplicateDetectionService` and `DuplicateService` ([slice README](src/dedup/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection and the review queue), `DedupModule.forRoot`, `DuplicateDetectionService`, `DuplicateService` and the three dedup controllers ([slice README](src/dedup/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/dedup/testing`: `describeDedupSliceConformance` ([slice README](src/dedup/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/burst`: the burst slice, `BurstModule.forRoot`, `BurstService`, `BurstDetectionService`, `BurstGroupReviewStrategy` and the two burst controllers ([slice README](src/burst/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/burst/testing`: `describeBurstSliceConformance` ([slice README](src/burst/README.md#extension-point-catalog)).

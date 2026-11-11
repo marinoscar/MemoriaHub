@@ -7,22 +7,23 @@
  * location-suggestion.service.spec.ts.
  */
 
-import { ReviewRunAction, ReviewRunSubject } from '@prisma/client';
-import { LocationSuggestionController } from './location-suggestion.controller';
-import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { LocationSuggestionQueryDto } from './dto/location-suggestion-query.dto';
-import { AcceptLocationSuggestionDto } from './dto/accept-location-suggestion.dto';
-import { BulkResolveLocationSuggestionsDto } from './dto/bulk-resolve-location-suggestions.dto';
+import {
+  LocationSuggestionController,
+  type AcceptLocationSuggestionDto,
+  type BulkResolveLocationSuggestionsDto,
+  type LocationSuggestionQueryDto,
+  type LocationSuggestionService,
+} from '../../src/location/index.js';
+import type { MemoriahubRequestUser as RequestUser } from '../../src/core/index.js';
+import type { ReviewRunService } from '../../src/review-runs/index.js';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
 
 const USER: RequestUser = {
   id: 'user-1',
-  email: 'user@example.com',
   roles: ['Contributor'],
   permissions: ['media:read', 'media:write'],
-  isActive: true,
-};
+  activeOrgId: null,
+} as unknown as RequestUser;
 
 describe('LocationSuggestionController', () => {
   let controller: LocationSuggestionController;

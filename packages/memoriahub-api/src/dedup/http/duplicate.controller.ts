@@ -17,18 +17,22 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
 import {
   BulkDismissDuplicateThresholdDto,
   BulkResolveDuplicateDto,
   BulkResolveDuplicateThresholdDto,
   DuplicateQueryDto,
-  DuplicateService,
   ResolveDuplicateDto,
-} from '@marinoscar/memoriahub-api/dedup';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
+} from '../dedup.dto.js';
+import { DuplicateService } from '../duplicate.service.js';
+import { DEDUP_PERMISSIONS as PERMISSIONS } from './dedup-permissions.js';
 
+/**
+ * The `DuplicateController` routes (the duplicate review queue); mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Duplicates')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
@@ -40,7 +44,7 @@ export class DuplicateController {
    * List duplicate groups for a circle, filtered by status/kind.
    */
   @Get('duplicates')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'List near-duplicate groups for a circle' })
   @ApiQuery({ name: 'circleId', type: String, required: true })
   @ApiQuery({ name: 'status', type: String, required: false, enum: ['pending', 'resolved', 'dismissed'] })
@@ -52,7 +56,7 @@ export class DuplicateController {
   @ApiResponse({ status: 200, description: 'Duplicate groups listed' })
   async listDuplicateGroups(
     @Query() query: DuplicateQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.listDuplicateGroups(query, user.id, user.permissions);
   }
@@ -66,7 +70,7 @@ export class DuplicateController {
    * segment is not captured by the `:id` param.
    */
   @Post('duplicates/bulk/resolve')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Bulk-resolve duplicate groups (auto-keep suggested best, archive/trash rest)',
@@ -85,7 +89,7 @@ export class DuplicateController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkResolveDuplicateGroups(
     @Body() dto: BulkResolveDuplicateDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.bulkResolveDuplicateGroups(dto, user.id, user.permissions);
   }
@@ -99,7 +103,7 @@ export class DuplicateController {
    * segment is not captured by the `:id` param.
    */
   @Post('duplicates/bulk/resolve-by-threshold')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start a run resolving duplicate groups at/above a confidence threshold',
@@ -131,7 +135,7 @@ export class DuplicateController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkResolveDuplicateGroupsByThreshold(
     @Body() dto: BulkResolveDuplicateThresholdDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.bulkResolveDuplicateGroupsByThreshold(dto, user.id, user.permissions);
   }
@@ -146,7 +150,7 @@ export class DuplicateController {
    * segment is not captured by the `:id` param.
    */
   @Post('duplicates/bulk/dismiss-by-threshold')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Start a run dismissing duplicate groups below a confidence threshold',
@@ -171,7 +175,7 @@ export class DuplicateController {
   @ApiResponse({ status: 404, description: 'Circle not found or access denied' })
   async bulkDismissDuplicateGroupsByThreshold(
     @Body() dto: BulkDismissDuplicateThresholdDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.bulkDismissDuplicateGroupsByThreshold(dto, user.id, user.permissions);
   }
@@ -181,14 +185,14 @@ export class DuplicateController {
    * Get full detail for a single duplicate group.
    */
   @Get('duplicates/:id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get near-duplicate group detail' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Duplicate group returned' })
   @ApiResponse({ status: 404, description: 'Duplicate group not found' })
   async getDuplicateGroup(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.getDuplicateGroup(id, user.id, user.permissions);
   }
@@ -198,7 +202,7 @@ export class DuplicateController {
    * Resolve a duplicate group: keep selected members, archive or trash the rest.
    */
   @Post('duplicates/:id/resolve')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resolve a duplicate group (keep selected, archive/trash rest)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -208,7 +212,7 @@ export class DuplicateController {
   async resolveDuplicateGroup(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ResolveDuplicateDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.resolveDuplicateGroup(id, dto, user.id, user.permissions);
   }
@@ -218,7 +222,7 @@ export class DuplicateController {
    * Dismiss a duplicate group (not actual duplicates; ungroups all members).
    */
   @Post('duplicates/:id/dismiss')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Dismiss a duplicate group (not duplicates)' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
@@ -227,7 +231,7 @@ export class DuplicateController {
   @ApiResponse({ status: 404, description: 'Duplicate group not found' })
   async dismissDuplicateGroup(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.dismissDuplicateGroup(id, user.id, user.permissions);
   }
@@ -237,13 +241,13 @@ export class DuplicateController {
    * Re-enqueue duplicate detection for a single media item.
    */
   @Post(':id/duplicates/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run duplicate detection for a media item' })
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 201, description: 'Duplicate detection job queued' })
   async rerunDuplicateDetection(
     @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.duplicateService.rerunDuplicateDetection(id, user.id, user.permissions);
   }

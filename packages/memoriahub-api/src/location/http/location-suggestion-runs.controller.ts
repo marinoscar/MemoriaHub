@@ -16,11 +16,10 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
-import { ListLocationSuggestionRunItemsQueryDto } from '../dto/list-location-suggestion-run-items-query.dto';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { ReviewRunService } from '../../review-runs/index.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS } from './location-permissions.js';
+import { ListLocationSuggestionRunItemsQueryDto } from './location-suggestion.dto.js';
 
 /**
  * DEPRECATED alias for the shared review-run API (issue #190).
@@ -35,6 +34,12 @@ import { ListLocationSuggestionRunItemsQueryDto } from '../dto/list-location-sug
  *
  * Prefer `/api/review-runs/:id` for new clients.
  */
+/**
+ * The `LocationSuggestionRunsController` routes (the deprecated `/api/location-suggestion-runs/*` alias);
+ * mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Location Suggestion Runs (deprecated)')
 @ApiBearerAuth('JWT-auth')
 @Controller('location-suggestion-runs')
@@ -42,7 +47,7 @@ export class LocationSuggestionRunsController {
   constructor(private readonly runService: ReviewRunService) {}
 
   @Get(':id')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Get a location-suggestion run (deprecated — use GET /review-runs/:id)',
     deprecated: true,
@@ -50,12 +55,12 @@ export class LocationSuggestionRunsController {
   @ApiParam({ name: 'id', type: String, format: 'uuid' })
   @ApiResponse({ status: 200, description: 'Run returned' })
   @ApiResponse({ status: 404, description: 'Run not found' })
-  async get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async get(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.runService.getRunDetail(id, user.id, user.permissions);
   }
 
   @Get(':id/items')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'List a run’s items (deprecated — use GET /review-runs/:id/items)',
     deprecated: true,
@@ -68,13 +73,13 @@ export class LocationSuggestionRunsController {
   async items(
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: ListLocationSuggestionRunItemsQueryDto,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.runService.listRunItems(id, query, user.id, user.permissions);
   }
 
   @Post(':id/cancel')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Cancel a non-terminal run (deprecated — use POST /review-runs/:id/cancel)',
@@ -84,7 +89,7 @@ export class LocationSuggestionRunsController {
   @ApiResponse({ status: 200, description: 'Run cancelled' })
   @ApiResponse({ status: 400, description: 'Run already finished' })
   @ApiResponse({ status: 404, description: 'Run not found' })
-  async cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: RequestUser) {
+  async cancel(@Param('id', ParseUUIDPipe) id: string, @MemoriahubCurrentUser() user: MemoriahubRequestUser) {
     return this.runService.cancelRun(id, user.id, user.permissions);
   }
 }

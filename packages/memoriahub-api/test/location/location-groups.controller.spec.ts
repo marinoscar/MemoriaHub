@@ -5,19 +5,29 @@
  * Two things are verified:
  *
  *  1. Handler delegation to LocationGroupsService.
- *  2. RBAC. Rather than only reading the `@Auth` metadata back, the REAL
- *     RolesGuard and PermissionsGuard are driven against each handler with a
+ *  2. RBAC. Rather than only reading the `@MemoriahubAuth` metadata back, the REAL
+ *     identity-backed guard is driven against each handler with a
  *     synthetic user, so "non-admin ⇒ 403" and "geo_settings:read can list but
  *     not mutate" are asserted as enforcement, not as decorator trivia.
  */
-import { Reflector } from '@nestjs/core';
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import 'reflect-metadata';
 
-import { LocationGroupsController } from './location-groups.controller';
-import { LocationGroupsAdminController } from './location-groups-admin.controller';
-import { LocationGroupsService } from '@marinoscar/memoriahub-api/location';
-import { RolesGuard, PermissionsGuard, ROLES_KEY, PERMISSIONS_KEY } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
+import { Reflector } from '@nestjs/core';
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+
+import {
+  LOCATION_PERMISSIONS as PERMISSIONS,
+  LOCATION_ROLES as ROLES,
+  LocationGroupsAdminController,
+  LocationGroupsController,
+  type LocationGroupsService,
+} from '../../src/location/index.js';
+import {
+  MEMORIAHUB_PERMISSIONS_KEY as PERMISSIONS_KEY,
+  MEMORIAHUB_ROLES_KEY as ROLES_KEY,
+  MemoriahubAuthGuard,
+} from '../../src/core/index.js';
+import type { MemoriahubPrincipal } from '../../src/ports/index.js';
 
 const mockService = {
   list: jest.fn(),
@@ -33,59 +43,36 @@ const mockService = {
   triggerRebuild: jest.fn(),
 };
 
-const controller = new LocationGroupsController(
-  mockService as unknown as LocationGroupsService,
-);
+const controller = new LocationGroupsController(mockService as unknown as LocationGroupsService);
 const adminController = new LocationGroupsAdminController(
   mockService as unknown as LocationGroupsService,
 );
 
-/**
- * Build an ExecutionContext the real guards accept, pointing at one handler.
- */
-function contextFor(
-  handler: (...args: any[]) => unknown,
-  cls: object,
-  user: { roles: string[]; permissions: string[] } | null,
-): ExecutionContext {
-  const request: Record<string, unknown> = {};
-  if (user) {
-    // Shaped as `toRequestUser` expects: roles and permissions arrive nested
-    // under userRoles → role → rolePermissions → permission, exactly as the JWT
-    // strategy attaches them.
-    request['user'] = {
-      id: 'u1',
-      email: 'admin@example.com',
-      isActive: true,
-      userRoles: user.roles.map((name) => ({
-        role: {
-          name,
-          rolePermissions: user.permissions.map((permission) => ({
-            permission: { name: permission },
-          })),
-        },
-      })),
-    };
-  }
+/** The synthetic caller a case runs as: roles and permissions, or none (unauthenticated). */
+type Caller = { roles: string[]; permissions: string[] } | null;
+
+/** Builds an ExecutionContext the real guard accepts, pointing at one handler. */
+function contextFor(handler: (...args: any[]) => unknown, cls: object): ExecutionContext {
   return {
     getHandler: () => handler,
     getClass: () => cls.constructor,
-    switchToHttp: () => ({ getRequest: () => request }),
+    switchToHttp: () => ({ getRequest: () => ({}) }),
   } as unknown as ExecutionContext;
 }
 
-/** Run both RBAC guards; returns true only when both allow. */
-function authorize(
-  handler: (...args: any[]) => unknown,
-  cls: object,
-  user: { roles: string[]; permissions: string[] } | null,
-): boolean {
-  const reflector = new Reflector();
-  const ctx = contextFor(handler, cls, user);
-  return (
-    new RolesGuard(reflector).canActivate(ctx) &&
-    new PermissionsGuard(reflector).canActivate(ctx)
-  );
+/** Runs the REAL identity-backed guard (over a fake identity port); resolves true only when it allows. */
+async function authorize(handler: (...args: any[]) => unknown, cls: object, user: Caller): Promise<boolean> {
+  const principal: MemoriahubPrincipal | null = user
+    ? ({
+        userId: 'u1',
+        roles: user.roles,
+        permissions: new Set(user.permissions),
+        orgId: null,
+        credential: { kind: 'jwt' },
+      } as unknown as MemoriahubPrincipal)
+    : null;
+  const guard = new MemoriahubAuthGuard(new Reflector(), { authenticate: async () => principal } as never);
+  return guard.canActivate(contextFor(handler, cls));
 }
 
 const ADMIN_READER = {
@@ -98,7 +85,7 @@ const ADMIN_WRITER = {
 };
 const CONTRIBUTOR = {
   // A non-admin who somehow holds the permissions still fails the ROLE gate.
-  roles: [ROLES.CONTRIBUTOR],
+  roles: ['contributor'],
   permissions: [PERMISSIONS.GEO_SETTINGS_READ, PERMISSIONS.GEO_SETTINGS_WRITE],
 };
 
@@ -237,36 +224,36 @@ describe('LocationGroupsController', () => {
 
     it.each(ALL_HANDLERS)(
       '%s rejects a non-admin with 403 even when they hold both permissions',
-      (_label, handler, cls) => {
-        expect(() => authorize(handler, cls, CONTRIBUTOR)).toThrow(ForbiddenException);
+      async (_label, handler, cls) => {
+        await expect(authorize(handler, cls, CONTRIBUTOR)).rejects.toThrow(ForbiddenException);
       },
     );
 
-    it.each(ALL_HANDLERS)('%s rejects an unauthenticated request', (_label, handler, cls) => {
-      expect(() => authorize(handler, cls, null)).toThrow(ForbiddenException);
+    it.each(ALL_HANDLERS)('%s rejects an unauthenticated request', async (_label, handler, cls) => {
+      await expect(authorize(handler, cls, null)).rejects.toThrow(UnauthorizedException);
     });
 
-    it.each(READ_HANDLERS)('%s allows an admin holding only geo_settings:read', (
+    it.each(READ_HANDLERS)('%s allows an admin holding only geo_settings:read', async (
       _label,
       handler,
       cls,
     ) => {
-      expect(authorize(handler, cls, ADMIN_READER)).toBe(true);
+      await expect(authorize(handler, cls, ADMIN_READER)).resolves.toBe(true);
     });
 
     it.each(WRITE_HANDLERS)(
       '%s rejects an admin holding only geo_settings:read (read cannot mutate)',
-      (_label, handler, cls) => {
-        expect(() => authorize(handler, cls, ADMIN_READER)).toThrow(ForbiddenException);
+      async (_label, handler, cls) => {
+        await expect(authorize(handler, cls, ADMIN_READER)).rejects.toThrow(ForbiddenException);
       },
     );
 
-    it.each(WRITE_HANDLERS)('%s allows an admin holding geo_settings:write', (
+    it.each(WRITE_HANDLERS)('%s allows an admin holding geo_settings:write', async (
       _label,
       handler,
       cls,
     ) => {
-      expect(authorize(handler, cls, ADMIN_WRITER)).toBe(true);
+      await expect(authorize(handler, cls, ADMIN_WRITER)).resolves.toBe(true);
     });
 
     it('introduces NO new permission — every route reuses the geo pair', () => {

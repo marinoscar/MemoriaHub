@@ -13,7 +13,7 @@ import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService, ResolveBurstDto } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateService, ResolveDuplicateDto } from '@marinoscar/memoriahub-api/dedup';
-import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
+import { AcceptLocationSuggestionDto, LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
 import {
@@ -31,7 +31,6 @@ import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
 import { BulkUpdateMediaDto } from '../../media/dto/bulk-update-media.dto';
 import { AddAlbumItemsDto } from '../../media/dto/add-album-items.dto';
 import { CreateAlbumDto } from '../../media/dto/create-album.dto';
-import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
 
 /**
  * WorkflowActionsHandler — the web app's {@link WorkflowActionHandler}: applies a single Media-Item workflow action (the

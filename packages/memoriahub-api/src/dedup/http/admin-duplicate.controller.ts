@@ -5,20 +5,30 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Logger,
   Post,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JobReason } from '@prisma/client';
 import { createZodDto } from 'nestjs-zod';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { FEATURE_KEYS } from '../settings/feature-gates';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { DuplicateBackfillService } from '@marinoscar/memoriahub-api/dedup';
-import { VisualEmbeddingService, VISUAL_EMBEDDING_MODEL_TAG } from '@marinoscar/memoriahub-api/dedup';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { adminDuplicateBackfillSchema, adminDuplicateConfidenceBackfillSchema } from '@marinoscar/memoriahub-contract/dedup';
+import {
+  adminDuplicateBackfillSchema,
+  adminDuplicateConfidenceBackfillSchema,
+} from '@marinoscar/memoriahub-contract/dedup';
+
+import { MemoriahubAuth, isFeatureEnabled } from '../../core/index.js';
+import { enqueueEnrichmentJob } from '../../media/index.js';
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubJobsPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import type { DedupDb } from '../data/dedup-db.js';
+import { DuplicateBackfillService } from '../duplicate-backfill.service.js';
+import { VISUAL_EMBEDDING_MODEL_TAG, VisualEmbeddingService } from '../visual-embedding.service.js';
+import { DEDUP_PERMISSIONS as PERMISSIONS, DEDUP_ROLES as ROLES } from './dedup-permissions.js';
 
 // Both schemas below accept a bodyless POST — see issue #289 (app.module.ts).
 // This one uses .prefault({}) rather than .default({}) so the empty body is fed
@@ -30,6 +40,11 @@ class AdminDuplicateConfidenceBackfillDto extends createZodDto(
   adminDuplicateConfidenceBackfillSchema,
 ) {}
 
+/**
+ * The `AdminDuplicateController` routes (`/api/admin/duplicates/*`); mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Duplicates')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/duplicates')
@@ -38,19 +53,21 @@ export class AdminDuplicateController {
 
   constructor(
     private readonly duplicateBackfillService: DuplicateBackfillService,
-    private readonly systemSettingsService: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly visualEmbeddingService: VisualEmbeddingService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
   ) {}
 
+  /** Backfills duplicate detection across every circle (Admin). */
   @Post('backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Backfill duplicate detection across ALL circles (Admin)' })
   @ApiResponse({ status: 201, description: 'Backfill jobs enqueued' })
   @ApiResponse({ status: 400, description: 'Duplicate detection is disabled globally' })
   async backfillAllCircles(@Body() dto: AdminDuplicateBackfillDto) {
-    const enabled = await this.systemSettingsService.isFeatureEnabled(FEATURE_KEYS.DUPLICATE_DETECTION);
+    const enabled = await isFeatureEnabled(this.settings, 'duplicateDetection');
     if (!enabled) {
       throw new BadRequestException('Duplicate detection is disabled globally');
     }
@@ -78,27 +95,30 @@ export class AdminDuplicateController {
    * do while the detection feature itself is off.
    */
   @Post('confidence/backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_WRITE] })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Backfill persisted confidence on pending duplicate groups (Admin)',
   })
   @ApiResponse({ status: 201, description: 'Confidence backfill job enqueued' })
   async backfillConfidence(@Body() dto: AdminDuplicateConfidenceBackfillDto) {
-    const job = await this.enrichmentJobService.enqueue({
+    const { id: jobId } = await enqueueEnrichmentJob(this.jobs, {
       type: 'duplicate_confidence_backfill',
       mediaItemId: null,
       circleId: null,
-      reason: JobReason.backfill,
+      reason: 'backfill',
       priority: 100,
       ...(dto.limit ? { payload: { limit: dto.limit } } : {}),
     });
+    const jobRow = await this.prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+    const job = { id: jobId, status: (jobRow?.status as string | undefined) ?? 'pending' };
     this.logger.log(`Enqueued duplicate_confidence_backfill job ${job.id}`);
     return { data: { jobId: job.id, status: job.status } };
   }
 
+  /** The visual-embedding model status (Admin). */
   @Get('status')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.SYSTEM_SETTINGS_READ] })
   @ApiOperation({ summary: 'Get visual-embedding model availability status (Admin)' })
   @ApiResponse({ status: 200, description: 'Model status returned' })
   async getStatus() {

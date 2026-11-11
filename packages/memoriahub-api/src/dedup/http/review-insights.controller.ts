@@ -1,22 +1,24 @@
 import { Controller, Get, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ReviewInsightsService } from '@marinoscar/memoriahub-api/dedup';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import { ReviewInsightsService } from '../review-insights.service.js';
+import { DEDUP_PERMISSIONS as PERMISSIONS } from './dedup-permissions.js';
 
+/**
+ * The `ReviewInsightsController` route (`GET /api/media/review-insights`); mounted by the host in its own
+ * module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Review Insights')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
 export class ReviewInsightsController {
   constructor(private readonly reviewInsights: ReviewInsightsService) {}
 
-  /**
-   * GET /api/media/review-insights?circleId=
-   * Per-circle aggregate of burst + duplicate review activity.
-   */
+  /** Per-circle aggregate of burst and duplicate review activity. */
   @Get('review-insights')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({
     summary: 'Per-circle burst & duplicate review-queue insights',
     description:
@@ -28,7 +30,7 @@ export class ReviewInsightsController {
   @ApiResponse({ status: 200, description: 'Review insights returned' })
   async getReviewInsights(
     @Query('circleId', new ParseUUIDPipe()) circleId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     return this.reviewInsights.getReviewInsights(circleId, user.id, user.permissions);
   }
