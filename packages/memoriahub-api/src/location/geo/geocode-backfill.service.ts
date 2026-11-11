@@ -1,17 +1,33 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { JobReason, MediaMetadataStatusType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
+import { MEMORIAHUB_JOBS, MEMORIAHUB_PRISMA, type MemoriahubJobsPort } from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { enqueueGeocodeJob } from './enqueue-geocode.js';
+
+/** The `media_geocode_status` values this service writes and filters on. */
+const GeocodeStatus = { pending: 'pending', processed: 'processed' } as const;
+
+/**
+ * Queues `geocode` jobs: the app-wide backfill, the per-item rerun, and the per-item status read.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class GeocodeBackfillService {
   private readonly logger = new Logger(GeocodeBackfillService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly enrichmentJobService: EnrichmentJobService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
+  /**
+   * Queues a `geocode` job for every media item with coordinates (every circle), optionally bounded by
+   * capture date; without `force` only items whose geocode status is absent or not `processed`.
+   *
+   * @param input - the optional date range and force flag.
+   * @returns how many jobs were queued.
+   */
   async backfill(input: { from?: string; to?: string; force?: boolean }): Promise<{ enqueued: number }> {
     const { from, to, force = false } = input;
 
@@ -34,7 +50,7 @@ export class GeocodeBackfillService {
           : {
               OR: [
                 { geocodeStatus: null },
-                { geocodeStatus: { status: { not: MediaMetadataStatusType.processed } } },
+                { geocodeStatus: { status: { not: GeocodeStatus.processed } } },
               ],
             }),
       },
@@ -43,23 +59,22 @@ export class GeocodeBackfillService {
 
     let enqueued = 0;
     for (const item of mediaItems) {
-      await this.enrichmentJobService.enqueue({
-        type: 'geocode',
+      await enqueueGeocodeJob(this.jobs, this.prisma, {
         mediaItemId: item.id,
         circleId: item.circleId,
-        reason: JobReason.backfill,
+        reason: 'backfill',
         priority: 100,
-      });
+      }, this.logger);
 
       await this.prisma.mediaGeocodeStatus.upsert({
         where: { mediaItemId: item.id },
         create: {
           mediaItemId: item.id,
           circleId: item.circleId,
-          status: MediaMetadataStatusType.pending,
+          status: GeocodeStatus.pending,
         },
         update: {
-          status: MediaMetadataStatusType.pending,
+          status: GeocodeStatus.pending,
         },
       });
 
@@ -70,6 +85,13 @@ export class GeocodeBackfillService {
     return { enqueued };
   }
 
+  /**
+   * Re-queues geocoding for one item at top priority and marks its status `pending`.
+   *
+   * @param mediaItemId - the item.
+   * @param userId - who asked.
+   * @throws NotFoundException when the item does not exist or is trashed.
+   */
   async enqueueRerun(
     mediaItemId: string,
     userId: string,
@@ -83,28 +105,34 @@ export class GeocodeBackfillService {
       throw new NotFoundException(`MediaItem ${mediaItemId} not found`);
     }
 
-    const job = await this.enrichmentJobService.enqueue({
-      type: 'geocode',
+    const { id: jobId } = await enqueueGeocodeJob(this.jobs, this.prisma, {
       mediaItemId,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
+      reason: 'rerun',
       priority: 0,
-    });
+    }, this.logger);
+    const jobRow = await this.prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+    const job = { id: jobId, status: (jobRow?.status as string | undefined) ?? 'pending' };
 
     await this.prisma.mediaGeocodeStatus.upsert({
       where: { mediaItemId },
       create: {
         mediaItemId,
         circleId: mediaItem.circleId,
-        status: MediaMetadataStatusType.pending,
+        status: GeocodeStatus.pending,
       },
-      update: { status: MediaMetadataStatusType.pending },
+      update: { status: GeocodeStatus.pending },
     });
 
     this.logger.log(`Geocode rerun job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${userId}`);
     return { jobId: job.id, status: job.status };
   }
 
+  /**
+   * The per-item geocode status (`not_processed` when the item has no status row).
+   *
+   * @param mediaItemId - the item.
+   */
   async getStatus(mediaItemId: string) {
     const status = await this.prisma.mediaGeocodeStatus.findUnique({
       where: { mediaItemId },

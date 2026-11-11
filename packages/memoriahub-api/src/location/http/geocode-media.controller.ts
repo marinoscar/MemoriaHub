@@ -5,6 +5,7 @@ import {
   Param,
   NotFoundException,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -13,13 +14,23 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
-import { GeocodeBackfillService } from './geocode-backfill.service';
+import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubScopeRole,
+} from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { GeocodeBackfillService } from '../geo/geocode-backfill.service.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS } from './location-permissions.js';
 
+/**
+ * The `GeocodeMediaController` routes (`POST /api/media/:id/geocode/rerun`, `GET /api/media/:id/geocode/status`);
+ * mounted by the host in its own module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Media')
 @ApiBearerAuth('JWT-auth')
 @Controller('media')
@@ -27,19 +38,19 @@ export class GeocodeMediaController {
   private readonly logger = new Logger(GeocodeMediaController.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly circleMembershipService: OwnerAccessService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
+    @Inject(MEMORIAHUB_ACCESS) private readonly circleMembershipService: MemoriahubAccessPort,
     private readonly geocodeBackfillService: GeocodeBackfillService,
   ) {}
 
   @Post(':id/geocode/rerun')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run geocoding for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 201, description: 'Geocode job queued' })
   async rerunGeocode(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.assertMediaItemAccess(mediaItemId, user, 'editor');
     const result = await this.geocodeBackfillService.enqueueRerun(mediaItemId, user.id);
@@ -47,13 +58,13 @@ export class GeocodeMediaController {
   }
 
   @Get(':id/geocode/status')
-  @Auth({ permissions: [PERMISSIONS.MEDIA_READ] })
+  @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get geocode status for a media item' })
   @ApiParam({ name: 'id', description: 'Media item ID' })
   @ApiResponse({ status: 200, description: 'Geocode status' })
   async getGeocodeStatus(
     @Param('id') mediaItemId: string,
-    @CurrentUser() user: RequestUser,
+    @MemoriahubCurrentUser() user: MemoriahubRequestUser,
   ) {
     await this.assertMediaItemAccess(mediaItemId, user, 'viewer');
     const status = await this.geocodeBackfillService.getStatus(mediaItemId);
@@ -62,8 +73,8 @@ export class GeocodeMediaController {
 
   private async assertMediaItemAccess(
     mediaItemId: string,
-    user: RequestUser,
-    requiredRole: OwnerRole = 'viewer',
+    user: MemoriahubRequestUser,
+    requiredRole: MemoriahubScopeRole = 'viewer',
   ): Promise<{ id: string; circleId: string }> {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },

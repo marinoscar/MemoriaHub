@@ -1,14 +1,16 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { createZodDto } from 'nestjs-zod';
-import { Auth } from '@marinoscar/platform-api/identity';
-import { PERMISSIONS, ROLES } from '../common/constants/roles.constants';
-import { GeocodeBackfillService } from './geocode-backfill.service';
-import { backfillGeoSchema } from '@marinoscar/memoriahub-contract/location';
+import { MemoriahubAuth } from '../../core/index.js';
+import { GeocodeBackfillService } from '../geo/geocode-backfill.service.js';
+import { BackfillGeoDto } from './geo.dto.js';
+import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './location-permissions.js';
 
-
-class BackfillGeoDto extends createZodDto(backfillGeoSchema) {}
-
+/**
+ * The `GeocodeAdminController` routes (`POST /api/admin/geocode/backfill`); mounted by the host in its own
+ * module.
+ *
+ * @stability experimental
+ */
 @ApiTags('Admin: Geocode')
 @ApiBearerAuth('JWT-auth')
 @Controller('admin/geocode')
@@ -16,7 +18,7 @@ export class GeocodeAdminController {
   constructor(private readonly geocodeBackfillService: GeocodeBackfillService) {}
 
   @Post('backfill')
-  @Auth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
+  @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Bulk-enqueue geocode enrichment for all media items with GPS (Admin)' })
   @ApiResponse({ status: 201, description: 'Jobs enqueued' })
   async backfill(@Body() dto: BackfillGeoDto) {

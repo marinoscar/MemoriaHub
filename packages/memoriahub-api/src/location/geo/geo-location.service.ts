@@ -1,23 +1,39 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OfflineGeoLocationProvider } from './offline-geo-location.provider';
-import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider';
-import { GoogleGeoLocationProvider } from './google-geo-location.provider';
-import { GeoLocationResult } from '@marinoscar/memoriahub-api/location';
-import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver';
-import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../../ports/index.js';
+import { GeoGoogleCredentialResolver } from './geo-google-credential.resolver.js';
+import type { GeoLocationResult } from './geo-location-provider.interface.js';
+import type { GeoSettingsDocument } from './geo-settings-shape.js';
+import { GoogleGeoLocationProvider } from './google-geo-location.provider.js';
+import { NominatimGeoLocationProvider } from './nominatim-geo-location.provider.js';
+import { OfflineGeoLocationProvider } from './offline-geo-location.provider.js';
+
+/**
+ * Reverse geocoding through the ACTIVE provider (`geo.reverseProvider`, else `GEO_PROVIDER`, else offline),
+ * reporting which provider answered. The Google provider needs a stored, enabled key; without one the
+ * service falls back to the offline provider.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class GeoLocationService {
   private readonly logger = new Logger(GeoLocationService.name);
 
   constructor(
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly offlineProvider: OfflineGeoLocationProvider,
     private readonly nominatimProvider: NominatimGeoLocationProvider,
     private readonly googleProvider: GoogleGeoLocationProvider,
     private readonly googleCredential: GeoGoogleCredentialResolver,
   ) {}
 
+  /**
+   * Reverse-geocodes a coordinate pair.
+   *
+   * @param lat - latitude in decimal degrees.
+   * @param lng - longitude in decimal degrees.
+   * @returns the result (or `null`) and the provider source that produced it.
+   */
   async reverseGeocode(lat: number, lng: number): Promise<{ result: GeoLocationResult | null; source: string }> {
     // Defensive choke point for every provider (offline/nominatim/google) and every
     // caller: a non-finite coordinate (NaN/Infinity) must never reach a provider.
@@ -28,8 +44,8 @@ export class GeoLocationService {
       return { result: null, source: 'none' };
     }
 
-    const settings = await this.systemSettings.getSettings();
-    const activeProvider = (settings as any).geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
+    const { value: geo } = await this.settings.readSystem<GeoSettingsDocument | undefined>('geo');
+    const activeProvider = geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
 
     if (activeProvider === 'google') {
       const apiKey = await this.googleCredential.resolveApiKey();

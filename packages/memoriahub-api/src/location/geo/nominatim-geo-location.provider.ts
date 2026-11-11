@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { mapNominatimResponse } from '@marinoscar/memoriahub-compute/geo';
-import type { GeoLocationProvider, GeoLocationResult } from '@marinoscar/memoriahub-api/location';
-import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
+import { parseRetryAfterMs } from '@marinoscar/memoriahub-compute/rate-limit';
+import { MemoriahubRateLimitError } from '../../ports/index.js';
+import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface.js';
+import { GEOCODE_THROTTLE_KEY } from './geocode-rate-limit.js';
 
 /**
  * IMPORTANT — PRIVACY NOTICE:
@@ -16,6 +17,8 @@ import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.e
  * https://nominatim.openstreetmap.org.  For production use, host a private
  * Nominatim instance or replace the endpoint with a paid provider (Mapbox,
  * Google, etc.) to comply with OSM's usage policy.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class NominatimGeoLocationProvider implements GeoLocationProvider {
@@ -23,11 +26,8 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
 
   private readonly baseUrl: string;
 
-  constructor(private readonly config: ConfigService) {
-    this.baseUrl = this.config.get<string>(
-      'NOMINATIM_BASE_URL',
-      'https://nominatim.openstreetmap.org',
-    );
+  constructor() {
+    this.baseUrl = process.env['NOMINATIM_BASE_URL'] ?? 'https://nominatim.openstreetmap.org';
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<GeoLocationResult | null> {
@@ -55,13 +55,8 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
       // HTTP-level throttle or server error — throw before parsing so the
       // enrichment worker routes through the rate-limit deferral path.
       if (response.status === 429 || response.status >= 500) {
-        const retryAfterMs =
-          parseRetryAfterMs(response.headers.get('retry-after') ?? undefined) ?? undefined;
-        throw new RateLimitError(
-          `Nominatim throttled (HTTP ${response.status})`,
-          retryAfterMs,
-          'nominatim',
-        );
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after') ?? undefined);
+        throw new MemoriahubRateLimitError(GEOCODE_THROTTLE_KEY, retryAfterMs, `Nominatim throttled (HTTP ${response.status})`);
       }
 
       if (!response.ok) {
@@ -80,7 +75,7 @@ export class NominatimGeoLocationProvider implements GeoLocationProvider {
       return mapNominatimResponse(data);
     } catch (error) {
       // Re-throw RateLimitError — do not swallow it into a null return.
-      if (error instanceof RateLimitError) {
+      if (error instanceof MemoriahubRateLimitError) {
         throw error;
       }
       const msg = error instanceof Error ? error.message : String(error);

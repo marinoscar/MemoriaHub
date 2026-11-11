@@ -36,6 +36,8 @@ export interface LocationModels {
   locationSuggestion: LocationDelegate;
   /** The audit log. */
   auditEvent: LocationDelegate;
+  /** The per-item geocoding status (one row per media item). */
+  mediaGeocodeStatus: LocationDelegate;
   /** The platform job rows (the state of a queued job). */
   job: MediaDelegate;
 }

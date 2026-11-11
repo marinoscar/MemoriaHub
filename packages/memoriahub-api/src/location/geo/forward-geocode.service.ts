@@ -1,7 +1,13 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { AppSystemSettingsService } from '../../platform/settings/app-system-settings.service';
+import { Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 
+import { MEMORIAHUB_SETTINGS, type MemoriahubSettingsPort } from '../../ports/index.js';
+import type { GeoSettingsDocument } from './geo-settings-shape.js';
+
+/**
+ * One place a name search found.
+ *
+ * @stability experimental
+ */
 export interface GeoSearchResult {
   lat: number;
   lng: number;
@@ -20,6 +26,8 @@ export interface GeoSearchResult {
  * SECURITY NOTE: Only the typed query string leaves the server — photo GPS coordinates
  * are never sent from this service. This is the safe forward-search path.
  * Gate it with GEO_FORWARD_SEARCH_ENABLED to give operators explicit opt-in control.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class ForwardGeocodeService {
@@ -28,16 +36,10 @@ export class ForwardGeocodeService {
   private readonly provider: string;
   private readonly googleApiKey: string;
 
-  constructor(
-    private readonly config: ConfigService,
-    private readonly systemSettings: AppSystemSettingsService,
-  ) {
-    this.baseUrl = this.config.get<string>(
-      'NOMINATIM_BASE_URL',
-      'https://nominatim.openstreetmap.org',
-    );
-    this.provider = this.config.get<string>('GEO_FORWARD_PROVIDER', 'nominatim');
-    this.googleApiKey = this.config.get<string>('GOOGLE_MAPS_API_KEY', '');
+  constructor(@Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort) {
+    this.baseUrl = process.env['NOMINATIM_BASE_URL'] ?? 'https://nominatim.openstreetmap.org';
+    this.provider = process.env['GEO_FORWARD_PROVIDER'] ?? 'nominatim';
+    this.googleApiKey = process.env['GOOGLE_MAPS_API_KEY'] ?? '';
   }
 
   /**
@@ -45,8 +47,9 @@ export class ForwardGeocodeService {
    * falling back to GEO_FORWARD_SEARCH_ENABLED env var, then to false.
    */
   private async isEnabled(): Promise<boolean> {
-    const settingValue = await this.systemSettings
-      .getSettingValue<boolean>('geo.forwardSearchEnabled')
+    const settingValue = await this.settings
+      .readSystem<GeoSettingsDocument | undefined>('geo')
+      .then(({ value }) => value?.forwardSearchEnabled)
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Failed to read geo.forwardSearchEnabled from system settings: ${msg}`);
@@ -59,6 +62,13 @@ export class ForwardGeocodeService {
     return process.env['GEO_FORWARD_SEARCH_ENABLED'] === 'true';
   }
 
+  /**
+   * Searches places by name.
+   *
+   * @param q - the typed query (the only thing that leaves the server).
+   * @param limit - the most results to return.
+   * @throws ServiceUnavailableException when place search is switched off.
+   */
   async searchPlaces(q: string, limit: number): Promise<GeoSearchResult[]> {
     const enabled = await this.isEnabled();
     if (!enabled) {

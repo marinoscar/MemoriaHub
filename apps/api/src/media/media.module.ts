@@ -31,11 +31,10 @@ import {
   TrashPurgeTask,
 } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
-import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
+import { ForwardGeocodeService, GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
 import { MediaOrientationEditController } from './media-orientation-edit.controller';
@@ -122,7 +121,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     // The media slice cannot import the location slice (location depends on media): the host binds
     // the canonical-name resolver hook to it.
     { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
-    ForwardGeocodeService,
     { provide: MEDIA_GEO_LOCATION_PROVIDER, useExisting: GEO_LOCATION_PROVIDER },
     { provide: MEDIA_FORWARD_GEOCODER, useExisting: ForwardGeocodeService },
     { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },

@@ -1,18 +1,25 @@
-import { Injectable } from '@nestjs/common';
-import { CredentialsService } from '@marinoscar/platform-api/credentials';
-import type { IssuedJobSecret, Job, JobSecretBroker, JobSecretUsability } from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable } from '@nestjs/common';
 
 import {
-  GEO_PROVIDER_CREDENTIAL_PURPOSE,
-} from '../platform/credentials/credential-purposes.manifest';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { GEO_GOOGLE_CREDENTIAL_NAME, GeoGoogleCredentialResolver } from '../media/geo/geo-google-credential.resolver';
+  MEMORIAHUB_SECRETS,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubIssuedJobSecret,
+  type MemoriahubJob,
+  type MemoriahubJobSecretBroker,
+  type MemoriahubJobSecretUsability,
+  type MemoriahubSecretsPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import { GEO_GOOGLE_CREDENTIAL_NAME, GeoGoogleCredentialResolver } from './geo-google-credential.resolver.js';
+import { GEO_PROVIDER_PURPOSE, type GeoSettingsDocument } from './geo-settings-shape.js';
 
 /**
  * The kind of credential this broker mints (RETRO-C6, #600).
  *
  * PERMANENT once a grant exists: it is half of `job_node_secrets`' `(job_id, kind)` unique key and
  * how the revocation paths find the broker again.
+ *
+ * @stability experimental
  */
 export const GEO_GOOGLE_SECRET_KIND = 'geo.google';
 
@@ -34,18 +41,19 @@ export const GEO_GOOGLE_SECRET_KIND = 'geo.google';
  * NOTHING in a message thrown or logged here carries the key.
  */
 @Injectable()
-export class GoogleGeocodeKeyBroker implements JobSecretBroker {
+export class GoogleGeocodeKeyBroker implements MemoriahubJobSecretBroker {
   readonly kind = GEO_GOOGLE_SECRET_KIND;
 
   constructor(
-    private readonly credentials: CredentialsService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_SECRETS) private readonly secrets: MemoriahubSecretsPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly googleCredential: GeoGoogleCredentialResolver,
   ) {}
 
-  async usable(): Promise<JobSecretUsability> {
-    const settings = await this.systemSettings.getSettings();
-    const provider = settings.geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
+  /** Whether the active provider is Google, switched on, with a stored key. */
+  async usable(): Promise<MemoriahubJobSecretUsability> {
+    const { value: geo } = await this.settings.readSystem<GeoSettingsDocument | undefined>('geo');
+    const provider = geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
     if (provider !== 'google') {
       return {
         ok: false,
@@ -53,15 +61,15 @@ export class GoogleGeocodeKeyBroker implements JobSecretBroker {
         remedy: 'Geocoding on a node needs the Google provider: select it at /admin/settings/geo, or leave geocoding on the server.',
       };
     }
-    if (settings.geo?.google?.enabled === false) {
+    if (geo?.google?.enabled === false) {
       return {
         ok: false,
         reason: 'The Google geocoding provider is switched off.',
         remedy: 'Switch the Google provider on at /admin/settings/geo.',
       };
     }
-    const info = await this.credentials.describe(GEO_PROVIDER_CREDENTIAL_PURPOSE, GEO_GOOGLE_CREDENTIAL_NAME);
-    if (!info) {
+    const info = await this.secrets.status(GEO_PROVIDER_PURPOSE, GEO_GOOGLE_CREDENTIAL_NAME);
+    if (!info.configured) {
       return {
         ok: false,
         reason: 'No Google geocoding key is stored.',
@@ -71,7 +79,8 @@ export class GoogleGeocodeKeyBroker implements JobSecretBroker {
     return { ok: true };
   }
 
-  async issue(job: Job, until: Date): Promise<IssuedJobSecret> {
+  /** Mints the Google key for one job; the key is returned in `material` and stored nowhere. */
+  async issue(job: MemoriahubJob, until: Date): Promise<MemoriahubIssuedJobSecret> {
     const apiKey = await this.googleCredential.resolveApiKey();
     if (!apiKey) {
       // Never an empty grant: a node that gets no key cannot start, and the server runs the job.
@@ -85,6 +94,7 @@ export class GoogleGeocodeKeyBroker implements JobSecretBroker {
     };
   }
 
+  /** A Google key cannot be revoked per job: nothing to undo. */
   async revoke(_handle: string): Promise<void> {
     // A Google API key cannot be revoked for one job: nothing to undo, and "already gone" is success.
   }

@@ -11,7 +11,6 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { PrismaModule } from '../prisma/prisma.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { MediaModule } from '../media/media.module';
-import { GeoLocationModule } from '../media/geo/geo-location.module';
 import { ReviewRunsModule } from '../review-runs/review-runs.module';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 
@@ -21,12 +20,12 @@ import { LocationGroupsModule } from '../location-groups/location-groups.module'
  * The inference, the review-queue service, the sweep backfill, the `location_inference` handler and the
  * upload fan-out registration live in the location slice (`@marinoscar/memoriahub-api/location`,
  * RETRO-J10 #624); this module supplies the geo provider the suggestion service calls on accept
- * (GeoLocationModule) and mounts the controllers (the deprecated `location_suggestion_run_*` shim handlers and
+ * (the location slice, through MediaModule) and mounts the controllers (the deprecated `location_suggestion_run_*` shim handlers and
  * the location review-run strategy live in the review-runs and location slices, RETRO-J9 #622).
  */
 @Module({
   imports: [
-    LocationInferenceSliceModule.forRoot({ geoProviderImports: [GeoLocationModule] }),
+    LocationInferenceSliceModule.forRoot(),
     EnrichmentModule,
     MediaProcessingModule,
     PrismaModule,

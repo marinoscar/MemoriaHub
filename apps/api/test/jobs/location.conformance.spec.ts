@@ -14,13 +14,13 @@
 // (`job-type-snapshot.spec.ts`), so the static case is replaced by the same check with exactly
 // that one violation filtered out.
 //
-// Beyond the contract: a quota signal is the platform `RateLimitError` and leaves the item
+// Beyond the contract: a quota signal is the queue's `MemoriahubRateLimitError` (translated to the platform one by the jobs adapter) and leaves the item
 // pending (never `processed` without geo data); a node result is validated by
 // `nodeResultSchema` and persisted without calling a provider; the Google key never appears
 // in any thrown message or in what the handler writes.
 // =============================================================================
 
-import { JobHandlerRegistry, RateLimitError, type JobHandler } from '@marinoscar/platform-api/jobs';
+import { JobHandlerRegistry, type JobHandler } from '@marinoscar/platform-api/jobs';
 import {
   createFakeJobQueue,
   describeJobHandlerConformance,
@@ -28,8 +28,8 @@ import {
 } from '@marinoscar/platform-api/jobs/testing';
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
-import { GeocodeHandler } from '../../src/geo/geocode.handler';
-import { LocationGroupRebuildHandler, LOCATION_GROUP_REBUILD_TYPE } from '@marinoscar/memoriahub-api/location';
+import { GeocodeHandler, LocationGroupRebuildHandler, LOCATION_GROUP_REBUILD_TYPE } from '@marinoscar/memoriahub-api/location';
+import { MemoriahubRateLimitError } from '@marinoscar/memoriahub-api/ports';
 import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { circleJob, mediaItemJob } from '../helpers/platform-job';
 
@@ -87,7 +87,6 @@ function reset(): void {
 reset();
 
 const registry = { register: jest.fn() } as unknown as JobHandlerRegistry;
-const throttle = { registerProviderKey: jest.fn() } as never;
 const broker = { kind: 'geo.google', usable: async () => ({ ok: true }), issue: async () => ({}), revoke: async () => undefined } as never;
 
 const snapshot = () => ({ writes: [...world.writes.entries()].sort() });
@@ -132,7 +131,7 @@ function buildGeocode(): GeocodeHandler {
       geoCanonicalLocality: raw.geoLocality,
     }),
   };
-  return new GeocodeHandler(registry, throttle, geo as never, fakePrisma() as never, resolver as never, broker);
+  return new GeocodeHandler(registry as never, geo as never, fakePrisma() as never, resolver as never, broker);
 }
 
 describe('geocode', () => {
@@ -174,11 +173,11 @@ describe('geocode', () => {
     expect(handler.nodeSecretBroker.kind).toBe('geo.google');
   });
 
-  it('a quota signal is the platform RateLimitError and the item is left pending, never processed', async () => {
+  it('a quota signal is the domain rate-limit error and the item is left pending, never processed', async () => {
     reset();
     world.quota = true;
     const handler = buildGeocode();
-    await expect(handler.process(mediaItemJob('geocode', PHOTO_ID, CIRCLE_ID))).rejects.toBeInstanceOf(RateLimitError);
+    await expect(handler.process(mediaItemJob('geocode', PHOTO_ID, CIRCLE_ID))).rejects.toBeInstanceOf(MemoriahubRateLimitError);
     expect(world.writes.get(`status:${PHOTO_ID}`)).toBe('pending');
     expect(world.writes.has(`geo:${PHOTO_ID}`)).toBe(false);
   });

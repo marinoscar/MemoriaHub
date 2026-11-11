@@ -1,21 +1,26 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
-import { AppMetricsService } from '@marinoscar/platform-api/host';
-import {
-  JobHandlerRegistry,
-  ProviderThrottleService,
-  RateLimitError as PlatformRateLimitError,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
-import { MediaMetadataStatusType } from '@prisma/client';
-import { RateLimitError as LegacyRateLimitError, classifyRateLimit } from '../enrichment/rate-limit.error';
+import { Inject, Injectable, Logger, Optional, type OnModuleInit } from '@nestjs/common';
 import { geocodeResultSchema, type GeocodeResult } from '@marinoscar/memoriahub-compute/dto';
-import { GeoLocationService } from '../media/geo/geo-location.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { resolveMediaItemJob, withPlatformRateLimits, type MediaJobContext } from '../platform/jobs/media-item-job';
-import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
+
+import { resolveMediaItemJob, type MediaJobContext } from '../../media/index.js';
+import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+} from '../../ports/index.js';
+import type { LocationDb } from '../data/location-db.js';
+import { LocationGroupResolverService } from '../groups/location-group-resolver.service.js';
+import { GEOCODE_THROTTLE_KEY, classifyGeocodeRateLimit } from './geocode-rate-limit.js';
+import { GeoLocationService } from './geo-location.service.js';
+import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker.js';
+
+/** The `media_geocode_status` values this handler writes. */
+const GeocodeStatus = { pending: 'pending', processing: 'processing', processed: 'processed', failed: 'failed' } as const;
+type GeocodeStatusValue = (typeof GeocodeStatus)[keyof typeof GeocodeStatus];
 
 /**
  * `geocode`: a native platform `JobHandler` (RETRO-C6, #600).
@@ -29,15 +34,20 @@ import { GoogleGeocodeKeyBroker } from './google-geocode-key.broker';
  * `nodes` broker switch (off by default) is on; otherwise the platform withholds `geocode` from nodes
  * and the server runs it, so a missing key or switch never fails a job.
  *
- * Quota signals (Google `OVER_QUERY_LIMIT` / `RESOURCE_EXHAUSTED`, Nominatim 429/5xx) become the platform
- * `RateLimitError`, so the queue defers the job and the status stays `pending`, never `processed` without geo data.
+ * Quota signals (Google `OVER_QUERY_LIMIT` / `RESOURCE_EXHAUSTED`, Nominatim 429/5xx) become the queue's
+ * rate-limit error, so the job is deferred and the status stays `pending`, never `processed` without geo data.
+ *
+ * @stability experimental
  */
 @Injectable()
-export class GeocodeHandler implements JobHandler, OnModuleInit {
+export class GeocodeHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = 'geocode';
   readonly label = 'Geocoding';
   /** One coordinate lookup: a minute covers a slow provider; the throttle gate spaces the calls. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 60_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 60_000, maxAttempts: 3 };
+
+  /** The geocoder's quota: a cooldown on one geocode job holds the others. */
+  readonly throttleKey = GEOCODE_THROTTLE_KEY;
 
   /** The payload a node submits: the shared contract from `@marinoscar/memoriahub-compute/dto`. */
   readonly nodeResultSchema = geocodeResultSchema;
@@ -48,28 +58,32 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
   private readonly logger = new Logger(GeocodeHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
-    private readonly throttle: ProviderThrottleService,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly geoLocationService: GeoLocationService,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: LocationDb,
     private readonly locationGroupResolver: LocationGroupResolverService,
     broker: GoogleGeocodeKeyBroker,
-    // App metrics (RETRO-T3, #628): `app.media.geocoded`. Optional for hand-built tests.
-    @Optional() private readonly metrics?: AppMetricsService,
+    // App metrics (RETRO-T3, #628): `app.media.geocoded`. Optional: an unbound port does nothing.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
   ) {
     this.nodeSecretBroker = broker;
   }
 
+  /** Registers the handler (and its throttle bucket) with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
-    // The geocoder's quota: a cooldown on one geocode job holds the others.
-    this.throttle.registerProviderKey(this.type, 'geocode');
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  /** Runs one attempt: reverse-geocodes the item and writes the geo columns. */
+  async process(job: MemoriahubJob): Promise<void> {
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
-    await withPlatformRateLimits(() => this.processMediaItem(context));
+    try {
+      await this.processMediaItem(context);
+    } catch (error) {
+      // A provider quota signal defers the job (the queue re-runs it) rather than failing it.
+      throw classifyGeocodeRateLimit(error) ?? error;
+    }
   }
 
   private async processMediaItem(job: MediaJobContext): Promise<void> {
@@ -82,13 +96,13 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
 
     if (!mediaItem || mediaItem.deletedAt) {
       this.logger.warn(`Geocode job ${job.id}: MediaItem ${mediaItemId} not found or deleted`);
-      await this.upsertStatus(mediaItemId, job.circleId ?? '', MediaMetadataStatusType.failed, undefined, 'Media item not found or deleted');
+      await this.upsertStatus(mediaItemId, job.circleId ?? '', GeocodeStatus.failed, undefined, 'Media item not found or deleted');
       return;
     }
 
     const circleId = mediaItem.circleId;
 
-    await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processing);
+    await this.upsertStatus(mediaItemId, circleId, GeocodeStatus.processing);
 
     try {
       if (!Number.isFinite(mediaItem.takenLat) || !Number.isFinite(mediaItem.takenLng)) {
@@ -96,7 +110,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
         // typeof NaN === 'number' passes a plain null check, so guard with
         // Number.isFinite to stop a bad coordinate reaching the geocoder.
         this.logger.debug(`Geocode job ${job.id}: MediaItem ${mediaItemId} has no usable GPS; marking processed`);
-        await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processed, new Date());
+        await this.upsertStatus(mediaItemId, circleId, GeocodeStatus.processed, new Date());
         return;
       }
 
@@ -119,14 +133,13 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       // A quota signal defers the job (the queue re-runs it): the item is still waiting, not failed.
-      const deferred =
-        err instanceof PlatformRateLimitError || err instanceof LegacyRateLimitError || classifyRateLimit(err) !== null;
+      const deferred = classifyGeocodeRateLimit(err) !== null;
       if (deferred) this.logger.warn(`Geocode job ${job.id} deferred for MediaItem ${mediaItemId}: ${error}`);
       else this.logger.error(`Geocode job ${job.id} failed for MediaItem ${mediaItemId}: ${error}`);
       await this.upsertStatus(
         mediaItemId,
         circleId,
-        deferred ? MediaMetadataStatusType.pending : MediaMetadataStatusType.failed,
+        deferred ? GeocodeStatus.pending : GeocodeStatus.failed,
         undefined,
         error,
       );
@@ -255,7 +268,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
       this.logger.debug(`Geocode job ${job.id}: provider returned null for MediaItem ${mediaItemId}`);
     }
 
-    await this.upsertStatus(mediaItemId, circleId, MediaMetadataStatusType.processed, new Date());
+    await this.upsertStatus(mediaItemId, circleId, GeocodeStatus.processed, new Date());
     this.metrics?.add('mediaGeocoded', 1, {
       // `geonames-offline` is the offline provider; `none` (no provider resolved) reads as `other`.
       provider: result.source === 'geonames-offline' ? 'offline' : result.source,
@@ -268,7 +281,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
    * nodeResultSchema by the ingestion endpoint; re-parsed here for type
    * narrowing, mirroring DuplicateDetectionHandler's precedent).
    */
-  async persistNodeResult(job: Job, result: unknown): Promise<void> {
+  async persistNodeResult(job: MemoriahubJob, result: unknown): Promise<void> {
     const parsed = geocodeResultSchema.parse(result);
     const context = await resolveMediaItemJob(this.prisma, job, this.logger);
     if (!context) return;
@@ -278,7 +291,7 @@ export class GeocodeHandler implements JobHandler, OnModuleInit {
   private async upsertStatus(
     mediaItemId: string,
     circleId: string,
-    status: MediaMetadataStatusType,
+    status: GeocodeStatusValue,
     processedAt?: Date,
     lastError?: string,
   ): Promise<void> {

@@ -1,8 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mapGoogleResponse } from '@marinoscar/memoriahub-compute/geo';
-import { GeoLocationResult } from '@marinoscar/memoriahub-api/location';
-import { RateLimitError, parseRetryAfterMs } from '../../enrichment/rate-limit.error';
+import { parseRetryAfterMs } from '@marinoscar/memoriahub-compute/rate-limit';
+import { MemoriahubRateLimitError } from '../../ports/index.js';
+import type { GeoLocationResult } from './geo-location-provider.interface.js';
+import { GEOCODE_THROTTLE_KEY } from './geocode-rate-limit.js';
 
+/**
+ * Reverse geocoding through the Google Geocoding API, with a key the caller resolved. The key goes
+ * only into the request URL and is never logged or put in an error message.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class GoogleGeoLocationProvider {
   private readonly logger = new Logger(GoogleGeoLocationProvider.name);
@@ -15,13 +23,8 @@ export class GoogleGeoLocationProvider {
       // HTTP-level throttle or server error — throw before parsing JSON so the
       // enrichment worker routes this job through the rate-limit deferral path.
       if (response.status === 429 || response.status >= 500) {
-        const retryAfterMs =
-          parseRetryAfterMs(response.headers.get('retry-after') ?? undefined) ?? undefined;
-        throw new RateLimitError(
-          `Google Geocoding API returned HTTP ${response.status}`,
-          retryAfterMs,
-          'google',
-        );
+        const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after') ?? undefined);
+        throw new MemoriahubRateLimitError(GEOCODE_THROTTLE_KEY, retryAfterMs, `Google Geocoding API returned HTTP ${response.status}`);
       }
 
       const data = await response.json() as {
@@ -41,10 +44,10 @@ export class GoogleGeoLocationProvider {
       // API-level quota exhaustion: treat as a rate limit so the job is deferred
       // rather than marked processed with no data (which would silence retries).
       if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'RESOURCE_EXHAUSTED') {
-        throw new RateLimitError(
-          `Google Geocoding quota exceeded (${data.status})`,
+        throw new MemoriahubRateLimitError(
+          GEOCODE_THROTTLE_KEY,
           undefined,
-          'google',
+          `Google Geocoding quota exceeded (${data.status})`,
         );
       }
       if (data.status !== 'OK') {
@@ -60,7 +63,7 @@ export class GoogleGeoLocationProvider {
     } catch (error) {
       // Re-throw RateLimitError — do not swallow it into a null return, or the
       // geocode handler will mark the job "processed" with no data.
-      if (error instanceof RateLimitError) {
+      if (error instanceof MemoriahubRateLimitError) {
         throw error;
       }
       const msg = error instanceof Error ? error.message : String(error);

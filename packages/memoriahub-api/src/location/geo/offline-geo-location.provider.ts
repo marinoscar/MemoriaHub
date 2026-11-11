@@ -1,18 +1,28 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import type { GeoLocationProvider, GeoLocationResult } from '@marinoscar/memoriahub-api/location';
-import { resolveUsState } from './us-state-codes';
+import type { GeoLocationProvider, GeoLocationResult } from './geo-location-provider.interface.js';
+import { resolveUsState } from './us-state-codes.js';
 
-// local-reverse-geocoder has no official @types package; use require to avoid
-// strict-mode issues with the CommonJS default export.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const geocoder = require('local-reverse-geocoder') as {
+/** The two calls of `local-reverse-geocoder` this provider uses (the library ships no types). */
+interface LocalReverseGeocoder {
   lookUp: (
     point: { latitude: number; longitude: number },
     maxResults: number,
     cb: (err: Error | null, results: Array<Array<GeonamesRecord>>) => void,
   ) => void;
   init: (opts: Record<string, unknown>, cb: () => void) => void;
-};
+}
+
+let loaded: LocalReverseGeocoder | undefined;
+
+/**
+ * Loads `local-reverse-geocoder` on first use: it is an optional peer of the package (a host that never
+ * selects the offline provider need not install it) and the library downloads its dataset on `init`.
+ */
+function geocoderLibrary(): LocalReverseGeocoder {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  loaded ??= require('local-reverse-geocoder') as LocalReverseGeocoder;
+  return loaded;
+}
 
 interface GeonamesRecord {
   geoNameId?: string;
@@ -49,6 +59,8 @@ interface GeonamesRecord {
  * - Resolves country → state/province/region → city reliably.
  *   Fine-grained POI/landmark resolution is not available offline and is
  *   deferred to a future phase.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModuleInit {
@@ -64,7 +76,7 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
 
     return new Promise<void>((resolve, _reject) => {
       this.logger.log('Initializing local-reverse-geocoder (GeoNames dataset)…');
-      geocoder.init(
+      geocoderLibrary().init(
         {
           load: {
             admin1: true,         // state/province/region names — required for "pics in California"
@@ -103,7 +115,7 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
       const point = { latitude: lat, longitude: lng };
 
       return await new Promise<GeoLocationResult | null>((resolve, reject) => {
-        geocoder.lookUp(point, 1, (err, results) => {
+        geocoderLibrary().lookUp(point, 1, (err, results) => {
           if (err) {
             reject(err);
             return;
