@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Avatar, Box } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
-import { FaceCrop } from './FaceCrop';
-import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListItem } from '../../services/face';
+import { FaceCrop } from './FaceCrop.js';
+import { getMedia } from '../../../media/headless/index.js';
+import type { MediaItem } from '../../../media/headless/index.js';
+import type { PersonListItem } from '../../headless/services/people.js';
 
 // ---------------------------------------------------------------------------
 // Module-level dedup cache — prevents duplicate concurrent fetches when many

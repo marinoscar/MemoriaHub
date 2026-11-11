@@ -13,8 +13,8 @@ import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { PersonAvatar } from './PersonAvatar';
-import type { PersonListItem } from '../../services/face';
+import { PersonAvatar } from './PersonAvatar.js';
+import type { PersonListItem } from '../../headless/services/people.js';
 
 interface PersonCardProps {
   person: PersonListItem;

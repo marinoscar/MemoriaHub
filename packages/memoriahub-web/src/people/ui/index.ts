@@ -1,0 +1,10 @@
+export * from './components/FaceCrop.js';
+export * from './components/FaceThumbGrid.js';
+export * from './components/MergePeopleDialog.js';
+export * from './components/PersonAvatar.js';
+export * from './components/PersonCard.js';
+export * from './components/PersonGrid.js';
+export * from './components/PurgeFacesDialog.js';
+export * from './components/UnknownFacesReview.js';
+export { default as PeoplePage } from './pages/PeoplePage.js';
+export { default as ArchivedFacesPage } from './pages/ArchivedFacesPage.js';

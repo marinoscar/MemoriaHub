@@ -43,15 +43,15 @@ import SelectAllIcon from '@mui/icons-material/SelectAll';
 import { useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
 import type { Area } from 'react-easy-crop';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { usePeople, usePerson } from '../../hooks/usePeople';
-import { PersonGrid } from '../../components/people/PersonGrid';
-import { UnknownFacesReview } from '../../components/people/UnknownFacesReview';
-import { MergePeopleDialog } from '../../components/people/MergePeopleDialog';
-import { FaceCrop } from '../../components/people/FaceCrop';
-import { FaceThumbGrid } from '../../components/people/FaceThumbGrid';
-import { PersonAvatar } from '../../components/people/PersonAvatar';
-import type { PersonListItem, PersonDetail } from '../../services/face';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { usePeople, usePerson } from '../../headless/hooks/usePeople.js';
+import { PersonGrid } from '../components/PersonGrid.js';
+import { UnknownFacesReview } from '../components/UnknownFacesReview.js';
+import { MergePeopleDialog } from '../components/MergePeopleDialog.js';
+import { FaceCrop } from '../components/FaceCrop.js';
+import { FaceThumbGrid } from '../components/FaceThumbGrid.js';
+import { PersonAvatar } from '../components/PersonAvatar.js';
+import type { PersonListItem, PersonDetail } from '../../headless/services/people.js';
 import {
   deleteCircleBiometrics,
   mergePeople,
@@ -60,11 +60,11 @@ import {
   createPerson as createPersonService,
   updatePerson,
   setPersonFavorite,
-} from '../../services/face';
-import { listMedia, getMedia } from '@marinoscar/memoriahub-web/media/headless';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
-import { scrollableTabsProps } from '../../components/common/tabs';
+} from '../../headless/services/people.js';
+import { listMedia, getMedia } from '../../../media/headless/index.js';
+import type { MediaItem } from '../../../media/headless/index.js';
+import { useUnassignedFaces } from '../../headless/hooks/useUnassignedFaces.js';
+import { scrollableTabsProps } from '../../../core/ui/index.js';
 
 // ---------------------------------------------------------------------------
 // Delete Biometrics Dialog

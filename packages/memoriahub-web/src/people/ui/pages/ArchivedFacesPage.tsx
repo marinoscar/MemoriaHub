@@ -20,10 +20,10 @@ import RestoreIcon from '@mui/icons-material/Restore';
 import SelectAllIcon from '@mui/icons-material/SelectAll';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import { useNavigate } from 'react-router-dom';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useUnassignedFaces } from '../../hooks/useUnassignedFaces';
-import { FaceThumbGrid } from '../../components/people/FaceThumbGrid';
-import { PurgeFacesDialog } from '../../components/people/PurgeFacesDialog';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { useUnassignedFaces } from '../../headless/hooks/useUnassignedFaces.js';
+import { FaceThumbGrid } from '../components/FaceThumbGrid.js';
+import { PurgeFacesDialog } from '../components/PurgeFacesDialog.js';
 
 export default function ArchivedFacesPage() {
   const navigate = useNavigate();

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getMediaFaces, getMediaFaceStatus, rerunMediaFaces } from '../services/face';
-import { useIsMounted } from './useIsMounted';
-import type { DetectedFaceDto, MediaFaceStatusDto, MediaFaceStatusType } from '../services/face';
+import { getMediaFaces, getMediaFaceStatus, rerunMediaFaces } from '../services/people.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { DetectedFaceDto, MediaFaceStatusDto, MediaFaceStatusType } from '../services/people.js';
 
 const TERMINAL_STATUSES: MediaFaceStatusType[] = ['processed', 'failed', 'no_faces'];
 const POLL_INTERVAL_MS = 2000;

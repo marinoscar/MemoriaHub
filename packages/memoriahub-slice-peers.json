@@ -38,6 +38,9 @@
     ],
     "leaflet.markercluster": [
       "leaflet"
+    ],
+    "react-easy-crop": [
+      "react"
     ]
   },
   "$reserved": {
@@ -462,6 +465,20 @@
         "ui": [
           "@mui/icons-material",
           "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "people": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-easy-crop",
           "react-router-dom"
         ]
       }

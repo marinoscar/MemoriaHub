@@ -208,6 +208,10 @@
     "workflows": [
       "core",
       "media"
+    ],
+    "people": [
+      "core",
+      "media"
     ]
   }
 }

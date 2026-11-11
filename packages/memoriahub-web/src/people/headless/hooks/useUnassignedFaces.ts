@@ -5,9 +5,9 @@ import {
   bulkUnhideFaces,
   purgeFaces,
   purgeArchivedFaces,
-} from '../services/face';
-import { useIsMounted } from './useIsMounted';
-import type { UnassignedFaceDto } from '../services/face';
+} from '../services/people.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { UnassignedFaceDto } from '../services/people.js';
 
 export function useUnassignedFaces(
   circleId: string | null,

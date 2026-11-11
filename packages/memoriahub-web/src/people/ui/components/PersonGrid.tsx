@@ -1,6 +1,6 @@
 import { Grid, Typography, Box, CircularProgress } from '@mui/material';
-import { PersonCard } from './PersonCard';
-import type { PersonListItem } from '../../services/face';
+import { PersonCard } from './PersonCard.js';
+import type { PersonListItem } from '../../headless/services/people.js';
 
 interface PersonGridProps {
   people: PersonListItem[];

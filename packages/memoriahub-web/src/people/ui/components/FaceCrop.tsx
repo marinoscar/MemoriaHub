@@ -1,6 +1,6 @@
 import { Box } from '@mui/material';
 import type { SxProps } from '@mui/material';
-import type { BoundingBox } from '../../services/face';
+import type { BoundingBox } from '../../headless/services/people.js';
 
 interface FaceCropProps {
   imageUrl: string;

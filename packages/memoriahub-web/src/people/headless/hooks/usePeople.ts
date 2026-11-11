@@ -10,9 +10,9 @@ import {
   bulkHidePeople,
   bulkUnhidePeople,
   purgePeople,
-} from '../services/face';
-import { useIsMounted } from './useIsMounted';
-import type { PersonListResponse, PersonDetail, ClusterResult } from '../services/face';
+} from '../services/people.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { PersonListResponse, PersonDetail, ClusterResult } from '../services/people.js';
 
 // Hook for listing people in a circle
 export function usePeople(

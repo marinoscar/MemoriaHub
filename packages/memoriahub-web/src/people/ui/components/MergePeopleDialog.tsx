@@ -12,7 +12,7 @@ import {
   TextField,
   CircularProgress,
 } from '@mui/material';
-import type { PersonListItem } from '../../services/face';
+import type { PersonListItem } from '../../headless/services/people.js';
 
 interface MergePeopleDialogProps {
   open: boolean;

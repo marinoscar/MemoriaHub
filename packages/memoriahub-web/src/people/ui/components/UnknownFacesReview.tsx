@@ -12,8 +12,8 @@ import {
 } from '@mui/material';
 import GroupsIcon from '@mui/icons-material/Groups';
 import ClusterIcon from '@mui/icons-material/AutoFixHigh';
-import { PersonGrid } from './PersonGrid';
-import type { PersonListItem, ClusterResult } from '../../services/face';
+import { PersonGrid } from './PersonGrid.js';
+import type { PersonListItem, ClusterResult } from '../../headless/services/people.js';
 
 interface UnknownFacesReviewProps {
   unlabeledPeople: PersonListItem[];
