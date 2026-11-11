@@ -84,6 +84,14 @@
       "types": "./dist/tagging/ui/index.d.ts",
       "default": "./dist/tagging/ui/index.js"
     },
+    "./workflows/headless": {
+      "types": "./dist/workflows/headless/index.d.ts",
+      "default": "./dist/workflows/headless/index.js"
+    },
+    "./workflows/ui": {
+      "types": "./dist/workflows/ui/index.d.ts",
+      "default": "./dist/workflows/ui/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

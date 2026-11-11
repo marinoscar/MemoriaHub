@@ -34,8 +34,8 @@ vi.mock('../../pages/Enhancements/EnhancementsPage', () => ({
 vi.mock('../../pages/Insights/ReviewInsightsPage', () => ({
   default: () => <div>ReviewInsightsPageStub</div>,
 }));
-vi.mock('../../pages/Workflows/WorkflowListPage', () => ({
-  default: () => <div>WorkflowListPageStub</div>,
+vi.mock('@marinoscar/memoriahub-web/workflows/ui', () => ({
+  WorkflowListPage: () => <div>WorkflowListPageStub</div>,
 }));
 
 import { useReviewQueues } from '../../hooks/useReviewQueues';

@@ -15,7 +15,9 @@
     "./src/search/headless/index.ts",
     "./src/search/ui/index.ts",
     "./src/tagging/headless/index.ts",
-    "./src/tagging/ui/index.ts"
+    "./src/tagging/ui/index.ts",
+    "./src/workflows/headless/index.ts",
+    "./src/workflows/ui/index.ts"
   ],
   "entryPointStrategy": "resolve",
   "name": "@marinoscar/memoriahub-web",

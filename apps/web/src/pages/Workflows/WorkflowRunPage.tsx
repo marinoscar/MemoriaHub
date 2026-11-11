@@ -41,9 +41,9 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { usePermissions } from '../../hooks/usePermissions';
-import { useWorkflowRun } from '../../hooks/useWorkflowRun';
-import { useWorkflowRunItems } from '../../hooks/useWorkflowRunItems';
-import { useWorkflowMutations } from '../../hooks/useWorkflowMutations';
+import { useWorkflowRun } from '@marinoscar/memoriahub-web/workflows/headless';
+import { useWorkflowRunItems } from '@marinoscar/memoriahub-web/workflows/headless';
+import { useWorkflowMutations } from '@marinoscar/memoriahub-web/workflows/headless';
 import { useRunPolling } from '../../hooks/useRunPolling';
 import RunProgressPanel from '../../components/runs/RunProgressPanel';
 import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
@@ -64,8 +64,8 @@ import {
   deriveActionImpacts,
   definitionHasHardDelete,
   hardDeleteConfirmationText,
-} from '../../utils/workflowFormat';
-import type { WorkflowRunDetail, WorkflowRunItem } from '../../types/workflows';
+} from '@marinoscar/memoriahub-web/workflows/headless';
+import type { WorkflowRunDetail, WorkflowRunItem } from '@marinoscar/memoriahub-web/workflows/headless';
 
 const ITEMS_PAGE_SIZE = 24;
 const MAX_EXCLUSIONS = 500;

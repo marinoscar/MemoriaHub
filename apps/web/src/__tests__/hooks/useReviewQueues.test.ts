@@ -26,7 +26,8 @@ function reviewQueueListTree() {
 vi.mock('../../hooks/useFeatureFlags', () => ({
   useFeatureFlags: vi.fn(),
 }));
-vi.mock('../../hooks/useWorkflowSubjects', () => ({
+vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowsEnabled: vi.fn(),
 }));
 vi.mock('../../hooks/useReviewCounts', () => ({
@@ -34,7 +35,7 @@ vi.mock('../../hooks/useReviewCounts', () => ({
 }));
 
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { useWorkflowsEnabled } from '../../hooks/useWorkflowSubjects';
+import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
 import { useReviewCounts } from '../../hooks/useReviewCounts';
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);

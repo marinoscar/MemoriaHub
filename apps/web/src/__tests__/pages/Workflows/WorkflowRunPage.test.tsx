@@ -45,15 +45,10 @@ vi.mock('../../../hooks/useOwnerScope', () => ({
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useWorkflowRun', () => ({
+vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowRun: vi.fn(),
-}));
-
-vi.mock('../../../hooks/useWorkflowRunItems', () => ({
   useWorkflowRunItems: vi.fn(),
-}));
-
-vi.mock('../../../hooks/useWorkflowMutations', () => ({
   useWorkflowMutations: vi.fn(),
 }));
 
@@ -74,10 +69,10 @@ vi.mock('react-router-dom', async () => {
 import WorkflowRunPage from '../../../pages/Workflows/WorkflowRunPage';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { useWorkflowRun } from '../../../hooks/useWorkflowRun';
-import { useWorkflowRunItems } from '../../../hooks/useWorkflowRunItems';
-import { useWorkflowMutations } from '../../../hooks/useWorkflowMutations';
-import type { WorkflowRunDetail, WorkflowRunItem } from '../../../types/workflows';
+import { useWorkflowRun } from '@marinoscar/memoriahub-web/workflows/headless';
+import { useWorkflowRunItems } from '@marinoscar/memoriahub-web/workflows/headless';
+import { useWorkflowMutations } from '@marinoscar/memoriahub-web/workflows/headless';
+import type { WorkflowRunDetail, WorkflowRunItem } from '@marinoscar/memoriahub-web/workflows/headless';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);

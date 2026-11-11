@@ -183,8 +183,13 @@ const PublicLinkPage = lazy(() =>
   import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.PublicLinkPage })),
 );
 const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
-const WorkflowListPage = lazy(() => import('./pages/Workflows/WorkflowListPage'));
-const WorkflowBuilderPage = lazy(() => import('./pages/Workflows/WorkflowBuilderPage'));
+// RETRO-J11: the workflow list and builder pages are the packaged slice's.
+const WorkflowListPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),
+);
+const WorkflowBuilderPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowBuilderPage })),
+);
 const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));

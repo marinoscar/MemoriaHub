@@ -39,8 +39,8 @@ import {
   runStatusLabel,
   formatRelativeTime,
   formatCount,
-} from '../../../utils/workflowFormat';
-import type { WorkflowSubjectType } from '../../../types/workflows';
+} from '@marinoscar/memoriahub-web/workflows/headless';
+import type { WorkflowSubjectType } from '@marinoscar/memoriahub-web/workflows/headless';
 import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
 
 // ---------------------------------------------------------------------------

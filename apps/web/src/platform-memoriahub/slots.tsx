@@ -21,6 +21,7 @@ import type {
   PersonMultiSelectSlotProps,
 } from '@marinoscar/memoriahub-web/media/ui';
 import type { SearchPeopleExploreSlotProps } from '@marinoscar/memoriahub-web/search/ui';
+import type { WorkflowPersonSelectSlotProps } from '@marinoscar/memoriahub-web/workflows/ui';
 
 // The slot names are the package's (`@marinoscar/memoriahub-web/media/headless`
 // `slot-names`); they are spelled out here so this module loads no slice code, and
@@ -35,6 +36,7 @@ export const APP_SLOT_NAMES = {
   personMultiSelect: 'media.personMultiSelect',
   mergeLocationsDialog: 'media.mergeLocationsDialog',
   searchPeopleExplore: 'search.peopleExplore',
+  workflowPersonSelect: 'workflows.personSelect',
 } as const;
 
 /** A lazy component behind a null-fallback Suspense, so a slot renders like the eager import did. */
@@ -72,6 +74,9 @@ const PersonMultiSelectSlot = lazySlot<PersonMultiSelectSlotProps>(() =>
 const SearchPeopleExploreSlot = lazySlot<SearchPeopleExploreSlotProps>(() =>
   import('../components/search/SearchPeopleExplore').then((m) => ({ default: m.SearchPeopleExplore })),
 );
+const WorkflowPersonSelectSlot = lazySlot<WorkflowPersonSelectSlotProps>(() =>
+  import('../components/workflows/WorkflowPersonSelect').then((m) => ({ default: m.WorkflowPersonSelect })),
+);
 // The dialog reports the merge result; the package wants the group's name.
 const MergeLocationsDialogSlot = lazySlot<MergeLocationsDialogSlotProps>(() =>
   Promise.all([
@@ -97,4 +102,5 @@ export const appMemoriahubSlots: MemoriahubWebSlots = {
   [APP_SLOT_NAMES.personMultiSelect]: PersonMultiSelectSlot,
   [APP_SLOT_NAMES.mergeLocationsDialog]: MergeLocationsDialogSlot,
   [APP_SLOT_NAMES.searchPeopleExplore]: SearchPeopleExploreSlot,
+  [APP_SLOT_NAMES.workflowPersonSelect]: WorkflowPersonSelectSlot,
 };

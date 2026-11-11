@@ -63,7 +63,7 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'components/review/MemberComparison.tsx': WHY.panel,
   'components/settings/mediaSync/DiagnosticsSection.tsx': WHY.panel,
   'components/settings/mediaSync/SyncHistory.tsx': WHY.panel,
-  'components/workflows/builder/WorkflowPreviewPanel.tsx': WHY.panel,
+  'memoriahub-web/workflows/ui/components/builder/WorkflowPreviewPanel.tsx': WHY.panel,
 };
 
 /** The app's shell chrome and its bindings: they read no breakpoint at all. */

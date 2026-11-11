@@ -33,7 +33,7 @@ import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/head
 import type { ReviewQueueDef, ReviewQueueFlag } from '../config/reviewQueues';
 import { REVIEW_QUEUES } from '../config/reviewQueues';
 import { useFeatureFlags } from './useFeatureFlags';
-import { useWorkflowsEnabled } from './useWorkflowSubjects';
+import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
 import { useReviewCounts } from './useReviewCounts';
 
 export interface ResolvedReviewQueue extends ReviewQueueDef {

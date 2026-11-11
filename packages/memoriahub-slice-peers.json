@@ -428,6 +428,20 @@
           "react-router-dom"
         ]
       }
+    },
+    "workflows": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

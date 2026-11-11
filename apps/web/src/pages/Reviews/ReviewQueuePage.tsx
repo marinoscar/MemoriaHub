@@ -33,7 +33,9 @@ const LocationSuggestionsPage = lazy(
 );
 const EnhancementsPage = lazy(() => import('../Enhancements/EnhancementsPage'));
 const ReviewInsightsPage = lazy(() => import('../Insights/ReviewInsightsPage'));
-const WorkflowListPage = lazy(() => import('../Workflows/WorkflowListPage'));
+const WorkflowListPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),
+);
 
 const QUEUE_PAGES: Record<ReviewQueueKey, React.ComponentType> = {
   bursts: BurstsPage,
