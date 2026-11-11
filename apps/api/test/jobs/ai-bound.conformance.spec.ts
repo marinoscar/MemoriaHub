@@ -30,8 +30,7 @@ import {
 import type { ConformanceTestApi } from '@marinoscar/platform-api/testing';
 
 import { MEMORIAHUB_AI_JOB_TYPES } from '../../src/app-registrations/jobs';
-import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
-import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
+import { PictureEnhancementHandler, PictureEnhancementPurgeHandler } from '@marinoscar/memoriahub-api/enhancement';
 import { AutoTaggingHandler, VideoAutoTaggingHandler } from '@marinoscar/memoriahub-api/tagging';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c401';
@@ -176,17 +175,17 @@ for (const [type, build] of [
 // picture_enhancement and its purge (no subject lookup: the row is in the payload)
 // ---------------------------------------------------------------------------
 
+// The enhancement handlers moved into `@marinoscar/memoriahub-api/enhancement` (RETRO-J10): they register through
+// the jobs port, like the tagging handlers above.
 const buildEnhancement = () =>
   new PictureEnhancementHandler(
-    registry,
-    throttle,
+    jobsPortOver(registry, throttle) as never,
     subjectLookups() as never,
     {} as never,
     {} as never,
     {} as never,
     {} as never,
-    {} as never,
-  );
+  ) as unknown as JobHandler;
 
 describe('picture_enhancement', () => {
   staticContract('picture_enhancement', buildEnhancement);
@@ -215,11 +214,11 @@ describe('picture_enhancement', () => {
 
 const buildPurge = () =>
   new PictureEnhancementPurgeHandler(
-    registry,
+    jobsPortOver(registry, throttle) as never,
     subjectLookups() as never,
     {} as never,
-    { getSettingValue: async () => 168 } as never,
-  );
+    { readSystem: async () => ({ value: { retentionHours: 168 }, version: 1 }) } as never,
+  ) as unknown as JobHandler;
 
 describe('picture_enhancement_purge', () => {
   staticContract('picture_enhancement_purge', buildPurge);
@@ -296,10 +295,8 @@ describe('the AI-bound types are server-only (EAB AI rule 3)', () => {
     withGate(
       (t) =>
         new PictureEnhancementHandler(
-          reg,
-          t,
+          jobsPortOver(reg, t) as never,
           subjectLookups() as never,
-          {} as never,
           {} as never,
           {} as never,
           {} as never,

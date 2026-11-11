@@ -36,7 +36,7 @@ export const MEDIA_SLICE_SOURCE_ROOT = join(__dirname, '..', '..', '..', '..', '
  * relative to it.
  */
 const SLICES_ROOT = join(__dirname, '..', '..', '..', '..', 'packages', 'memoriahub-api', 'src');
-export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup', 'memories'].map((slice) => join(SLICES_ROOT, slice));
+export const J10_SLICE_SOURCE_ROOTS: readonly string[] = ['insights', 'location', 'dedup', 'memories', 'burst', 'social-media', 'enhancement'].map((slice) => join(SLICES_ROOT, slice));
 
 /**
  * The face slice of `@marinoscar/memoriahub-api` (RETRO-J6, #615), scanned like the media slice. It
