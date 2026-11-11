@@ -8,7 +8,7 @@ import { AutoTaggingHandler, VideoAutoTaggingHandler } from '@marinoscar/memoria
 import { BurstDetectionHandler } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateConfidenceBackfillHandler, DuplicateDetectionHandler, DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { FaceAutoArchiveSweepHandler, FaceDetectionHandler, VideoFaceDetectionHandler } from '@marinoscar/memoriahub-api/face';
-import { GeocodeHandler } from '../../src/geo/geocode.handler';
+import { GeocodeHandler } from '@marinoscar/memoriahub-api/location';
 import { RetiredJobTypeHandler } from '../../src/platform/jobs/retired-job-types';
 import { LocationGroupRebuildHandler } from '@marinoscar/memoriahub-api/location';
 import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';

@@ -23,7 +23,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'stream';
 import { StorageObject, StorageObjectStatus } from '@prisma/client';
 import { ReverseGeocodeProcessor } from './reverse-geocode.processor';
-import { GeoLocationService } from '../../media/geo/geo-location.service';
+import { GeoLocationService } from '@marinoscar/memoriahub-api/location';
 
 // ---------------------------------------------------------------------------
 // Helpers

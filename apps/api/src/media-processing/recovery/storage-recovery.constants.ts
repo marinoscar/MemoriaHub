@@ -23,11 +23,8 @@
 // (`test/jobs/job-type-snapshot.spec.ts` pins them).
 // =============================================================================
 
-/** The recovery sweep's permanent job type. */
-export const STORAGE_RECOVER_STUCK_TYPE = 'media.storage.recover_stuck';
-
-/** The admin bulk reprocess's permanent job type. */
-export const STORAGE_REPROCESS_TYPE = 'media.storage.reprocess';
+// The two type strings are defined by the media slice (its admin recovery controller queues them).
+export { STORAGE_RECOVER_STUCK_TYPE, STORAGE_REPROCESS_TYPE } from '@marinoscar/memoriahub-api/media';
 
 /** Default minutes an object may read `processing` before the sweep treats it as orphaned. */
 export const DEFAULT_STUCK_MINUTES = 10;

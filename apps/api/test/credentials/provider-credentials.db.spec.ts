@@ -9,10 +9,9 @@
 import { Logger } from '@nestjs/common';
 import { CredentialsService } from '@marinoscar/platform-api/credentials';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { GeoSettingsService } from '../../src/geo/geo-settings.service';
+import { GeoGoogleCredentialResolver, GeoSettingsService } from '@marinoscar/memoriahub-api/location';
 import { FaceSettingsService, FaceSystemSettings } from '@marinoscar/memoriahub-api/face';
 import { PlatformMemoriahubSecretsAdapter } from '../../src/platform-memoriahub/secrets/platform-memoriahub-secrets.adapter';
-import { GeoGoogleCredentialResolver } from '../../src/media/geo/geo-google-credential.resolver';
 import '../../src/platform/credentials/credential-purposes.manifest';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 
@@ -60,13 +59,7 @@ describeMaybeDb('Provider credentials (DB_GATED: real PostgreSQL)', () => {
         merge(settingsDoc, patch);
       }),
     };
-    resolver = new GeoGoogleCredentialResolver(credentials, systemSettings as never);
-    geo = new GeoSettingsService(credentials, resolver, systemSettings as never, {} as never, {} as never, {} as never);
-    const registry = {
-      keys: () => ['compreface'],
-      get: () => ({ capabilities: { detect: true }, requiresCredentials: false }),
-    };
-    // The face slice reaches the credential store and the settings through the memoriahub ports (RETRO-J6).
+    // The geo and face slices reach the credential store and the settings through the memoriahub ports (RETRO-J6, J10).
     const settingsPort = {
       readSystem: async (name: string) => ({ value: settingsDoc[name], version: 1 }),
       patchSystem: async (name: string, patch: Record<string, unknown>) => {
@@ -74,8 +67,15 @@ describeMaybeDb('Provider credentials (DB_GATED: real PostgreSQL)', () => {
         return { value: settingsDoc[name], version: 1 };
       },
     };
+    const secretsPort = new PlatformMemoriahubSecretsAdapter(credentials);
+    resolver = new GeoGoogleCredentialResolver(secretsPort, settingsPort as never);
+    geo = new GeoSettingsService(secretsPort, resolver, settingsPort as never, {} as never, {} as never, {} as never);
+    const registry = {
+      keys: () => ['compreface'],
+      get: () => ({ capabilities: { detect: true }, requiresCredentials: false }),
+    };
     face = new FaceSettingsService(
-      new PlatformMemoriahubSecretsAdapter(credentials),
+      secretsPort,
       registry as never,
       new FaceSystemSettings(settingsPort as never),
     );

@@ -27,7 +27,7 @@ import type { AppSystemSettings } from '../settings/app-settings.types';
 import type { AiSettingsService } from '../ai-port/ai-settings.service';
 import type { AiProviderRegistry } from '@marinoscar/platform-api/ai';
 import type { FaceSettingsService } from '@marinoscar/memoriahub-api/face';
-import type { GeoSettingsService } from '../geo/geo-settings.service';
+import type { GeoSettingsService } from '@marinoscar/memoriahub-api/location';
 import type { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import type { SocialMediaOcrService } from '@marinoscar/memoriahub-api/social-media';
 import type { VisualEmbeddingService } from '@marinoscar/memoriahub-api/dedup';

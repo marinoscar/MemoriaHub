@@ -52,7 +52,7 @@ import { randomUUID } from 'crypto';
 import { updateWorkflowSchema } from '@marinoscar/memoriahub-contract/workflows';
 import { UpdateWorkflowDto } from '@marinoscar/memoriahub-api/workflows';
 import { updatePersonSchema, UpdatePersonDto } from '@marinoscar/memoriahub-api/face';
-import { ReprocessFailedBodyDto } from '../../media/media-reprocess.controller';
+import { ReprocessFailedBodyDto } from '@marinoscar/memoriahub-api/media';
 import { composePatchUserSettingsSchema } from '@marinoscar/platform-api/settings';
 import '../../settings/registry';
 import { AcceptLocationSuggestionDto } from '@marinoscar/memoriahub-api/location';
@@ -147,7 +147,7 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
   // (`adminMetadataBackfillSchema`) AND the DTO class itself are declared
   // without `export` — there is no way to import either without changing
   // production code, which the task explicitly says not to do here.
-  // `ReprocessFailedBodyDto` (apps/api/src/media/media-reprocess.controller.ts,
+  // `ReprocessFailedBodyDto` (packages/memoriahub-api/src/media/recovery/media-reprocess.controller.ts,
   // `POST /api/admin/media/reprocess-failed` body `{ limit? }`) is fixed by the
   // exact same commit, follows the exact same top-level `.default({})`
   // pattern, lives in the same "admin bulk-operation" family, and — unlike
@@ -160,7 +160,7 @@ describe('issue #289 — top-level .default({}) contract on all-optional Zod bod
   // end-to-end through the real HTTP route in issue-289-bodyless-post.spec.ts,
   // which never needs to import the unexported class/schema by name.
   // ===========================================================================
-  describe('ReprocessFailedBodyDto (apps/api/src/media/media-reprocess.controller.ts) — admin-backfill-clone stand-in', () => {
+  describe('ReprocessFailedBodyDto (packages/memoriahub-api/src/media/recovery/media-reprocess.controller.ts) — admin-backfill-clone stand-in', () => {
     const schema = ReprocessFailedBodyDto.schema;
 
     it('parse(undefined) -> {} — would have thrown before commit 3f5d88f', () => {

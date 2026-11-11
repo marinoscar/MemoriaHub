@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorageObject } from '@prisma/client';
 import { Readable } from 'stream';
-import { GeoLocationService } from '../../media/geo/geo-location.service';
+import { GeoLocationService } from '@marinoscar/memoriahub-api/location';
 import type { ObjectProcessor, ObjectProcessorResult } from '@marinoscar/platform-api/storage';
 import { streamToBuffer } from './stream-utils';
 

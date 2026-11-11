@@ -144,7 +144,9 @@ function main() {
     run(process.execPath, ['dist/src/main.js'], project);
 
     // 5 and 6. the repository's own checks, pointed at the temporary project
-    run(process.execPath, [join(REPO, 'scripts/memoriahub-packages/check-slice-peers.mjs'), '--root', REPO, '--app', project], REPO);
+    run(process.execPath, [join(REPO, 'scripts/memoriahub-packages/check-slice-peers.mjs'), '--root', REPO, '--app', project, '--without', 'local-reverse-geocoder'], REPO);
+    // (--without: the bare host never selects the offline geocoder, so it leaves its optional peer out and
+    //  really does not install it; the slice must still boot, which step 4 proves.)
     run(process.execPath, [join(REPO, 'scripts/memoriahub-packages/check-single-instance.mjs'), '--root', project, '--guard', '@marinoscar/platform-*', '--guard', '@marinoscar/memoriahub-*'], REPO);
   } finally {
     if (options.keep) console.log(`bare-host: kept ${relative(process.cwd(), work) || work}`);
