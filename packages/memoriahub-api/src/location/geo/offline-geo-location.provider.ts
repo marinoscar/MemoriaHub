@@ -19,8 +19,16 @@ let loaded: LocalReverseGeocoder | undefined;
  * selects the offline provider need not install it) and the library downloads its dataset on `init`.
  */
 function geocoderLibrary(): LocalReverseGeocoder {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  loaded ??= require('local-reverse-geocoder') as LocalReverseGeocoder;
+  if (loaded) return loaded;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    loaded = require('local-reverse-geocoder') as LocalReverseGeocoder;
+  } catch (cause) {
+    throw new Error(
+      'The offline geocoder needs the optional peer dependency "local-reverse-geocoder"; install it or select another reverse provider (geo.reverseProvider).',
+      { cause },
+    );
+  }
   return loaded;
 }
 
@@ -69,7 +77,12 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
 
   /** Loads the GeoNames dataset at start-up (the library downloads it once and caches it). */
   async onModuleInit(): Promise<void> {
-    await this.ensureInitialized();
+    try {
+      await this.ensureInitialized();
+    } catch (error) {
+      // A host without the optional peer must still boot the slice; a lookup reports the problem when the offline provider is used.
+      this.logger.warn(`Offline geocoder not initialized: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async ensureInitialized(): Promise<void> {
