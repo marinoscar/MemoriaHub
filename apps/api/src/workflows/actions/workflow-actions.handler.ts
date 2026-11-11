@@ -12,7 +12,7 @@ import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService, ResolveBurstDto } from '@marinoscar/memoriahub-api/burst';
-import { DuplicateService } from '../../dedup/duplicate.service';
+import { DuplicateService, ResolveDuplicateDto } from '@marinoscar/memoriahub-api/dedup';
 import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';
@@ -31,7 +31,6 @@ import { BulkTagsDto } from '../../media/dto/bulk-tags.dto';
 import { BulkUpdateMediaDto } from '../../media/dto/bulk-update-media.dto';
 import { AddAlbumItemsDto } from '../../media/dto/add-album-items.dto';
 import { CreateAlbumDto } from '../../media/dto/create-album.dto';
-import { ResolveDuplicateDto } from '../../dedup/dto/resolve-duplicate.dto';
 import { AcceptLocationSuggestionDto } from '../../location-inference/dto/accept-location-suggestion.dto';
 
 /**

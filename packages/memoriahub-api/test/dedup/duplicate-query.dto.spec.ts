@@ -1,4 +1,4 @@
-import { duplicateQuerySchema } from './duplicate-query.dto';
+import { duplicateQuerySchema } from '@marinoscar/memoriahub-contract/dedup';
 
 const CIRCLE_ID = '11111111-1111-4111-8111-111111111111';
 

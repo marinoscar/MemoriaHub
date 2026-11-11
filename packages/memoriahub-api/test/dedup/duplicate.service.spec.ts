@@ -19,30 +19,35 @@
  *    enqueues at priority 0 with reason=rerun
  */
 
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DuplicateService } from './duplicate.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { DuplicateGroupStatus, JobReason, MhLegacyJobStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
-import { CircleRole } from '../../test/helpers/circle-role';
-import { DuplicateQueryDto } from './dto/duplicate-query.dto';
-import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
-import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
-import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
-import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
-import { thumbnailServiceOverMocks } from '../../test/helpers/media-thumbnail';
+
+import {
+  DuplicateService,
+  type BulkDismissDuplicateThresholdDto,
+  type BulkResolveDuplicateDto,
+  type BulkResolveDuplicateThresholdDto,
+  type DuplicateQueryDto,
+  type ResolveDuplicateDto,
+} from '../../src/dedup/index.js';
+import { MediaThumbnailService } from '../../src/media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+} from '../../src/ports/index.js';
+import { ReviewRunService } from '../../src/review-runs/index.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
+
+type DuplicateGroupStatus = 'pending' | 'resolved' | 'dismissed';
+const DuplicateGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
+const JobReason = { rerun: 'rerun' } as const;
+const MhLegacyJobStatus = { pending: 'pending' } as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+const ReviewRunStatus = { evaluating: 'evaluating' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -162,11 +167,11 @@ describe('DuplicateService', () => {
   let mockMembership: { requireOwnerRole: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
   let mockStorageProvider: { getSignedDownloadUrl: jest.Mock; getBucket: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockObjectStore: { forLocation: jest.Mock; active: jest.Mock };
   let mockReviewRuns: { createRun: jest.Mock };
 
   beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockMembership = { requireOwnerRole: jest.fn().mockResolvedValue(undefined) };
     mockEnrichmentJobService = { enqueue: jest.fn() };
     mockStorageProvider = {
@@ -176,7 +181,10 @@ describe('DuplicateService', () => {
       // must implement it or that fallback throws and silently returns null.
       getBucket: jest.fn().mockReturnValue('legacy-static-bucket'),
     };
-    mockResolver = { getProviderFor: jest.fn().mockResolvedValue(mockStorageProvider) };
+    mockObjectStore = {
+      forLocation: jest.fn().mockResolvedValue(mockStorageProvider),
+      active: jest.fn().mockResolvedValue({ id: 's3', store: mockStorageProvider }),
+    };
 
     (mockPrisma.$transaction as jest.Mock).mockImplementation((ops: Promise<unknown>[]) =>
       Promise.all(ops),
@@ -186,8 +194,8 @@ describe('DuplicateService', () => {
     // Batched thumbnail signing (MediaThumbnailService.signThumbsBatched, used
     // by listDuplicateGroups/getDuplicateGroup) issues one storageObject.findMany
     // call. Default to no matching rows -> falls back to the legacy static
-    // STORAGE_PROVIDER, which in this spec is the SAME mock object returned by
-    // mockResolver.getProviderFor, so existing "signed-url" assertions still
+    // active store, which in this spec is the SAME mock object returned by
+    // mockObjectStore.forLocation, so existing "signed-url" assertions still
     // hold without needing per-test findMany rows.
     (mockPrisma.storageObject.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.duplicateGroup.update as jest.Mock).mockResolvedValue({});
@@ -204,14 +212,15 @@ describe('DuplicateService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DuplicateService,
-        // Real MediaThumbnailService, reusing the same PrismaService/
-        // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
-        thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: OwnerAccessService, useValue: mockMembership },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: StorageProviderResolver, useValue: mockResolver },
+        // Real MediaThumbnailService, over the same database and object store mocks registered below.
+        {
+          provide: MediaThumbnailService,
+          useFactory: () => new MediaThumbnailService(mockPrisma as never, mockObjectStore as never),
+        },
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_ACCESS, useValue: mockMembership },
+        { provide: MEMORIAHUB_JOBS, useValue: jobsPortOverFacade(mockEnrichmentJobService) },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: mockObjectStore },
         { provide: ReviewRunService, useValue: mockReviewRuns },
       ],
     }).compile();
@@ -1541,6 +1550,7 @@ describe('DuplicateService', () => {
         id: 'job-rerun-1',
         status: MhLegacyJobStatus.pending,
       });
+      (mockPrisma.job.findUnique as jest.Mock).mockResolvedValue({ status: MhLegacyJobStatus.pending });
 
       await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
 
@@ -1606,6 +1616,7 @@ describe('DuplicateService', () => {
         id: 'job-rerun-1',
         status: MhLegacyJobStatus.pending,
       });
+      (mockPrisma.job.findUnique as jest.Mock).mockResolvedValue({ status: MhLegacyJobStatus.pending });
 
       const result = await service.rerunDuplicateDetection('media-1', USER_ID, PERMS_MEDIA_WRITE);
 

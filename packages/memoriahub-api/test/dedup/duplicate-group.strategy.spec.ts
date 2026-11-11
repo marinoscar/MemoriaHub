@@ -27,13 +27,13 @@
  * strategy is constructed directly (plain class, no Nest wiring needed).
  */
 
-import { DuplicateGroupStatus, ReviewRunAction, ReviewRunSubject } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { DuplicateGroupReviewStrategy } from './duplicate-group.strategy';
-import { PrismaService } from '../../prisma/prisma.service';
-import { DuplicateService } from '../../dedup/duplicate.service';
-import { createExecutionContext } from '@marinoscar/memoriahub-api/review-runs';
-import { createMockPrismaService, MockPrismaService } from '../../../test/mocks/prisma.mock';
+import { DuplicateGroupReviewStrategy, DuplicateService } from '../../src/dedup/index.js';
+import { createExecutionContext } from '../../src/review-runs/index.js';
+import { ReviewRunAction, ReviewRunSubject } from '../helpers/review-run-enums.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+const DuplicateGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
 
 const CIRCLE_ID = randomUUID();
 const ACTOR_ID = randomUUID();
@@ -59,14 +59,14 @@ describe('DuplicateGroupReviewStrategy', () => {
   >;
 
   beforeEach(() => {
-    prisma = createMockPrismaService();
+    prisma = createMockDb();
     duplicateService = {
       resolveOneDuplicateGroup: jest.fn().mockResolvedValue(undefined),
       dismissOneDuplicateGroup: jest.fn().mockResolvedValue(undefined),
     };
 
     strategy = new DuplicateGroupReviewStrategy(
-      prisma as unknown as PrismaService,
+      prisma as never,
       duplicateService as unknown as DuplicateService,
       { register: jest.fn() } as never,
     );
@@ -280,5 +280,39 @@ describe('DuplicateGroupReviewStrategy', () => {
 
       expect(result.get(GROUP_ID)?.mediaItemId).toBe('earliest');
     });
+  });
+});
+
+// The null-confidence exclusion (issue #190): a resolve run filters `confidence { not: null, gte: floor }`, a
+// dismiss run `{ not: null, lt: floor }`: a group whose tightest-pair similarity is uncomputable (fewer than two
+// members carry an embedding) is never auto-resolved and never auto-dismissed. Strategy-owned logic, so it is
+// asserted against the real strategy rather than a stub.
+describe('DuplicateGroupReviewStrategy: null-confidence exclusion', () => {
+  const build = () => {
+    const prisma = createMockDb();
+    (prisma.duplicateGroup.findMany as jest.Mock).mockResolvedValue([]);
+    return { prisma, strategy: new DuplicateGroupReviewStrategy(prisma as never, {} as never, { register: jest.fn() } as never) };
+  };
+
+  it('a resolve run filters confidence { not: null, gte: floor }', async () => {
+    const { prisma, strategy } = build();
+    await strategy.evaluatePage(
+      makeRun({ subjectType: ReviewRunSubject.duplicate_group, action: ReviewRunAction.resolve_trash, threshold: 75 }) as any,
+      null,
+      1000,
+    );
+    const where = (prisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.confidence).toEqual({ not: null, gte: 0.75 });
+  });
+
+  it('a dismiss run filters confidence { not: null, lt: floor }', async () => {
+    const { prisma, strategy } = build();
+    await strategy.evaluatePage(
+      makeRun({ subjectType: ReviewRunSubject.duplicate_group, action: ReviewRunAction.dismiss, threshold: 75 }) as any,
+      null,
+      1000,
+    );
+    const where = (prisma.duplicateGroup.findMany as jest.Mock).mock.calls[0][0].where;
+    expect(where.confidence).toEqual({ not: null, lt: 0.75 });
   });
 });

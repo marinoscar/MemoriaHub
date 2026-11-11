@@ -17,15 +17,17 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { DuplicateService } from './duplicate.service';
+import {
+  BulkDismissDuplicateThresholdDto,
+  BulkResolveDuplicateDto,
+  BulkResolveDuplicateThresholdDto,
+  DuplicateQueryDto,
+  DuplicateService,
+  ResolveDuplicateDto,
+} from '@marinoscar/memoriahub-api/dedup';
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../common/constants/roles.constants';
-import { DuplicateQueryDto } from './dto/duplicate-query.dto';
-import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
-import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
-import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
-import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
 
 @ApiTags('Duplicates')
 @ApiBearerAuth('JWT-auth')

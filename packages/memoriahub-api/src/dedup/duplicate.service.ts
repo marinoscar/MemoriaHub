@@ -1,43 +1,35 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  Logger,
-  NotFoundException,
-  Optional,
-} from '@nestjs/common';
-import {
-  DuplicateGroupStatus,
-  JobReason,
-  MediaType,
-  Prisma,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
-import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import {
-  STORAGE_PROVIDER,
-  StorageProvider,
-} from '@marinoscar/platform-api/storage';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { hammingDistanceBigInt as hammingDistance } from '@marinoscar/memoriahub-compute/dhash';
-import { PERMISSIONS } from '../common/constants/roles.constants';
-import { DuplicateQueryDto } from './dto/duplicate-query.dto';
-import { ResolveDuplicateDto } from './dto/resolve-duplicate.dto';
-import { BulkResolveDuplicateDto } from './dto/bulk-resolve-duplicate.dto';
-import { BulkResolveDuplicateThresholdDto } from './dto/bulk-resolve-duplicate-threshold.dto';
-import { BulkDismissDuplicateThresholdDto } from './dto/bulk-dismiss-duplicate-threshold.dto';
-import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
+
+import { MEDIA_PERMISSIONS as PERMISSIONS, MediaThumbnailService, enqueueEnrichmentJob } from '../media/index.js';
+import {
+  MEMORIAHUB_ACCESS,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubAccessPort,
+  type MemoriahubJobsPort,
+  type MemoriahubObjectStorePort,
+} from '../ports/index.js';
+import { ReviewRunService } from '../review-runs/index.js';
+import type { DedupDb } from './data/dedup-db.js';
+import type {
+  BulkDismissDuplicateThresholdDto,
+  BulkResolveDuplicateDto,
+  BulkResolveDuplicateThresholdDto,
+  DuplicateQueryDto,
+  ResolveDuplicateDto,
+} from './dedup.dto.js';
+import { DUPLICATE_OBSERVER, type DuplicateObserver } from './duplicate-observer.js';
+
+const DuplicateGroupStatus = { pending: 'pending', resolved: 'resolved', dismissed: 'dismissed' } as const;
+const MediaType = { photo: 'photo' } as const;
 
 type DuplicateKind = 'exact_variant' | 'edited' | 'similar';
 
 interface GroupMemberRow {
   id: string;
-  metadata: Prisma.JsonValue | null;
+  metadata: unknown;
   width: number | null;
   height: number | null;
   perceptualHash: string | null;
@@ -49,6 +41,20 @@ interface GroupMemberRow {
   cameraModel: string | null;
   contentHash: string | null;
   storageObject: { size: bigint } | null;
+}
+
+/** A duplicate group as the reads select it (the member shape varies by read; each read selects what it uses). */
+interface DupGroup {
+  id: string;
+  circleId: string;
+  status: string;
+  mediaCount: number;
+  capturedAt: Date | null;
+  confidence: number | null;
+  suggestedBestItemId: string | null;
+  resolvedById: string | null;
+  resolvedAt: Date | null;
+  items: GroupMemberRow[];
 }
 
 /**
@@ -63,36 +69,34 @@ function normalize(values: number[]): number[] {
   return values.map((v) => (v - min) / (max - min));
 }
 
+/**
+ * DuplicateService: the duplicate review queue (list with read-time kind and best-copy scoring, detail,
+ * resolve, dismiss, bulk and threshold runs, per-item rerun). Its resolve and dismiss primitives are public
+ * because the review-run strategy wraps them.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class DuplicateService {
   private readonly logger = new Logger(DuplicateService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly membership: OwnerAccessService,
-    private readonly enrichmentJobService: EnrichmentJobService,
-    @Inject(STORAGE_PROVIDER)
-    private readonly storageProvider: StorageProvider,
-    private readonly resolver: StorageProviderResolver,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
+    // Owner access (RETRO-K1): the first, unchanged check of every route.
+    @Inject(MEMORIAHUB_ACCESS) private readonly membership: MemoriahubAccessPort,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly objectStore: MemoriahubObjectStorePort,
     private readonly mediaThumbnailService: MediaThumbnailService,
     // The review-run engine (RETRO-J9): these threshold endpoints start runs, the registered strategy wraps
     // this service's resolve/dismiss primitives.
     private readonly reviewRuns: ReviewRunService,
     // Webhooks (RETRO-H4, #603). Optional so unit tests that build the service by hand need no stub.
-    @Optional() private readonly webhookEvents?: MemoriaHubWebhooks,
+    @Optional() @Inject(DUPLICATE_OBSERVER) private readonly observer?: DuplicateObserver,
   ) {}
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
-
-  /**
-   * Single-item thumbnail signing. Delegates to the shared
-   * MediaThumbnailService. List paths batch signing via `signThumbsBatched`.
-   */
-  private async signThumb(metadata: Prisma.JsonValue | null): Promise<string | null> {
-    return this.mediaThumbnailService.signThumb(metadata);
-  }
 
   private async signOriginal(mediaItemId: string): Promise<string | null> {
     try {
@@ -106,7 +110,7 @@ export class DuplicateService {
         select: { storageKey: true, storageProvider: true, bucket: true },
       });
       if (!storageObj) return null;
-      const provider = await this.resolver.getProviderFor(storageObj.storageProvider, storageObj.bucket);
+      const provider = await this.objectStore.forLocation(storageObj.storageProvider, storageObj.bucket);
       return await provider.getSignedDownloadUrl(storageObj.storageKey);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -255,6 +259,7 @@ export class DuplicateService {
   // List duplicate groups
   // ---------------------------------------------------------------------------
 
+  /** Lists a circle's duplicate groups for the review queue with the read-time kind and best-copy scoring (viewer). */
   async listDuplicateGroups(query: DuplicateQueryDto, userId: string, perms: string[]) {
     const { circleId, status, kind, page, pageSize } = query;
     // Service specs construct this DTO from a bare object literal (bypassing the
@@ -268,12 +273,12 @@ export class DuplicateService {
     // non-null (plain direction only). `confidence` is now a real, persisted,
     // indexed column (issue #190) and is ordered here at the SQL level,
     // mirroring BurstService.listBurstGroups — nulls last in both directions.
-    const baseOrder: Prisma.DuplicateGroupOrderByWithRelationInput[] = [
+    const baseOrder: Array<Record<string, unknown>> = [
       { capturedAt: { sort: 'asc', nulls: 'last' } },
       { createdAt: 'asc' },
       { id: 'asc' },
     ];
-    const orderBy: Prisma.DuplicateGroupOrderByWithRelationInput[] =
+    const orderBy: Array<Record<string, unknown>> =
       by === 'capturedAt'
         ? [{ capturedAt: { sort: dir, nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }]
         : by === 'confidence'
@@ -286,8 +291,8 @@ export class DuplicateService {
             ? [{ mediaCount: dir }, { capturedAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }]
             : baseOrder;
 
-    const groups = await this.prisma.duplicateGroup.findMany({
-      where: { circleId, status: status as DuplicateGroupStatus },
+    const groups: DupGroup[] = await this.prisma.duplicateGroup.findMany({
+      where: { circleId, status },
       orderBy,
       select: {
         id: true,
@@ -371,8 +376,9 @@ export class DuplicateService {
   // Get single duplicate group detail
   // ---------------------------------------------------------------------------
 
+  /** One duplicate group with its members, signed thumbnails and previews, quality and similarity scores (viewer). */
   async getDuplicateGroup(id: string, userId: string, perms: string[]) {
-    const group = await this.prisma.duplicateGroup.findUnique({
+    const group: DupGroup | null = await this.prisma.duplicateGroup.findUnique({
       where: { id },
       select: {
         id: true,
@@ -469,8 +475,9 @@ export class DuplicateService {
   // Resolve duplicate group
   // ---------------------------------------------------------------------------
 
+  /** Resolves a pending group: keeps the chosen members, archives or trashes the rest (editor; trash needs `media:delete`). */
   async resolveDuplicateGroup(id: string, dto: ResolveDuplicateDto, userId: string, perms: string[]) {
-    const group = await this.prisma.duplicateGroup.findUnique({
+    const group: DupGroup | null = await this.prisma.duplicateGroup.findUnique({
       where: { id },
       select: {
         id: true,
@@ -557,7 +564,7 @@ export class DuplicateService {
     ]);
 
     // Webhook `media.item.trashed` (RETRO-H4) once the transaction committed; batched, never throws.
-    if (action === 'trash') this.webhookEvents?.mediaTrashed(group.circleId, removeIds);
+    if (action === 'trash') this.observer?.mediaTrashed(group.circleId, removeIds);
 
     await this.createAuditEvent(userId, 'duplicate_group:resolved', group.id, {
       keepIds,
@@ -574,6 +581,7 @@ export class DuplicateService {
   // Bulk resolve duplicate groups (auto-keep suggestedBest)
   // ---------------------------------------------------------------------------
 
+  /** Resolves up to 100 pending groups, keeping each group's suggested best (editor). */
   async bulkResolveDuplicateGroups(dto: BulkResolveDuplicateDto, userId: string, perms: string[]) {
     await this.membership.requireOwnerRole(userId, dto.circleId, perms, 'editor');
 
@@ -583,7 +591,7 @@ export class DuplicateService {
 
     const dedupedIds = [...new Set(dto.ids)];
 
-    const groups = await this.prisma.duplicateGroup.findMany({
+    const groups: DupGroup[] = await this.prisma.duplicateGroup.findMany({
       where: { id: { in: dedupedIds } },
       select: {
         id: true,
@@ -681,11 +689,9 @@ export class DuplicateService {
   ) {
     const run = await this.reviewRuns.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.duplicate_group,
+      subjectType: 'duplicate_group',
       action:
-        dto.action === 'trash'
-          ? ReviewRunAction.resolve_trash
-          : ReviewRunAction.resolve_archive,
+        dto.action === 'trash' ? 'resolve_trash' : 'resolve_archive',
       threshold: dto.threshold,
       userId,
       perms,
@@ -698,8 +704,9 @@ export class DuplicateService {
   // Dismiss duplicate group
   // ---------------------------------------------------------------------------
 
+  /** Dismisses a pending group as not duplicates: ungroups every member (editor). */
   async dismissDuplicateGroup(id: string, userId: string, perms: string[]) {
-    const group = await this.prisma.duplicateGroup.findUnique({
+    const group: DupGroup | null = await this.prisma.duplicateGroup.findUnique({
       where: { id },
       select: {
         id: true,
@@ -791,8 +798,8 @@ export class DuplicateService {
   ) {
     const run = await this.reviewRuns.createRun({
       circleId: dto.circleId,
-      subjectType: ReviewRunSubject.duplicate_group,
-      action: ReviewRunAction.dismiss,
+      subjectType: 'duplicate_group',
+      action: 'dismiss',
       threshold: dto.threshold,
       userId,
       perms,
@@ -805,6 +812,7 @@ export class DuplicateService {
   // Per-item rerun
   // ---------------------------------------------------------------------------
 
+  /** Queues a fresh `duplicate_detection` job for one photo at priority 0 (editor). */
   async rerunDuplicateDetection(mediaItemId: string, userId: string, perms: string[]) {
     const mediaItem = await this.prisma.mediaItem.findUnique({
       where: { id: mediaItemId },
@@ -821,13 +829,15 @@ export class DuplicateService {
       throw new BadRequestException('Duplicate detection only applies to photos');
     }
 
-    const job = await this.enrichmentJobService.enqueue({
+    const { id: jobId } = await enqueueEnrichmentJob(this.jobs, {
       type: 'duplicate_detection',
       mediaItemId,
       circleId: mediaItem.circleId,
-      reason: JobReason.rerun,
+      reason: 'rerun',
       priority: 0,
     });
+    const jobRow = await this.prisma.job.findUnique({ where: { id: jobId }, select: { status: true } });
+    const job = { id: jobId, status: (jobRow?.status as string | undefined) ?? 'pending' };
 
     this.logger.log(`Rerun duplicate detection job ${job.id} enqueued for MediaItem ${mediaItemId} by user ${userId}`);
 
@@ -850,7 +860,7 @@ export class DuplicateService {
         action,
         targetType: 'duplicate_group',
         targetId,
-        meta: meta as Prisma.InputJsonValue,
+        meta,
       },
     });
   }

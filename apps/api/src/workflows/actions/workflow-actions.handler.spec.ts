@@ -22,7 +22,7 @@ import { MediaService } from '../../media/media.service';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService } from '@marinoscar/memoriahub-api/burst';
-import { DuplicateService } from '../../dedup/duplicate.service';
+import { DuplicateService, ResolveDuplicateDto } from '@marinoscar/memoriahub-api/dedup';
 import { LocationSuggestionService } from '@marinoscar/memoriahub-api/location';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
 import { OwnerAccessService } from '../../platform/sharing/owner-scope';

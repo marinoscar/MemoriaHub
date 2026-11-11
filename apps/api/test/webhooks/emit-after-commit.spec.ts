@@ -8,7 +8,7 @@
 // =============================================================================
 
 import { BurstService } from '@marinoscar/memoriahub-api/burst';
-import { DuplicateService } from '../../src/dedup/duplicate.service';
+import { DuplicateService } from '@marinoscar/memoriahub-api/dedup';
 import { MediaService } from '../../src/media/media.service';
 
 const GROUP = { id: 'group-1', circleId: 'circle-1' };
@@ -34,7 +34,7 @@ describe.each([
   ['burst', (prisma: unknown, events: unknown) =>
     new BurstService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
   ['duplicate', (prisma: unknown, events: unknown) =>
-    new DuplicateService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
+    new DuplicateService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, events as never)],
 ])('%s group resolution with action trash', (kind, build) => {
   const resolve = (service: unknown) =>
     kind === 'burst'

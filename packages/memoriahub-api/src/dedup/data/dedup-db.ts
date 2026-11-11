@@ -35,6 +35,10 @@ export interface DedupModels {
   burstGroup: DedupDelegate;
   /** The duplicate review groups. */
   duplicateGroup: DedupDelegate;
+  /** The queued jobs (read for the status of a rerun job). */
+  job: MediaDelegate;
+  /** The audit trail. */
+  auditEvent: MediaDelegate;
 }
 
 /**

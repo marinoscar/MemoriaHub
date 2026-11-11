@@ -8,3 +8,7 @@ export * from './duplicate-confidence-backfill.handler.js';
 export * from './duplicate-backfill.service.js';
 export * from './dedup-upload-enrichment.js';
 export * from './review-insights.service.js';
+export * from './duplicate-observer.js';
+export * from './dedup.dto.js';
+export * from './duplicate.service.js';
+export * from './duplicate-group.strategy.js';

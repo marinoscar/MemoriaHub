@@ -1,12 +1,6 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DuplicateGroupStatus,
-  Prisma,
-  ReviewRunAction,
-  ReviewRunSubject,
-} from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { DuplicateService } from '../../dedup/duplicate.service';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
+
+import { MEMORIAHUB_PRISMA } from '../ports/index.js';
 import {
   ReviewRunSubjectRegistry,
   type ReviewRunCursor,
@@ -15,7 +9,11 @@ import {
   type ReviewRunRow,
   type ReviewRunSubjectPreview,
   type ReviewRunSubjectStrategy,
-} from '@marinoscar/memoriahub-api/review-runs';
+} from '../review-runs/index.js';
+import type { DedupDb } from './data/dedup-db.js';
+import { DuplicateService } from './duplicate.service.js';
+
+const DUPLICATE_GROUP_PENDING = 'pending';
 
 /** Keyset cursor for the (capturedAt DESC NULLS LAST, id DESC) scan. */
 interface DuplicateCursor extends ReviewRunCursor {
@@ -24,7 +22,8 @@ interface DuplicateCursor extends ReviewRunCursor {
 }
 
 /**
- * Duplicate review queue strategy (issue #190).
+ * Duplicate review queue strategy (issue #190), registered with the review-run engine's
+ * `ReviewRunSubjectRegistry` when the module starts.
  *
  * Structurally identical to the burst strategy — resolve keeps the group's
  * `suggestedBestItemId` and archives/trashes the rest, dismiss ungroups every
@@ -38,18 +37,22 @@ interface DuplicateCursor extends ReviewRunCursor {
  * 500-group cap: the pre-run implementation had to load a bounded candidate set
  * and recompute tightest-pair CLIP similarity per group in application code.
  */
+/**
+ * The duplicate-group review strategy.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, OnModuleInit {
-  readonly subject = ReviewRunSubject.duplicate_group;
+  /** The review queue this strategy serves. */
+  readonly subject = 'duplicate_group' as const;
+  /** The `review_run_items` column the subject ids live in. */
   readonly subjectColumn = 'duplicateGroupId' as const;
-  readonly supportedActions = [
-    ReviewRunAction.resolve_archive,
-    ReviewRunAction.resolve_trash,
-    ReviewRunAction.dismiss,
-  ] as const;
+  /** Bulk resolve (archive or trash the rest) and dismiss. */
+  readonly supportedActions = ['resolve_archive', 'resolve_trash', 'dismiss'] as const;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: DedupDb,
     private readonly duplicateService: DuplicateService,
     private readonly registry: ReviewRunSubjectRegistry,
   ) {}
@@ -63,6 +66,7 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
   // Evaluate
   // ---------------------------------------------------------------------------
 
+  /** One keyset page of pending groups on the side of the confidence threshold the run's action names. */
   async evaluatePage(
     run: ReviewRunRow,
     cursor: ReviewRunCursor | null,
@@ -74,18 +78,18 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
     // never auto-resolved AND never auto-dismissed, matching the pre-run
     // behaviour where a null maxSim was skipped by both paths.
     const floor = run.threshold / 100;
-    const confidence: Prisma.FloatNullableFilter =
-      run.action === ReviewRunAction.dismiss
+    const confidence: Record<string, unknown> =
+      run.action === 'dismiss'
         ? { not: null, lt: floor }
         : { not: null, gte: floor };
 
-    const baseWhere: Prisma.DuplicateGroupWhereInput = {
+    const baseWhere: Record<string, unknown> = {
       circleId: run.circleId,
-      status: DuplicateGroupStatus.pending,
+      status: DUPLICATE_GROUP_PENDING,
       confidence,
     };
     const c = cursor as DuplicateCursor | null;
-    const where: Prisma.DuplicateGroupWhereInput = c
+    const where: Record<string, unknown> = c
       ? { AND: [baseWhere, buildAfterCursor(c)] }
       : baseWhere;
 
@@ -109,6 +113,7 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
   // Execute
   // ---------------------------------------------------------------------------
 
+  /** Resolves or dismisses one group through the review service's primitives; skips one resolved by hand since evaluation. */
   async executeItem(
     run: ReviewRunRow,
     groupId: string,
@@ -129,13 +134,13 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
     });
 
     // Gone, or already resolved/dismissed by hand since evaluation → skip.
-    if (!group || group.status !== DuplicateGroupStatus.pending) return 'skipped';
+    if (!group || group.status !== DUPLICATE_GROUP_PENDING) return 'skipped';
 
     // Nullable only because the starting user may have been deleted; both
     // audit_events.actor_user_id and duplicate_groups.resolved_by_id accept null.
     const actorId = run.startedById as string;
 
-    if (run.action === ReviewRunAction.dismiss) {
+    if (run.action === 'dismiss') {
       await this.duplicateService.dismissOneDuplicateGroup(
         { id: group.id, items: group.items },
         actorId,
@@ -143,14 +148,14 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
       return 'applied';
     }
 
-    const liveMemberIds = group.items.map((i) => i.id);
+    const liveMemberIds = group.items.map((i: { id: string }) => i.id);
     if (!group.suggestedBestItemId || !liveMemberIds.includes(group.suggestedBestItemId)) {
       return 'skipped';
     }
 
     const keepIds = [group.suggestedBestItemId];
-    const removeIds = liveMemberIds.filter((id) => id !== group.suggestedBestItemId);
-    const action = run.action === ReviewRunAction.resolve_trash ? 'trash' : 'archive';
+    const removeIds = liveMemberIds.filter((id: string) => id !== group.suggestedBestItemId);
+    const action = run.action === 'resolve_trash' ? 'trash' : 'archive';
 
     await this.duplicateService.resolveOneDuplicateGroup(
       group,
@@ -166,6 +171,7 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
   // Hydrate
   // ---------------------------------------------------------------------------
 
+  /** The preview of each group: its suggested best, else its earliest member. */
   async hydrateItems(groupIds: string[]): Promise<Map<string, ReviewRunSubjectPreview>> {
     const groups = await this.prisma.duplicateGroup.findMany({
       where: { id: { in: groupIds } },
@@ -219,7 +225,7 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, O
  * Keyset "strictly after cursor" predicate for the (capturedAt DESC NULLS LAST,
  * id DESC) ordering.
  */
-function buildAfterCursor(cursor: DuplicateCursor): Prisma.DuplicateGroupWhereInput {
+function buildAfterCursor(cursor: DuplicateCursor): Record<string, unknown> {
   if (cursor.capturedAt === null) {
     return { capturedAt: null, id: { lt: cursor.id } };
   }

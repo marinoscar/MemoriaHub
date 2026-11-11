@@ -272,6 +272,8 @@
       "peers": [
         "@nestjs/common",
         "@marinoscar/memoriahub-compute",
+        "@marinoscar/memoriahub-contract",
+        "nestjs-zod",
         "onnxruntime-node"
       ]
     },

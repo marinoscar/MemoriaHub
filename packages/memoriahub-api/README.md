@@ -21,7 +21,7 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-api/insights/testing`: `describeInsightsSliceConformance` ([slice README](src/insights/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/location`: the location slice (location grouping so far), `LocationModule.forRoot` and `LocationGroupResolverService` ([slice README](src/location/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/location/testing`: `describeLocationSliceConformance` ([slice README](src/location/README.md#extension-point-catalog)).
-- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection so far), `DedupModule.forRoot` and `DuplicateDetectionService` ([slice README](src/dedup/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/dedup`: the dedup slice (near-duplicate detection and the review queue), `DedupModule.forRoot`, `DuplicateDetectionService` and `DuplicateService` ([slice README](src/dedup/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/dedup/testing`: `describeDedupSliceConformance` ([slice README](src/dedup/README.md#extension-point-catalog)).
 - `@marinoscar/memoriahub-api/burst`: the burst slice, `BurstModule.forRoot`, `BurstService`, `BurstDetectionService`, `BurstGroupReviewStrategy` and the two burst controllers ([slice README](src/burst/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/burst/testing`: `describeBurstSliceConformance` ([slice README](src/burst/README.md#extension-point-catalog)).
@@ -104,6 +104,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver`, `WorkflowTriggerService` | registry, token, service | the workflows slice's catalog, action implementation, run side channels (`WorkflowRunObserver`) and settlement entry point (`WorkflowTriggerService.evaluateSettlement`) a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |
+| `DUPLICATE_OBSERVER`, `DuplicateObserver` | token, interface | the dedup slice's optional side channel: the `media.item.trashed` webhook after a trash resolve commits |
 | `BURST_OBSERVER`, `BurstObserver` | token, interface | the burst slice's optional side channel: the `media.item.trashed` webhook after a trash resolve commits |
 | `ReviewRunSubjectRegistry`, `ReviewRunSubjectStrategy` | registry, interface | the review-runs slice's per-queue behaviour: the owner of a review queue registers what is eligible, how to apply the action and how to show a subject |
 | `MEDIA_ITEM_PURGER`, `MediaItemPurger` | token | the host's batched hard delete of trashed media items, called by the trash purge job |

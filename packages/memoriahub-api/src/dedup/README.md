@@ -1,18 +1,18 @@
 # dedup
 
-The near-duplicate detection slice of the MemoriaHub domain (RETRO-J10, #624), detection part.
+The near-duplicate detection and review slice of the MemoriaHub domain (RETRO-J10, #624).
 
 ## Purpose and scope
 
-`VisualEmbeddingService` lazily loads the CLIP ViT-B/32 vision model (downloaded to `MODELS_DIR` on first use, recycled every N embeds, degraded to hash-only matching when it cannot load) and stores 512-d pgvector embeddings. `DuplicateDetectionService` matches in two tiers, OR-combined: CLIP cosine similarity over a pgvector KNN (`dedup.similarityThreshold`) or dHash Hamming distance (`dedup.hashMaxDistance`), then groups with union-find into review groups; a row lock re-checks the burst group before writing `duplicate_group_id` so burst membership wins (the write-time guard), and the group's `confidence` (tightest-pair similarity) is persisted. The compute half (embed plus dHash) is separate from the persist half, which is what a worker node uses. Jobs (type strings and profiles permanent): `duplicate_detection` (node-eligible, 5 minutes, three attempts), `duplicate_detection_batch` (100 ids per job, server-only), `duplicate_confidence_backfill` (server-only). `DuplicateBackfillService` queues the chunks, `DedupUploadEnrichment` registers the photo fan-out with the media slice (priority 10), and `ReviewInsightsService` answers the burst and duplicate review counters. The review service (resolve, dismiss, thresholds, best-copy scoring), its review-run strategy and the controllers stay in the web app until the review-run engine moves. Status: experimental until the first published release.
+`VisualEmbeddingService` lazily loads the CLIP ViT-B/32 vision model (downloaded to `MODELS_DIR` on first use, recycled every N embeds, degraded to hash-only matching when it cannot load) and stores 512-d pgvector embeddings. `DuplicateDetectionService` matches in two tiers, OR-combined: CLIP cosine similarity over a pgvector KNN (`dedup.similarityThreshold`) or dHash Hamming distance (`dedup.hashMaxDistance`), then groups with union-find into review groups; a row lock re-checks the burst group before writing `duplicate_group_id` so burst membership wins (the write-time guard), and the group's `confidence` (tightest-pair similarity) is persisted. The compute half (embed plus dHash) is separate from the persist half, which is what a worker node uses. Jobs (type strings and profiles permanent): `duplicate_detection` (node-eligible, 5 minutes, three attempts), `duplicate_detection_batch` (100 ids per job, server-only), `duplicate_confidence_backfill` (server-only). `DuplicateBackfillService` queues the chunks, `DedupUploadEnrichment` registers the photo fan-out with the media slice (priority 10), and `ReviewInsightsService` answers the burst and duplicate review counters. `DuplicateService` is the review queue: list with the read-time `kind` (`exact_variant`, `edited`, `similar`) and best-copy scoring, detail with quality and similarity scores, resolve, dismiss, bulk resolve, the two threshold runs and the per-item rerun; its resolve and dismiss primitives are public because `DuplicateGroupReviewStrategy` wraps them and registers with the review-run engine's `ReviewRunSubjectRegistry`. The controllers stay in the web app until they move too. Status: experimental until the first published release.
 
 ## Entry point
 
-`@marinoscar/memoriahub-api/dedup` (and `@marinoscar/memoriahub-api/dedup/testing`). It imports the `ports`, `core` and `media` slices through their `index.ts` and nothing else of the package.
+`@marinoscar/memoriahub-api/dedup` (and `@marinoscar/memoriahub-api/dedup/testing`). It imports the `ports`, `core`, `media` and `review-runs` slices through their `index.ts` and nothing else of the package.
 
 ## Peer dependencies
 
-`@nestjs/common`, `@marinoscar/memoriahub-compute` (`dhash`, `clip`, `dto`) and `onnxruntime-node` (the native runtime probe at boot).
+`@nestjs/common`, `nestjs-zod`, `@marinoscar/memoriahub-compute` (`dhash`, `clip`, `dto`), `@marinoscar/memoriahub-contract` (`dedup`) and `onnxruntime-node` (the native runtime probe at boot).
 
 ## Configuration
 
@@ -20,4 +20,8 @@ The near-duplicate detection slice of the MemoriaHub domain (RETRO-J10, #624), d
 
 ## Extension-point catalog
 
-None. The slice registers three job handlers through `MEMORIAHUB_JOBS` and one fan-out with the media slice's `UploadEnrichmentRegistry`. `describeDedupSliceConformance` (`./dedup/testing`) proves the registration: photos only, priority 10, gated by the feature flag.
+| Symbol | Kind | What the host does |
+|---|---|---|
+| `DUPLICATE_OBSERVER`, `DuplicateObserver` | token, interface | optional: what happens after a resolve with `trash` commits (the `media.item.trashed` webhook); never throws; bind it from a global module |
+
+The slice registers three job handlers through `MEMORIAHUB_JOBS`, one fan-out with the media slice's `UploadEnrichmentRegistry` and one strategy with the review-run engine. `describeDedupSliceConformance` (`./dedup/testing`) proves the registration: photos only, priority 10, gated by the feature flag.
