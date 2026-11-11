@@ -49,7 +49,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PrismaSystemService } from '../prisma/prisma-system.service';
 import { MEDIA_HOUSEKEEPING_REASON } from '../app-registrations/system-access-reasons';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_MAX_ATTEMPTS = 3;

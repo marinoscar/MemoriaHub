@@ -231,7 +231,7 @@ runPlatformConformance({
     onEventNoIo: {
       minListenerFiles: 7, // 7 since RETRO-D3 removed the broadcast-failure listener
       mustScan: [
-        'media/sync/media-metadata-sync.service.ts',
+        'media/sync/media-metadata-sync.listener.ts',
         'media/enrichment/media-enrichment-enqueue.listener.ts',
         'workflows/runs/workflow-trigger.listener.ts', // the app's listener over the workflows slice's settlement service
         'notification-producers/enrichment-failure-notification.listener.ts',

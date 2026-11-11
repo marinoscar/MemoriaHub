@@ -35,7 +35,7 @@ import { storageObjectSize } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { thumbnailKeyPrefixFor } from '../media-processing/thumbnail-key.util';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 
 @Injectable()
 export class ThumbnailNodePersistService {

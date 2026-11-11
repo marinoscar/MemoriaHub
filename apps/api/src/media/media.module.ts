@@ -6,6 +6,8 @@ import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
 import {
   MEDIA_ITEM_PURGER,
+  MEDIA_LOCATION_RESOLVER,
+  MediaMetadataSyncService,
   MediaModule as MediaCoreModule,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
@@ -16,7 +18,8 @@ import {
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
 import { MediaController } from './media.controller';
 import { MediaService } from './media.service';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
+import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
 import { MediaReprocessController } from './media-reprocess.controller';
 import { MediaThumbnailRerunController } from './media-thumbnail-rerun.controller';
@@ -101,6 +104,10 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
   providers: [
     MediaService,
     MediaMetadataSyncService,
+    MediaMetadataSyncListener,
+    // The media slice cannot import the location slice (location depends on media): the host binds
+    // the canonical-name resolver hook to it.
+    { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
     ForwardGeocodeService,
     ThumbnailProcessor,
     ImageDimensionsProcessor,

@@ -20,7 +20,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ThumbnailNodePersistService } from './thumbnail-node-persist.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import type { EnrichmentJob } from '@prisma/client';

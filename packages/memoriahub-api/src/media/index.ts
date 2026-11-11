@@ -27,3 +27,5 @@ export * from './trash-empty/trash-empty-run.service.js';
 export * from './trash-empty/trash-empty-evaluate.handler.js';
 export * from './trash-empty/trash-empty-execute-batch.handler.js';
 export * from './trash-empty/trash-empty-runs.controller.js';
+export * from './sync/media-metadata-sync.service.js';
+export * from './location/media-location-resolver.js';

@@ -1,25 +1,29 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Prisma } from '@prisma/client';
-import { MediaMetadataSyncService } from './media-metadata-sync.service';
-import { PrismaService } from '../../prisma/prisma.service';
-import {
-  createMockPrismaService,
-  MockPrismaService,
-} from '../../../test/mocks/prisma.mock';
 import { randomUUID } from 'crypto';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import { createMockLocationGroupResolver } from '../../../test/mocks/location-group-resolver.mock';
+import { MediaMetadataSyncService } from './media-metadata-sync.service.js';
 
-// ---------------------------------------------------------------------------
-// Helper: build a Prisma P2002 error for unique constraint violations
-// ---------------------------------------------------------------------------
-function makeP2002Error(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError(
-    'Unique constraint failed',
-    { code: 'P2002', clientVersion: '0.0.0', meta: { target: ['owner_id', 'content_hash'] } },
-  );
+// A Prisma-style unique-constraint violation, as the slice sees it (structurally, by `code`).
+function makeP2002Error(): Error & { code: string } {
+  return Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
 }
+
+/** The identity resolver: what the real one answers when Location Grouping is off. */
+function createIdentityResolver() {
+  return {
+    resolve: jest.fn().mockImplementation((raw: { geoCountry: string | null; geoAdmin1: string | null; geoLocality: string | null }) =>
+      Promise.resolve({
+        geoCanonicalCountry: raw?.geoCountry ?? null,
+        geoCanonicalAdmin1: raw?.geoAdmin1 ?? null,
+        geoCanonicalLocality: raw?.geoLocality ?? null,
+      }),
+    ),
+  };
+}
+
+function createMockPrisma() {
+  const delegate = () => ({ findUnique: jest.fn(), update: jest.fn() });
+  return { storageObject: delegate(), mediaItem: delegate() };
+}
+type MockPrismaService = ReturnType<typeof createMockPrisma>;
 
 // ---------------------------------------------------------------------------
 // Test factories
@@ -89,21 +93,9 @@ describe('MediaMetadataSyncService', () => {
   let service: MediaMetadataSyncService;
   let mockPrisma: MockPrismaService;
 
-  beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
-        MediaMetadataSyncService,
-        { provide: PrismaService, useValue: mockPrisma },
-        // EventEmitter2 is required by @OnEvent decorator at module init time
-        { provide: EventEmitter2, useValue: { on: jest.fn(), emit: jest.fn() } },
-      ],
-    }).compile();
-
-    service = module.get<MediaMetadataSyncService>(MediaMetadataSyncService);
+  beforeEach(() => {
+    mockPrisma = createMockPrisma();
+    service = new MediaMetadataSyncService(mockPrisma as never, createIdentityResolver() as never);
   });
 
   afterEach(() => {

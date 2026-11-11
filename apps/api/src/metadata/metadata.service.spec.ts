@@ -19,7 +19,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MetadataExtractionService } from './metadata.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 import {
   createMockPrismaService,

@@ -12,7 +12,7 @@ import {
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
 import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../common/constants/roles.constants';
 import { randomUUID } from 'crypto';
 import { OwnerAccessService } from '../platform/sharing/owner-scope';

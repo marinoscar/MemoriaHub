@@ -1,26 +1,25 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
-import {
-  OBJECT_PROCESSED_EVENT,
-  ObjectProcessedEvent,
-} from '../../media-processing/events/object-processed.event';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+
+import { MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_LOCATION_RESOLVER, type MediaLocationResolver } from '../location/media-location-resolver.js';
+
+/** A Prisma unique-constraint violation (`P2002`), seen structurally (the slice imports no client). */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
+}
 
 /**
  * MediaMetadataSyncService
  *
- * Listens for OBJECT_PROCESSED_EVENT and syncs extracted processor metadata
+ * Syncs extracted processor metadata
  * from StorageObject.metadata._processing into the typed columns of the
  * linked MediaItem.
  *
- * Circular dependency avoidance (Constraint B):
- *   The storage processing module emits OBJECT_PROCESSED_EVENT after all
- *   processors have run.  This service lives inside MediaModule and only
- *   depends on PrismaService (already available via the global PrismaModule).
- *   It does NOT import or depend on StorageModule/ObjectProcessingModule,
- *   breaking any potential cycle.
+ * The host listens for its `storage.object.processed` event and calls
+ * {@link MediaMetadataSyncService.syncFromStorageObject} (the listener stays in the host: the
+ * event belongs to its post-upload processing pipeline). This service depends only on the
+ * database port and the {@link MEDIA_LOCATION_RESOLVER} hook, so there is no import cycle.
  *
  * If no MediaItem is linked to the StorageObject, the handler no-ops
  * gracefully.
@@ -54,13 +53,18 @@ import {
  * Only columns whose source value is present (not undefined) are updated.
  * Existing data is never nulled out.
  */
+/**
+ * Copies the processor metadata of a storage object into the typed columns of its media item.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class MediaMetadataSyncService {
   private readonly logger = new Logger(MediaMetadataSyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly locationGroupResolver: LocationGroupResolverService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEDIA_LOCATION_RESOLVER) private readonly locationGroupResolver: MediaLocationResolver,
   ) {}
 
   /**
@@ -113,7 +117,7 @@ export class MediaMetadataSyncService {
       return;
     }
 
-    const update: Prisma.MediaItemUpdateInput = {};
+    const update: Record<string, unknown> = {};
 
     // --- content-hash ---
     // Only set the hash when the MediaItem's contentHash is currently NULL.
@@ -315,7 +319,7 @@ export class MediaMetadataSyncService {
         ...existingMeta,
         thumbnailObjectId: thumbMeta['thumbnailObjectId'],
         thumbnailStorageKey: thumbMeta['thumbnailStorageKey'],
-      } as Prisma.InputJsonValue;
+      };
     }
 
     // Only run the DB update if there is anything to update
@@ -336,7 +340,7 @@ export class MediaMetadataSyncService {
         data: update,
       });
     } catch (err: unknown) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      if (isUniqueViolation(err)) {
         this.logger.warn(
           `Content hash collision on backfill for MediaItem ${mediaItem.id} — ` +
             `the computed hash already belongs to another item. ` +
@@ -358,20 +362,5 @@ export class MediaMetadataSyncService {
     this.logger.log(
       `Synced ${Object.keys(update).length} metadata field(s) into MediaItem ${mediaItem.id}`,
     );
-  }
-
-  @OnEvent(OBJECT_PROCESSED_EVENT, { async: true })
-  async handleObjectProcessed(event: ObjectProcessedEvent): Promise<void> {
-    const { storageObjectId } = event;
-
-    try {
-      await this.syncFromStorageObject(storageObjectId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `MediaMetadataSyncService failed for StorageObject ${storageObjectId}: ${message}`,
-      );
-      // Do NOT rethrow — a sync failure should not crash the event loop
-    }
   }
 }

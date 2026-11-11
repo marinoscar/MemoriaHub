@@ -17,7 +17,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_PROVIDER, StorageProvider } from '@marinoscar/platform-api/storage';
 import { streamToBuffer, streamToTempFile } from '../media-processing/processors/stream-utils';
-import { MediaMetadataSyncService } from '../media/sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { GeoLocationService } from '../media/geo/geo-location.service';
 
 // =============================================================================

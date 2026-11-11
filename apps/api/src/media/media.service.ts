@@ -36,7 +36,7 @@ import { MediaLocationsQueryDto } from './dto/media-locations-query.dto';
 import { MediaLocationsAggregateQueryDto } from './dto/media-locations-aggregate-query.dto';
 import { MediaLocationsExtentQueryDto } from './dto/media-locations-extent-query.dto';
 import { MediaThumbnailsQueryDto } from './dto/media-thumbnails-query.dto';
-import { MediaMetadataSyncService } from './sync/media-metadata-sync.service';
+import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
 import {
   RecordAccessService,
