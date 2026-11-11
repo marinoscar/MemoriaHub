@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { MemoriesAlbumsPort } from '@marinoscar/memoriahub-api/memories';
 
-import { MediaService } from '../../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 
 // =============================================================================
 // MemoriesAlbumsAdapter: save-as-album over the web app's album code (RETRO-J8, #619)

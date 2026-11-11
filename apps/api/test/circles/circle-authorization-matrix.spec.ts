@@ -1,22 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { CircleRole } from '../helpers/circle-role';
-import { MediaService } from '../../src/media/media.service';
-import { PrismaService } from '../../src/prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
-import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
-import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
-import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
-import { ForwardGeocodeService } from '../../src/media/geo/forward-geocode.service';
-import { StorageProviderResolver } from '../../src/platform/storage/storage-provider.resolver';
-import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
-import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
+import {
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
+  MEDIA_LOCATION_RESOLVER,
+  MediaService,
+} from '@marinoscar/memoriahub-api/media';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '@marinoscar/memoriahub-api/ports';
+import { accessOver, csvStringifierProvider, objectStoreOver, thumbnailServiceOverMocks } from '../helpers/media-gallery';
 import { createMockLocationGroupResolver } from '../mocks/location-group-resolver.mock';
-import { thumbnailServiceOverMocks } from '../helpers/media-thumbnail';
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -156,26 +155,21 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        // Location Grouping (issue #373) — identity resolver by default.
-        { provide: LocationGroupResolverService, useValue: createMockLocationGroupResolver() },
+        { provide: MEDIA_LOCATION_RESOLVER, useValue: createMockLocationGroupResolver() },
         MediaService,
         // Real MediaThumbnailService, reusing the same PrismaService/
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         thumbnailServiceOverMocks,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: STORAGE_PROVIDER, useValue: mockStorageProvider },
-        { provide: MediaMetadataSyncService, useValue: mockSyncService },
-        { provide: OwnerAccessService, useValue: mockOwnerAccessService },
-        { provide: GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
-        { provide: ForwardGeocodeService, useValue: { searchPlaces: jest.fn() } },
-        {
-          provide: StorageProviderResolver,
-          useValue: {
+        { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, {
             getProviderFor: jest.fn().mockResolvedValue({
               getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/download'),
             }),
-          },
-        },
+          }) },
+        { provide: MediaMetadataSyncService, useValue: mockSyncService },
+        { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockOwnerAccessService) },
+        { provide: MEDIA_GEO_LOCATION_PROVIDER, useValue: { reverseGeocode: jest.fn() } },
+        { provide: MEDIA_FORWARD_GEOCODER, useValue: { searchPlaces: jest.fn() } },
         {
           // #247 upload_completed producer — fire-and-forget, not asserted here.
           provide: UploadNotificationService,
@@ -185,7 +179,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
           provide: MediaTouchService,
           useValue: { touchMediaItems: jest.fn().mockResolvedValue(undefined) },
         },
-        { provide: MediaEnrichmentService, useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) } },
+        { provide: MEDIA_ENRICHMENT, useValue: { enqueueUploadEnrichment: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

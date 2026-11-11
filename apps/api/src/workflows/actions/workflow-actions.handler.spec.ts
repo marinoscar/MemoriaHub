@@ -18,7 +18,7 @@ import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prism
 import { randomUUID } from 'crypto';
 import { WorkflowActionsHandler } from './workflow-actions.handler';
 import { PrismaService } from '../../prisma/prisma.service';
-import { MediaService } from '../../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService } from '@marinoscar/memoriahub-api/burst';

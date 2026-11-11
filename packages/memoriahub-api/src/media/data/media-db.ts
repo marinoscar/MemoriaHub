@@ -41,6 +41,8 @@ export interface MediaDelegate {
   deleteMany(args?: any): Promise<{ count: number }>;
   /** Counts rows. */
   count(args?: any): Promise<number>;
+  /** Aggregates rows. */
+  aggregate(args: any): Promise<any>;
   /** Groups and counts rows. */
   groupBy(args: any): Promise<any[]>;
 }
@@ -75,6 +77,26 @@ export interface MediaModels {
   trashEmptyRunItem: MediaDelegate;
   /** `media_metadata_status`. */
   mediaMetadataStatus: MediaDelegate;
+  /** `albums`. */
+  album: MediaDelegate;
+  /** `album_items`. */
+  albumItem: MediaDelegate;
+  /** `tags`. */
+  tag: MediaDelegate;
+  /** `media_tags`. */
+  mediaTag: MediaDelegate;
+  /** `burst_groups` (the review-queue count). */
+  burstGroup: MediaDelegate;
+  /** `duplicate_groups` (the review-queue count). */
+  duplicateGroup: MediaDelegate;
+  /** `location_suggestions` (the review-queue count). */
+  locationSuggestion: MediaDelegate;
+  /** `media_enhancements` (the review-queue count). */
+  mediaEnhancement: MediaDelegate;
+  /** `system_settings` (the burst minimum group size). */
+  systemSettings: MediaDelegate;
+  /** `location_groups` (the tiered browsing cover override). */
+  locationGroup: MediaDelegate;
 }
 
 /**

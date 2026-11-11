@@ -19,6 +19,7 @@
  */
 import { randomUUID } from 'crypto';
 import { Logger } from '@nestjs/common';
+import { deleteGrantsForResources } from '@marinoscar/platform-api/sharing';
 import { forSystem, runAsSystem } from '@marinoscar/platform-api/core';
 import {
   FactoryResetHandler,
@@ -37,7 +38,7 @@ import {
   SharedCircleOwnershipError,
 } from '../../src/platform/user-data/memoriahub-user-data.service';
 import { memoriaHubCircleContentRemovalHook } from '../../src/platform/user-data/user-removal.hook';
-import { MediaService } from '../../src/media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { newLibrary } from '../helpers/library';
 import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
@@ -136,7 +137,12 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
 
     // The real batched media purge; only its storage resolver is faked.
     const media = Object.create(MediaService.prototype) as MediaService;
-    Object.assign(media, { prisma, resolver, logger: new Logger('MediaService') });
+    const objectStore = {
+      forLocation: (provider: string | null | undefined, bucket?: string | null) => resolver.getProviderFor(provider as string, bucket),
+    };
+    // The grants of a purged item go with its row (the access port of the app, minus its scope data).
+    const access = { deleteGrantsFor: (tx: unknown, type: 'media_item' | 'album', ids: readonly string[]) => deleteGrantsForResources(tx, type, ids) };
+    Object.assign(media, { prisma, objectStore, access, logger: new Logger('MediaService') });
     // The system client over the app's client (PrismaSystemService.asSystem in the app).
     const system = { asSystem: (reason: string) => forSystem(prisma, reason as never) };
     service = new MemoriaHubUserDataService(

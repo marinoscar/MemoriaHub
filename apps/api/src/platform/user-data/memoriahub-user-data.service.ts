@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { MediaService } from '../../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { OwnerScopeSweepService } from '../sharing/owner-scope-sweep.service';
 import { PersonalLibraryStore } from '../sharing/personal-library.store';
 import { PrismaService } from '../../prisma/prisma.service';

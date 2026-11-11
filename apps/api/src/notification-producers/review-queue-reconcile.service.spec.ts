@@ -24,7 +24,7 @@ import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { createPlatformNotificationsMock } from '../../test/mocks/platform-notifications.mock';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { MediaService } from '../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 import { ReviewQueueReconcileService } from './review-queue-reconcile.service';

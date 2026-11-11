@@ -37,7 +37,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { NotificationsService } from '@marinoscar/platform-api/notifications';
 
 import { FEATURE_KEYS, isPictureEnhancementEnabled } from '../settings/feature-gates';
-import { MediaService } from '../media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 import { MEMORIAHUB_EVENT_KEYS } from '../notifications-registry/memoriahub.notifications';
 import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
 import { PrismaService } from '../prisma/prisma.service';

@@ -4,13 +4,21 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { GeoLocationModule } from './geo/geo-location.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
+import { stringify as csvStringify } from 'csv-stringify';
 import {
+  MEDIA_CSV_STRINGIFIER,
+  MEDIA_ENRICHMENT,
+  MEDIA_FORWARD_GEOCODER,
+  MEDIA_GEO_LOCATION_PROVIDER,
   MEDIA_ITEM_PURGER,
   MEDIA_LOCATION_RESOLVER,
   MEDIA_OBJECT_REPROCESSOR,
   MEDIA_SYSTEM_ACCESS,
   MEDIA_THUMBNAIL_PRUNER,
+  MEDIA_WEBHOOK_EVENTS,
+  MediaController,
   MediaMetadataSyncService,
+  MediaService,
   MediaModule as MediaCoreModule,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
@@ -23,8 +31,8 @@ import {
   TrashPurgeTask,
 } from '@marinoscar/memoriahub-api/media';
 import { LocationGroupsModule } from '../location-groups/location-groups.module';
-import { MediaController } from './media.controller';
-import { MediaService } from './media.service';
+import { GEO_LOCATION_PROVIDER } from '@marinoscar/memoriahub-api/location';
+import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { ForwardGeocodeService } from './geo/forward-geocode.service';
@@ -115,6 +123,11 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     // the canonical-name resolver hook to it.
     { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
     ForwardGeocodeService,
+    { provide: MEDIA_GEO_LOCATION_PROVIDER, useExisting: GEO_LOCATION_PROVIDER },
+    { provide: MEDIA_FORWARD_GEOCODER, useExisting: ForwardGeocodeService },
+    { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
+    { provide: MEDIA_WEBHOOK_EVENTS, useExisting: MemoriaHubWebhooks },
+    { provide: MEDIA_CSV_STRINGIFIER, useValue: { create: (columns: string[]) => csvStringify({ header: true, columns }) } },
     ThumbnailProcessor,
     ImageDimensionsProcessor,
     // The trash purge job and its hourly cron are the media slice's; the batched hard delete they

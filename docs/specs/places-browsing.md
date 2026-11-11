@@ -44,7 +44,7 @@ This feature adds a second, hierarchical view — Country → Region → City �
 
 ## 2. API Endpoints
 
-Both endpoints live in `MediaController` (`apps/api/src/media/media.controller.ts`) and `MediaService` (`apps/api/src/media/media.service.ts`), mounted under `/api/media/explore/locations`. Both require `media:read` plus per-circle `viewer` role (or the `media:read_any` admin bypass).
+Both endpoints live in `MediaController` (`packages/memoriahub-api/src/media/gallery/media.controller.ts`) and `MediaService` (`packages/memoriahub-api/src/media/gallery/media.service.ts`), mounted under `/api/media/explore/locations`. Both require `media:read` plus per-circle `viewer` role (or the `media:read_any` admin bypass).
 
 ### 2.1 Tiered Overview
 
@@ -114,7 +114,7 @@ Two properties of that change are worth stating explicitly:
 - **The canonical columns are ADDED to `by:`, not swapped in for the raw ones.** Prisma's `groupBy` cannot express a `COALESCE(canonical, raw)` projection, so the canonical column has to be a real grouping key; the fold then keys on it in application code. Keeping the raw columns alongside costs nothing in practice — the canonical column is populated whenever the raw one is (the #372 migration seeded `canonical = raw` for every existing row, and the resolver is the identity function when the feature is off), so row cardinality is unchanged.
 - **Countries still key on `geoCountryCode`** (see §6). A country group therefore renames only the DISPLAY name; the grouping key stays the ISO code.
 
-**With no groups defined this is a no-op.** Canonical equals raw byte-for-byte, so every tier entry, count and ordering is identical to the pre-#374 behaviour — asserted directly in `apps/api/src/media/media.service.location-grouping.spec.ts`.
+**With no groups defined this is a no-op.** Canonical equals raw byte-for-byte, so every tier entry, count and ordering is identical to the pre-#374 behaviour — asserted directly in `packages/memoriahub-api/src/media/gallery/media.service.location-grouping.spec.ts`.
 
 ---
 

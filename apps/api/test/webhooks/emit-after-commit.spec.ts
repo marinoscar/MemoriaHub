@@ -9,7 +9,7 @@
 
 import { BurstService } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateService } from '@marinoscar/memoriahub-api/dedup';
-import { MediaService } from '../../src/media/media.service';
+import { MediaService } from '@marinoscar/memoriahub-api/media';
 
 const GROUP = { id: 'group-1', circleId: 'circle-1' };
 
@@ -85,9 +85,10 @@ describe('MediaService.purgeMediaItemsBatched', () => {
       grant: { deleteMany: jest.fn(async () => ({ count: 0 })) },
       $transaction: jest.fn(async (fn: (tx: unknown) => unknown): Promise<unknown> => fn(prisma)),
     };
-    const args: unknown[] = Array.from({ length: 12 }, () => ({}));
+    const args: unknown[] = Array.from({ length: 11 }, () => ({}));
     args[0] = prisma;
-    args[12] = events; // the last (optional) constructor parameter
+    args[3] = { deleteGrantsFor: jest.fn(async () => 0) }; // the access port (grants go with the rows)
+    args[11] = events; // the webhook events hook (the first optional constructor parameter)
     return new (MediaService as unknown as new (...a: unknown[]) => MediaService)(...args);
   }
 
