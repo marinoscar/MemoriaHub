@@ -5,20 +5,20 @@
  * mocked so no real DB is needed, making this a true unit test.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaService } from './media.service.js';
-import { MediaMetadataSyncService } from '../index.js';
-import { MediaTouchService, UploadNotificationService } from '../index.js';
-import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../ports/index.js';
+import { MediaService } from '../../src/media/gallery/media.service.js';
+import { MediaMetadataSyncService } from '../../src/media/index.js';
+import { MediaTouchService, UploadNotificationService } from '../../src/media/index.js';
+import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
 import {
   MEDIA_ENRICHMENT,
   MEDIA_FORWARD_GEOCODER,
   MEDIA_GEO_LOCATION_PROVIDER,
   MEDIA_LOCATION_RESOLVER,
   MEDIA_PERMISSIONS,
-} from '../index.js';
-import { deepMockDb } from '../../../test/helpers/deep-mock-db.js';
-import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../../../test/helpers/gallery-providers.js';
-import { createMockLocationGroupResolver } from '../../../test/helpers/location-group-resolver.mock.js';
+} from '../../src/media/index.js';
+import { deepMockDb } from '../helpers/deep-mock-db.js';
+import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../helpers/gallery-providers.js';
+import { createMockLocationGroupResolver } from '../helpers/location-group-resolver.mock.js';
 
 const PERMISSIONS = {
   ...MEDIA_PERMISSIONS,

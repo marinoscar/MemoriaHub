@@ -149,12 +149,12 @@ A `MediaItem`'s own column writes (favorite, description, capturedAt, archive/tr
 |---|---|---|
 | Auto-tagging (parse failure, MediaTag-only path) | `tagging/auto-tagging.service.ts` | AI re-tags an item without also updating `description` (parse failed but a stale-AI-tag was still deleted) |
 | Tag label delete/import | `tagging/tag-labels.service.ts` | Deleting or CSV-reimporting a global tag label removes/updates `media_tags` rows for every item it touched |
-| Attach / remove a manual tag | `media/media.service.ts` (`attachTags`, `removeTag`) | `media_tags` join changes |
-| Bulk tags | `media/media.service.ts` (`bulkTags`) | Same, batched |
-| Album delete | `media/media.service.ts` (`deleteAlbum`) | Cascade-deletes `album_items`, which is invisible to the members' own rows |
-| Add items to an album (explicit ids, or by filter) | `media/media.service.ts` (`addAlbumItems`, `addAlbumItemsByFilter`) | New `album_items` rows |
-| Remove one item from an album | `media/media.service.ts` (`removeAlbumItem`) | `album_items` row deleted |
-| Rename an album / change its cover | `media/media.service.ts` (`touchAlbumMembers`, called from `updatePerson`-adjacent album update paths) | The sidecar's `albums[].name` is now stale for every member |
+| Attach / remove a manual tag | `media/gallery/media.service.ts` (`attachTags`, `removeTag`) | `media_tags` join changes |
+| Bulk tags | `media/gallery/media.service.ts` (`bulkTags`) | Same, batched |
+| Album delete | `media/gallery/media.service.ts` (`deleteAlbum`) | Cascade-deletes `album_items`, which is invisible to the members' own rows |
+| Add items to an album (explicit ids, or by filter) | `media/gallery/media.service.ts` (`addAlbumItems`, `addAlbumItemsByFilter`) | New `album_items` rows |
+| Remove one item from an album | `media/gallery/media.service.ts` (`removeAlbumItem`) | `album_items` row deleted |
+| Rename an album / change its cover | `media/gallery/media.service.ts` (`touchAlbumMembers`, called from `updatePerson`-adjacent album update paths) | The sidecar's `albums[].name` is now stale for every member |
 | Face detection (photo + video) | `face/face-detection.service.ts`, `face/video-face-detection.service.ts` | New `Face` rows for the item |
 | Create / rename a person, assign or unassign faces, merge, delete, hide/unhide, purge | `face/people.service.ts` (11 call sites: `createPerson`, `assignFaces`, `unassignFace`, `mergePeople`, `deletePerson`, `purgePeople`, `purgeFaces`, `purgeArchivedFaces`, `addPersonToMedia`, `removePersonFromMedia`, and the shared `touchMediaForPersons`/`touchMediaForFaceIds` helpers used by hide/unhide) | Any of these changes the `people[]` array the sidecar reports for one or more items |
 | Face auto-archive sweep | `face/face-auto-archive-sweep.handler.ts` | Auto-hiding a face changes which people appear on affected items |
