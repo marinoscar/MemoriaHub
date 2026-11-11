@@ -24,13 +24,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { randomUUID } from 'crypto';
 import { describeMaybeDb } from '../helpers/db-probe.helper';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { MemoryCurationService } from '../../src/memories/curation/memory-curation.service';
-import { CuratedSelection } from '../../src/memories/curation/memory-curation.types';
+import { MemoryCurationService } from '@marinoscar/memoriahub-api/memories';
+import { CuratedSelection } from '@marinoscar/memoriahub-api/memories';
 import {
   MemoryAiTitle,
   MemoryTitleRequest,
   MemoryTitleRun,
-} from '../../src/memories/titles/memory-title.types';
+} from '@marinoscar/memoriahub-api/memories';
 import { stubTitleService } from './memory-title.stub';
 import { defaultOrgId } from '../helpers/default-org';
 

@@ -27,14 +27,13 @@ import {
 } from '@marinoscar/platform-api/jobs/testing';
 
 import { InsightsService, StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
-import { MemoryDigestHandler } from '../../src/memories/digest/memory-digest.handler';
-import { MemoryDigestService } from '../../src/memories/digest/memory-digest.service';
-import { MemoryGenerationHandler } from '../../src/memories/memory-generation.handler';
+import { MemoryDigestHandler } from '@marinoscar/memoriahub-api/memories';
+import { MemoryDigestService } from '@marinoscar/memoriahub-api/memories';
+import { MemoryGenerationHandler } from '@marinoscar/memoriahub-api/memories';
 import type {
   MemoryCurator,
   MemoryCuratorContext,
-} from '../../src/memories/curators/memory-curator.interface';
-import { subjectPrisma, subjectScopes } from '../helpers/platform-job';
+} from '@marinoscar/memoriahub-api/memories';
 
 const registry = { register: jest.fn() } as unknown as JobHandlerRegistry;
 
@@ -46,6 +45,11 @@ function alias(handler: JobHandler): JobHandler {
 }
 
 const CIRCLE = '00000000-0000-4000-8000-0000000000c1';
+
+/** The access port's scope lookup (`scopeExists`) over the one known circle. */
+function scopeDirectory() {
+  return { scopeExists: async (id: string) => id === CIRCLE };
+}
 
 // =============================================================================
 // memory_generation
@@ -76,9 +80,8 @@ function buildMemoryGeneration(): MemoryGenerationHandler {
   const titles = { beginRun: () => ({ aiCalls: 0, stopReason: null }) };
   const notifications = { recordGeneratedAsync: () => undefined };
   return new MemoryGenerationHandler(
-    registry,
-    subjectPrisma() as never,
-    subjectScopes([CIRCLE]) as never,
+    registry as never,
+    scopeDirectory() as never,
     settings as never,
     titles as never,
     notifications as never,
@@ -174,9 +177,8 @@ function buildMemoryDigest(): MemoryDigestHandler {
     },
   };
   return new MemoryDigestHandler(
-    registry,
-    subjectPrisma() as never,
-    subjectScopes([CIRCLE]) as never,
+    registry as never,
+    scopeDirectory() as never,
     digest as never
   );
 }
@@ -220,7 +222,7 @@ describeJobHandlerConformance('memory_digest', () => alias(buildMemoryDigest()),
 describe('memory_digest watermark (read from the platform jobs table)', () => {
   function service(row: { finishedAt: Date } | null) {
     const prisma = { job: { findFirst: jest.fn().mockResolvedValue(row) } };
-    const svc = new MemoryDigestService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const svc = new MemoryDigestService(prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     return { svc, prisma };
   }
 

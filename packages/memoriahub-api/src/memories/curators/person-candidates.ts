@@ -42,10 +42,16 @@ const logger = new Logger('PersonMemoryCandidates');
  * curation passes. Ordered deterministically (favorites first, then by id) so
  * the cut is stable across runs rather than reshuffling which persons get
  * memories. A crash guard, not a tuning knob.
+  *
+  * @stability experimental
  */
 export const MAX_ELIGIBLE_PERSONS = 500;
 
-/** Minimum distinct years of material before `person_over_years` is meaningful. */
+/**
+ * Minimum distinct years of material before `person_over_years` is meaningful.
+ *
+ * @stability experimental
+ */
 export const PERSON_OVER_YEARS_MIN_YEARS = 3;
 
 /**
@@ -54,16 +60,26 @@ export const PERSON_OVER_YEARS_MIN_YEARS = 3;
  * The memory is a span, not an album: four photos from one prolific year is
  * plenty, and the budget freed by the cap is what lets quiet years appear at
  * all. Per issue #305 ("best 2–4 items per year").
+  *
+  * @stability experimental
  */
 export const PERSON_OVER_YEARS_MAX_PER_YEAR = 4;
 
-/** An eligible person, reduced to what the curators actually use. */
+/**
+ * An eligible person, reduced to what the curators actually use.
+ *
+ * @stability experimental
+ */
 export interface EligiblePerson {
   id: string;
   name: string | null;
 }
 
-/** Candidate count for one `(person, calendar year)` pair. */
+/**
+ * Candidate count for one `(person, calendar year)` pair.
+ *
+ * @stability experimental
+ */
 export interface PersonYearCount {
   personId: string;
   year: number;
@@ -78,6 +94,8 @@ export interface PersonYearCount {
  * whitespace-only name — Prisma cannot express `trim(name) <> ''`, and a person
  * named `"   "` with no cover face would otherwise get a "Best of" memory
  * titled after nothing.
+  *
+  * @stability experimental
  */
 export async function loadEligiblePersons(
   prisma: MemoriesDb,
@@ -126,6 +144,8 @@ export async function loadEligiblePersons(
  *
  * The `WHERE` on `media_items` is the curation base filter, hand-written here
  * for the same reason as in `circle-month-counts.ts` — see that file's header.
+  *
+  * @stability experimental
  */
 export async function loadPersonYearCounts(
   prisma: MemoriesDb,
@@ -153,7 +173,11 @@ export async function loadPersonYearCounts(
   `);
 }
 
-/** Group a flat census by person, each person's years sorted ascending. */
+/**
+ * Group a flat census by person, each person's years sorted ascending.
+ *
+ * @stability experimental
+ */
 export function groupYearCounts(
   counts: PersonYearCount[],
 ): Map<string, Array<{ year: number; count: number }>> {
@@ -180,6 +204,8 @@ export function groupYearCounts(
  * them: a cover is rendered as a still. Returns null when nothing qualifies
  * (an all-video selection, or faces with NULL confidence only) and the caller
  * keeps the engine's cover.
+  *
+  * @stability experimental
  */
 export async function preferredPersonCover(
   prisma: MemoriesDb,
@@ -206,7 +232,11 @@ export async function preferredPersonCover(
   return best?.mediaItemId ?? null;
 }
 
-/** Replace a selection's cover, leaving the rest of it untouched. */
+/**
+ * Replace a selection's cover, leaving the rest of it untouched.
+ *
+ * @stability experimental
+ */
 export function withCover(
   selection: CuratedSelection,
   coverMediaItemId: string | null,

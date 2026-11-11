@@ -33,9 +33,16 @@ import {
   setupMockUserSettings,
 } from '../fixtures/mock-setup.helper';
 import {
-  signDigestImageToken,
-  signDigestUnsubscribeToken,
-} from '../../src/memories/digest/digest-token.util';
+  signDigestImageToken as signImage,
+  signDigestUnsubscribeToken as signUnsubscribe,
+} from '@marinoscar/memoriahub-api/memories';
+import { deriveSubKey } from '../../src/legacy/legacy-secret-cipher';
+
+// The host derives the signing keys from `SECRETS_ENCRYPTION_KEY` (the same derivation the slice is
+// given in `MemoriesModule`), so a token minted before the move still verifies.
+const keyOf = (purpose: string) => deriveSubKey(purpose);
+const signDigestImageToken = (mediaItemId: string, ttlDays: number) => signImage(keyOf, mediaItemId, ttlDays);
+const signDigestUnsubscribeToken = (userId: string, ttlDays?: number) => signUnsubscribe(keyOf, userId, ttlDays);
 
 const MEDIA_ID = '7e310000-0000-4000-8000-000000000001';
 const USER_ID = '7e310000-0000-4000-8000-000000000002';

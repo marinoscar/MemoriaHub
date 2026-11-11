@@ -16,6 +16,7 @@ export * from './curators/trip.curator.js';
 export * from './curators/trip-clustering.js';
 export * from './curators/person-highlights.curator.js';
 export * from './curators/person-over-years.curator.js';
+export * from './curators/person-candidates.js';
 export * from './curators/theme.curator.js';
 export * from './curators/seasonal.curator.js';
 export * from './curators/year-in-review.curator.js';
