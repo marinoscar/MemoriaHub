@@ -35,7 +35,7 @@ import {
 } from '../helpers/auth-mock.helper';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
-import { MEDIA_ITEM_ACTIONS, MEDIA_ITEM_FIELDS } from '../../src/workflows/registry/media-item-fields';
+import { getSubjectRegistry } from '@marinoscar/memoriahub-api/workflows';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -788,8 +788,8 @@ describe('Workflows Integration (DB-gated)', () => {
       expect(subjects[0].subject).toBe('media_item');
       expect(subjects[0].label).toBe('Media Item');
       expect(subjects[0].triggers).toEqual(['manual', 'on_media_enriched', 'scheduled']);
-      expect(subjects[0].fields).toHaveLength(MEDIA_ITEM_FIELDS.length);
-      expect(subjects[0].actions).toHaveLength(MEDIA_ITEM_ACTIONS.length);
+      expect(subjects[0].fields).toHaveLength(getSubjectRegistry('media_item')!.fields.length);
+      expect(subjects[0].actions).toHaveLength(getSubjectRegistry('media_item')!.actions.length);
 
       const filenameField = subjects[0].fields.find((f: any) => f.key === 'filename');
       expect(filenameField).toMatchObject({

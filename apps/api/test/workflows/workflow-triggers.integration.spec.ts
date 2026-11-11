@@ -39,10 +39,12 @@ import { createMockContributorUser, authHeader } from '../helpers/auth-mock.help
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import { SystemSettingsService } from '@marinoscar/platform-api/settings';
 import { WorkflowTriggerListener } from '../../src/workflows/runs/workflow-trigger.listener';
-import { WorkflowEvaluateItemHandler } from '../../src/workflows/runs/workflow-evaluate-item.handler';
-import { WorkflowMicroRunFinalizeHandler } from '../../src/workflows/runs/workflow-micro-run-finalize.handler';
-import { WorkflowScheduleTickHandler } from '../../src/workflows/runs/workflow-schedule-tick.handler';
-import { WorkflowExecuteBatchHandler } from '../../src/workflows/runs/workflow-execute-batch.handler';
+import {
+  WorkflowEvaluateItemHandler,
+  WorkflowExecuteBatchHandler,
+  WorkflowMicroRunFinalizeHandler,
+  WorkflowScheduleTickHandler,
+} from '@marinoscar/memoriahub-api/workflows';
 import { ObjectProcessedEvent } from '../../src/media-processing/events/object-processed.event';
 import { EnrichmentJobSettledEvent } from '../../src/enrichment/events/enrichment-job-settled.event';
 
@@ -105,6 +107,20 @@ function setupActorPermissions(context: TestContext, perms: string[]): void {
   context.prismaMock.userRole.findMany.mockResolvedValue([
     { role: { rolePermissions: perms.map((name) => ({ permission: { name } })) } },
   ] as any);
+  // Since RETRO-J9 (#622) the slice resolves the actor's permissions through the identity port, whose
+  // binding reads the user row with its roles and role permissions.
+  context.prismaMock.user.findUnique.mockResolvedValue({
+    id: 'actor',
+    isActive: true,
+    userRoles: [
+      {
+        role: {
+          name: 'contributor',
+          rolePermissions: perms.map((name) => ({ permission: { name } })),
+        },
+      },
+    ],
+  } as any);
 }
 
 /** Fake enrichment_jobs row shaped like the one the run engine enqueues. */

@@ -16,3 +16,4 @@ export * from './inference/location-suggestion.service.js';
 export * from './inference/location-inference-backfill.service.js';
 export * from './inference/location-inference.handler.js';
 export * from './inference/location-inference-upload-enrichment.js';
+export * from './review/location-suggestion.strategy.js';

@@ -19,7 +19,7 @@ import {
 import { Auth, RequestUser } from '@marinoscar/platform-api/identity';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PERMISSIONS } from '../../common/constants/roles.constants';
-import { ReviewRunService } from '../../review-runs/review-run.service';
+import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
 import { ListLocationSuggestionRunItemsQueryDto } from '../dto/list-location-suggestion-run-items-query.dto';
 
 /**

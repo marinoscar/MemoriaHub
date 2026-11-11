@@ -24,7 +24,7 @@ import { STORAGE_PROVIDER } from '@marinoscar/platform-api/storage';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { DuplicateDetectionService } from '@marinoscar/memoriahub-api/dedup';
 import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { ReviewRunService } from '../review-runs/review-run.service';
+import { ReviewRunService } from '@marinoscar/memoriahub-api/review-runs';
 import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
 import { BurstGroupStatus, MediaType, ReviewRunAction, ReviewRunStatus, ReviewRunSubject } from '@prisma/client';
 import { CircleRole } from '../../test/helpers/circle-role';

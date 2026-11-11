@@ -31,5 +31,5 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'testing/fake-tagging-db.ts', why: 'In-memory fake of the tagging slice database (packages/memoriahub-api/src/tagging/testing): the raw-SQL members are no-op stubs, no SQL runs.' },
   { file: 'testing/fake-search-db.ts', why: 'In-memory fake of the search slice database (packages/memoriahub-api/src/search/testing): the raw-SQL members are stubs that answer a seeded list, no SQL runs.' },
   { file: 'auto-tagging.service.ts', why: 'pgvector embedding upsert keyed by media item id. In the tagging slice package (packages/memoriahub-api/src/tagging).' },
-  { file: 'workflows/runs/workflow-evaluate-item.handler.ts', why: 'Rolling micro-run append with row locks, scoped by workflow id.' },
+  { file: 'runs/workflow-evaluate-item.handler.ts', why: 'Rolling micro-run append with row locks, scoped by workflow id. In the workflows slice package (packages/memoriahub-api/src/workflows).' },
 ];

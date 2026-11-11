@@ -1,20 +1,21 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
 import {
   DuplicateGroupStatus,
   Prisma,
-  ReviewRun,
   ReviewRunAction,
   ReviewRunSubject,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DuplicateService } from '../../dedup/duplicate.service';
 import {
-  ReviewRunCursor,
-  ReviewRunEvaluatePage,
-  ReviewRunExecutionContext,
-  ReviewRunSubjectPreview,
-  ReviewRunSubjectStrategy,
-} from '../review-run-subject.strategy';
+  ReviewRunSubjectRegistry,
+  type ReviewRunCursor,
+  type ReviewRunEvaluatePage,
+  type ReviewRunExecutionContext,
+  type ReviewRunRow,
+  type ReviewRunSubjectPreview,
+  type ReviewRunSubjectStrategy,
+} from '@marinoscar/memoriahub-api/review-runs';
 
 /** Keyset cursor for the (capturedAt DESC NULLS LAST, id DESC) scan. */
 interface DuplicateCursor extends ReviewRunCursor {
@@ -38,7 +39,7 @@ interface DuplicateCursor extends ReviewRunCursor {
  * and recompute tightest-pair CLIP similarity per group in application code.
  */
 @Injectable()
-export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy {
+export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy, OnModuleInit {
   readonly subject = ReviewRunSubject.duplicate_group;
   readonly subjectColumn = 'duplicateGroupId' as const;
   readonly supportedActions = [
@@ -49,19 +50,21 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy {
 
   constructor(
     private readonly prisma: PrismaService,
-    // Circular by nature: DuplicateService injects ReviewRunService (wrapped in its own
-    // forwardRef), and ReviewRunService pulls in this strategy via the subject registry —
-    // this is the reverse edge of that same cycle, so it needs forwardRef too.
-    @Inject(forwardRef(() => DuplicateService))
     private readonly duplicateService: DuplicateService,
+    private readonly registry: ReviewRunSubjectRegistry,
   ) {}
+
+  /** Registers the strategy with the review-run engine (the slice knows no review queue). */
+  onModuleInit(): void {
+    this.registry.register(this);
+  }
 
   // ---------------------------------------------------------------------------
   // Evaluate
   // ---------------------------------------------------------------------------
 
   async evaluatePage(
-    run: ReviewRun,
+    run: ReviewRunRow,
     cursor: ReviewRunCursor | null,
     pageSize: number,
   ): Promise<ReviewRunEvaluatePage> {
@@ -107,7 +110,7 @@ export class DuplicateGroupReviewStrategy implements ReviewRunSubjectStrategy {
   // ---------------------------------------------------------------------------
 
   async executeItem(
-    run: ReviewRun,
+    run: ReviewRunRow,
     groupId: string,
     _ctx: ReviewRunExecutionContext,
   ): Promise<'applied' | 'skipped'> {
