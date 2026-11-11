@@ -15,8 +15,7 @@ import { LocationInferenceHandler } from '@marinoscar/memoriahub-api/location';
 import { MemoryDigestHandler } from '@marinoscar/memoriahub-api/memories';
 import { MemoryGenerationHandler } from '@marinoscar/memoriahub-api/memories';
 import { MetadataExtractionHandler } from '@marinoscar/memoriahub-api/media';
-import { PictureEnhancementHandler } from '../../src/enhancement/picture-enhancement.handler';
-import { PictureEnhancementPurgeHandler } from '../../src/enhancement/picture-enhancement-purge.handler';
+import { PictureEnhancementHandler, PictureEnhancementPurgeHandler } from '@marinoscar/memoriahub-api/enhancement';
 import {
   LocationSuggestionRunEvaluateHandler,
   LocationSuggestionRunExecuteBatchHandler,
@@ -24,7 +23,7 @@ import {
   ReviewRunExecuteBatchHandler,
 } from '@marinoscar/memoriahub-api/review-runs';
 import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-retention.handler';
-import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
+import { SocialMediaDetectionHandler } from '@marinoscar/memoriahub-api/social-media';
 import { StorageInsightsHandler } from '@marinoscar/memoriahub-api/insights';
 import { RetiredStorageMigrationHandler } from '../../src/platform/jobs/retired-job-types';
 import { ThumbnailRegenHandler } from '@marinoscar/memoriahub-api/media';

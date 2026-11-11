@@ -111,6 +111,22 @@
       "types": "./dist/burst/testing/index.d.ts",
       "default": "./dist/burst/testing/index.js"
     },
+    "./social-media": {
+      "types": "./dist/social-media/index.d.ts",
+      "default": "./dist/social-media/index.js"
+    },
+    "./social-media/testing": {
+      "types": "./dist/social-media/testing/index.d.ts",
+      "default": "./dist/social-media/testing/index.js"
+    },
+    "./enhancement": {
+      "types": "./dist/enhancement/index.d.ts",
+      "default": "./dist/enhancement/index.js"
+    },
+    "./enhancement/testing": {
+      "types": "./dist/enhancement/testing/index.d.ts",
+      "default": "./dist/enhancement/testing/index.js"
+    },
     "./package.json": "./package.json",
     "./memories": {
       "types": "./dist/memories/index.d.ts",
@@ -137,6 +153,8 @@
     "review-runs",
     "workflows",
     "burst",
+    "social-media",
+    "enhancement",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

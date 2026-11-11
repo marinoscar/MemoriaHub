@@ -38,8 +38,7 @@ import { BurstDetectionHandler } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
-import { SocialMediaDetectionHandler } from '../../src/social-media/social-media-detection.handler';
-import { SocialMediaDetectorService } from '../../src/social-media/social-media-detector.service';
+import { SocialMediaDetectionHandler, SocialMediaDetectorService } from '@marinoscar/memoriahub-api/social-media';
 import { mediaItemJob } from '../helpers/platform-job';
 
 const PHOTO_ID = '00000000-0000-4000-8000-00000000c501';
@@ -428,12 +427,11 @@ function socialPrisma() {
 }
 
 function buildSocial(): SocialMediaDetectionHandler {
-  const settings = {
-    getSettings: async () => ({
-      features: { socialMediaDetection: true },
-      socialMedia: { minConfidence: 0.8, ocrEnabled, maxDurationSeconds: 300, maxSizeBytes: 500_000_000 },
-    }),
+  const document: Record<string, unknown> = {
+    features: { socialMediaDetection: true },
+    socialMedia: { minConfidence: 0.8, ocrEnabled, maxDurationSeconds: 300, maxSizeBytes: 500_000_000 },
   };
+  const settings = { readSystem: async (name: string) => ({ value: document[name], version: 1 }) };
   const ocr = {
     recognizeVideo: async () => {
       world.ocrRuns += 1;
@@ -441,7 +439,7 @@ function buildSocial(): SocialMediaDetectionHandler {
     },
   };
   const resolver = {
-    getProviderFor: async () => ({
+    forLocation: async () => ({
       download: async () => {
         world.downloads += 1;
         throw new Error('no download expected in these scenarios');
@@ -463,7 +461,7 @@ function buildSocial(): SocialMediaDetectionHandler {
     },
   };
   return new SocialMediaDetectionHandler(
-    registry,
+    { registerHandler: jest.fn() } as never,
     socialPrisma() as never,
     settings as never,
     new SocialMediaDetectorService(),

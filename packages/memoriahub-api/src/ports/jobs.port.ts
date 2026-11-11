@@ -52,6 +52,11 @@ export interface MemoriahubJob<P = unknown> {
   orgId: string | null;
   /** The row's status (`pending`, `running`, `succeeded`, `failed`, ...), when the host tells. A `canDelete` veto reads it. */
   status?: string;
+  /**
+   * Provider rate-limit deferrals so far, before the attempt that is running (the queue tracks them
+   * apart from `attempts`). A handler that mirrors the queue's retry decision into its own row reads it.
+   */
+  rateLimitHits?: number;
 }
 
 /**

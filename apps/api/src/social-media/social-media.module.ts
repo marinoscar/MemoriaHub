@@ -1,53 +1,38 @@
 import { Module } from '@nestjs/common';
-import { EnrichmentModule } from '../enrichment/enrichment.module';
+import {
+  AdminSocialMediaController,
+  SOCIAL_MEDIA_POST_DETECTION,
+  SocialMediaMediaController,
+  SocialMediaModule as PackagedSocialMediaModule,
+} from '@marinoscar/memoriahub-api/social-media';
+
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
-import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
-import { MediaProcessingModule } from '../media-processing/media-processing.module';
-import { SocialMediaDetectorService } from './social-media-detector.service';
-import { SocialMediaOcrService } from './social-media-ocr.service';
-import { SocialMediaDetectionHandler } from './social-media-detection.handler';
-import { SocialMediaBackfillService } from './social-media-backfill.service';
-import { SocialMediaMediaController } from './social-media-media.controller';
-import { AdminSocialMediaController } from './admin-social-media.controller';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { SocialMediaUploadEnrichment } from './social-media-upload-enrichment';
+import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
+import { SocialMediaPostDetectionAdapter } from './post-detection.adapter';
+
+const packagedSocialMedia = PackagedSocialMediaModule.forRoot({
+  providers: [
+    SocialMediaPostDetectionAdapter,
+    { provide: SOCIAL_MEDIA_POST_DETECTION, useExisting: SocialMediaPostDetectionAdapter },
+  ],
+  // The face module provides the frame extractor of the Tier-2 OCR; the media module the post-detection fan-out.
+  imports: [FaceModule, MediaModule],
+  videoJobTimeoutMs: videoJobTimeoutMs(),
+});
 
 /**
- * SocialMediaModule
+ * The web app's binding of the social-media slice (RETRO-J10, #624). Social-media video detection (the Tier-1
+ * rule engine, the Tier-2 OCR fallback), the `social_media_detection` job, the upload fan-out registration, the
+ * backfill service and the OCR service live in `@marinoscar/memoriahub-api/social-media`; this module mounts the
+ * two controllers and binds the post-detection fan-out to the media enrichment service.
  *
- * Social-media video detection: a Tier-1 (metadata/filename) rule engine plus a
- * Tier-2 OCR fallback, wired into the enrichment queue as the
- * `social_media_detection` handler.
- *
- * Imports:
- *   - EnrichmentModule       → EnrichmentHandlerRegistry / EnrichmentJobService
- *   - SettingsModule         → AppSystemSettingsService (feature flags + socialMedia.*)
- *   - FaceModule             → VideoFrameExtractionService (now exported)
- *   - MediaModule            → MediaEnrichmentService (clean-path fan-out)
- *   - MediaProcessingModule → StorageProviderResolver (legacy re-probe + OCR download)
- *
- * No circular import: FaceModule already imports MediaModule; nothing imports
- * SocialMediaModule except AppModule.
+ * No circular import: FaceModule already imports MediaModule; nothing imports this module except AppModule and
+ * the Doctor checks.
  */
 @Module({
-  imports: [
-    EnrichmentModule,
-    
-    FaceModule,
-    MediaModule,
-    OwnerAccessModule,
-    MediaProcessingModule,
-  ],
+  imports: [packagedSocialMedia],
   controllers: [SocialMediaMediaController, AdminSocialMediaController],
-  providers: [
-    // Registers this slice's upload fan-out with the media slice (RETRO-J5).
-    SocialMediaUploadEnrichment,
-    SocialMediaDetectorService,
-    SocialMediaOcrService,
-    SocialMediaDetectionHandler,
-    SocialMediaBackfillService,
-  ],
-  exports: [SocialMediaOcrService, SocialMediaDetectorService],
+  exports: [packagedSocialMedia],
 })
 export class SocialMediaModule {}

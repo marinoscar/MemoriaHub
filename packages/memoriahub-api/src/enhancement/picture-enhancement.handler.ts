@@ -1,0 +1,486 @@
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Readable } from 'stream';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
+
+import { aiRateLimit, streamToBuffer } from '../core/index.js';
+import {
+  MEMORIAHUB_AI,
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_METRICS,
+  MEMORIAHUB_OBJECT_STORE,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  MemoriahubRateLimitError,
+  type MemoriahubAiPort,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+  type MemoriahubMetricsPort,
+  type MemoriahubObjectStore,
+  type MemoriahubObjectStorePort,
+  type MemoriahubSettingsPort,
+} from '../ports/index.js';
+import {
+  ENHANCEMENT_AI_FEATURE,
+  ENHANCEMENT_JOB_TYPES,
+  ENHANCEMENT_MEDIA_TYPE,
+  ENHANCEMENT_STATUS,
+  ENHANCEMENT_THROTTLE_KEY,
+  ENHANCEMENT_THUMBNAIL_CACHE_CONTROL,
+} from './constants.js';
+import type { EnhancementDb } from './data/enhancement-db.js';
+import { closestSupportedSize, sizeToDims } from './enhance-prompt.builder.js';
+import {
+  DEFAULT_RATE_LIMIT_MAX_HITS,
+  ENHANCEMENT_IMAGE_TOOLS,
+  ENHANCEMENT_OPTIONS,
+  type EnhancementImageTools,
+  type EnhancementModuleOptions,
+} from './enhancement-host-hooks.js';
+
+/** The job's payload: the enhancement row it renders. */
+interface PictureEnhancementPayload {
+  enhancementId?: string;
+}
+
+/** `gpt-image-1` can take several minutes; the row-state machine below reads `maxAttempts`. */
+const PROFILE: MemoriahubJobProfile = { maxRuntimeMs: 600_000, maxAttempts: 3 };
+
+/** The settings the handler reads. */
+interface PictureEnhancementSettings {
+  defaultQuality?: string;
+  defaultStrength?: string;
+  stampExif?: boolean;
+}
+
+/**
+ * PictureEnhancementHandler: the `picture_enhancement` job (RETRO-C4, #590; moved RETRO-J10, #624).
+ *
+ * Server-only, permanently (AI rule 3; no nodeResultSchema/persistNodeResult; `usesAi`): it
+ * needs the OpenAI credential and writes a staging object, so it never runs on a
+ * distributed worker node. A 429/529 reaches the queue as a rate-limit error, so the job is deferred
+ * without consuming an attempt.
+ *
+ * The row is created ahead of time (status=pending, params + compiled prompt
+ * already stored) by MediaEnhancementService.startEnhance; this handler resolves
+ * the row from job.payload.enhancementId, calls the provider's images.edit, and
+ * stages the enhanced bytes for human review.
+ */
+/**
+ * The `picture_enhancement` job handler.
+ *
+ * @stability experimental
+ */
+@Injectable()
+export class PictureEnhancementHandler implements MemoriahubJobHandler, OnModuleInit {
+  readonly type = ENHANCEMENT_JOB_TYPES.pictureEnhancement;
+  readonly label = 'AI picture enhancer';
+  readonly profile: MemoriahubJobProfile = PROFILE;
+  /** OpenAI image-edit quota: its own gate, apart from tagging. */
+  readonly throttleKey = ENHANCEMENT_THROTTLE_KEY;
+  /** A model call: server-only, so it never declares the node result pair. */
+  readonly usesAi = true;
+  private readonly logger = new Logger(PictureEnhancementHandler.name);
+  private readonly rateLimitMaxHits: number;
+
+  constructor(
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: EnhancementDb,
+    @Inject(MEMORIAHUB_OBJECT_STORE) private readonly resolver: MemoriahubObjectStorePort,
+    @Inject(MEMORIAHUB_AI) private readonly ai: MemoriahubAiPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly systemSettings: MemoriahubSettingsPort,
+    @Inject(ENHANCEMENT_IMAGE_TOOLS) private readonly imageTools: EnhancementImageTools,
+    @Optional() @Inject(ENHANCEMENT_OPTIONS) options?: EnhancementModuleOptions,
+    // Metrics: `app.ai.images.generated`. Optional for hand-built tests.
+    @Optional() @Inject(MEMORIAHUB_METRICS) private readonly metrics?: MemoriahubMetricsPort,
+  ) {
+    this.rateLimitMaxHits = options?.rateLimitMaxHits ?? DEFAULT_RATE_LIMIT_MAX_HITS;
+  }
+
+  /** Registers the handler with the queue. */
+  onModuleInit(): void {
+    this.jobs.registerHandler(this);
+  }
+
+  /**
+   * Refuse to delete a PENDING job whose batch is still active: it is what will
+   * make the row's (already requested, billed-on-run) render happen, and the
+   * batch counters derive from the rows it advances. Cancel the batch instead.
+   */
+  async canDelete(job: MemoriahubJob): Promise<string | null> {
+    if (job.status !== 'pending') return null;
+    const enhancementId = (job.payload as PictureEnhancementPayload | null)?.enhancementId;
+    if (!enhancementId) return null;
+    const row = await this.prisma.mediaEnhancement.findUnique({
+      where: { id: enhancementId },
+      select: { status: true, batchId: true, batch: { select: { cancelledAt: true } } },
+    });
+    if (!row?.batchId || row.batch?.cancelledAt) return null;
+    if (row.status !== ENHANCEMENT_STATUS.pending) return null;
+    return `This job renders an enhancement of batch ${row.batchId}, which is still active: cancel the batch instead of deleting its job.`;
+  }
+
+  async process(job: MemoriahubJob): Promise<void> {
+    const payload = job.payload as PictureEnhancementPayload | null;
+    const enhancementId = payload?.enhancementId;
+    if (!enhancementId) {
+      this.logger.warn(`picture_enhancement job ${job.id} has no enhancementId; skipping`);
+      return;
+    }
+
+    const row = await this.prisma.mediaEnhancement.findUnique({
+      where: { id: enhancementId },
+    });
+    if (!row) {
+      this.logger.warn(
+        `picture_enhancement job ${job.id}: enhancement ${enhancementId} not found; skipping`,
+      );
+      return;
+    }
+
+    // Only pending/processing rows are actionable (a superseded row is discarded).
+    if (
+      row.status !== ENHANCEMENT_STATUS.pending &&
+      row.status !== ENHANCEMENT_STATUS.processing
+    ) {
+      this.logger.log(
+        `picture_enhancement job ${job.id}: enhancement ${enhancementId} is ${row.status}; skipping`,
+      );
+      return;
+    }
+
+    // Second cancellation gate (epic #420, issue #421). MediaEnhancementService
+    // .cancelBatch deletes the still-PENDING job rows, but a job already claimed
+    // by a worker when the cancel landed is past that point — it would otherwise
+    // go on to make a billed gpt-image-1 call for a batch the user just stopped.
+    // One cheap read closes that window.
+    if (row.batchId) {
+      const batch = await this.prisma.mediaEnhancementBatch.findUnique({
+        where: { id: row.batchId },
+        select: { cancelledAt: true },
+      });
+      if (batch?.cancelledAt) {
+        await this.prisma.mediaEnhancement.update({
+          where: { id: row.id },
+          data: { status: ENHANCEMENT_STATUS.cancelled },
+        });
+        this.logger.log(
+          `picture_enhancement job ${job.id}: batch ${row.batchId} was cancelled; skipping enhancement ${row.id}`,
+        );
+        return;
+      }
+    }
+
+    await this.prisma.mediaEnhancement.update({
+      where: { id: row.id },
+      data: { status: ENHANCEMENT_STATUS.processing, lastError: null },
+    });
+
+    // The quality the run asked for, for `app.ai.images.generated` (set once it is resolved).
+    let imageQuality: string | undefined;
+    try {
+      const mediaItem = await this.prisma.mediaItem.findUnique({
+        where: { id: row.mediaItemId },
+        select: {
+          id: true,
+          type: true,
+          deletedAt: true,
+          width: true,
+          height: true,
+          storageObject: {
+            select: { storageKey: true, storageProvider: true, bucket: true, mimeType: true },
+          },
+        },
+      });
+
+      if (
+        !mediaItem ||
+        mediaItem.deletedAt ||
+        !mediaItem.storageObject ||
+        mediaItem.type !== ENHANCEMENT_MEDIA_TYPE.photo ||
+        !mediaItem.storageObject.mimeType.startsWith('image/')
+      ) {
+        throw new Error(
+          `MediaItem ${row.mediaItemId} is not an eligible photo for enhancement`,
+        );
+      }
+
+      // Download original bytes, then auto-orient (deterministic pre-pass).
+      const objectProvider = await this.resolver.forLocation(
+        mediaItem.storageObject.storageProvider,
+        mediaItem.storageObject.bucket,
+      );
+      const originalBuffer = await streamToBuffer(
+        await objectProvider.download(mediaItem.storageObject.storageKey),
+      );
+
+      const prepared = await prepareImageForProcessing(originalBuffer, { maxDim: 2048 });
+      const inputBuffer = prepared.width > 0 ? prepared.buffer : originalBuffer;
+      const inputMime = prepared.width > 0 ? 'image/jpeg' : mediaItem.storageObject.mimeType;
+
+      // Resolve OpenAI call params (spec §4.2).
+      const { value: pictureSettings } =
+        await this.systemSettings.readSystem<PictureEnhancementSettings | undefined>('pictureEnhancement');
+      const settings = { pictureEnhancement: pictureSettings };
+      const rawParams = (row.params as Record<string, unknown> | null) ?? {};
+      // Per-run quality override takes precedence over the system setting.
+      const quality =
+        (rawParams['quality'] as string | undefined) ??
+        settings.pictureEnhancement?.defaultQuality ??
+        'high';
+      imageQuality = quality;
+      const preserveFaces = rawParams['preserveFaces'] !== false; // default true
+      const strength =
+        (rawParams['strength'] as string | undefined) ??
+        settings.pictureEnhancement?.defaultStrength ??
+        'balanced';
+      const inputFidelity: 'low' | 'high' =
+        preserveFaces || strength !== 'strong' ? 'high' : 'low';
+      const size = closestSupportedSize(mediaItem.width, mediaItem.height);
+
+      // One synchronous image edit through the platform `AiService` (`editImageInline`: this
+      // handler already runs inside its own server-only job and holds the bytes, so no second
+      // queued run and no copy under `ai-outputs/`). A system call: no acting user, the
+      // organization's or the deployment's key. `input_fidelity` and `output_compression` have no
+      // neutral field, so they ride the OpenAI `providerOptions` escape hatch.
+      const edited = await this.ai
+        .forSystem({ feature: ENHANCEMENT_AI_FEATURE, jobId: job.id })
+        .editImageInline({
+          provider: row.provider,
+          model: row.model,
+          prompt: row.prompt ?? '',
+          images: [
+            {
+              data: new Uint8Array(inputBuffer),
+              mimeType: inputMime,
+              filename: `input.${inputMime === 'image/png' ? 'png' : 'jpg'}`,
+            },
+          ],
+          size,
+          quality: quality as 'low' | 'medium' | 'high',
+          outputFormat: 'jpeg',
+          n: 1,
+          providerOptions: { openai: { input_fidelity: inputFidelity, output_compression: 90 } },
+        });
+      const image = edited.images[0];
+      if (!image || image.data.byteLength === 0) {
+        throw new Error('The image edit returned no image data');
+      }
+
+      const enhancedBuffer = Buffer.from(image.data);
+
+      // The model does not always return the exact canvas we asked for, so the
+      // REAL pixel dimensions come from the returned bytes; sizeToDims(size) is
+      // only the fallback when they can't be read.
+      const requestedDims = sizeToDims(size);
+      const outputDims = (await this.readDims(enhancedBuffer)) ?? requestedDims;
+
+      // File-level EXIF carryover + AI marker (spec §5.1/§5.4), gated on
+      // pictureEnhancement.stampExif. Done HERE, once, on the staged bytes:
+      // both apply paths (keep_both and replace) reuse this same staged object,
+      // so a single stamp covers both. Best-effort by contract — the service
+      // returns the input buffer on any failure; the extra try/catch is
+      // belt-and-braces so a metadata step can never fail a good enhancement.
+      const stampExif = settings.pictureEnhancement?.stampExif !== false;
+      let finalBuffer: Buffer = enhancedBuffer;
+      if (stampExif) {
+        try {
+          const stamped = await this.imageTools.carryOverMetadata(
+            originalBuffer,
+            enhancedBuffer,
+            {
+              model: row.model,
+              width: outputDims[0],
+              height: outputDims[1],
+              originalExtension: extensionForMime(mediaItem.storageObject.mimeType),
+            },
+          );
+          if (stamped?.length) finalBuffer = stamped;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `picture_enhancement job ${job.id}: EXIF carryover skipped: ${msg}`,
+          );
+        }
+      }
+
+      // Read the persisted dims off the FINAL bytes so the recorded size always
+      // describes what is actually stored (drives the downscale warning and the
+      // keep_both item's width/height).
+      const [enhancedWidth, enhancedHeight] =
+        (await this.readDims(finalBuffer)) ?? outputDims;
+
+      // Stage the enhanced bytes on the ACTIVE provider under a dedicated key.
+      const { id: activeProviderId, store: activeProvider } = await this.resolver.active();
+      const stagingKey = `enhancements/${row.id}/result.jpg`;
+      await activeProvider.upload(stagingKey, Readable.from(finalBuffer), {
+        mimeType: 'image/jpeg',
+        contentLength: finalBuffer.length,
+      });
+
+      // Thumbnail derivative of the staged bytes (issue #203) so the
+      // /enhancements hub can paint a card without downloading the full
+      // gpt-image-1 output. Same provider/bucket as the staged object, so the
+      // existing stagingProvider/stagingBucket columns cover both.
+      const stagingThumbnailKey = await this.uploadStagingThumbnail(
+        row.id,
+        finalBuffer,
+        activeProvider,
+      );
+
+      await this.prisma.mediaEnhancement.update({
+        where: { id: row.id },
+        data: {
+          status: ENHANCEMENT_STATUS.ready,
+          stagingStorageKey: stagingKey,
+          stagingThumbnailKey,
+          stagingProvider: activeProviderId,
+          stagingBucket: activeProvider.getBucket(),
+          originalWidth: mediaItem.width,
+          originalHeight: mediaItem.height,
+          enhancedWidth,
+          enhancedHeight,
+          enhancedSize: BigInt(finalBuffer.length),
+          lastError: null,
+        },
+      });
+
+      this.metrics?.add('aiImagesGenerated', 1, { feature: 'enhance', quality, outcome: 'ready' });
+
+      this.logger.log(
+        `picture_enhancement job ${job.id}: enhancement ${row.id} ready (${enhancedWidth}x${enhancedHeight}, ${finalBuffer.length} bytes)`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+
+      // Classify the failure the SAME way EnrichmentTerminalService will, so
+      // the row's next state always agrees with the job's next state.
+      // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
+      const rl = err instanceof MemoriahubRateLimitError ? err : aiRateLimit(err, ENHANCEMENT_THROTTLE_KEY);
+
+      // Does the queue requeue this job, or is this its last breath?
+      //
+      //  - Rate limit: the deferral path requeues until
+      //    `rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS`, and it
+      //    UN-CHARGES the claim-time attempt, so a deferral never consumes
+      //    retry budget. `job.rateLimitHits` is the count BEFORE this hit.
+      //  - Normal error: `attempts` is charged at CLAIM time (it means
+      //    "attempts STARTED"), so `job.attempts` already includes the attempt
+      //    that just failed — 1 on the first run. The queue retries while
+      //    `job.attempts < PROFILE.maxAttempts`, i.e. attempt 3 of 3 is
+      //    terminal. Using `<` (not `<=`) here is what keeps the two in step.
+      const queueWillRetry = rl
+        ? (job.rateLimitHits ?? 0) + 1 < this.rateLimitMaxHits
+        : job.attempts < PROFILE.maxAttempts;
+
+      // A retryable failure must leave the row ACTIONABLE. process() early-returns
+      // unless the row is pending/processing, so unconditionally tombstoning it as
+      // `failed` here turned every retry — and every rate-limit deferral — into a
+      // silent no-op that burned the job's budget without re-running the work.
+      await this.prisma.mediaEnhancement.update({
+        where: { id: row.id },
+        data: {
+          status: queueWillRetry
+            ? ENHANCEMENT_STATUS.pending
+            : ENHANCEMENT_STATUS.failed,
+          // Informational while retrying (explains the current backoff), and the
+          // surfaced failure reason once the queue gives up.
+          lastError: msg,
+        },
+      });
+
+      // Counted once, when the queue gives up (a retry or a deferral is not an outcome yet).
+      if (!queueWillRetry) {
+        this.metrics?.add('aiImagesGenerated', 1, {
+          feature: 'enhance',
+          quality: imageQuality ?? 'other',
+          outcome: 'failed',
+        });
+      }
+
+      this.logger.error(
+        `picture_enhancement job ${job.id}: enhancement ${row.id} ${
+          queueWillRetry ? 'failed (will retry)' : 'failed'
+        }${rl ? ' [rate-limited]' : ''}: ${msg}`,
+      );
+
+      // Rethrow the NORMALIZED RateLimitError so the queue takes its deferral
+      // path (backoff + no attempt charged) rather than the retry path; any
+      // other error is rethrown untouched for normal retry/backoff.
+      if (rl) throw rl;
+      throw err;
+    }
+  }
+
+  /**
+   * Render and upload a thumbnail derivative of the staged bytes, returning its
+   * storage key — or `null` if it could not be produced (issue #203).
+   *
+   * Best-effort by contract: a thumbnail is a display optimization, so a
+   * rendering or upload failure must never fail an enhancement whose expensive
+   * `gpt-image-1` call already succeeded. The API then reports
+   * `enhanced.thumbnailUrl: null` and the client falls back to the
+   * full-resolution `enhanced.previewUrl` — the pre-#203 behavior.
+   *
+   * Uploaded to the SAME provider instance the staged bytes just went to, which
+   * is what lets stagingProvider/stagingBucket describe both objects.
+   */
+  private async uploadStagingThumbnail(
+    enhancementId: string,
+    bytes: Buffer,
+    provider: Pick<MemoriahubObjectStore, 'upload'>,
+  ): Promise<string | null> {
+    const key = `enhancements/${enhancementId}/thumb.jpg`;
+    try {
+      const thumb = await this.imageTools.renderThumbnail(bytes, { sourceFilename: 'result.jpg' });
+      await provider.upload(key, Readable.from(thumb), {
+        mimeType: 'image/jpeg',
+        contentLength: thumb.length,
+        cacheControl: ENHANCEMENT_THUMBNAIL_CACHE_CONTROL,
+      });
+      return key;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `picture_enhancement: staging thumbnail skipped for enhancement ${enhancementId} (non-fatal): ${msg}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Read a buffer's real pixel dimensions, or `null` if it can't be decoded.
+   * Never throws — the caller falls back to the requested canvas size.
+   */
+  private async readDims(buffer: Buffer): Promise<[number, number] | null> {
+    return this.imageTools.readDimensions(buffer);
+  }
+}
+
+/**
+ * Extension hint for the temp copy of the ORIGINAL passed to ExifTool, so it
+ * type-detects the source exactly as it would in storage. Unknown types get no
+ * extension (ExifTool identifies by content anyway).
+ */
+function extensionForMime(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case 'image/jpeg':
+    case 'image/jpg':
+      return '.jpg';
+    case 'image/png':
+      return '.png';
+    case 'image/heic':
+      return '.heic';
+    case 'image/heif':
+      return '.heif';
+    case 'image/webp':
+      return '.webp';
+    case 'image/gif':
+      return '.gif';
+    case 'image/tiff':
+      return '.tif';
+    default:
+      return '';
+  }
+}
