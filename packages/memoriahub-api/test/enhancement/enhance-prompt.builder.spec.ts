@@ -11,8 +11,8 @@
  *   - sizeToDims: string -> [width, height] split.
  */
 
-import { buildEnhancePrompt, closestSupportedSize, sizeToDims } from './enhance-prompt.builder';
-import type { EnhanceParams } from './dto/enhance-params.dto';
+import type { EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
+import { buildEnhancePrompt, closestSupportedSize, sizeToDims } from '../../src/enhancement/index.js';
 
 describe('buildEnhancePrompt', () => {
   describe('auto intent (default toggles: color/tone/sharpness/denoise on, dehaze/straighten off)', () => {

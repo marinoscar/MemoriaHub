@@ -25,7 +25,8 @@
  *   - provider.enhanceImage rejection -> failed + rethrow
  */
 
-jest.mock('../media-processing/image-orientation.util', () => ({
+jest.mock('@marinoscar/memoriahub-compute/image', () => ({
+  ...jest.requireActual('@marinoscar/memoriahub-compute/image'),
   prepareImageForProcessing: jest.fn().mockResolvedValue({
     buffer: Buffer.from('prepared-jpeg-bytes'),
     width: 800,
@@ -35,35 +36,45 @@ jest.mock('../media-processing/image-orientation.util', () => ({
 
 import { Readable } from 'stream';
 import sharp from 'sharp';
-import { MediaEnhancementStatus, MediaType } from '@prisma/client';
-import { PictureEnhancementHandler } from './picture-enhancement.handler';
-import { prepareImageForProcessing } from '../media-processing/image-orientation.util';
-import { streamToBuffer } from '../media-processing/processors/stream-utils';
-import { RateLimitError } from '@marinoscar/platform-api/jobs';
-import { AiError } from '@marinoscar/platform-api/ai';
-import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
-import type { Job } from '@marinoscar/platform-api/jobs';
-import { platformJob } from '../../test/helpers/platform-job';
+import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
+import { PictureEnhancementHandler } from '../../src/enhancement/index.js';
+import { streamToBuffer } from '../../src/core/index.js';
+import { MemoriahubAiError, MemoriahubRateLimitError, type MemoriahubJob } from '../../src/ports/index.js';
+import { domainJob } from '../helpers/job-fixtures.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+import { realImageTools } from './image-tools.js';
+
+type Job = MemoriahubJob;
+
+const MediaEnhancementStatus = {
+  pending: 'pending',
+  processing: 'processing',
+  ready: 'ready',
+  failed: 'failed',
+  applied: 'applied',
+  discarded: 'discarded',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
 
 /** The handler's own budget (`profile.maxAttempts`). */
 const ENRICHMENT_MAX_ATTEMPTS = 3;
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+/** The queue's budget of rate-limit deferrals (the handler's default). */
+const ENRICHMENT_RATELIMIT_MAX_HITS = 10;
 
 const mockPrepareImageForProcessing = prepareImageForProcessing as jest.Mock;
 
 function makeJob(overrides: Partial<Job> = {}): Job {
-  return platformJob({
+  return domainJob({
     type: 'picture_enhancement',
     subjectType: 'media_item',
     subjectId: 'media-1',
     status: 'running',
     reason: 'rerun',
-    priority: 0,
-    providerKey: 'openai',
-    modelVersion: 'gpt-image-1',
     payload: { enhancementId: 'enh-1', circleId: 'circle-1' },
     attempts: 1,
-    startedAt: new Date(),
+    rateLimitHits: 0,
     ...overrides,
   });
 }
@@ -115,8 +126,7 @@ function makeMediaItem(overrides: Record<string, any> = {}) {
 
 describe('PictureEnhancementHandler', () => {
   let handler: PictureEnhancementHandler;
-  let mockRegistry: { register: jest.Mock };
-  let mockThrottle: { registerProviderKey: jest.Mock };
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockPrisma: {
     mediaEnhancement: { findUnique: jest.Mock; update: jest.Mock };
     mediaEnhancementBatch: { findUnique: jest.Mock };
@@ -126,7 +136,7 @@ describe('PictureEnhancementHandler', () => {
   let mockUpload: jest.Mock;
   let mockObjectProvider: { download: jest.Mock };
   let mockActiveProvider: { upload: jest.Mock; getBucket: jest.Mock };
-  let mockResolver: { getProviderFor: jest.Mock; getActiveProvider: jest.Mock };
+  let mockResolver: { forLocation: jest.Mock; active: jest.Mock };
   /** The scripted model: `mockEnhanceImage` answers the edit the platform `editImageInline` returns. */
   let mockEnhanceImage: jest.Mock;
   let mockForSystem: jest.Mock;
@@ -134,6 +144,19 @@ describe('PictureEnhancementHandler', () => {
   let mockSystemSettings: { getSettings: jest.Mock };
   let mockApplyCarryover: jest.Mock;
   let mockExifCarryover: { applyCarryover: jest.Mock };
+
+  /** The handler over the doubles of the current case; `carryOver` scripts the host's metadata step. */
+  function buildHandler(carryOver: jest.Mock): PictureEnhancementHandler {
+    return new PictureEnhancementHandler(
+      mockRegistry as never,
+      mockPrisma as never,
+      mockResolver as never,
+      mockAi as never,
+      // The settings document the cases seed (`getSettings`), answered one namespace at a time.
+      settingsPortFrom(() => mockSystemSettings.getSettings()) as never,
+      realImageTools(carryOver) as never,
+    );
+  }
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -143,8 +166,7 @@ describe('PictureEnhancementHandler', () => {
       height: 600,
     });
 
-    mockRegistry = { register: jest.fn() };
-    mockThrottle = { registerProviderKey: jest.fn() };
+    mockRegistry = { registerHandler: jest.fn() };
 
     mockPrisma = {
       mediaEnhancement: {
@@ -173,10 +195,10 @@ describe('PictureEnhancementHandler', () => {
     };
 
     mockResolver = {
-      getProviderFor: jest.fn().mockResolvedValue(mockObjectProvider),
-      getActiveProvider: jest.fn().mockResolvedValue({
+      forLocation: jest.fn().mockResolvedValue(mockObjectProvider),
+      active: jest.fn().mockResolvedValue({
         id: 'r2',
-        provider: mockActiveProvider,
+        store: mockActiveProvider,
       }),
     };
 
@@ -220,15 +242,7 @@ describe('PictureEnhancementHandler', () => {
     mockApplyCarryover = jest.fn().mockImplementation(async (_original: Buffer, enhanced: Buffer) => enhanced);
     mockExifCarryover = { applyCarryover: mockApplyCarryover };
 
-    handler = new PictureEnhancementHandler(
-      mockRegistry as any,
-      mockThrottle as any,
-      mockPrisma as any,
-      mockResolver as any,
-      mockAi as any,
-      mockSystemSettings as any,
-      mockExifCarryover as any,
-    );
+    handler = buildHandler(mockExifCarryover.applyCarryover);
   });
 
   // -------------------------------------------------------------------------
@@ -239,10 +253,11 @@ describe('PictureEnhancementHandler', () => {
     expect(handler.type).toBe('picture_enhancement');
   });
 
-  it('registers itself with the JobHandlerRegistry and the `enhance` throttle gate on module init', () => {
+  it('registers itself through the jobs port and names the `enhance` throttle gate', () => {
     handler.onModuleInit();
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
-    expect(mockThrottle.registerProviderKey).toHaveBeenCalledWith('picture_enhancement', 'enhance');
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
+    expect(handler.throttleKey).toBe('enhance');
+    expect(handler.usesAi).toBe(true);
   });
 
   it('is server-only (AI rule 3): no node pair, a 10-minute / 3-attempt profile', () => {
@@ -289,7 +304,7 @@ describe('PictureEnhancementHandler', () => {
       await handler.process(makeJob());
 
       expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalled();
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
     });
 
     it('skips a row that is already applied (superseded / terminal)', async () => {
@@ -300,7 +315,7 @@ describe('PictureEnhancementHandler', () => {
       await handler.process(makeJob());
 
       expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalled();
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
     });
 
     it('skips a row that has been discarded', async () => {
@@ -362,7 +377,7 @@ describe('PictureEnhancementHandler', () => {
       );
       expect(mockForSystem).not.toHaveBeenCalled();
       expect(mockEnhanceImage).not.toHaveBeenCalled();
-      expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+      expect(mockResolver.forLocation).not.toHaveBeenCalled();
       expect(mockDownload).not.toHaveBeenCalled();
       expect(mockUpload).not.toHaveBeenCalled();
     });
@@ -411,7 +426,7 @@ describe('PictureEnhancementHandler', () => {
     it('downloads the original bytes from the object provider recorded on the StorageObject', async () => {
       await handler.process(makeJob());
 
-      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-1');
+      expect(mockResolver.forLocation).toHaveBeenCalledWith('s3', 'bucket-1');
       expect(mockDownload).toHaveBeenCalledWith('key-1');
     });
 
@@ -428,7 +443,7 @@ describe('PictureEnhancementHandler', () => {
       await handler.process(makeJob());
 
       // A system call under the picture_enhance feature, on the job, for the row's provider.
-      expect(mockForSystem).toHaveBeenCalledWith({ orgId: null, feature: 'picture_enhance', jobId: 'job-1' });
+      expect(mockForSystem).toHaveBeenCalledWith({ feature: 'picture_enhance', jobId: expect.any(String) });
       expect(mockEnhanceImage).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -453,7 +468,7 @@ describe('PictureEnhancementHandler', () => {
     it('uploads the enhanced bytes to the ACTIVE provider under enhancements/<id>/result.jpg', async () => {
       await handler.process(makeJob());
 
-      expect(mockResolver.getActiveProvider).toHaveBeenCalled();
+      expect(mockResolver.active).toHaveBeenCalled();
       expect(mockUpload).toHaveBeenCalledWith(
         'enhancements/enh-1/result.jpg',
         expect.any(Readable),
@@ -608,7 +623,7 @@ describe('PictureEnhancementHandler', () => {
   describe('provider errors', () => {
     it('fails when the platform refuses a model without the image_edit capability', async () => {
       mockEnhanceImage.mockRejectedValue(
-        new AiError('AI_CAPABILITY_UNSUPPORTED', 'The model does not support image enhancement.'),
+        new MemoriahubAiError('capability', 'The model does not support image enhancement.'),
       );
 
       // attempts defaults to 1 (< ENRICHMENT_MAX_ATTEMPTS) — retryable, so the
@@ -690,12 +705,12 @@ describe('PictureEnhancementHandler', () => {
     });
 
     it('defers to pending and throws a RateLimitError on a rate-limited failure (non-final attempt)', async () => {
-      const rateLimitErr = new AiError('AI_RATE_LIMITED', 'Too Many Requests', { retryAfterMs: 15_000 });
+      const rateLimitErr = new MemoriahubAiError('rate_limit', 'Too Many Requests', 15_000);
       mockEnhanceImage.mockRejectedValue(rateLimitErr);
 
       await expect(
         handler.process(makeJob({ rateLimitHits: 0 })),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
 
       const pendingCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
         (c: any[]) => c[0].data.status === MediaEnhancementStatus.pending,
@@ -711,12 +726,12 @@ describe('PictureEnhancementHandler', () => {
     });
 
     it('marks the row failed when rate-limit deferrals are exhausted (rateLimitHits + 1 >= ENRICHMENT_RATELIMIT_MAX_HITS)', async () => {
-      const rateLimitErr = new AiError('AI_RATE_LIMITED', 'Too Many Requests', { retryAfterMs: 15_000 });
+      const rateLimitErr = new MemoriahubAiError('rate_limit', 'Too Many Requests', 15_000);
       mockEnhanceImage.mockRejectedValue(rateLimitErr);
 
       await expect(
         handler.process(makeJob({ rateLimitHits: ENRICHMENT_RATELIMIT_MAX_HITS - 1 })),
-      ).rejects.toBeInstanceOf(RateLimitError);
+      ).rejects.toBeInstanceOf(MemoriahubRateLimitError);
 
       const failedCall = mockPrisma.mediaEnhancement.update.mock.calls.find(
         (c: any[]) => c[0].data.status === MediaEnhancementStatus.failed,
@@ -749,15 +764,7 @@ describe('PictureEnhancementHandler', () => {
         .mockResolvedValue(Buffer.from('stamped-jpeg-bytes'));
       mockExifCarryover = { applyCarryover: mockApplyCarryover };
 
-      handlerWithCarryover = new PictureEnhancementHandler(
-        mockRegistry as any,
-        mockThrottle as any,
-        mockPrisma as any,
-        mockResolver as any,
-        mockAi as any,
-        mockSystemSettings as any,
-        mockExifCarryover as any,
-      );
+      handlerWithCarryover = buildHandler(mockApplyCarryover);
     });
 
     it('invokes carryover when stampExif is explicitly true', async () => {

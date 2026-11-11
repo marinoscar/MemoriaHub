@@ -3,13 +3,13 @@
  *
  * Mirrors workflows-admin.controller.spec.ts: a genuine HTTP round-trip
  * (supertest) against NestJS's REAL compiled route table, with the REAL
- * RolesGuard/PermissionsGuard (backed by the real Reflector reading the
- * `@Auth()` metadata declared on each handler) and the REAL global
+ * MemoriahubAuthGuard (backed by the real Reflector reading the
+ * `@MemoriahubAuth()` metadata declared on each handler) and the REAL global
  * `ZodValidationPipe` (nestjs-zod) wired in via APP_PIPE — this is what lets
  * this file assert genuine 400s for a malformed body, not just decorator
- * presence. Only JwtAuthGuard is stubbed, stamping a fake
- * AuthenticatedUser-shaped `request.user` the same way the real JWT strategy
- * does. MediaEnhancementService itself is mocked — no database required.
+ * presence. Only the identity port is stubbed (`MEMORIAHUB_IDENTITY`, answering the principal of the
+ * case); the real `MemoriahubAuthGuard` checks roles and permissions against it.
+ * MediaEnhancementService itself is mocked — no database required.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -18,50 +18,21 @@ import {
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { APP_PIPE } from '@nestjs/core';
-import { ExecutionContext, RequestMethod } from '@nestjs/common';
+import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { ZodValidationPipe } from 'nestjs-zod';
 import request from 'supertest';
 import { randomUUID } from 'crypto';
-import { MediaEnhancementController } from './media-enhancement.controller';
-import { MediaEnhancementService } from './media-enhancement.service';
-import { JwtAuthGuard, AuthenticatedUser } from '@marinoscar/platform-api/identity';
+import { MediaEnhancementController, MediaEnhancementService } from '../../src/enhancement/index.js';
+import { MEMORIAHUB_IDENTITY, type MemoriahubPrincipal } from '../../src/ports/index.js';
 
 const MEDIA_ID = randomUUID();
 const ENH_ID = randomUUID();
 const CIRCLE_ID = randomUUID();
 
-/** Builds a minimal AuthenticatedUser-shaped fixture with the given roles/permissions. */
-function fakeAuthenticatedUser(
-  roleNames: string[],
-  permissionNames: string[],
-): Partial<AuthenticatedUser> {
-  return {
-    id: 'user-1',
-    email: 'user-1@example.com',
-    isActive: true,
-    userRoles: roleNames.map((name) => ({
-      role: {
-        id: `role-${name}`,
-        name,
-        description: `${name} role`,
-        rolePermissions: permissionNames.map((p) => ({
-          permission: { id: `perm-${p}`, name: p, description: p },
-        })),
-      } as any,
-    })),
-  };
-}
-
-/** JwtAuthGuard stub: always "authenticates", stamping the given user onto the request. */
-function stubJwtAuthGuard(user: Partial<AuthenticatedUser>) {
-  return {
-    canActivate: (ctx: ExecutionContext) => {
-      const req = ctx.switchToHttp().getRequest();
-      req.user = user;
-      return true;
-    },
-  };
+/** Builds the principal of a caller with the given roles/permissions. */
+function fakeAuthenticatedUser(roleNames: string[], permissionNames: string[]): MemoriahubPrincipal {
+  return { userId: 'user-1', orgId: null, roles: roleNames, permissions: new Set(permissionNames) };
 }
 
 function makeMockService() {
@@ -94,20 +65,25 @@ describe('MediaEnhancementController — route dispatch + RBAC + validation (sup
   let app: NestFastifyApplication;
   let mockService: ReturnType<typeof makeMockService>;
 
-  /** Rebuilds the app with the given caller identity, real RolesGuard/PermissionsGuard/ZodValidationPipe. */
-  async function buildApp(user: Partial<AuthenticatedUser>): Promise<NestFastifyApplication> {
+  /** Rebuilds the app with the given caller identity, real MemoriahubAuthGuard/ZodValidationPipe. */
+  async function buildApp(user: MemoriahubPrincipal): Promise<NestFastifyApplication> {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [MediaEnhancementController],
       providers: [
         { provide: MediaEnhancementService, useValue: mockService },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
+        {
+          provide: MEMORIAHUB_IDENTITY,
+          useValue: {
+            authenticate: async () => user,
+            hasPermission: async (_userId: string, permission: string) => user.permissions.has(permission),
+            permissionsOf: async () => [...user.permissions],
+          },
+        },
       ],
-    })
-      .overrideGuard(JwtAuthGuard)
-      .useValue(stubJwtAuthGuard(user))
-      .compile();
-    // NOTE: RolesGuard and PermissionsGuard are intentionally NOT overridden —
-    // they run for real, resolving @Auth() metadata via the real Reflector.
+    }).compile();
+    // NOTE: the MemoriahubAuthGuard is intentionally NOT overridden — it runs for real,
+    // resolving @MemoriahubAuth() metadata via the real Reflector.
 
     const nestApp = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     await nestApp.init();

@@ -30,6 +30,10 @@ export class PictureEnhancementPurgeTask {
   /** Enqueues the purge job on a worker instance. */
   @Cron(CronExpression.EVERY_HOUR)
   async handleScheduledPurge(): Promise<void> {
+    await this.enqueueHousekeepingJob();
+  }
+
+  private async enqueueHousekeepingJob(): Promise<void> {
     // Only worker instances create/sweep staging objects.
     if (this.options?.housekeepingEnabled?.() === false) return;
     await this.jobs.enqueueHousekeeping({

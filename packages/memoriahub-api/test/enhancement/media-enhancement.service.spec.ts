@@ -28,35 +28,35 @@
  *   - discardEnhancement: RBAC (collaborator), deletes staging, row -> discarded
  */
 
-import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
-import {
-  ArgumentsHost,
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import { MediaEnhancementStatus, MediaEnhancementDecision, MediaType, MediaTagSource } from '@prisma/client';
-import { CircleRole } from '../../test/helpers/circle-role';
-import { MediaEnhancementService } from './media-enhancement.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService } from '../platform/sharing/owner-scope';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { EnhanceParams } from './dto/enhance-params.dto';
-import { BulkEnhance } from './dto/bulk-enhance.dto';
-import { BulkEnhanceByFilter } from './dto/bulk-enhance-by-filter.dto';
-import { ListEnhancementsQuery } from './dto/list-enhancements-query.dto';
-import { HttpExceptionFilter } from '@marinoscar/platform-api/core';
-import { DefaultOrgId } from '../common/tenancy/default-org-id';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { BadRequestException, ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
+import type { MemoriahubRequestUser } from '../../src/core/index.js';
+import type {
+  BulkEnhance,
+  BulkEnhanceByFilter,
+  EnhanceParams,
+  ListEnhancementsQuery,
+} from '../../src/enhancement/index.js';
+import { MediaEnhancementService } from '../../src/enhancement/index.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+import { settingsPortFrom } from '../helpers/settings-port.js';
+
+type RequestUser = MemoriahubRequestUser;
+
+const MediaEnhancementStatus = {
+  pending: 'pending',
+  processing: 'processing',
+  ready: 'ready',
+  failed: 'failed',
+  applied: 'applied',
+  discarded: 'discarded',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+const MediaEnhancementDecision = { keep_both: 'keep_both', replace: 'replace' } as const;
+const MediaType = { photo: 'photo', video: 'video' } as const;
+const MediaTagSource = { manual: 'manual', ai: 'ai', system: 'system' } as const;
+const CircleRole = { viewer: 'viewer', collaborator: 'collaborator', circle_admin: 'circle_admin' } as const;
 
 /**
  * Run a thrown exception through the REAL app-wide `HttpExceptionFilter` and
@@ -70,27 +70,22 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
  * `common/filters/http-exception.filter.spec.ts`.
  */
 function sendThroughFilter(exception: unknown): any {
-  const response = {
-    code: jest.fn().mockReturnThis(),
-    send: jest.fn().mockReturnThis(),
-  };
-  const host = {
-    switchToHttp: () => ({
-      getResponse: () => response,
-      getRequest: () => ({ url: '/api/media/bulk/enhance/by-filter', method: 'POST' }),
-    }),
-  } as unknown as ArgumentsHost;
-
-  new HttpExceptionFilter().catch(exception, host);
-  return response.send.mock.calls[0][0];
+  // The package is host-neutral and cannot import the platform's filter, so this mirrors its contract: the
+  // body is rebuilt from a fixed allowlist, never spread. The real filter is run over the same 400 by
+  // `apps/api/test/enhancement/enhancement-wire.spec.ts`.
+  const allowed = ['message', 'code', 'details', 'error', 'error_description', 'startedAt'];
+  const http = exception as HttpException;
+  const payload = (http.getResponse() ?? {}) as Record<string, unknown>;
+  const body: Record<string, unknown> = { statusCode: http.getStatus() };
+  for (const key of allowed) if (payload[key] !== undefined) body[key] = payload[key];
+  return body;
 }
 
 const USER: RequestUser = {
   id: 'user-1',
-  email: 'user@example.com',
   roles: ['Contributor'],
   permissions: ['media:read', 'media:write'],
-  isActive: true,
+  activeOrgId: null,
 };
 
 const MEDIA_ID = 'media-1';
@@ -183,10 +178,12 @@ function makeSettings(overrides: Record<string, any> = {}) {
 describe('MediaEnhancementService', () => {
   let service: MediaEnhancementService;
   let mockPrisma: MockPrismaService;
+  /** The settings port over the document the cases seed (`getSettings`); a read of a namespace is a call. */
+  let settingsPort: ReturnType<typeof settingsPortFrom>;
   let mockMembership: { requireOwnerRole: jest.Mock };
   let mockResolver: {
-    getProviderFor: jest.Mock;
-    getActiveProvider: jest.Mock;
+    forLocation: jest.Mock;
+    active: jest.Mock;
   };
   let mockRecoveryService: { reprocessNow: jest.Mock };
   let mockMetadataSync: { syncFromStorageObject: jest.Mock };
@@ -196,17 +193,18 @@ describe('MediaEnhancementService', () => {
   let mockMediaEnrichment: { enqueueUploadEnrichment: jest.Mock };
   let mockThumbnails: { signThumbsBatched: jest.Mock; extractThumbKey: jest.Mock };
   let mockEnrichmentJobService: { enqueue: jest.Mock };
-  let mockSystemSettings: { getSettings: jest.Mock; getSettingValue: jest.Mock };
+  let mockSystemSettings: { getSettings: jest.Mock };
+  let mockRecordProvider: jest.Mock;
 
   let mockObjectProvider: { getSignedDownloadUrl: jest.Mock; download: jest.Mock; upload: jest.Mock; delete: jest.Mock };
   let mockActiveProvider: { upload: jest.Mock; getBucket: jest.Mock; getSignedDownloadUrl: jest.Mock; download: jest.Mock; delete: jest.Mock };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     jest.clearAllMocks();
     delete process.env['PICTURE_ENHANCEMENT_ENABLED'];
     delete process.env['FACE_AUTO_DETECT'];
 
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
 
     mockMembership = {
       requireOwnerRole: jest.fn().mockResolvedValue({ role: 'editor', isSuperAdmin: false }),
@@ -229,10 +227,10 @@ describe('MediaEnhancementService', () => {
       // The ORIGINAL object lives on provider 's3'; the staged/active enhancement
       // bytes live on provider 'r2' (the resolved "active" provider). Route by
       // providerId so signOriginal() and signStaging() get distinct signed URLs.
-      getProviderFor: jest.fn().mockImplementation(async (providerId: string) =>
+      forLocation: jest.fn().mockImplementation(async (providerId: string) =>
         providerId === 'r2' ? mockActiveProvider : mockObjectProvider,
       ),
-      getActiveProvider: jest.fn().mockResolvedValue({ id: 'r2', provider: mockActiveProvider }),
+      active: jest.fn().mockResolvedValue({ id: 'r2', store: mockActiveProvider }),
     };
 
     replaceCallOrder = [];
@@ -261,8 +259,9 @@ describe('MediaEnhancementService', () => {
     mockEnrichmentJobService = { enqueue: jest.fn().mockResolvedValue({ id: 'job-1', status: 'pending' }) };
     mockSystemSettings = {
       getSettings: jest.fn().mockResolvedValue(makeSettings()),
-      getSettingValue: jest.fn().mockResolvedValue(undefined),
     };
+    settingsPort = settingsPortFrom(() => mockSystemSettings.getSettings());
+    mockRecordProvider = jest.fn().mockResolvedValue(undefined);
 
     // Interactive-transaction passthrough (applySystemTag runs tx.tag.upsert / tx.mediaTag.upsert|updateMany).
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (arg: any) => {
@@ -279,25 +278,21 @@ describe('MediaEnhancementService', () => {
     (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
     (mockPrisma.mediaFaceStatus.upsert as jest.Mock).mockResolvedValue({});
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MediaEnhancementService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: DefaultOrgId, useValue: { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } },
-        { provide: OwnerAccessService, useValue: mockMembership },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: ObjectReprocessService, useValue: mockRecoveryService },
-        { provide: ThumbnailPruneService, useValue: mockThumbnailPrune },
-        { provide: MediaMetadataSyncService, useValue: mockMetadataSync },
-        { provide: MediaEnrichmentService, useValue: mockMediaEnrichment },
-        { provide: MediaThumbnailService, useValue: mockThumbnails },
-        { provide: EnrichmentJobService, useValue: mockEnrichmentJobService },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
-        { provide: AiDeploymentKeySource, useValue: { status: jest.fn() } },
-      ],
-    }).compile();
-
-    service = module.get<MediaEnhancementService>(MediaEnhancementService);
+    service = new MediaEnhancementService(
+      mockPrisma as never,
+      mockMembership as never,
+      mockResolver as never,
+      mockRecoveryService as never,
+      mockThumbnailPrune as never,
+      mockMetadataSync as never,
+      mockMediaEnrichment as never,
+      mockThumbnails as never,
+      // The queue port over the facade mock the cases assert on, plus the provider/model record.
+      { ...jobsPortOverFacade(mockEnrichmentJobService), recordProvider: mockRecordProvider } as never,
+      settingsPort as never,
+      { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } as never,
+      { status: jest.fn() } as never,
+    );
   });
 
   // ===========================================================================
@@ -398,7 +393,7 @@ describe('MediaEnhancementService', () => {
       await service.startEnhance(MEDIA_ID, {}, USER);
 
       // Staging bytes of the old row were deleted, and it was marked discarded.
-      expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'active-bucket');
+      expect(mockResolver.forLocation).toHaveBeenCalledWith('r2', 'active-bucket');
       expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
       // ...including the thumbnail derivative (issue #203).
       expect(mockActiveProvider.delete).toHaveBeenCalledWith('enhancements/enh-1/thumb.jpg');
@@ -442,9 +437,7 @@ describe('MediaEnhancementService', () => {
       expect(mockPrisma.mediaEnhancement.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ model: 'gpt-image-1-custom' }),
       });
-      expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({ modelVersion: 'gpt-image-1-custom' }),
-      );
+      expect(mockRecordProvider).toHaveBeenCalledWith('job-1', 'openai', 'gpt-image-1-custom');
     });
 
     it('enqueues a picture_enhancement job referencing the new row', async () => {
@@ -458,10 +451,9 @@ describe('MediaEnhancementService', () => {
         priority: 0,
         // Required: dedup would otherwise return the superseded row's job.
         skipDedup: true,
-        providerKey: 'openai',
-        modelVersion: 'gpt-image-1',
         payload: { enhancementId: ENH_ID },
       });
+      expect(mockRecordProvider).toHaveBeenCalledWith('job-1', 'openai', 'gpt-image-1');
       expect(result).toEqual({ data: { enhancementId: ENH_ID, jobId: 'job-1', status: 'pending' } });
     });
 
@@ -771,11 +763,12 @@ describe('MediaEnhancementService', () => {
             reason: 'rerun',
             priority: 50,
             skipDedup: true,
-            providerKey: 'openai',
-            modelVersion: 'gpt-image-1',
           });
           expect(opts.payload).toEqual({ enhancementId: `enh-${opts.mediaItemId}` });
         }
+        // The provider and model are recorded on each job row through the jobs port.
+        expect(mockRecordProvider).toHaveBeenCalledTimes(2);
+        expect(mockRecordProvider).toHaveBeenCalledWith('job-1', 'openai', 'gpt-image-1');
       });
     });
 
@@ -1387,9 +1380,9 @@ describe('MediaEnhancementService', () => {
       it('promotes the staged bytes to a fresh object on the active provider', async () => {
         await service.applyEnhancement(MEDIA_ID, ENH_ID, 'keep_both', USER);
 
-        expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'active-bucket');
+        expect(mockResolver.forLocation).toHaveBeenCalledWith('r2', 'active-bucket');
         expect(mockActiveProvider.download).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
-        expect(mockResolver.getActiveProvider).toHaveBeenCalled();
+        expect(mockResolver.active).toHaveBeenCalled();
         expect(mockActiveProvider.upload).toHaveBeenCalledWith(
           expect.stringMatching(/^uploads\//),
           expect.anything(),
@@ -1599,7 +1592,7 @@ describe('MediaEnhancementService', () => {
       it('overwrites the ORIGINAL object key on its own provider (not the staging/active provider)', async () => {
         await service.applyEnhancement(MEDIA_ID, ENH_ID, 'replace', USER);
 
-        expect(mockResolver.getProviderFor).toHaveBeenCalledWith('s3', 'bucket-1');
+        expect(mockResolver.forLocation).toHaveBeenCalledWith('s3', 'bucket-1');
         expect(mockObjectProvider.upload).toHaveBeenCalledWith(
           'uploads/original.jpg',
           expect.anything(),
@@ -1938,7 +1931,10 @@ describe('MediaEnhancementService', () => {
       (mockPrisma.mediaItem.findMany as jest.Mock).mockResolvedValue([]);
       mockThumbnails.signThumbsBatched.mockResolvedValue(new Map());
       mockThumbnails.extractThumbKey.mockReturnValue(null);
-      mockSystemSettings.getSettingValue.mockResolvedValue(168);
+      // The retention hours come from the `pictureEnhancement` namespace (the default of the document is 168).
+      mockSystemSettings.getSettings.mockResolvedValue(
+        makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, retentionHours: 168 } }),
+      );
     });
 
     // -------------------------------------------------------------------------
@@ -1969,7 +1965,7 @@ describe('MediaEnhancementService', () => {
     // -------------------------------------------------------------------------
 
     describe('status filtering', () => {
-      it.each<[string, MediaEnhancementStatus[]]>([
+      it.each<[string, string[]]>([
         ['in_progress', [MediaEnhancementStatus.pending, MediaEnhancementStatus.processing]],
         ['awaiting_decision', [MediaEnhancementStatus.ready]],
         [
@@ -2106,12 +2102,14 @@ describe('MediaEnhancementService', () => {
     });
 
     // -------------------------------------------------------------------------
-    // 6. expiresAt + single getSettingValue read per call
+    // 6. expiresAt + single namespace read per call
     // -------------------------------------------------------------------------
 
     describe('expiresAt / retention', () => {
       it('sets expiresAt from updatedAt + retentionHours for ready/failed rows, null for every other status, reading the setting exactly once', async () => {
-        mockSystemSettings.getSettingValue.mockResolvedValue(48);
+        mockSystemSettings.getSettings.mockResolvedValue(
+          makeSettings({ pictureEnhancement: { ...makeSettings().pictureEnhancement, retentionHours: 48 } }),
+        );
         const updatedAt = new Date('2026-01-10T00:00:00Z');
 
         const rowReady = makeEnhancementListRow({
@@ -2155,10 +2153,8 @@ describe('MediaEnhancementService', () => {
         const result = await service.listEnhancements(makeListQuery(), USER);
         const byId = new Map(result.items.map((i: any) => [i.id, i]));
 
-        expect(mockSystemSettings.getSettingValue).toHaveBeenCalledTimes(1);
-        expect(mockSystemSettings.getSettingValue).toHaveBeenCalledWith(
-          'pictureEnhancement.retentionHours',
-        );
+        // The namespace is read once for the whole page, not once per row.
+        expect(settingsPort.readSystem.mock.calls.filter(([name]) => name === 'pictureEnhancement')).toHaveLength(1);
 
         const expected = new Date(updatedAt.getTime() + 48 * 3_600_000);
         expect((byId.get('enh-ready') as any).expiresAt).toEqual(expected);
@@ -2211,7 +2207,7 @@ describe('MediaEnhancementService', () => {
           'https://cdn.example.com/enhancements/enh-1/result.jpg',
         );
         // ONE provider resolution for the page, not one per signed key.
-        expect(mockResolver.getProviderFor).toHaveBeenCalledTimes(1);
+        expect(mockResolver.forLocation).toHaveBeenCalledTimes(1);
       });
 
       it('leaves thumbnailUrl null but still returns previewUrl for a row with no thumbnail derivative (pre-#203 / failed render)', async () => {

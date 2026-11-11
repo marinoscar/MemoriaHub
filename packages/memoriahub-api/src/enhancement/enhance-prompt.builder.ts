@@ -1,6 +1,10 @@
 import type { EnhanceParams } from '@marinoscar/memoriahub-contract/enhancement';
 
-/** How hard the correction pushes. */
+/**
+ * How hard the correction pushes.
+ *
+ * @stability experimental
+ */
 export type Strength = 'subtle' | 'balanced' | 'strong';
 
 type Preset = NonNullable<EnhanceParams['preset']>;
@@ -65,6 +69,10 @@ const COLORIZE_FIDELITY_CONSTRAINT =
  * and the adjustment sentence, independently of `intent`.
  * The composition/identity/text hard constraints are ALWAYS present regardless
  * of intent or preset — they are the core safety guardrails of the feature.
+ *
+ * @param params - the preset, the adjustments and the free-text guidance.
+ * @param strength - how hard the correction pushes.
+ * @stability experimental
  */
 export function buildEnhancePrompt(
   params: EnhanceParams,
@@ -134,6 +142,10 @@ export function buildEnhancePrompt(
 /**
  * Choose the closest supported gpt-image-1 output canvas to the original aspect
  * ratio (spec §4.2). Square, portrait (1024×1536), or landscape (1536×1024).
+ *
+ * @param width - the original's width in pixels (or null).
+ * @param height - the original's height in pixels (or null).
+ * @stability experimental
  */
 export function closestSupportedSize(
   width: number | null | undefined,
@@ -160,7 +172,12 @@ export function closestSupportedSize(
   return best.size;
 }
 
-/** Split a supported size string into [width, height]. */
+/**
+ * Split a supported size string into [width, height].
+ *
+ * @param size - a supported canvas.
+ * @stability experimental
+ */
 export function sizeToDims(size: '1024x1024' | '1024x1536' | '1536x1024'): [number, number] {
   const [w, h] = size.split('x').map((n) => parseInt(n, 10));
   return [w, h];

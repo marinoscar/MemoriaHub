@@ -40,33 +40,34 @@
  *   - List: paginated, newest-first, circle-scoped, one groupBy per page.
  */
 
-import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
-import { MhLegacyJobStatus, MediaEnhancementStatus } from '@prisma/client';
-import { CircleRole } from '../../test/helpers/circle-role';
-import { EnhancementBatchesController } from './enhancement-batches.controller';
-import { MediaEnhancementService } from './media-enhancement.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { OwnerAccessService, type OwnerRole } from '../platform/sharing/owner-scope';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
-import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
-import { MediaEnrichmentService } from '../media/enrichment/media-enrichment.service';
-import { MediaThumbnailService } from '@marinoscar/memoriahub-api/media';
-import { EnrichmentJobService } from '../enrichment/enrichment-job.service';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { RequestUser } from '@marinoscar/platform-api/identity';
-import { defaultOrgIdProvider } from '../../test/mocks/default-org.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import type { MemoriahubRequestUser } from '../../src/core/index.js';
+import { EnhancementBatchesController, MediaEnhancementService } from '../../src/enhancement/index.js';
+import { jobsPortOverFacade } from '../helpers/facade-jobs-port.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+type RequestUser = MemoriahubRequestUser;
+type OwnerRole = 'viewer' | 'editor' | 'admin';
+
+const MediaEnhancementStatus = {
+  pending: 'pending',
+  processing: 'processing',
+  ready: 'ready',
+  failed: 'failed',
+  applied: 'applied',
+  discarded: 'discarded',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+type MediaEnhancementStatus = (typeof MediaEnhancementStatus)[keyof typeof MediaEnhancementStatus];
+const MhLegacyJobStatus = { pending: 'pending', running: 'running' } as const;
+const CircleRole = { viewer: 'viewer', collaborator: 'collaborator', circle_admin: 'circle_admin' } as const;
 
 const USER: RequestUser = {
   id: 'user-1',
-  email: 'user@example.com',
   roles: ['Contributor'],
   permissions: ['media:read', 'media:write'],
-  isActive: true,
+  activeOrgId: null,
 };
 
 const CIRCLE_ID = 'circle-1';
@@ -115,10 +116,10 @@ describe('EnhancementBatchesController', () => {
   let mockPrisma: MockPrismaService;
   let mockMembership: { requireOwnerRole: jest.Mock };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     jest.clearAllMocks();
 
-    mockPrisma = createMockPrismaService();
+    mockPrisma = createMockDb();
     mockMembership = {
       requireOwnerRole: jest
         .fn()
@@ -133,25 +134,20 @@ describe('EnhancementBatchesController', () => {
       return arg;
     });
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        MediaEnhancementService,
-        { provide: PrismaService, useValue: mockPrisma },
-        defaultOrgIdProvider,
-        { provide: OwnerAccessService, useValue: mockMembership },
-        { provide: StorageProviderResolver, useValue: {} },
-        { provide: ObjectReprocessService, useValue: {} },
-        { provide: ThumbnailPruneService, useValue: {} },
-        { provide: MediaMetadataSyncService, useValue: {} },
-        { provide: MediaEnrichmentService, useValue: {} },
-        { provide: MediaThumbnailService, useValue: {} },
-        { provide: EnrichmentJobService, useValue: {} },
-        { provide: AppSystemSettingsService, useValue: {} },
-        { provide: AiDeploymentKeySource, useValue: {} },
-      ],
-    }).compile();
-
-    const service = module.get<MediaEnhancementService>(MediaEnhancementService);
+    const service = new MediaEnhancementService(
+      mockPrisma as never,
+      mockMembership as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      jobsPortOverFacade({ enqueue: jest.fn() }) as never,
+      {} as never,
+      { get: jest.fn().mockResolvedValue('00000000-0000-4000-8000-0000000000d0') } as never,
+      {} as never,
+    );
     controller = new EnhancementBatchesController(service);
   });
 

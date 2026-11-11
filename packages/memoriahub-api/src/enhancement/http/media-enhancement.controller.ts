@@ -18,7 +18,6 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { FastifyReply } from 'fastify';
 
 import { MemoriahubAuth, MemoriahubCurrentUser, type MemoriahubRequestUser } from '../../core/index.js';
 import { ENHANCEMENT_PERMISSIONS as PERMISSIONS, ENHANCEMENT_STATUS } from '../constants.js';
@@ -260,7 +259,7 @@ export class MediaEnhancementController {
     @Param('enhancementId', ParseUUIDPipe) enhancementId: string,
     @Body() dto: ApplyEnhancementDto,
     @MemoriahubCurrentUser() user: MemoriahubRequestUser,
-    @Res({ passthrough: true }) res: FastifyReply,
+    @Res({ passthrough: true }) res: { status(code: number): unknown },
   ) {
     const result = await this.service.applyEnhancement(id, enhancementId, dto.decision, user, {
       acknowledgeDownscale: dto.acknowledgeDownscale === true,

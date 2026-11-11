@@ -9,25 +9,31 @@
  * staging delete succeeded.
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { MediaEnhancementStatus } from '@prisma/client';
-import { JobHandlerRegistry, type Job } from '@marinoscar/platform-api/jobs';
-import { platformJob } from '../../test/helpers/platform-job';
-import { PictureEnhancementPurgeHandler } from './picture-enhancement-purge.handler';
-import { PrismaService } from '../prisma/prisma.service';
-import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
+import { PictureEnhancementPurgeHandler } from '../../src/enhancement/index.js';
+import type { MemoriahubJob } from '../../src/ports/index.js';
+import { domainJob } from '../helpers/job-fixtures.js';
+import { createMockDb, type MockDb as MockPrismaService } from '../helpers/mock-db.js';
+
+type Job = MemoriahubJob;
+
+const MediaEnhancementStatus = {
+  pending: 'pending',
+  processing: 'processing',
+  ready: 'ready',
+  failed: 'failed',
+  applied: 'applied',
+  discarded: 'discarded',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
 
 function makeJob(overrides: Partial<Job> = {}): Job {
-  return platformJob({
+  return domainJob({
     id: 'job-purge-1',
     type: 'picture_enhancement_purge',
     status: 'running',
     reason: 'backfill',
-    priority: 100,
     attempts: 1,
-    startedAt: new Date(),
     ...overrides,
   });
 }
@@ -47,18 +53,18 @@ function makeRow(overrides: Record<string, any> = {}) {
 
 describe('PictureEnhancementPurgeHandler', () => {
   let handler: PictureEnhancementPurgeHandler;
-  let mockRegistry: jest.Mocked<Pick<JobHandlerRegistry, 'register'>>;
+  let mockRegistry: { registerHandler: jest.Mock };
   let mockPrisma: MockPrismaService;
-  let mockResolver: { getProviderFor: jest.Mock };
+  let mockResolver: { forLocation: jest.Mock };
   let mockDeleteFn: jest.Mock;
-  let mockSettings: jest.Mocked<Pick<AppSystemSettingsService, 'getSettingValue'>>;
+  let mockSettings: { getSettingValue: jest.Mock };
 
   beforeEach(async () => {
-    mockRegistry = { register: jest.fn() };
-    mockPrisma = createMockPrismaService();
+    mockRegistry = { registerHandler: jest.fn() };
+    mockPrisma = createMockDb();
     mockDeleteFn = jest.fn().mockResolvedValue(undefined);
     mockResolver = {
-      getProviderFor: jest.fn().mockResolvedValue({ delete: mockDeleteFn }),
+      forLocation: jest.fn().mockResolvedValue({ delete: mockDeleteFn }),
     };
     mockSettings = {
       getSettingValue: jest.fn().mockResolvedValue(72),  // explicit setting overrides the default
@@ -67,17 +73,18 @@ describe('PictureEnhancementPurgeHandler', () => {
     (mockPrisma.mediaEnhancement.findMany as jest.Mock).mockResolvedValue([]);
     (mockPrisma.mediaEnhancement.update as jest.Mock).mockResolvedValue({});
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        PictureEnhancementPurgeHandler,
-        { provide: JobHandlerRegistry, useValue: mockRegistry },
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: StorageProviderResolver, useValue: mockResolver },
-        { provide: AppSystemSettingsService, useValue: mockSettings },
-      ],
-    }).compile();
-
-    handler = module.get<PictureEnhancementPurgeHandler>(PictureEnhancementPurgeHandler);
+    handler = new PictureEnhancementPurgeHandler(
+      mockRegistry as never,
+      mockPrisma as never,
+      mockResolver as never,
+      // The retention hours the cases seed (`getSettingValue`), read through the `pictureEnhancement` namespace.
+      {
+        readSystem: async (name: string) => ({
+          value: { retentionHours: await mockSettings.getSettingValue(`${name}.retentionHours`) },
+          version: 1,
+        }),
+      } as never,
+    );
   });
 
   afterEach(() => {
@@ -96,7 +103,7 @@ describe('PictureEnhancementPurgeHandler', () => {
 
   it('registers itself with the JobHandlerRegistry on module init', () => {
     handler.onModuleInit();
-    expect(mockRegistry.register).toHaveBeenCalledWith(handler);
+    expect(mockRegistry.registerHandler).toHaveBeenCalledWith(handler);
   });
 
   it('queries only ready/failed rows past the cutoff, using the configured retentionHours', async () => {
@@ -128,7 +135,7 @@ describe('PictureEnhancementPurgeHandler', () => {
 
     await handler.process(makeJob());
 
-    expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+    expect(mockResolver.forLocation).not.toHaveBeenCalled();
     expect(mockPrisma.mediaEnhancement.update).not.toHaveBeenCalled();
   });
 
@@ -137,7 +144,7 @@ describe('PictureEnhancementPurgeHandler', () => {
 
     await handler.process(makeJob());
 
-    expect(mockResolver.getProviderFor).toHaveBeenCalledWith('r2', 'active-bucket');
+    expect(mockResolver.forLocation).toHaveBeenCalledWith('r2', 'active-bucket');
     // Both staged objects are reaped: the full-resolution result AND its
     // thumbnail derivative (issue #203).
     expect(mockDeleteFn).toHaveBeenCalledWith('enhancements/enh-1/result.jpg');
@@ -235,7 +242,7 @@ describe('PictureEnhancementPurgeHandler', () => {
 
     await handler.process(makeJob());
 
-    expect(mockResolver.getProviderFor).not.toHaveBeenCalled();
+    expect(mockResolver.forLocation).not.toHaveBeenCalled();
     expect(mockPrisma.mediaEnhancement.update).toHaveBeenCalledWith({
       where: { id: 'enh-1' },
       data: {
