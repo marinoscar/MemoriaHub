@@ -43,6 +43,7 @@ export class GeocodeMediaController {
     private readonly geocodeBackfillService: GeocodeBackfillService,
   ) {}
 
+  /** Queues a geocode rerun for one item (collaborator role). */
   @Post(':id/geocode/rerun')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run geocoding for a media item' })
@@ -57,6 +58,7 @@ export class GeocodeMediaController {
     return { data: result };
   }
 
+  /** Reads the geocode status of one item (viewer role). */
   @Get(':id/geocode/status')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_READ] })
   @ApiOperation({ summary: 'Get geocode status for a media item' })

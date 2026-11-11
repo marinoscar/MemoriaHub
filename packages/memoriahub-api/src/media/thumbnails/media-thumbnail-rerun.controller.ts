@@ -34,6 +34,7 @@ export class MediaThumbnailRerunController {
     @Inject(MEDIA_OBJECT_REPROCESSOR) private readonly recoveryService: MediaObjectReprocessor,
   ) {}
 
+  /** Re-runs thumbnail generation for one photo or video, synchronously, and reports the resulting storage status. */
   @Post('media/:id/thumbnail/rerun')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({ summary: 'Re-run thumbnail generation for a media item' })

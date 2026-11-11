@@ -15,6 +15,14 @@ import { GEOCODE_THROTTLE_KEY } from './geocode-rate-limit.js';
 export class GoogleGeoLocationProvider {
   private readonly logger = new Logger(GoogleGeoLocationProvider.name);
 
+  /**
+   * Reverse-geocodes a coordinate pair with the given key.
+   *
+   * @param lat - latitude in decimal degrees.
+   * @param lng - longitude in decimal degrees.
+   * @param apiKey - the Google key (never logged).
+   * @throws MemoriahubRateLimitError on HTTP 429, a server error or an exhausted quota.
+   */
   async reverseGeocodeWithKey(lat: number, lng: number, apiKey: string): Promise<GeoLocationResult | null> {
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}`;
     try {

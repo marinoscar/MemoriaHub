@@ -7,6 +7,8 @@
  *
  * Includes all 50 states, DC, and the five US territories that GeoNames represents
  * as US admin1 entries (PR, VI, GU, AS, MP) — 56 entries total.
+ *
+ * @stability experimental
  */
 export const US_STATE_CODES: Record<string, string> = {
   AL: 'Alabama',
@@ -73,6 +75,9 @@ export const US_STATE_CODES: Record<string, string> = {
  * Resolve a GeoNames US admin1Code (USPS 2-letter abbreviation) to its full
  * state or territory name.  Returns undefined when the code is absent or
  * unrecognised, so callers can continue down their own fallback chain.
+ *
+ * @param code - the USPS abbreviation.
+ * @stability experimental
  */
 export function resolveUsState(code?: string): string | undefined {
   if (!code) return undefined;

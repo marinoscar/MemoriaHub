@@ -67,6 +67,7 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
   private readonly logger = new Logger(OfflineGeoLocationProvider.name);
   private initialized = false;
 
+  /** Loads the GeoNames dataset at start-up (the library downloads it once and caches it). */
   async onModuleInit(): Promise<void> {
     await this.ensureInitialized();
   }
@@ -99,6 +100,12 @@ export class OfflineGeoLocationProvider implements GeoLocationProvider, OnModule
     });
   }
 
+  /**
+   * Reverse-geocodes a coordinate pair from the local dataset.
+   *
+   * @param lat - latitude in decimal degrees.
+   * @param lng - longitude in decimal degrees.
+   */
   async reverseGeocode(lat: number, lng: number): Promise<GeoLocationResult | null> {
     // Defensive guard mirroring GeoLocationService's choke point: the offline
     // kd-tree geocoder has no "no location" concept and returns a bogus nearest

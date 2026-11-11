@@ -54,6 +54,7 @@ export class MediaOrientationEditController {
     private readonly orientationEditService: MediaOrientationEditService,
   ) {}
 
+  /** Rotates or flips a photo's original bytes (collaborator role; photos only). */
   @Post('media/:id/edit/orientation')
   @MemoriahubAuth({ permissions: [PERMISSIONS.MEDIA_WRITE] })
   @ApiOperation({

@@ -161,6 +161,12 @@ export class GeocodeHandler implements MemoriahubJobHandler, OnModuleInit {
   // the resulting DTO directly — bypassing this method.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The compute half: looks the coordinates up through the active provider.
+   *
+   * @param lat - latitude in decimal degrees.
+   * @param lng - longitude in decimal degrees.
+   */
   async computeGeocode(lat: number, lng: number): Promise<GeocodeResult> {
     const { result, source } = await this.geoLocationService.reverseGeocode(lat, lng);
     return {
@@ -183,6 +189,13 @@ export class GeocodeHandler implements MemoriahubJobHandler, OnModuleInit {
   // preloaded context and reloads it fresh.
   // ---------------------------------------------------------------------------
 
+  /**
+   * The persist half: writes the geo columns (canonicalised) and the status row; the same for a server run and a node result.
+   *
+   * @param job - the job context (its id and media item).
+   * @param result - the geocode result.
+   * @param preloadedMediaItem - the item, when the caller already read it.
+   */
   async persistGeocode(
     job: MediaJobContext,
     result: GeocodeResult,

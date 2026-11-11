@@ -59,6 +59,7 @@ export class MediaReprocessController {
     @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
   ) {}
 
+  /** Queues the `media.storage.reprocess` job for one circle or the whole library. */
   @Post('reprocess')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
@@ -86,6 +87,7 @@ export class MediaReprocessController {
     return { data: { jobId: job.id, status: job.status } };
   }
 
+  /** Queues the recovery sweep for objects orphaned at `processing`. */
   @Post('reprocess-stuck')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
@@ -116,6 +118,7 @@ export class MediaReprocessController {
     return { data: { jobId: job.id, status: job.status } };
   }
 
+  /** Queues the recovery sweep for image objects that ended `failed`. */
   @Post('reprocess-failed')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({
@@ -146,6 +149,7 @@ export class MediaReprocessController {
     return { data: { jobId: job.id, status: job.status } };
   }
 
+  /** Queues a thumbnail repair sweep at priority 0 (promoting a pending one). */
   @Post('thumbnails/repair')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.STORAGE_DELETE_ANY] })
   @ApiOperation({

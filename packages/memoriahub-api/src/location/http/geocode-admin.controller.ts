@@ -17,6 +17,7 @@ import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './
 export class GeocodeAdminController {
   constructor(private readonly geocodeBackfillService: GeocodeBackfillService) {}
 
+  /** Queues a `geocode` job for every media item with coordinates. */
   @Post('backfill')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Bulk-enqueue geocode enrichment for all media items with GPS (Admin)' })

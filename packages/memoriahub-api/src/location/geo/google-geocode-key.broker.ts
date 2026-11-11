@@ -39,6 +39,8 @@ export const GEO_GOOGLE_SECRET_KIND = 'geo.google';
  * for a compromised node (see the geocoding runbook).
  *
  * NOTHING in a message thrown or logged here carries the key.
+ *
+ * @stability experimental
  */
 @Injectable()
 export class GoogleGeocodeKeyBroker implements MemoriahubJobSecretBroker {

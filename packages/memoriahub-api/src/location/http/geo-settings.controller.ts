@@ -33,6 +33,7 @@ import { LOCATION_PERMISSIONS as PERMISSIONS, LOCATION_ROLES as ROLES } from './
 export class GeoSettingsController {
   constructor(private readonly geoSettingsService: GeoSettingsService) {}
 
+  /** Reads the geo provider summary (the key is never returned). */
   @Get('settings')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({ summary: 'Get geo provider settings (Admin)' })
@@ -41,6 +42,7 @@ export class GeoSettingsController {
     return this.geoSettingsService.getSettings();
   }
 
+  /** Stores the Google key and its non-secret settings. */
   @Put('credentials/:provider')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Configure geo provider credentials (Admin)' })
@@ -57,6 +59,7 @@ export class GeoSettingsController {
     return this.geoSettingsService.upsertCredential(provider, dto, userId);
   }
 
+  /** Removes the Google key. */
   @Delete('credentials/:provider')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Remove geo provider credentials (Admin)' })
@@ -70,6 +73,7 @@ export class GeoSettingsController {
     return { deleted: true, provider };
   }
 
+  /** Selects the active reverse geocoding provider. */
   @Put('features/reverse')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_WRITE] })
   @ApiOperation({ summary: 'Set active reverse geocoding provider (Admin)' })
@@ -81,6 +85,7 @@ export class GeoSettingsController {
     return this.geoSettingsService.setActiveReverseProvider(dto.provider, userId);
   }
 
+  /** Looks one coordinate up through a provider to test it. */
   @Post('test')
   @MemoriahubAuth({ roles: [ROLES.ADMIN], permissions: [PERMISSIONS.GEO_SETTINGS_READ] })
   @ApiOperation({ summary: 'Test geo provider connectivity (Admin)' })
