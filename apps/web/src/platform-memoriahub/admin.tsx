@@ -17,7 +17,9 @@ import type {
 } from '@marinoscar/memoriahub-web/core/headless';
 
 import { AdminPageHeader } from '../components/admin/AdminPageHeader';
+import { useAiSettings } from '../hooks/useAiSettings';
 import { useSystemSettings } from '../hooks/useSystemSettings';
+import { getEmailSettings } from '../services/email';
 
 /**
  * Compile-time proof that the platform's table accepts everything the package's
@@ -44,4 +46,6 @@ export const appMemoriahubAdmin: MemoriahubAdminPort = {
   DataTable: AppDataTable,
   AdminPageHeader,
   useSystemSettings,
+  useAiSettings,
+  getEmailReadiness: getEmailSettings,
 };

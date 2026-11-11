@@ -59,21 +59,44 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
-import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
-import type { UserSettings, UserSettingsUpdate } from '../../types';
-import type { MemoryHiddenDateRange } from '@marinoscar/memoriahub-web/memories/headless';
-import {
-  MEMORIES_MAX_HIDDEN_DATE_RANGES,
-  MEMORIES_MAX_HIDDEN_PERSON_IDS,
-} from '@marinoscar/memoriahub-web/memories/headless';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { useMemoriesEnabled } from '../../headless/hooks/useMemoriesEnabled.js';
+import { MEMORIES_MAX_HIDDEN_DATE_RANGES, MEMORIES_MAX_HIDDEN_PERSON_IDS } from '../../headless/types.js';
+import type { MemoriesPreferences, MemoriesPreferencesPatch, MemoryHiddenDateRange } from '../../headless/types.js';
+import { usePeople } from '../../../people/headless/index.js';
+import type { PersonListItem } from '../../../people/headless/index.js';
+import { PersonAvatar } from '../../../people/ui/index.js';
 
-interface MemoriesSettingsProps {
-  settings: UserSettings;
-  updateSettings: (updates: UserSettingsUpdate) => Promise<void>;
+/**
+ * The slice of the user's settings document the card reads.
+ *
+ * @stability experimental
+ */
+export interface MemoriesSettingsDocument {
+  /** The sparse `memories` namespace; absent means no preference. */
+  memories?: MemoriesPreferences;
+}
+
+/**
+ * What the card sends to merge-patch the user's settings.
+ *
+ * @stability experimental
+ */
+export interface MemoriesSettingsUpdate {
+  /** The one-key delta; a `null` field deletes it. */
+  memories?: MemoriesPreferencesPatch | null;
+}
+
+/**
+ * Props of {@link MemoriesSettings}.
+ *
+ * @stability experimental
+ */
+export interface MemoriesSettingsProps {
+  /** The user's settings. */
+  settings: MemoriesSettingsDocument;
+  /** Merge-patches the user's settings; rejects when the write is refused. */
+  updateSettings: (updates: MemoriesSettingsUpdate) => Promise<void>;
   /** Reported to the page's snackbar on a successful save. */
   onSaved?: (message: string) => void;
   /** Page-level save disable (another section is mid-save). */
@@ -99,6 +122,14 @@ function isCompleteRange(draft: DraftRange): boolean {
   return draft.from !== '' && draft.to !== '' && draft.from <= draft.to;
 }
 
+/**
+ * The per-user Memories preferences card: hidden people, hidden date ranges and the email digest.
+ *
+ * @param props - the settings and the update call.
+ * @returns the card, or nothing while Memories is off.
+ *
+ * @stability experimental
+ */
 export function MemoriesSettings({
   settings,
   updateSettings,
@@ -134,7 +165,7 @@ export function MemoriesSettings({
   }, [storedSignature]);
 
   const save = async (
-    patch: NonNullable<UserSettingsUpdate['memories']>,
+    patch: MemoriesPreferencesPatch,
     message: string,
   ) => {
     setIsSaving(true);

@@ -1,0 +1,25 @@
+# people
+
+People and faces on the web: the People page, the archived-faces page, the person cards and grids, the face crop and the merge and purge dialogs, and the clients and hooks behind them.
+
+## Purpose and scope
+
+`people/headless` carries the clients over the host's API client: the people of a circle (`listPeople`, `getPerson`, `createPerson`, `updatePerson`, `setPersonFavorite`, `mergePeople`, `deletePerson`, `assignFaces`, `unassignFace`, `clusterUnknownFaces`, the bulk hide, unhide and purge calls for people and for unassigned faces, `deleteCircleBiometrics`), the faces of one media item (`getMediaFaces`, `getMediaFaceStatus`, `rerunMediaFaces`) and the manual association (`addPersonToMedia`, `removePersonFromMedia`), with the wire types (`PersonListItem`, `PersonDetail`, `DetectedFaceDto`, `BoundingBox`, `UnassignedFaceDto`, ...). The hooks are `usePeople`, `usePerson`, `useUnassignedFaces` and `useMediaFaces` (which polls a running detection to a terminal status). `people/ui` carries `PeoplePage`, `ArchivedFacesPage`, `PersonAvatar`, `PersonCard`, `PersonGrid`, `FaceCrop`, `FaceThumbGrid`, `UnknownFacesReview`, `MergePeopleDialog` and `PurgeFacesDialog`.
+
+Staying in the app: the face settings admin API and hook (`services/face.ts`, `useFaceSettings`) and its page, which configure the provider and are not part of the people experience; the media-detail face panels (`FaceThumbnails`, `VideoFacePanel`, `FaceMarkerStrip`, `AssignFaceDialog`), which move with the media viewer; and the four host-slot bridges (`media.personMultiSelect`, `media.albumPeopleDialog`, `search.peopleExplore`, `workflows.personSelect`), whose components stay in the app and read this slice's hooks and avatar.
+
+## Entry point
+
+`@marinoscar/memoriahub-web/people/headless` and `@marinoscar/memoriahub-web/people/ui`. The slice imports `core` and `media` (the media clients `getMedia` and `listMedia`) through their entries.
+
+## Peer dependencies
+
+`react` and `react-dom` for every file; the `ui` entry adds `@mui/material`, `@mui/icons-material`, `react-router-dom` and `react-easy-crop` (the cover-face crop of the People page).
+
+## Configuration
+
+None of its own. It reads the host's API client and owner scope.
+
+## Extension-point catalog
+
+None: the slice registers no slot of its own.

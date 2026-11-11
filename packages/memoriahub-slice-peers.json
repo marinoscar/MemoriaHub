@@ -424,6 +424,7 @@
         "ui": [
           "@mui/icons-material",
           "@mui/material",
+          "react-easy-crop",
           "react-router-dom"
         ]
       }

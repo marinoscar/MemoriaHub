@@ -14,6 +14,9 @@ import type { ReactNode } from 'react';
 import type {
   MemoriahubAdminPageHeaderProps,
   MemoriahubAdminPort,
+  MemoriahubAiSettings,
+  MemoriahubAiSettingsState,
+  MemoriahubEmailReadiness,
   MemoriahubDataTableProps,
   MemoriahubSystemSettings,
   MemoriahubSystemSettingsState,
@@ -135,6 +138,8 @@ export interface FakeAdminPort {
   port: MemoriahubAdminPort;
   /** Every patch `updateSettings` received, in order. */
   settingsUpdates: Array<Partial<MemoriahubSystemSettings>>;
+  /** The AI settings hook's recordings: every `saveMemoriesFeature` call, in order. */
+  aiMemoriesSaves: Array<{ provider: string | null; model: string | null }>;
   /** Makes the next `updateSettings` call reject with this message (`null` clears it). */
   failNextUpdate(message: string | null): void;
 }
@@ -144,12 +149,18 @@ export interface FakeAdminPort {
  *
  * @param initial - the settings document; `null` leaves the hook in its loading state.
  * @param loadError - with `initial` `null`, the message the hook reports as its load failure.
+ * @param extras - the AI settings, the chat models and the email readiness the port answers with.
  * @returns the port and its recordings.
  *
  * @stability experimental
  */
-export function createFakeAdminPort(initial: Partial<MemoriahubSystemSettings> | null = {}, loadError: string | null = null): FakeAdminPort {
+export function createFakeAdminPort(
+  initial: Partial<MemoriahubSystemSettings> | null = {},
+  loadError: string | null = null,
+  extras: { ai?: MemoriahubAiSettings | null; models?: string[]; email?: MemoriahubEmailReadiness } = {},
+): FakeAdminPort {
   const settingsUpdates: Array<Partial<MemoriahubSystemSettings>> = [];
+  const aiMemoriesSaves: Array<{ provider: string | null; model: string | null }> = [];
   let failure: string | null = null;
 
   function useFakeSystemSettings(): MemoriahubSystemSettingsState {
@@ -174,9 +185,26 @@ export function createFakeAdminPort(initial: Partial<MemoriahubSystemSettings> |
     return { settings, isLoading: settings === null && loadError === null, error: settings === null ? loadError : null, isSaving, updateSettings, refresh };
   }
 
+  function useFakeAiSettings(): MemoriahubAiSettingsState {
+    const [settings] = useState<MemoriahubAiSettings | null>(extras.ai === undefined ? { providers: [], knownProviders: [], features: {} } : extras.ai);
+    const fetchSettings = useCallback(async () => undefined, []);
+    const getModels = useCallback(async () => extras.models ?? [], []);
+    const saveMemoriesFeature = useCallback(async (provider: string | null, model: string | null) => {
+      aiMemoriesSaves.push({ provider, model });
+    }, []);
+    return { settings, fetchSettings, getModels, saveMemoriesFeature };
+  }
+
   return {
-    port: { DataTable: FakeDataTable, AdminPageHeader: FakeAdminPageHeader, useSystemSettings: useFakeSystemSettings },
+    port: {
+      DataTable: FakeDataTable,
+      AdminPageHeader: FakeAdminPageHeader,
+      useSystemSettings: useFakeSystemSettings,
+      useAiSettings: useFakeAiSettings,
+      getEmailReadiness: async () => extras.email ?? { provider: null, enabled: false },
+    },
     settingsUpdates,
+    aiMemoriesSaves,
     failNextUpdate: (message) => {
       failure = message;
     },

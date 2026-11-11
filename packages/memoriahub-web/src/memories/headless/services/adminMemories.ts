@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api } from '../../../core/headless/index.js';
 
 /**
  * Result of `POST /api/admin/memories/backfill` (epic #300, issue #315).

@@ -4,7 +4,7 @@
  * `features.memories` is off, so the page says so instead of standing empty.
  */
 import { Alert } from '@mui/material';
-import { MemoriesSettings } from '../../components/settings/MemoriesSettings';
+import { MemoriesSettings } from '@marinoscar/memoriahub-web/memories/ui';
 import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
 import { UserSettingsCardPage } from './UserSettingsCardPage';
 

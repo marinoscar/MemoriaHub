@@ -21,29 +21,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../hooks/useAiSettings', () => ({
-  useAiSettings: vi.fn(),
-}));
-
-vi.mock('../../services/email', () => ({
-  getEmailSettings: vi.fn(),
-}));
-
-vi.mock('../../services/adminMemories', () => ({
+vi.mock('../../src/memories/headless/services/adminMemories.js', () => ({
   runMemoriesBackfill: vi.fn(),
   listMemoriesBackfillLibraries: vi.fn(),
 }));
@@ -52,17 +43,19 @@ vi.mock('../../services/adminMemories', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import MemoriesSettingsPage from '../../pages/Admin/MemoriesSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { useAiSettings } from '../../hooks/useAiSettings';
-import { getEmailSettings } from '../../services/email';
-import { listMemoriesBackfillLibraries, runMemoriesBackfill } from '../../services/adminMemories';
+import MemoriesSettingsPage from '../../src/memories/ui/pages/MemoriesSettingsPage.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import {
+  listMemoriesBackfillLibraries,
+  runMemoriesBackfill,
+} from '../../src/memories/headless/services/adminMemories.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
-const mockUseAiSettings = vi.mocked(useAiSettings);
-const mockGetEmailSettings = vi.mocked(getEmailSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The admin port the page reads: the settings, AI settings and email readiness are the doubles below.
+const mockUseSystemSettings = vi.fn();
+const mockUseAiSettings = vi.fn();
+const mockGetEmailSettings = vi.fn();
 const mockListLibraries = vi.mocked(listMemoriesBackfillLibraries);
 const mockRunBackfill = vi.mocked(runMemoriesBackfill);
 
@@ -190,6 +183,12 @@ function switchFor(labelText: RegExp): HTMLInputElement {
 describe('MemoriesSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+      useAiSettings: mockUseAiSettings,
+      getEmailReadiness: mockGetEmailSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(adminPermissions() as never);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as never);
     mockUseAiSettings.mockReturnValue(makeAiSettingsMock() as never);

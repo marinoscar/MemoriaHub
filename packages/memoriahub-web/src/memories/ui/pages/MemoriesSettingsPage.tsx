@@ -23,13 +23,9 @@ import {
   Divider,
 } from '@mui/material';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { useAiSettings } from '../../hooks/useAiSettings';
-import { getEmailSettings } from '../../services/email';
-import { listMemoriesBackfillLibraries, runMemoriesBackfill } from '../../services/adminMemories';
-import type { MemoriesBackfillLibrary, MemoriesBackfillResult } from '../../services/adminMemories';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { listMemoriesBackfillLibraries, runMemoriesBackfill } from '../../headless/services/adminMemories.js';
+import type { MemoriesBackfillLibrary, MemoriesBackfillResult } from '../../headless/services/adminMemories.js';
 
 type DigestFrequency = 'off' | 'daily' | 'weekly' | 'monthly';
 
@@ -83,6 +79,7 @@ const DEFAULTS = {
 const SEND_HOURS = Array.from({ length: 24 }, (_unused, hour) => hour);
 
 function MemoriesSettingsContent() {
+  const { AdminPageHeader, useSystemSettings, useAiSettings, getEmailReadiness } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('system_settings:write');
@@ -209,7 +206,7 @@ function MemoriesSettingsContent() {
   // and an admin holds it — a failure is treated as "unknown" rather than an
   // error, since the digest section is informational.
   useEffect(() => {
-    getEmailSettings()
+    getEmailReadiness()
       .then((email) => {
         setEmailProvider(email.provider);
         setEmailEnabled(email.enabled);
@@ -219,7 +216,7 @@ function MemoriesSettingsContent() {
         setEmailEnabled(null);
       })
       .finally(() => setEmailChecked(true));
-  }, []);
+  }, [getEmailReadiness]);
 
   // Library list for the backfill selector (RETRO-I6, #588): every group and
   // every personal library, from the admin-only `GET /api/admin/memories/libraries`
@@ -1034,6 +1031,19 @@ function MemoriesSettingsContent() {
   );
 }
 
+/**
+ * The admin Memories settings page (`/admin/settings/memories`): the global toggle, the model that
+ * writes memory titles, every `memories.*` parameter, the digest and the library backfill.
+ *
+ * @remarks
+ * The page reads the deployment settings, the AI settings and the email readiness
+ * from the host's admin port. It redirects to `/` unless the caller is an admin who can read
+ * the system settings.
+ *
+ * @returns the page, or a redirect.
+ *
+ * @stability experimental
+ */
 export default function MemoriesSettingsPage() {
   const { isAdmin, hasPermission } = usePermissions();
 

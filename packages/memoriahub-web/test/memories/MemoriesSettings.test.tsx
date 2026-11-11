@@ -13,22 +13,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockUser } from '../../utils/test-utils';
-import type { UserSettings } from '../../../types';
+import { render, mockUser } from '../utils/test-utils.js';
 
-vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+vi.mock('../../src/memories/headless/hooks/useMemoriesEnabled.js', () => ({
   useMemoriesEnabled: vi.fn(),
 }));
 
-import { MemoriesSettings } from '../../../components/settings/MemoriesSettings';
-import { useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
-import { http, HttpResponse } from 'msw';
-import { server } from '../../mocks/server';
+// The card's people hook lists through this client, so the list is answered here.
+vi.mock('../../src/people/headless/services/people.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listPeople: vi.fn(),
+}));
+
+import { MemoriesSettings } from '../../src/memories/ui/components/MemoriesSettings.js';
+import type { MemoriesSettingsDocument } from '../../src/memories/ui/components/MemoriesSettings.js';
+import { useMemoriesEnabled } from '../../src/memories/headless/hooks/useMemoriesEnabled.js';
+import { listPeople } from '../../src/people/headless/services/people.js';
+
+type UserSettings = MemoriesSettingsDocument & { theme: string; profile: { useProviderImage: boolean }; updatedAt: string; version: number };
 
 const mockFlags = vi.mocked(useMemoriesEnabled);
-// The packaged people hook lists through the host's API client, so the list is answered at the network layer.
-const listPeopleRequests = vi.fn();
+const mockListPeople = vi.mocked(listPeople);
 
 function setFlags(memories: boolean | null, isLoading = false) {
   mockFlags.mockReturnValue(isLoading || memories === null ? null : memories);
@@ -58,26 +63,21 @@ function renderSection(
 beforeEach(() => {
   vi.clearAllMocks();
   setFlags(true);
-  server.use(
-    http.get('*/api/people', () => {
-      listPeopleRequests();
-      return HttpResponse.json({
-    items: [
-      {
-        id: '11111111-1111-4111-8111-111111111111',
-        name: 'Abuela',
-        isUnlabeled: false,
-        faceCount: 42,
-        coverFace: null,
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        favorite: false,
-      },
-    ],
-    meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
-      });
-    }),
-  );
+  mockListPeople.mockResolvedValue({
+  items: [
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      name: 'Abuela',
+      isUnlabeled: false,
+      faceCount: 42,
+      coverFace: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      favorite: false,
+    },
+  ],
+  meta: { page: 1, pageSize: 100, totalItems: 1, totalPages: 1 },
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ describe('MemoriesSettings — feature gating', () => {
 
     expect(screen.queryByText('Memories')).not.toBeInTheDocument();
     // Not merely unrendered — the request must never be made.
-    await waitFor(() => expect(listPeopleRequests).not.toHaveBeenCalled());
+    await waitFor(() => expect(mockListPeople).not.toHaveBeenCalled());
   });
 
   it('stays hidden while the flags are still resolving', () => {
