@@ -176,15 +176,14 @@
     "@nestjs/core": "^11.1.12",
     "@nestjs/schedule": "^6.1.0",
     "@nestjs/swagger": "^11.4.6",
-    "@opentelemetry/api": "^1.9.1",
-    "cron": "^4.4.0",
+    "@opentelemetry/api": "^1.10.0",
     "@prisma/client-runtime-utils": "^7.8.0",
+    "cron": "^4.4.0",
     "csv-parse": "^5.6.0",
-    "csv-stringify": "^6.5.1",
+    "csv-stringify": "^6.9.0",
+    "local-reverse-geocoder": "^0.16.7",
     "nestjs-zod": "^5.4.0",
-    "zod": "^4.4.3",
-    "onnxruntime-node": "^1.27.0",
-    "local-reverse-geocoder": "^0.16.7"
+    "zod": "^4.6.7"
   },
   "peerDependenciesMeta": {
     "@marinoscar/memoriahub-compute": {
@@ -233,18 +232,21 @@
     "@nestjs/schedule": "^6.1.0",
     "@nestjs/swagger": "^11.4.6",
     "@nestjs/testing": "^11.1.12",
-    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api": "^1.10.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "cron": "^4.4.0",
     "csv-parse": "^5.6.0",
-    "csv-stringify": "^6.5.1",
-    "jest": "^30.4.2",
+    "csv-stringify": "^6.9.0",
+    "jest": "^30.5.2",
     "nestjs-zod": "^5.4.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "ts-jest": "^29.4.11",
+    "ts-jest": "^29.4.15",
     "typescript": "^6.0.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.31.1"
   }
 }
