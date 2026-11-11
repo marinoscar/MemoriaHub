@@ -21,11 +21,12 @@
 // =============================================================================
 
 import type { NotificationRegistration } from '@marinoscar/platform-api/notifications';
+import { MEMORIES_DIGEST_EVENT_KEY } from '@marinoscar/memoriahub-api/memories';
 
 /** PERMANENT event keys. */
 export const MEMORIAHUB_EMAIL_EVENT_KEYS = {
   membershipConfirmed: 'circles.membership_confirmed',
-  memoriesDigest: 'memories.digest',
+  memoriesDigest: MEMORIES_DIGEST_EVENT_KEY,
 } as const;
 
 export const MEMORIAHUB_EMAIL_NOTIFICATIONS: readonly NotificationRegistration[] = [
