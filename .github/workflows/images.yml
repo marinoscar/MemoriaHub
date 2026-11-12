@@ -22,14 +22,13 @@ on:
       - 'package-lock.json'
       - '.github/workflows/images.yml'
   push:
-    branches: [main, fix/heic-native-decode]  # TEMP-HEIC-FIX branch entry
+    branches: [main]
     paths:
       - 'apps/api/Dockerfile'
       - 'apps/cli/Dockerfile'
       - 'scripts/docker/**'
       - '.github/workflows/images.yml'
   workflow_dispatch:
-  # TEMP-HEIC-FIX: remove before finishing
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -141,23 +140,6 @@ jobs:
       - name: Built sharp addon diagnostics (inside the worker image)
         run: |
           docker run --rm --entrypoint sh memoriahub-worker:parity-gate -c 'ls -l /app/node_modules/sharp/src/build/Release/ || true; ldd /app/node_modules/sharp/src/build/Release/sharp-linux-x64-*.node | grep -E "vips|heif|not found" || true; env | grep -E "LD_LIBRARY|CPATH|SHARP"; node -e "try{require(\"/app/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node\");console.log(\"built addon loads\")}catch(e){console.log(\"built addon ERROR\",e.message)}"'
-
-      - name: Bundled vs source-built sharp pixel comparison (diagnostic, worker image)
-        continue-on-error: true
-        run: |
-          docker run --rm -i --entrypoint sh memoriahub-worker:parity-gate -c 'cp -r /app/node_modules/sharp /tmp/sharp-bundled && rm -rf /tmp/sharp-bundled/src/build && cd /app/packages/memoriahub-compute && NODE_PATH=/app/node_modules node -' <<'EOF2'
-          const fs = require('fs');
-          const built = require('/app/node_modules/sharp');
-          const bundled = require('/tmp/sharp-bundled');
-          const buf = fs.readFileSync('test/fixtures/golden-fixture.jpg');
-          const cmp = (a, b) => { let m = 0, n = 0; for (let i = 0; i < a.length; i++) { const d = Math.abs(a[i] - b[i]); if (d > m) m = d; if (d) n++; } return { max: m, differing: n, len: a.length }; };
-          (async () => {
-            const dec = [await built(buf).raw().toBuffer(), await bundled(buf).raw().toBuffer()];
-            console.log('decode-only', JSON.stringify(cmp(dec[0], dec[1])));
-            const rs = [await built(buf).resize(224, 224, { fit: 'fill' }).removeAlpha().raw().toBuffer(), await bundled(buf).resize(224, 224, { fit: 'fill' }).removeAlpha().raw().toBuffer()];
-            console.log('decode+resize', JSON.stringify(cmp(rs[0], rs[1])));
-          })();
-          EOF2
 
       - name: Runner CPU (the quantized CLIP model is CPU-feature dependent)
         run: grep -m1 'model name' /proc/cpuinfo; grep -m1 -o -E 'avx512_vnni|avx_vnni|avx512f' /proc/cpuinfo | sort -u || true

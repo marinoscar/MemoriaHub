@@ -94,7 +94,7 @@ Jobs the platform slices own (`storage.object.process`, `storage.migrate_*`, `db
 
 ## Image rule
 
-Obtain pixels through `prepareImageForProcessing` (`apps/api/src/storage/processing/image-orientation.util.ts`), never by decoding raw bytes, so EXIF orientation is applied first. If sharp fails the helper returns the raw buffer with width and height 0 and the handler must tolerate that. HEIC decodes natively because the API and worker images build sharp against a HEIF-enabled system libvips; `transcodeToDecodableJpeg` (ffmpeg) is the rarely hit fallback. Never pass raw storage bytes to an image model.
+Obtain pixels through `prepareImageForProcessing` (`apps/api/src/storage/processing/image-orientation.util.ts`), never by decoding raw bytes, so EXIF orientation is applied first. If sharp fails the helper returns the raw buffer with width and height 0 and the handler must tolerate that. HEIC decodes natively because the API and worker images build sharp against a source-built, HEIF-enabled libvips 8.18.3 (`scripts/docker/build-libvips.sh`); `transcodeToDecodableJpeg` (ffmpeg) is the rarely hit fallback. Never pass raw storage bytes to an image model.
 
 ## Adding a job type
 
