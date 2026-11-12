@@ -18,9 +18,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { FaceThumbnails } from '../../../components/media/FaceThumbnails';
-import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub-web/people/headless';
+import { render } from '../utils/test-utils.js';
+import { FaceThumbnails } from '../../src/people/ui/components/FaceThumbnails.js';
+import type { DetectedFaceDto, MediaFaceStatusDto } from '../../src/people/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Mock the useMediaFaces hook directly
@@ -28,8 +28,8 @@ import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub
 
 // Mock face service — listPeople, assignFaces, unassignFace, createPerson,
 // purgeFaces (the shared AssignFaceDialog's dependencies).
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>();
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/people/headless/index.js')>();
   return {
     ...original,
     useMediaFaces: vi.fn(),
@@ -48,7 +48,7 @@ import {
   unassignFace,
   createPerson,
   purgeFaces,
-} from '@marinoscar/memoriahub-web/people/headless';
+} from '../../src/people/headless/index.js';
 
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
 const mockListPeople = vi.mocked(listPeople);

@@ -8,3 +8,7 @@ export * from './components/PurgeFacesDialog.js';
 export * from './components/UnknownFacesReview.js';
 export { default as PeoplePage } from './pages/PeoplePage.js';
 export { default as ArchivedFacesPage } from './pages/ArchivedFacesPage.js';
+export * from './components/AssignFaceDialog.js';
+export * from './components/FaceMarkerStrip.js';
+export * from './components/FaceThumbnails.js';
+export * from './components/VideoFacePanel.js';

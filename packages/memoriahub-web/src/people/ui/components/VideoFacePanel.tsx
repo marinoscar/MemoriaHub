@@ -37,10 +37,10 @@ import {
   listPeople,
   addPersonToMedia,
   removePersonFromMedia,
-} from '@marinoscar/memoriahub-web/people/headless';
-import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
-import { AssignFaceDialog } from './AssignFaceDialog';
+} from '../../headless/index.js';
+import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '../../headless/index.js';
+import { PersonAvatar } from './PersonAvatar.js';
+import { AssignFaceDialog } from './AssignFaceDialog.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -135,7 +135,12 @@ function buildPersonFaceIds(faces: DetectedFaceDto[]): Map<string, string[]> {
 // Props
 // ---------------------------------------------------------------------------
 
-interface VideoFacePanelProps {
+/**
+ * The props of {@link VideoFacePanel}.
+ *
+ * @stability experimental
+ */
+export interface VideoFacePanelProps {
   mediaId: string;
   circleId?: string;
   /** Video duration in milliseconds from MediaItem.durationMs. */
@@ -144,6 +149,7 @@ interface VideoFacePanelProps {
   onSeek?: (seconds: number) => void;
   /** ID of the currently selected face row (for highlight). */
   selectedFaceId?: string | null;
+  /** Called with the face to highlight, or `null` to clear the highlight. */
   onSelectFace?: (faceId: string | null) => void;
   /** Called after any face mutation so an external face consumer (e.g. the
    *  marker strip) can refresh its own copy of the faces. */
@@ -154,6 +160,11 @@ interface VideoFacePanelProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The face panel of a video in the media detail drawer: one row per person identity with the moments they appear.
+ *
+ * @stability experimental
+ */
 export function VideoFacePanel({
   mediaId,
   circleId,

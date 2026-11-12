@@ -25,17 +25,23 @@ import {
   Divider,
   Avatar,
 } from '@mui/material';
-import type { DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import type { DetectedFaceDto, PersonListItem } from '../../headless/index.js';
 import {
   listPeople,
   createPerson,
   assignFaces,
   unassignFace,
   purgeFaces,
-} from '@marinoscar/memoriahub-web/people/headless';
-import { FaceCrop, PurgeFacesDialog } from '@marinoscar/memoriahub-web/people/ui';
+} from '../../headless/index.js';
+import { FaceCrop } from './FaceCrop.js';
+import { PurgeFacesDialog } from './PurgeFacesDialog.js';
 
-interface AssignFaceDialogProps {
+/**
+ * The props of {@link AssignFaceDialog}.
+ *
+ * @stability experimental
+ */
+export interface AssignFaceDialogProps {
   open: boolean;
   face: DetectedFaceDto | null;
   /** Full-resolution URL preferred; falls back to thumbnailUrl for sharp crop preview.
@@ -45,10 +51,17 @@ interface AssignFaceDialogProps {
   /** When provided, all actions operate on this full set of face IDs (e.g. every
    *  detected face for a person in a video). Defaults to the single `face.id`. */
   faceIds?: string[];
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
+  /** Called after the face was assigned, created, archived or purged. */
   onSuccess: () => void;
 }
 
+/**
+ * The dialog that assigns a detected face to a person, creates a person from it, or archives or purges the face.
+ *
+ * @stability experimental
+ */
 export function AssignFaceDialog({
   open,
   face,

@@ -21,10 +21,10 @@ import {
   listPeople,
   addPersonToMedia,
   removePersonFromMedia,
-} from '@marinoscar/memoriahub-web/people/headless';
-import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
-import { AssignFaceDialog } from './AssignFaceDialog';
+} from '../../headless/index.js';
+import type { MediaFaceStatusType, DetectedFaceDto, PersonListItem } from '../../headless/index.js';
+import { PersonAvatar } from './PersonAvatar.js';
+import { AssignFaceDialog } from './AssignFaceDialog.js';
 
 function statusChipProps(status: MediaFaceStatusType): {
   label: string;
@@ -46,7 +46,12 @@ function statusChipProps(status: MediaFaceStatusType): {
   }
 }
 
-interface FaceThumbnailsProps {
+/**
+ * The props of {@link FaceThumbnails}.
+ *
+ * @stability experimental
+ */
+export interface FaceThumbnailsProps {
   mediaId: string;
   mediaType?: string;
   thumbnailUrl?: string;
@@ -60,6 +65,11 @@ interface FaceThumbnailsProps {
 // Main FaceThumbnails component
 // ---------------------------------------------------------------------------
 
+/**
+ * The face panel of a photo in the media detail drawer: the detection status, the detected faces as avatars and the actions on them.
+ *
+ * @stability experimental
+ */
 export function FaceThumbnails({
   mediaId,
   mediaType,

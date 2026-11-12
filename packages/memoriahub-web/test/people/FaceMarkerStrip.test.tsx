@@ -14,9 +14,9 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent } from '@testing-library/react';
-import { render } from '../../utils/test-utils';
-import { FaceMarkerStrip } from '../../../components/media/FaceMarkerStrip';
-import type { DetectedFaceDto } from '@marinoscar/memoriahub-web/people/headless';
+import { render } from '../utils/test-utils.js';
+import { FaceMarkerStrip } from '../../src/people/ui/components/FaceMarkerStrip.js';
+import type { DetectedFaceDto } from '../../src/people/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures

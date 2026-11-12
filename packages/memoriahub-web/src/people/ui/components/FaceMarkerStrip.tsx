@@ -9,7 +9,7 @@
  */
 
 import { Tooltip, Box } from '@mui/material';
-import type { DetectedFaceDto } from '@marinoscar/memoriahub-web/people/headless';
+import type { DetectedFaceDto } from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,10 +27,16 @@ function formatTimestamp(ms: number): string {
 // Props
 // ---------------------------------------------------------------------------
 
-interface FaceMarkerStripProps {
+/**
+ * The props of {@link FaceMarkerStrip}.
+ *
+ * @stability experimental
+ */
+export interface FaceMarkerStripProps {
   faces: DetectedFaceDto[];
   durationMs: number | null;
   selectedFaceId?: string | null;
+  /** Called with the second the user clicked or tapped. */
   onSeek?: (seconds: number) => void;
 }
 
@@ -38,6 +44,11 @@ interface FaceMarkerStripProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The strip of face markers under a video's seek bar, one marker per sampled appearance.
+ *
+ * @stability experimental
+ */
 export function FaceMarkerStrip({
   faces,
   durationMs,

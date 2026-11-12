@@ -17,9 +17,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { VideoFacePanel } from '../../../components/media/VideoFacePanel';
-import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub-web/people/headless';
+import { render } from '../utils/test-utils.js';
+import { VideoFacePanel } from '../../src/people/ui/components/VideoFacePanel.js';
+import type { DetectedFaceDto, MediaFaceStatusDto } from '../../src/people/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -27,8 +27,8 @@ import type { DetectedFaceDto, MediaFaceStatusDto } from '@marinoscar/memoriahub
 
 // Mock face service — listPeople, addPersonToMedia, removePersonFromMedia,
 // assignFaces, unassignFace, createPerson, purgeFaces (AssignFaceDialog deps)
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>();
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/people/headless/index.js')>();
   return {
     ...original,
     useMediaFaces: vi.fn(),
@@ -48,7 +48,7 @@ import {
   assignFaces,
   unassignFace,
   purgeFaces,
-} from '@marinoscar/memoriahub-web/people/headless';
+} from '../../src/people/headless/index.js';
 const mockUseMediaFaces = vi.mocked(useMediaFaces);
 const mockListPeople = vi.mocked(listPeople);
 const mockAssignFaces = vi.mocked(assignFaces);
