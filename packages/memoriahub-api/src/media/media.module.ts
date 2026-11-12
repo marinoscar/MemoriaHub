@@ -9,6 +9,7 @@ import { MEDIA_ENRICHMENT } from './hooks/media-host-hooks.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
 import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service.js';
 import { MediaThumbnailService } from './thumbnails/media-thumbnail.service.js';
+import { ReviewQueueCounterRegistry } from './producers/review-queue-counter.registry.js';
 import { UploadNotificationService } from './producers/upload-notification.service.js';
 import { MediaTouchModule } from './touch/media-touch.module.js';
 
@@ -59,6 +60,7 @@ export class MediaModule {
       imports: [MediaTouchModule],
       providers: [
         UploadEnrichmentRegistry,
+        ReviewQueueCounterRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
         AndroidMediaSyncDoctorCheck,
@@ -72,6 +74,7 @@ export class MediaModule {
       exports: [
         MediaTouchModule,
         UploadEnrichmentRegistry,
+        ReviewQueueCounterRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
         MediaEnrichmentService,

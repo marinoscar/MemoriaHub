@@ -38,51 +38,13 @@ import {
   type MemoriahubSettingsPort,
 } from '../../ports/index.js';
 import { MediaService } from '../gallery/media.service.js';
-import { REVIEW_QUEUE_EVENT_KEYS } from './review-queue.constants.js';
+import { ReviewQueueCounterRegistry, type ReviewQueueCounter } from './review-queue-counter.registry.js';
 
 /** Per-library roles that can actually act on a review queue. See the header. */
 const ELIGIBLE_ROLES: MemoriahubScopeRole[] = ['admin', 'editor'];
 
-/** The four integers `computeReviewCounts()` returns. */
-type ReviewCounts = Awaited<ReturnType<MediaService['computeReviewCounts']>>;
-
 /** The `features` namespace, narrowed to what the flag gates read. */
 type FeatureFlags = Record<string, unknown> | undefined;
-
-/**
- * One review queue's mapping from a pending count to a STATE event. The title ("3 burst groups ready to
- * review in Family") and the library-agnostic link are the event's template, which the host declares.
- */
-interface ReviewQueueDescriptor {
-  eventKey: string;
-  countKey: keyof ReviewCounts;
-  isEnabled: (features: FeatureFlags) => boolean;
-}
-
-const REVIEW_QUEUES: readonly ReviewQueueDescriptor[] = [
-  {
-    eventKey: REVIEW_QUEUE_EVENT_KEYS.bursts,
-    countKey: 'pendingBurstGroups',
-    isEnabled: (f) => f?.['burstDetection'] === true,
-  },
-  {
-    eventKey: REVIEW_QUEUE_EVENT_KEYS.duplicates,
-    countKey: 'pendingDuplicateGroups',
-    isEnabled: (f) => f?.['duplicateDetection'] === true,
-  },
-  {
-    eventKey: REVIEW_QUEUE_EVENT_KEYS.locationSuggestions,
-    countKey: 'pendingLocationSuggestions',
-    isEnabled: (f) => f?.['locationInference'] === true,
-  },
-  {
-    eventKey: REVIEW_QUEUE_EVENT_KEYS.enhancements,
-    countKey: 'pendingEnhancements',
-    // The one queue with an environment kill switch, folded in so this sweep can never advertise a queue
-    // the enhance endpoints would reject.
-    isEnabled: (f) => f?.['pictureEnhancement'] === true && process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false',
-  },
-];
 
 /**
  * Outcome tally for one sweep: logged, and returned for the job's log line.
@@ -114,6 +76,7 @@ export class ReviewQueueReconcileService {
     @Inject(MEMORIAHUB_ACCESS) private readonly access: MemoriahubAccessPort,
     @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly mediaService: MediaService,
+    private readonly queueCounters: ReviewQueueCounterRegistry,
   ) {}
 
   /**
@@ -125,8 +88,11 @@ export class ReviewQueueReconcileService {
     const result: ReviewQueueReconcileResult = { circles: 0, upserted: 0, resolved: 0, errors: 0 };
 
     const features = (await this.settings.readSystem<FeatureFlags>('features')).value;
-    const enabled = REVIEW_QUEUES.filter((q) => q.isEnabled(features));
-    const disabled = REVIEW_QUEUES.filter((q) => !q.isEnabled(features));
+    // The queues are the counters the owning slices registered (bursts, duplicates, location suggestions,
+    // enhancements); a queue whose slice is not in the host has none and raises nothing.
+    const queues = this.queueCounters.all();
+    const enabled = queues.filter((q) => q.isEnabled(features));
+    const disabled = queues.filter((q) => !q.isEnabled(features));
 
     // A disabled queue produces nothing, but any row produced BEFORE it was disabled would otherwise stay
     // live forever (the reconcile that drains it to zero is exactly the thing that no longer runs for it),
@@ -165,7 +131,7 @@ export class ReviewQueueReconcileService {
    */
   private async reconcileCircle(
     circle: { id: string; name: string },
-    queues: readonly ReviewQueueDescriptor[],
+    queues: readonly ReviewQueueCounter[],
   ): Promise<{ upserted: number; resolved: number }> {
     // Only ids are loaded, so a library's whole eligible membership is a few KB even in the pathological
     // case: no paging needed at this level.

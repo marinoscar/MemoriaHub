@@ -9,6 +9,7 @@ export * from './producers/share-expiring.service.js';
 export * from './producers/share-expiring.handler.js';
 export * from './producers/share-expiring.task.js';
 export * from './producers/review-queue.constants.js';
+export * from './producers/review-queue-counter.registry.js';
 export * from './producers/review-queue-reconcile.service.js';
 export * from './producers/review-queue-reconcile.handler.js';
 export * from './producers/review-queue-reconcile.task.js';

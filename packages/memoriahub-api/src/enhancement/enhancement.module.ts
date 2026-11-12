@@ -1,6 +1,7 @@
 import { Module, type DynamicModule, type ModuleMetadata, type Provider } from '@nestjs/common';
 
 import { MediaModule } from '../media/index.js';
+import { EnhancementReviewQueueCounter } from './enhancement-review-queue.counter.js';
 import { ExifCarryoverService } from './exif-carryover.service.js';
 import { ENHANCEMENT_OPTIONS, type EnhancementModuleOptions } from './enhancement-host-hooks.js';
 import { MediaEnhancementService } from './media-enhancement.service.js';
@@ -64,6 +65,7 @@ export class EnhancementModule {
         PictureEnhancementHandler,
         PictureEnhancementPurgeHandler,
         PictureEnhancementPurgeTask,
+        EnhancementReviewQueueCounter,
       ],
       exports: [MediaEnhancementService, ExifCarryoverService],
     };

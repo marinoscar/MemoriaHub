@@ -18,7 +18,27 @@
   *  - a per-circle failure is counted, never fatal
  */
 
+import { ReviewQueueCounterRegistry, type ReviewQueueCounter } from './review-queue-counter.registry.js';
+import { REVIEW_QUEUE_EVENT_KEYS } from './review-queue.constants.js';
 import { ReviewQueueReconcileService } from './review-queue-reconcile.service.js';
+
+/** The four counters the owning slices register, with their flag gates (the counts are the media double's). */
+function queueCounters(): ReviewQueueCounterRegistry {
+  const registry = new ReviewQueueCounterRegistry();
+  const counter = (countKey: ReviewQueueCounter['countKey'], eventKey: string, isEnabled: ReviewQueueCounter['isEnabled']): ReviewQueueCounter => ({
+    countKey,
+    eventKey,
+    isEnabled,
+    count: async () => 0,
+  });
+  registry.registerReviewQueueCounter(counter('pendingBurstGroups', REVIEW_QUEUE_EVENT_KEYS.bursts, (f) => f?.['burstDetection'] === true));
+  registry.registerReviewQueueCounter(counter('pendingDuplicateGroups', REVIEW_QUEUE_EVENT_KEYS.duplicates, (f) => f?.['duplicateDetection'] === true));
+  registry.registerReviewQueueCounter(counter('pendingLocationSuggestions', REVIEW_QUEUE_EVENT_KEYS.locationSuggestions, (f) => f?.['locationInference'] === true));
+  registry.registerReviewQueueCounter(
+    counter('pendingEnhancements', REVIEW_QUEUE_EVENT_KEYS.enhancements, (f) => f?.['pictureEnhancement'] === true && process.env['PICTURE_ENHANCEMENT_ENABLED'] !== 'false'),
+  );
+  return registry;
+}
 
 const CIRCLE_A = { id: 'circle-a', name: 'Family' };
 const CIRCLE_B = { id: 'circle-b', name: 'Work' };
@@ -81,7 +101,7 @@ describe('ReviewQueueReconcileService', () => {
     scopes.allScopes.mockResolvedValue([asScope(CIRCLE_A)]);
     scopes.membersOf.mockResolvedValue([{ userId: USER_A, role: 'editor' }]);
 
-    service = new ReviewQueueReconcileService(notify as never, scopes as never, settings as never, mockMediaService as never);
+    service = new ReviewQueueReconcileService(notify as never, scopes as never, settings as never, mockMediaService as never, queueCounters());
   });
 
   afterEach(() => jest.clearAllMocks());

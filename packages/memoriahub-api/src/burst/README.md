@@ -27,3 +27,5 @@ The burst photo detection slice of the MemoriaHub domain (RETRO-J10, #624).
 `describeBurstSliceConformance` (`./burst/testing`) proves the fan-out registration: photos only, priority 5, gated by the feature flag.
 
 **Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.jobs.burst-config` check (`BurstConfigDoctorCheck`) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.
+
+The slice also registers `BurstReviewQueueCounter` with the media slice's `ReviewQueueCounterRegistry` (`pendingBurstGroups`, event `review.bursts`, on with `features.burstDetection`; pending groups that reached `burst.minGroupSize`, default 3).

@@ -70,6 +70,7 @@ import type { DeleteForeverDto } from '../dto/delete-forever.dto.js';
 import type { EmptyTrashDto } from '../dto/empty-trash.dto.js';
 import type { DashboardQueryDto } from '../dto/dashboard-query.dto.js';
 import type { ReviewCountsQueryDto } from '../dto/review-counts-query.dto.js';
+import { ReviewQueueCounterRegistry, type ReviewQueueCounts } from '../producers/review-queue-counter.registry.js';
 
 // Structural stand-ins for the generated client's types (the slice imports no generated client).
 type MediaItemWhereInput = Record<string, any>;
@@ -166,6 +167,8 @@ export class MediaService {
     private readonly uploadNotificationService: UploadNotificationService,
     private readonly mediaTouch: MediaTouchService,
     @Inject(MEDIA_LOCATION_RESOLVER) private readonly locationGroupResolver: MediaLocationResolver,
+    // The review queues each slice counts (RETRO-J10, #624); the media slice only aggregates them.
+    private readonly reviewQueues: ReviewQueueCounterRegistry,
     // Webhooks (RETRO-H4, #603). Optional so a host without webhooks binds nothing.
     @Optional() @Inject(MEDIA_WEBHOOK_EVENTS) private readonly webhookEvents?: MediaWebhookEvents,
     // App metrics (RETRO-T3, #628): `app.media.uploads` / `app.media.upload.size`. An unbound port is a no-op.
@@ -2073,59 +2076,11 @@ export class MediaService {
    * the reconcile is a server-side sweep with no requesting user, and the two
    * HTTP callers above run their own membership check.
    */
-  async computeReviewCounts(circleId: string) {
-    // Load burst minGroupSize from system settings for the burst count filter
-    const burstSettings = await this.prisma.systemSettings.findUnique({
-      where: { key: 'global' },
-      select: { value: true },
-    });
-    const burstValue = (burstSettings?.value as Record<string, unknown> | null) ?? {};
-    const burstConfig = burstValue['burst'] as { minGroupSize?: number } | undefined;
-    const burstMinGroupSize = burstConfig?.minGroupSize ?? 3;
-
-    const [
-      pendingBurstGroups,
-      pendingDuplicateGroups,
-      pendingLocationSuggestions,
-      pendingEnhancements,
-    ] = await Promise.all([
-      this.prisma.burstGroup.count({
-        where: {
-          circleId,
-          status: 'pending',
-          mediaCount: { gte: burstMinGroupSize },
-        },
-      }),
-      this.prisma.duplicateGroup.count({
-        where: {
-          circleId,
-          status: 'pending',
-        },
-      }),
-      this.prisma.locationSuggestion.count({
-        where: {
-          circleId,
-          status: 'pending',
-        },
-      }),
-      // "Pending review" for an enhancement means STAGED and awaiting a human
-      // keep-both/replace/discard decision — i.e. `ready`. The `pending` status
-      // means "queued for the model" and is not user-actionable, so it is
-      // deliberately excluded. Served by the existing @@index([circleId, status]).
-      this.prisma.mediaEnhancement.count({
-        where: {
-          circleId,
-          status: 'ready',
-        },
-      }),
-    ]);
-
-    return {
-      pendingBurstGroups,
-      pendingDuplicateGroups,
-      pendingLocationSuggestions,
-      pendingEnhancements,
-    };
+  async computeReviewCounts(circleId: string): Promise<ReviewQueueCounts> {
+    // The queues belong to their own slices (bursts, duplicates, location suggestions, enhancements): each
+    // registers a counter, and an absent slice's queue reports 0. "Pending review" for an enhancement means
+    // STAGED and awaiting a human decision (`ready`), which that slice's counter decides.
+    return this.reviewQueues.countAll(circleId);
   }
 
   /** The circle dashboard: On This Day, recent, favorites and the review-queue counts. */

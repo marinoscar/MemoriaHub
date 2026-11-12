@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { MediaService } from '../../src/media/gallery/media.service.js';
-import { MediaMetadataSyncService } from '../../src/media/index.js';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '../../src/media/index.js';
 import { randomUUID } from 'crypto';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '../../src/media/index.js';
 import { mediaThumbnailsQuerySchema } from '../../src/media/index.js';
@@ -18,7 +18,7 @@ import {
   MEDIA_PERMISSIONS,
 } from '../../src/media/index.js';
 import { deepMockDb } from '../helpers/deep-mock-db.js';
-import { accessOver, objectStoreOver, thumbnailServiceOverMocks } from '../helpers/gallery-providers.js';
+import { accessOver, objectStoreOver, reviewQueueRegistryOver, thumbnailServiceOverMocks } from '../helpers/gallery-providers.js';
 import { createMockLocationGroupResolver } from '../helpers/location-group-resolver.mock.js';
 
 const PERMISSIONS = {
@@ -294,6 +294,7 @@ describe('MediaService', () => {
         // registered below.
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: ReviewQueueCounterRegistry, useFactory: () => reviewQueueRegistryOver(mockPrisma) },
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, mockResolver) },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
         { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockOwnerAccessService) },
@@ -4376,53 +4377,6 @@ describe('MediaService', () => {
       // replace / discard decision); `pending` means "queued for the model".
       expect(mockPrisma.mediaEnhancement.count).toHaveBeenCalledWith({
         where: { circleId: CIRCLE_ID, status: 'ready' },
-      });
-    });
-
-    it('applies burst.minGroupSize from system settings to the burst count', async () => {
-      mockPrisma.systemSettings.findUnique.mockResolvedValue({
-        value: { burst: { minGroupSize: 7 } },
-      } as any);
-      mockCounts();
-
-      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
-
-      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
-        where: {
-          circleId: CIRCLE_ID,
-          status: 'pending',
-          mediaCount: { gte: 7 },
-        },
-      });
-    });
-
-    it('defaults burst.minGroupSize to 3 when the setting row is absent', async () => {
-      mockPrisma.systemSettings.findUnique.mockResolvedValue(null);
-      mockCounts();
-
-      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
-
-      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
-        where: {
-          circleId: CIRCLE_ID,
-          status: 'pending',
-          mediaCount: { gte: 3 },
-        },
-      });
-    });
-
-    it('defaults burst.minGroupSize to 3 when the settings row has no burst config', async () => {
-      mockPrisma.systemSettings.findUnique.mockResolvedValue({ value: {} } as any);
-      mockCounts();
-
-      await service.getReviewCounts(reviewCountsQuery, 'user-1', ownPerms);
-
-      expect(mockPrisma.burstGroup.count).toHaveBeenCalledWith({
-        where: {
-          circleId: CIRCLE_ID,
-          status: 'pending',
-          mediaCount: { gte: 3 },
-        },
       });
     });
 

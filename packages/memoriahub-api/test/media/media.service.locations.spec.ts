@@ -12,7 +12,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { MediaService } from '../../src/media/gallery/media.service.js';
-import { MediaMetadataSyncService } from '../../src/media/index.js';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '../../src/media/index.js';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '../../src/media/index.js';
 import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
 import {
@@ -102,6 +102,7 @@ describe('MediaService.exploreLocations / exploreLocationLevel', () => {
         MediaService,
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: ReviewQueueCounterRegistry, useValue: new ReviewQueueCounterRegistry() },
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, { getProviderFor: jest.fn() }) },
         { provide: MediaMetadataSyncService, useValue: {} },
         { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockCircleMembership) },
