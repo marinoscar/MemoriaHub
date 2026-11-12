@@ -13,16 +13,22 @@ import type { AddAlbumItemsByFilterDto, MediaItem } from '../headless/types.js';
 
 
 // =============================================================================
-// Slots: the components of slices that have not moved into this package yet
+// Slots: the components the media pages reach but cannot import
 // =============================================================================
 //
 // The gallery, the album page and the places pages reach a few components that
-// belong to later J11 parts (the lightbox and detail drawer with the face,
-// tagging and location slices, the enhancement drawer and dialog, the people
-// pickers) or to the platform (the share dialog). The host registers them under
-// the names below (`slots` of `MemoriahubWebHost`); a host that registers none
-// renders the page without them. Each slot is deleted when its component moves
-// into the package.
+// belong to other slices or to the platform. The host registers them under the
+// names below (`slots` of `MemoriahubWebHost`); a host that registers none
+// renders the page without them.
+//
+// - The people pickers (`AlbumPeopleDialog`, `PersonMultiSelect`) are the
+//   `people` slice's, and stay slots permanently: `people` imports `media` (the
+//   media clients), so `media` cannot import `people` back. The web edition binds
+//   them to the packaged components.
+// - The lightbox and detail drawer (tagging, location-suggestion and enhancement
+//   hooks), the enhancement drawer and dialog, the location-merge dialog and the
+//   platform's share dialog are the app's until their slices move; each of those
+//   slots is deleted when its component moves into the package.
 // =============================================================================
 
 /**

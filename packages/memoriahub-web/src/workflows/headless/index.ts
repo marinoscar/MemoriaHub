@@ -14,5 +14,4 @@ export * from './utils/workflowSentence.js';
 export * from './constants/workflowActionMeta.js';
 export * from './constants/workflowTemplates.js';
 export * from './builderState.js';
-export * from './slot-names.js';
 export * from './types.js';

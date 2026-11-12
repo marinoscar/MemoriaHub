@@ -2,10 +2,13 @@
  * The components the packaged media slice asks its host for (`slots` of
  * `MemoriahubWebHost`): the ones that belong to slices that have not moved into
  * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer, the AI
- * enhancement drawer and dialog, the people pickers, the location-merge dialog)
- * and the platform's share dialog. Each is lazy, so the page that needs it keeps
- * it out of the main chunk exactly as before. A slot is deleted when its
- * component moves into the package (J11 later parts).
+ * enhancement drawer and dialog, the location-merge dialog), the platform's share
+ * dialog, and the two people pickers of the album and library pages, which stay
+ * slots for good: the people slice imports the media slice, so the media pages
+ * cannot import the people components. Those two are bound straight to the
+ * packaged components. Each is lazy, so the page that needs it keeps it out of
+ * the main chunk exactly as before. A slot is deleted when its component moves
+ * into the package and the slice that owns it can import it.
  */
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
@@ -20,8 +23,6 @@ import type {
   MergeLocationsDialogSlotProps,
   PersonMultiSelectSlotProps,
 } from '@marinoscar/memoriahub-web/media/ui';
-import type { SearchPeopleExploreSlotProps } from '@marinoscar/memoriahub-web/search/ui';
-import type { WorkflowPersonSelectSlotProps } from '@marinoscar/memoriahub-web/workflows/ui';
 
 // The slot names are the package's (`@marinoscar/memoriahub-web/media/headless`
 // `slot-names`); they are spelled out here so this module loads no slice code, and
@@ -35,8 +36,6 @@ export const APP_SLOT_NAMES = {
   albumPeopleDialog: 'media.albumPeopleDialog',
   personMultiSelect: 'media.personMultiSelect',
   mergeLocationsDialog: 'media.mergeLocationsDialog',
-  searchPeopleExplore: 'search.peopleExplore',
-  workflowPersonSelect: 'workflows.personSelect',
 } as const;
 
 /** A lazy component behind a null-fallback Suspense, so a slot renders like the eager import did. */
@@ -65,17 +64,12 @@ const BatchEnhanceDialogSlot = lazySlot<BatchEnhanceDialogSlotProps>(() =>
 const MediaShareDialogSlot = lazySlot<MediaShareDialogSlotProps>(() =>
   import('../platform/sharing/MediaShareDialog').then((m) => ({ default: m.MediaShareDialog })),
 );
+// The two people pickers are the packaged people slice's components.
 const AlbumPeopleDialogSlot = lazySlot<AlbumPeopleDialogSlotProps>(() =>
-  import('../components/album/AlbumPeopleDialog').then((m) => ({ default: m.AlbumPeopleDialog })),
+  import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.AlbumPeopleDialog })),
 );
 const PersonMultiSelectSlot = lazySlot<PersonMultiSelectSlotProps>(() =>
-  import('../components/search/PersonMultiSelect').then((m) => ({ default: m.PersonMultiSelect })),
-);
-const SearchPeopleExploreSlot = lazySlot<SearchPeopleExploreSlotProps>(() =>
-  import('../components/search/SearchPeopleExplore').then((m) => ({ default: m.SearchPeopleExplore })),
-);
-const WorkflowPersonSelectSlot = lazySlot<WorkflowPersonSelectSlotProps>(() =>
-  import('../components/workflows/WorkflowPersonSelect').then((m) => ({ default: m.WorkflowPersonSelect })),
+  import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.PersonMultiSelect })),
 );
 // The dialog reports the merge result; the package wants the group's name.
 const MergeLocationsDialogSlot = lazySlot<MergeLocationsDialogSlotProps>(() =>
@@ -101,6 +95,4 @@ export const appMemoriahubSlots: MemoriahubWebSlots = {
   [APP_SLOT_NAMES.albumPeopleDialog]: AlbumPeopleDialogSlot,
   [APP_SLOT_NAMES.personMultiSelect]: PersonMultiSelectSlot,
   [APP_SLOT_NAMES.mergeLocationsDialog]: MergeLocationsDialogSlot,
-  [APP_SLOT_NAMES.searchPeopleExplore]: SearchPeopleExploreSlot,
-  [APP_SLOT_NAMES.workflowPersonSelect]: WorkflowPersonSelectSlot,
 };

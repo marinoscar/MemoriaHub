@@ -17,17 +17,31 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { useNavigate } from 'react-router-dom';
-import { PersonGrid } from '@marinoscar/memoriahub-web/people/ui';
-import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonGrid } from './PersonGrid.js';
+import { listPeople } from '../../headless/index.js';
+import type { PersonListItem } from '../../headless/index.js';
 
-interface AlbumPeopleDialogProps {
+/**
+ * The props of {@link AlbumPeopleDialog}.
+ *
+ * @stability experimental
+ */
+export interface AlbumPeopleDialogProps {
+  /** Whether the dialog is open. */
   open: boolean;
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
+  /** The album whose people are shown. */
   albumId: string;
+  /** The owner scope id of the album. */
   circleId: string;
 }
 
+/**
+ * The dialog that lists the people recognised in one album and links to each person's photos.
+ *
+ * @stability experimental
+ */
 export function AlbumPeopleDialog({ open, onClose, albumId, circleId }: AlbumPeopleDialogProps) {
   const navigate = useNavigate();
   const [people, setPeople] = useState<PersonListItem[]>([]);

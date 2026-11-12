@@ -13,18 +13,27 @@ import type {
   AutocompleteOwnerState,
   AutocompleteRenderValue,
 } from '@mui/material/Autocomplete';
-import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { usePeople } from '../../headless/index.js';
+import { PersonAvatar } from './PersonAvatar.js';
+import type { PersonListItem } from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface PersonMultiSelectProps {
+/**
+ * The props of {@link PersonMultiSelect}.
+ *
+ * @stability experimental
+ */
+export interface PersonMultiSelectProps {
+  /** The owner scope id whose labelled people are offered. */
   circleId: string;
+  /** The chosen person ids and whether a photo must show all or any of them. */
   value: { ids: string[]; mode: 'all' | 'any' };
+  /** Called with the next selection. */
   onChange: (next: { ids: string[]; mode: 'all' | 'any' }) => void;
+  /** The field's label. */
   label?: string;
 }
 
@@ -32,6 +41,11 @@ interface PersonMultiSelectProps {
 // PersonMultiSelect
 // ---------------------------------------------------------------------------
 
+/**
+ * A multi-select of the labelled people of a library, with an all-or-any toggle (the search and workflow condition person filter).
+ *
+ * @stability experimental
+ */
 export function PersonMultiSelect({ circleId, value, onChange, label }: PersonMultiSelectProps) {
   const { data } = usePeople(circleId || null);
 

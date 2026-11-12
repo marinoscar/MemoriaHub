@@ -22,13 +22,12 @@ import userEvent from '@testing-library/user-event';
 
 vi.mock('react-easy-crop', () => ({ default: () => null }));
 
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   usePeople: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/people/ui', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/ui')>()),
+vi.mock('../../src/people/ui/components/PersonAvatar.js', () => ({
   PersonAvatar: () => <span data-testid="person-avatar" />,
 }));
 
@@ -36,9 +35,9 @@ vi.mock('@marinoscar/memoriahub-web/people/ui', async (importOriginal) => ({
 // Imports that depend on mocks
 // ---------------------------------------------------------------------------
 
-import { PersonMultiSelect } from '../../../components/search/PersonMultiSelect';
-import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
+import { PersonMultiSelect } from '../../src/people/ui/components/PersonMultiSelect.js';
+import { usePeople } from '../../src/people/headless/index.js';
+import type { PersonListItem } from '../../src/people/headless/index.js';
 
 const mockUsePeople = vi.mocked(usePeople);
 

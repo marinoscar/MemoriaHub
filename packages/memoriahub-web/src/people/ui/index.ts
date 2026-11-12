@@ -12,3 +12,7 @@ export * from './components/AssignFaceDialog.js';
 export * from './components/FaceMarkerStrip.js';
 export * from './components/FaceThumbnails.js';
 export * from './components/VideoFacePanel.js';
+export * from './components/AlbumPeopleDialog.js';
+export * from './components/PersonMultiSelect.js';
+export * from './components/SearchPeopleExplore.js';
+export * from './components/WorkflowPersonSelect.js';

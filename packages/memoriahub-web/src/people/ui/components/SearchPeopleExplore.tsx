@@ -1,17 +1,22 @@
-/**
- * The people carousel of the search page's explore view: the labelled people of the
- * active library, favourites first, then by face count. It is the host's
- * `search.peopleExplore` slot of the packaged search page, because people belong to
- * the people slice, which has not moved into `@marinoscar/memoriahub-web` yet.
- */
+// The people carousel of the search page's explore view: the labelled people of the
+// active library, favourites first, then by face count.
 import { Box, Typography } from '@mui/material';
 import PersonIcon from '@mui/icons-material/Person';
 import { useNavigate } from 'react-router-dom';
-import { ExploreCarousel } from '@marinoscar/memoriahub-web/media/ui';
-import type { SearchPeopleExploreSlotProps } from '@marinoscar/memoriahub-web/search/ui';
-import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
+import { ExploreCarousel } from '../../../media/ui/index.js';
+import { usePeople } from '../../headless/index.js';
+import type { PersonListItem } from '../../headless/index.js';
+import { PersonAvatar } from './PersonAvatar.js';
+
+/**
+ * The props of {@link SearchPeopleExplore}.
+ *
+ * @stability experimental
+ */
+export interface SearchPeopleExploreProps {
+  /** The owner scope id whose people are shown. */
+  circleId: string;
+}
 
 function renderPersonTile(person: PersonListItem, navigate: ReturnType<typeof useNavigate>) {
   return (
@@ -53,7 +58,12 @@ function renderPersonTile(person: PersonListItem, navigate: ReturnType<typeof us
   );
 }
 
-export function SearchPeopleExplore({ circleId }: SearchPeopleExploreSlotProps) {
+/**
+ * The people carousel of the Search page's explore view: labelled people, favourites first, then by face count.
+ *
+ * @stability experimental
+ */
+export function SearchPeopleExplore({ circleId }: SearchPeopleExploreProps) {
   const navigate = useNavigate();
   const { data: peopleData, loading: peopleLoading } = usePeople(circleId);
 

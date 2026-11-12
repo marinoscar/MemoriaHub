@@ -6,15 +6,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   usePeople: vi.fn(),
 }));
 
-import { WorkflowPersonSelect } from '../../../components/workflows/WorkflowPersonSelect';
-import { usePeople } from '@marinoscar/memoriahub-web/people/headless';
+import { WorkflowPersonSelect } from '../../src/people/ui/components/WorkflowPersonSelect.js';
+import { usePeople } from '../../src/people/headless/index.js';
 
 const mockUsePeople = vi.mocked(usePeople);
 

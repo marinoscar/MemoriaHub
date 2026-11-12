@@ -28,7 +28,7 @@ import { useTheme } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import TuneIcon from '@mui/icons-material/Tune';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { PersonMultiSelectSlot as PersonMultiSelect } from '../../../media/ui/index.js';
+import { PersonMultiSelect } from '../../../people/ui/index.js';
 import { LocationPickerMap } from '../../../media/ui/index.js';
 import type { SearchRequest } from '../../headless/services/search.js';
 import { getExploreTags, getLocationFacets } from '../../../media/headless/index.js';

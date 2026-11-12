@@ -27,10 +27,13 @@ vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
 
 }));
 
+// The people picker is the people slice's; a placeholder keeps the test free of async calls.
+vi.mock('../../src/people/ui/index.js', () => ({
+  PersonMultiSelect: ({ label }: { label: string }) => <div data-testid="person-multi-select">{label}</div>,
+}));
+
 vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  // The people picker is the host's slot; a placeholder keeps the test free of async calls.
-  PersonMultiSelectSlot: ({ label }: { label: string }) => <div data-testid="person-multi-select">{label}</div>,
   LocationPickerMap: vi.fn(
     ({ onChange }: { onChange: (latlng: { lat: number; lng: number }) => void }) => (
       <button

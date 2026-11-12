@@ -200,7 +200,8 @@
     ],
     "search": [
       "core",
-      "media"
+      "media",
+      "people"
     ],
     "tagging": [
       "core",
@@ -209,7 +210,8 @@
     "workflows": [
       "core",
       "media",
-      "review-runs"
+      "review-runs",
+      "people"
     ],
     "people": [
       "core",
