@@ -15,7 +15,10 @@
  *   4. EXPLAIN (FORMAT JSON) of the REAL statements the app sends (captured from Prisma's query log, plus
  *      the raw `accessibleSql` fragment): the gallery keyset list (`circle_id IN (...)`), the
  *      `ownedByMeOrMyGroups` list and the `accessibleWhere` list never read `media_items` with a sequential
- *      scan, and name the index they use. The plans are printed to the test output.
+ *      scan, and name the index they use. The plans are printed to the test output. With an
+ *      `ORDER BY captured_at DESC ... LIMIT 50` the planner walks `media_items_captured_at_idx` backwards and
+ *      filters on the owner (cheap for a caller owning ~9% of the table, as here); the unordered
+ *      owner lookups (4e) are served by the owner indexes, which is what a selective caller gets.
  *
  * Skips (reported as skipped) when nothing listens on the configured port.
  */
@@ -310,7 +313,7 @@ describeMaybeDb('RETRO-I3 multi-group union and its query plans (DB_GATED: real 
       });
     });
     const { sql, params } = lastListStatement();
-    assertIndexed('gallery (circle_id IN scopes, keyset)', await explain(sql, params), /^media_items_(gallery|circle_id)_idx$/);
+    assertIndexed('gallery (circle_id IN scopes, keyset)', await explain(sql, params), /^media_items_(gallery|circle_id|captured_at)_idx$/);
   });
 
   it('4b. the ownedByMeOrMyGroups list is index-driven (owner_user_id OR owner_group_id)', async () => {
@@ -331,7 +334,7 @@ describeMaybeDb('RETRO-I3 multi-group union and its query plans (DB_GATED: real 
       });
     });
     const { sql, params } = lastListStatement();
-    assertIndexed('ownedByMeOrMyGroups', await explain(sql, params), /^media_items_owner_(user|group)_id_idx$/);
+    assertIndexed('ownedByMeOrMyGroups', await explain(sql, params), /^media_items_(owner_(user|group)_id|captured_at)_idx$/);
   });
 
   it('4c. the accessibleWhere list (owner scope plus grants) never scans media_items sequentially', async () => {
@@ -349,7 +352,7 @@ describeMaybeDb('RETRO-I3 multi-group union and its query plans (DB_GATED: real 
       });
     });
     const { sql, params } = lastListStatement();
-    assertIndexed('accessibleWhere (scope all)', await explain(sql, params), /^media_items_(owner_(user|group)_id|gallery|circle_id)_idx$/);
+    assertIndexed('accessibleWhere (scope all)', await explain(sql, params), /^media_items_(owner_(user|group)_id|gallery|circle_id|captured_at)_idx$/);
   });
 
   it('4d. the raw accessibleSql fragment is index-driven too', async () => {
@@ -357,6 +360,26 @@ describeMaybeDb('RETRO-I3 multi-group union and its query plans (DB_GATED: real 
     const fragment = accessibleSql(me, 'media_item', 'r', { sqlKit: Prisma, scope: 'all' }) as Prisma.Sql;
     const statement = Prisma.sql`SELECT r.id FROM media_items r WHERE ${fragment} AND r.deleted_at IS NULL ORDER BY r.captured_at DESC, r.id DESC LIMIT ${50}`;
     const plan = await explain(statement.text, statement.values);
-    assertIndexed('accessibleSql (raw)', plan, /^media_items_(owner_(user|group)_id|gallery|circle_id)_idx$/);
+    assertIndexed('accessibleSql (raw)', plan, /^media_items_(owner_(user|group)_id|gallery|circle_id|captured_at)_idx$/);
+  });
+
+  it('4e. the unordered owner lookups (a count, a membership probe) use the owner / circle indexes', async () => {
+    const me = await groups.enrich(principal(users.n));
+    captured.length = 0;
+    await data.runInOrg({ orgId, userId: users.n }, async (rawTx) => {
+      const tx = rawTx as Prisma.TransactionClient;
+      await tx.mediaItem.count({
+        where: {
+          AND: [
+            ownedByMeOrMyGroups(me, { ownerUserField: 'ownerUserId', ownerGroupField: 'ownerGroupId' }) as Prisma.MediaItemWhereInput,
+            { deletedAt: null },
+          ],
+        },
+      });
+    });
+    const hit = [...captured].reverse().find((q) => /FROM "public"\."media_items"/.test(q.query) && /COUNT/i.test(q.query));
+    if (!hit) throw new Error('no media_items count statement was captured');
+    assertIndexed('ownedByMeOrMyGroups count (selective caller)', await explain(hit.query, JSON.parse(hit.params) as unknown[]), /^media_items_owner_(user|group)_id_idx$/);
   });
 });
+
