@@ -21,7 +21,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/images.yml'
   push:
-    branches: [main]
+    branches: [main, ci/retro-gates]  # TEMP-BRANCH
     paths:
       - 'apps/api/Dockerfile'
       - 'apps/cli/Dockerfile'
