@@ -50,6 +50,10 @@ const SERVER_ONLY_TYPE = 'retro.c2.server_only';
 describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the MemoriaHub schema (DB_GATED: real PostgreSQL)', () => {
   let scratch: ScratchDatabase;
   let prisma: PrismaClient;
+  // The inputs adapter reads `media_items` on the plain client with no organization of its own (the app-reads
+  // row of docs/platform-adoption/local-exceptions.md): its client carries the explicit `app.rls_bypass`
+  // connection option, as the same ordinary role. Seeding and the jobs slice use `prisma` / the scoped `q`.
+  let inputsPrisma: PrismaClient;
   let registry: JobHandlerRegistry;
   let jobs: JobsService;
   let nodes: NodesService;
@@ -74,6 +78,9 @@ describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the Memoria
   beforeAll(async () => {
     scratch = await createScratchDatabase(`c2_round_${randomUUID().replace(/-/g, '').slice(0, 12)}`);
     prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: connectionUrl(scratch.name), max: 4 }) });
+    inputsPrisma = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: `${connectionUrl(scratch.name)}?options=${encodeURIComponent('-c app.rls_bypass=on')}`, max: 2 }),
+    });
 
     ownerId = randomUUID();
     await q(`INSERT INTO users (id, email, is_active, updated_at) VALUES ($1, $2, true, now())`, [
@@ -115,6 +122,7 @@ describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the Memoria
   }, 300_000);
 
   afterAll(async () => {
+    await inputsPrisma?.$disconnect();
     await prisma?.$disconnect();
     await scratch?.drop();
   });
@@ -181,7 +189,7 @@ describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the Memoria
     let objectId: string;
 
     beforeAll(async () => {
-      adapter = new NodeJobInputsAdapter(prisma as never);
+      adapter = new NodeJobInputsAdapter(inputsPrisma as never);
       const org = (await q(`SELECT id FROM organizations WHERE is_default`))[0].id;
       objectId = randomUUID();
       mediaItemId = randomUUID();
