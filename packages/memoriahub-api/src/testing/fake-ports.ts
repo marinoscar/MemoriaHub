@@ -1,6 +1,7 @@
 import { InProcessMemoriahubEvents } from '../core/index.js';
 import type { MemoriahubPortBindings } from '../core/index.js';
 import { FakeMemoriahubAccess } from './fake-access.js';
+import { FakeMemoriahubAiAdmin } from './fake-ai-admin.js';
 import { FakeMemoriahubAi } from './fake-ai.js';
 import { FakeMemoriahubIdentity } from './fake-identity.js';
 import { FakeMemoriahubJobs } from './fake-jobs.js';
@@ -50,6 +51,8 @@ export interface FakeMemoriahubPorts {
   metrics: RecordingMemoriahubMetrics;
   /** The link-sharing port. */
   sharing: FakeMemoriahubSharing;
+  /** The AI administration probe port. */
+  aiAdmin: FakeMemoriahubAiAdmin;
 }
 
 /**
@@ -74,6 +77,7 @@ export function createFakeMemoriahubPorts(): FakeMemoriahubPorts {
     webhooks: new RecordingMemoriahubWebhooks(),
     metrics: new RecordingMemoriahubMetrics(),
     sharing: new FakeMemoriahubSharing(),
+    aiAdmin: new FakeMemoriahubAiAdmin(),
   };
 }
 
@@ -101,5 +105,6 @@ export function fakeMemoriahubBindings(ports: FakeMemoriahubPorts = createFakeMe
     webhooks: { useValue: ports.webhooks },
     metrics: { useValue: ports.metrics },
     sharing: { useValue: ports.sharing },
+    aiAdmin: { useValue: ports.aiAdmin },
   };
 }

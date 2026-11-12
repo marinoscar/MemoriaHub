@@ -1,5 +1,6 @@
 export * from './conformance.js';
 export * from './fake-access.js';
+export * from './fake-ai-admin.js';
 export * from './fake-ai.js';
 export * from './fake-identity.js';
 export * from './fake-jobs.js';

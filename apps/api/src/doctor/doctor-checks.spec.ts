@@ -37,7 +37,7 @@ import {
 } from '../../test/mocks/prisma.mock';
 
 import { ALL_MEMORIAHUB_DOCTOR_CHECKS as MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
-import { MEMORIAHUB_DOCTOR, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '@marinoscar/memoriahub-api/ports';
+import { MEMORIAHUB_AI_ADMIN, MEMORIAHUB_DOCTOR, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '@marinoscar/memoriahub-api/ports';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ describe('MemoriaHub Doctor checks', () => {
   let service: { runDiagnostics: () => Promise<DoctorReport> };
   let mockPrisma: MockPrismaService;
   let mockSystemSettings: jest.Mocked<Pick<AppSystemSettingsService, 'readKnownValue'>>;
-  let mockAiSettings: jest.Mocked<Pick<AiSettingsService, 'testProvider' | 'testEmbedding'>>;
+  let mockAiSettings: jest.Mocked<Pick<AiSettingsService, 'testProvider' | 'testEmbedding' | 'credentialStatus'>>;
   let mockFaceSettings: jest.Mocked<Pick<FaceSettingsService, 'testProvider'>>;
   let mockGeoSettings: jest.Mocked<Pick<GeoSettingsService, 'testProvider'>>;
   let mockStorageProvider: { exists: jest.Mock; getBucket: jest.Mock };
@@ -243,6 +243,27 @@ describe('MemoriaHub Doctor checks', () => {
     const byToken = new Map<unknown, unknown>([
       [MEMORIAHUB_DOCTOR, { registerCheck: jest.fn() }],
       [MEMORIAHUB_PRISMA, mockPrisma],
+      [
+        // The AI administration port over the AI settings and provider-registry doubles: the same mapping the
+        // platform adapter makes (key status only, capability from the registry, `null` for an unknown provider).
+        MEMORIAHUB_AI_ADMIN,
+        {
+          testModel: (target: { provider: string; model: string }) => mockAiSettings.testProvider(target),
+          testEmbedding: () => mockAiSettings.testEmbedding({}),
+          credentialStatus: async (provider: string) => {
+            const status = await mockAiSettings.credentialStatus(provider);
+            return { configured: status.configured, enabled: status.enabled };
+          },
+          providerCapabilities: (provider: string) => {
+            try {
+              const adapter = mockAiProviderRegistry.get(provider);
+              return adapter ? { transcribeAudio: typeof adapter.audio?.transcribe === 'function' } : null;
+            } catch {
+              return null;
+            }
+          },
+        },
+      ],
       [
         // The object-store port over the storage double: the same capability mapping the platform adapter makes.
         MEMORIAHUB_OBJECT_STORE,

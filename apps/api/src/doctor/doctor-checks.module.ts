@@ -12,8 +12,8 @@
 // The checks a domain slice owns (RETRO-J10, #624) are the slice's: they register through the
 // `MEMORIAHUB_DOCTOR` port from their slice's `forRoot` providers (see `SLICE_DOCTOR_CHECKS`), bound to
 // the platform registry by `PlatformMemoriahubDoctorAdapter`. What stays here is what has no slice to
-// own it (core, auth, nodes), what needs a platform service (the AI admin probes over the platform
-// `AiService`). Nothing imports this module except
+// own it (core, auth, nodes), what needs a platform service (nothing since RETRO-J10: the AI probes are the
+// slices', over the `MEMORIAHUB_AI_ADMIN` port). Nothing imports this module except
 // `AppModule`, so it closes no cycle.
 //
 // The platform ships `db.connection`, `db.migrations`, `secrets.encryption-key`
@@ -40,16 +40,13 @@ import {
 } from '@marinoscar/memoriahub-api/face';
 import { GeoReverseProviderDoctorCheck } from '@marinoscar/memoriahub-api/location';
 import { WorkflowsStateDoctorCheck } from '@marinoscar/memoriahub-api/workflows';
-import { AiFlagConsistencyDoctorCheck } from '@marinoscar/memoriahub-api/tagging';
+import { AiFlagConsistencyDoctorCheck, AiTaggingDoctorCheck, VideoTaggingDoctorCheck } from '@marinoscar/memoriahub-api/tagging';
+import { AiEmbeddingDoctorCheck, AiSearchDoctorCheck } from '@marinoscar/memoriahub-api/search';
+import { PictureEnhancerDoctorCheck } from '@marinoscar/memoriahub-api/enhancement';
 
 import { AdminBootstrapDoctorCheck } from './checks/auth/admin-bootstrap.doctor-check';
 import { GoogleOauthDoctorCheck } from './checks/auth/google-oauth.doctor-check';
 import { JwtDoctorCheck } from './checks/auth/jwt.doctor-check';
-import { AiEmbeddingDoctorCheck } from './checks/ai/embedding.doctor-check';
-import { AiSearchDoctorCheck } from './checks/ai/search.doctor-check';
-import { AiTaggingDoctorCheck } from './checks/ai/tagging.doctor-check';
-import { PictureEnhancerDoctorCheck } from './checks/ai/picture-enhancer.doctor-check';
-import { VideoTaggingDoctorCheck } from './checks/ai/video-tagging.doctor-check';
 import { AppUrlDoctorCheck } from './checks/core/app-url.doctor-check';
 import { PgvectorDoctorCheck } from './checks/core/pgvector.doctor-check';
 import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-health.doctor-check';
@@ -72,12 +69,7 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   GoogleOauthDoctorCheck,
   AdminBootstrapDoctorCheck,
   // storage
-  // ai
-  AiSearchDoctorCheck,
-  AiTaggingDoctorCheck,
-  AiEmbeddingDoctorCheck,
-  PictureEnhancerDoctorCheck,
-  VideoTaggingDoctorCheck,
+  // ai (the slices' since RETRO-J10, over the `MEMORIAHUB_AI_ADMIN` port)
   // face
   // geo
   // jobs
@@ -99,6 +91,11 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
 export const SLICE_DOCTOR_CHECKS = [
   // ai
   AiFlagConsistencyDoctorCheck,
+  AiSearchDoctorCheck,
+  AiTaggingDoctorCheck,
+  AiEmbeddingDoctorCheck,
+  PictureEnhancerDoctorCheck,
+  VideoTaggingDoctorCheck,
   SocialMediaDoctorCheck,
   DuplicateDetectionDoctorCheck,
   // face

@@ -1,6 +1,7 @@
 import { Module, type DynamicModule, type ModuleMetadata, type Provider } from '@nestjs/common';
 
 import { MediaModule } from '../media/index.js';
+import { PictureEnhancerDoctorCheck } from './doctor/picture-enhancer.doctor-check.js';
 import { EnhancementReviewQueueCounter } from './enhancement-review-queue.counter.js';
 import { ExifCarryoverService } from './exif-carryover.service.js';
 import { ENHANCEMENT_OPTIONS, type EnhancementModuleOptions } from './enhancement-host-hooks.js';
@@ -66,6 +67,7 @@ export class EnhancementModule {
         PictureEnhancementPurgeHandler,
         PictureEnhancementPurgeTask,
         EnhancementReviewQueueCounter,
+        PictureEnhancerDoctorCheck,
       ],
       exports: [MediaEnhancementService, ExifCarryoverService],
     };

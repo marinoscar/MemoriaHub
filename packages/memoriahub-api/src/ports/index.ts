@@ -1,4 +1,5 @@
 export * from './access.port.js';
+export * from './ai-admin.port.js';
 export * from './ai.port.js';
 export * from './audit.port.js';
 export * from './doctor.port.js';

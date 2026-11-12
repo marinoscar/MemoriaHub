@@ -13,3 +13,4 @@ export * from './http/enhancement-batches.controller.js';
 export * from './http/admin-enhancement.controller.js';
 export * from './exif-carryover.service.js';
 export * from './enhancement-review-queue.counter.js';
+export * from './doctor/picture-enhancer.doctor-check.js';

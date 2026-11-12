@@ -12,6 +12,7 @@ import {
 import {
   MEMORIAHUB_ACCESS,
   MEMORIAHUB_AI,
+  MEMORIAHUB_AI_ADMIN,
   MEMORIAHUB_AUDIT,
   MEMORIAHUB_EVENTS,
   MEMORIAHUB_IDENTITY,
@@ -26,6 +27,7 @@ import {
   MEMORIAHUB_SHARING,
   MEMORIAHUB_WEBHOOKS,
   type MemoriahubAccessPort,
+  type MemoriahubAiAdminPort,
   type MemoriahubAiPort,
   type MemoriahubAuditPort,
   type MemoriahubDoctorPort,
@@ -135,6 +137,11 @@ export interface MemoriahubPortBindings {
   doctor?: MemoriahubPortBinding<MemoriahubDoctorPort>;
   /** The link-sharing port, bound to `MEMORIAHUB_SHARING`. Optional; defaults to a no-op that lists nothing. */
   sharing?: MemoriahubPortBinding<MemoriahubSharingPort>;
+  /**
+   * The AI administration probe port, bound to `MEMORIAHUB_AI_ADMIN`. Optional, with NO default: an unbound
+   * port is simply absent and the diagnostics that need it are skipped.
+   */
+  aiAdmin?: MemoriahubPortBinding<MemoriahubAiAdminPort>;
   /** Modules the bindings' providers need (a binding by `useClass` resolves its dependencies from them). */
   imports?: ModuleMetadata['imports'];
 }
@@ -209,7 +216,7 @@ export const NOOP_MEMORIAHUB_SHARING: MemoriahubSharingPort = Object.freeze({
 
 type RequiredPort = Exclude<
   keyof MemoriahubPortBindings,
-  'events' | 'audit' | 'webhooks' | 'metrics' | 'doctor' | 'sharing' | 'imports'
+  'events' | 'audit' | 'webhooks' | 'metrics' | 'doctor' | 'sharing' | 'aiAdmin' | 'imports'
 >;
 
 /** Required ports in the order they are reported, with their tokens. */
@@ -308,13 +315,16 @@ export class MemoriahubPortsModule {
         ? provider(MEMORIAHUB_SHARING, bindings.sharing as MemoriahubPortBinding<unknown>)
         : { provide: MEMORIAHUB_SHARING, useValue: NOOP_MEMORIAHUB_SHARING },
     );
+    // No default: a host that binds no AI administration port has none, and what needs it is skipped.
+    const aiAdmin = isBinding(bindings.aiAdmin);
+    if (aiAdmin) providers.push(provider(MEMORIAHUB_AI_ADMIN, bindings.aiAdmin as MemoriahubPortBinding<unknown>));
 
     return {
       module: MemoriahubPortsModule,
       global: true,
       imports: bindings.imports ?? [],
       providers,
-      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS, MEMORIAHUB_DOCTOR, MEMORIAHUB_SHARING],
+      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS, MEMORIAHUB_DOCTOR, MEMORIAHUB_SHARING, ...(aiAdmin ? [MEMORIAHUB_AI_ADMIN] : [])],
     };
   }
 }
