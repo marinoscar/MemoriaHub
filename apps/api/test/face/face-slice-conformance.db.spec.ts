@@ -90,21 +90,21 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
   async function faceSliceOverTheWebHost() {
     const { circleId, mediaItemId } = await seedLibrary();
     const keys = new Map<string, string>();
-    const matching = (backend: 'app' | 'pgvector') => new FaceMatchingService(prisma as never, configFor(backend));
+    const matching = (backend: 'app' | 'pgvector') => new FaceMatchingService(seed as never, configFor(backend));
     const appMatching = matching('app');
     const core = new FaceDetectionCore(
-      prisma as never,
+      seed as never,
       { resolveCredentials: async () => ({}) } as never,
       { get: () => ({ detect: async () => [] }) } as never,
       appMatching,
       { getSettings: async () => ({ features: {}, face: {} }), face: async () => undefined } as never,
     );
     const detection = new FaceDetectionService(
-      prisma as never,
+      seed as never,
       {} as never,
       { recordModel: async () => undefined } as never,
       core,
-      new MediaTouchService(prisma as never),
+      new MediaTouchService(seed as never),
     );
 
     const addFace = async (key: string, data: Record<string, unknown>): Promise<string> => {
@@ -137,7 +137,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
         },
       },
       clustering: {
-        service: new FaceClusteringService(prisma as never, appMatching),
+        service: new FaceClusteringService(seed as never, appMatching),
         circleId,
         userId,
         seedFaces: async (faces: ReadonlyArray<{ key: string; embedding: number[]; hidden: boolean }>) => {

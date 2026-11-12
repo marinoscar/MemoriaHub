@@ -18,7 +18,7 @@ import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-re
 import { WorkflowExecuteBatchHandler } from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
-import { seedClient, type SeedClient } from '../helpers/org-scope';
+import { housekeepingClient, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -85,7 +85,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     const recent = await workflowRun('completed', ago(10), ago(10));
     const running = await workflowRun('running', ago(40), null);
 
-    await new WorkflowRunsRetentionHandler(registry, prisma, settings as never).process(job);
+    await new WorkflowRunsRetentionHandler(registry, housekeepingClient(prisma), settings as never).process(job);
 
     const left = await seed.workflowRun.findMany({ where: { workflowId }, select: { id: true, status: true } });
     const byId = new Map(left.map((r) => [r.id, r.status]));
@@ -98,7 +98,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
 
   it('canDelete reads the real run: a pending batch of a running run is vetoed', async () => {
     const run = await workflowRun('running', new Date(), null);
-    const handler = new WorkflowExecuteBatchHandler({} as never, prisma as never, {} as never, {} as never, {} as never);
+    const handler = new WorkflowExecuteBatchHandler({} as never, seed as never, {} as never, {} as never, {} as never);
     const pending = { status: 'pending', payload: { runId: run.id, itemIds: [] } } as unknown as Job;
     expect(await handler.canDelete(pending)).toContain('Cancel the run');
     await seed.workflowRun.update({ where: { id: run.id }, data: { status: 'cancelled' } });
@@ -119,7 +119,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     const staleTrash = await trash('running', ago(3), null);
     const oldTrash = await trash('completed', ago(31), ago(31));
 
-    await new ReviewRunsRetentionHandler(registry, prisma, settings as never).process(job);
+    await new ReviewRunsRetentionHandler(registry, housekeepingClient(prisma), settings as never).process(job);
 
     const reviews = new Map(
       (await seed.reviewRun.findMany({ where: { circleId } })).map((r) => [r.id, r]),

@@ -45,10 +45,10 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
           : token === DefaultOrgId
             ? { get: async () => randomUUID() }
             : token === OwnerAccessService
-              ? buildOwnerAccessService(prisma)
+              ? buildOwnerAccessService(seed as never)
               : token === OwnerScopeSweepService
-                ? sqlScopeDirectory(prisma as never)
-                : prisma,
+                ? sqlScopeDirectory(seed as never)
+                : seed,
     }) as unknown as OnboardingRequestContext;
 
   beforeAll(async () => {

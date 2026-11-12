@@ -74,20 +74,24 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
         version: 1,
       }),
     };
+    // The domain services read `media_items` and the review groups on the client they are given, with no
+    // organization of their own (the "MemoriaHub's own reads" row of docs/platform-adoption/local-exceptions.md):
+    // under the ordinary role they are handed the default organization's scoped client, exactly the
+    // `forOrg(defaultOrgId)` the planned app-read scoping uses. In production a job runs under JobScope.
     const dedupService = new DuplicateDetectionService(
-      prisma,
+      seed as never,
       noDownload as never,
       settings as never,
       degradedClip as never,
     );
     const burstService = new BurstDetectionService(
-      prisma as never,
+      seed as never,
       noDownload as never,
       settings as never,
       dedupService,
     );
-    dedupHandler = new DuplicateDetectionHandler(registry as never, prisma, dedupService);
-    burstHandler = new BurstDetectionHandler(registry as never, prisma, burstService);
+    dedupHandler = new DuplicateDetectionHandler(registry as never, seed as never, dedupService);
+    burstHandler = new BurstDetectionHandler(registry as never, seed as never, burstService);
   });
 
   afterAll(async () => {

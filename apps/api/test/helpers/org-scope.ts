@@ -11,6 +11,12 @@
 // spec that must see or write rows of every organization on purpose (a migration replay, a cross-org
 // count) and each use says why.
 import type { Client } from 'pg';
+import { forSystem } from '@marinoscar/platform-api/core';
+
+import {
+  MEDIA_HOUSEKEEPING_REASON,
+  registerMemoriaHubSystemAccessReasons,
+} from '../../src/app-registrations/system-access-reasons';
 
 export interface OrgScopeOptions {
   /** The organization; defaults to the default organization (`mh_default_org_id()`). */
@@ -23,6 +29,12 @@ export interface ScopedQueryable {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, any>>; rowCount: number | null }>;
 }
 
+async function scopeStatement(client: Pick<Client, 'query'>, options: OrgScopeOptions): Promise<void> {
+  if (options.bypass) await client.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
+  else if (options.orgId) await client.query(`SELECT set_config('app.org_id', $1, true)`, [options.orgId]);
+  else await client.query(`SELECT set_config('app.org_id', mh_default_org_id()::text, true)`);
+}
+
 /** Runs `fn` in one transaction whose first statement opens the scope. */
 export async function inOrgTransaction<R>(
   client: Pick<Client, 'query'>,
@@ -31,9 +43,7 @@ export async function inOrgTransaction<R>(
 ): Promise<R> {
   await client.query('BEGIN');
   try {
-    if (options.bypass) await client.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
-    else if (options.orgId) await client.query(`SELECT set_config('app.org_id', $1, true)`, [options.orgId]);
-    else await client.query(`SELECT set_config('app.org_id', mh_default_org_id()::text, true)`);
+    await scopeStatement(client, options);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -59,7 +69,10 @@ export function orgScoped(client: Pick<Client, 'query'>, options: OrgScopeOption
       const control = /^\s*(BEGIN|START TRANSACTION|COMMIT|END|ROLLBACK)\b/i.exec(sql);
       if (control) {
         open = /^(BEGIN|START)/i.test(control[1]!);
-        return (await client.query(sql, params as unknown[])) as never;
+        const result = await client.query(sql, params as unknown[]);
+        // The scope is the transaction's first statement; the spec may widen or replace it afterwards.
+        if (open) await scopeStatement(client, options);
+        return result as never;
       }
       if (open) return (await client.query(sql, params as unknown[])) as never;
       return (await inOrgTransaction(client, (c) => c.query(sql, params as unknown[]) as never, options)) as never;
@@ -80,4 +93,14 @@ export async function seedClient(prisma: import('../../src/prisma/prisma.service
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
   if (rows.length === 0) throw new Error('no organization row: run the migrations first');
   return prisma.forOrg(rows[0]!.id);
+}
+
+/**
+ * The platform's system client (`app.rls_bypass`, transaction-local) under MemoriaHub's housekeeping
+ * reason, for the code under test that sweeps every organization's rows (a retention purge) on the client
+ * it is given. An explicit, reasoned bypass; never a superuser connection.
+ */
+export function housekeepingClient(prisma: import('../../src/prisma/prisma.service').PrismaService): never {
+  registerMemoriaHubSystemAccessReasons();
+  return forSystem(prisma as never, MEDIA_HOUSEKEEPING_REASON as never) as never;
 }

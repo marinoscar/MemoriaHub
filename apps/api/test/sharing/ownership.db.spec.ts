@@ -95,7 +95,7 @@ describeMaybeDb('RETRO-I2 circles to groups and content ownership (DB_GATED: rea
   let migration: string;
   let defaultOrg: string;
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db, { bypass: true }).query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
   const circleByName = async (name: string): Promise<Row> => one(`SELECT * FROM circles WHERE name = $1`, [name]);
 

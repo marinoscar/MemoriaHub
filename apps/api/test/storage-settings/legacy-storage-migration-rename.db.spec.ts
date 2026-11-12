@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
-import { orgScoped } from '../helpers/org-scope';
+import { orgScoped, seedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -295,7 +295,8 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
     });
 
     it('MhLegacyStorageMigrationRun / Item map onto mh_legacy_*, with the object relation', async () => {
-      const run = await prisma.mhLegacyStorageMigrationRun.findUnique({
+      // The object relation reads `storage_objects` (row-level security): the default organization's scope.
+      const run = await (await seedClient(prisma)).mhLegacyStorageMigrationRun.findUnique({
         where: { id: ids.run },
         include: { items: { include: { object: { select: { id: true } } } } },
       });
