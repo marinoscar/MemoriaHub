@@ -1,5 +1,5 @@
 /** Settings → Search (`/settings/search`), RETRO-B5 #621: the search field preferences. */
-import { SearchFieldsSettings } from '../../components/settings/SearchFieldsSettings';
+import { SearchFieldsSettings } from '@marinoscar/memoriahub-web/search/ui';
 import { UserSettingsCardPage } from './UserSettingsCardPage';
 
 export default function SearchPreferencesPage() {
