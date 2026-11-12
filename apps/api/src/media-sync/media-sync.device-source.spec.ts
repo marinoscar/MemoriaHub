@@ -5,8 +5,8 @@ import {
   MEDIA_SYNC_DEVICE_SOURCE_ID,
   MediaSyncDeviceSourceBinder,
   bindMediaSyncDeviceSource,
-  mediaSyncDevicesBehind,
-  mediaSyncReportedApps,
+  devicesBehind,
+  reportedApps,
   registerMediaSyncDeviceSource,
 } from './media-sync.device-source';
 
@@ -42,36 +42,13 @@ describe('the Media Sync device source (RETRO-D5, #586)', () => {
     await expect(MEDIA_SYNC_DEVICE_SOURCE.devicesBehind!('memoriahub.marin.cr', 9)).resolves.toBe(0);
   });
 
-  it('groups ACTIVE devices that reported a package and a signer, one row per pair', async () => {
+  it('delegates to the media slice queries over the bound client', async () => {
     const prisma = fakePrisma();
-    const rows = await mediaSyncReportedApps(prisma as never);
-
-    expect(prisma.mediaSyncDevice.groupBy).toHaveBeenCalledWith({
-      by: ['packageName', 'signingSha256'],
-      where: { status: 'active', packageName: { not: null }, signingSha256: { not: null } },
-      _count: { _all: true },
-      _max: { lastSeenAt: true },
-    });
-    expect(rows).toEqual([
-      {
-        packageName: 'memoriahub.marin.cr',
-        signingSha256: 'ab:cd',
-        deviceCount: 3,
-        lastSeenAt: new Date('2026-10-01T00:00:00Z'),
-      },
+    await expect(reportedApps(prisma as never)).resolves.toEqual([
+      { packageName: 'memoriahub.marin.cr', signingSha256: 'ab:cd', deviceCount: 3, lastSeenAt: new Date('2026-10-01T00:00:00Z') },
     ]);
-  });
-
-  it('counts active devices on an older build of the package, plus those that never reported one', async () => {
-    const prisma = fakePrisma();
-    await expect(mediaSyncDevicesBehind('memoriahub.marin.cr', 12, prisma as never)).resolves.toBe(2);
-    expect(prisma.mediaSyncDevice.count).toHaveBeenCalledWith({
-      where: {
-        status: 'active',
-        appVersionCode: { lt: 12 },
-        OR: [{ packageName: 'memoriahub.marin.cr' }, { packageName: null }],
-      },
-    });
+    await expect(devicesBehind('memoriahub.marin.cr', 12, prisma as never)).resolves.toBe(2);
+    expect(prisma.mediaSyncDevice.count).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ appVersionCode: { lt: 12 } }) }));
   });
 
   it('reads through the client the binder binds at module init', async () => {

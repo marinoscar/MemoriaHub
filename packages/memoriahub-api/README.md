@@ -12,7 +12,7 @@ Status: experimental. It is `"private": true` until the owner opens the publish 
 
 Entry points (a slice README per folder):
 
-- `@marinoscar/memoriahub-api/ports`: the thirteen ports (tokens, interfaces, option and result shapes) and the two classes a slice throws across them ([slice README](src/ports/README.md#purpose-and-scope)).
+- `@marinoscar/memoriahub-api/ports`: the fourteen ports (tokens, interfaces, option and result shapes) and the two classes a slice throws across them ([slice README](src/ports/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/core`: `MemoriahubPortsModule.forRoot`, the optional-port defaults, the `Prisma` SQL helper, the domain error base class and the AI-to-job error helpers ([slice README](src/core/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/testing`: an in-memory fake of every port and `describeMemoriahubPortsConformance`, the kit a binding must pass ([slice README](src/testing/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-api/media`: the media slice, `MediaModule.forRoot` and `UploadEnrichmentRegistry` ([slice README](src/media/README.md#purpose-and-scope)).
@@ -107,6 +107,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_AUDIT`, `MemoriahubAuditPort` | token | the audit sink |
 | `MEMORIAHUB_WEBHOOKS`, `MemoriahubWebhooksPort` | token | outbound webhook events |
 | `MEMORIAHUB_METRICS`, `MemoriahubMetricsPort` | token | counters and histograms by registered name |
+| `MEMORIAHUB_DOCTOR`, `MemoriahubDoctorPort` | token | optional: the diagnostics checks a slice registers (`MemoriahubDoctorCheck`; read-only, permanent ids `memoriahub.<section>.<name>`); the default registers nothing |
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver`, `WorkflowTriggerService` | registry, token, service | the workflows slice's catalog, action implementation, run side channels (`WorkflowRunObserver`) and settlement entry point (`WorkflowTriggerService.evaluateSettlement`) a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |
@@ -130,6 +131,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEDIA_OBJECT_REPROCESSOR`, `MediaObjectReprocessor` | token | re-runs the post-upload processors for one stored object, now (the thumbnail jobs call it from inside a job) |
 | `MEDIA_THUMBNAIL_PRUNER`, `MediaThumbnailPruner` | token | deletes the thumbnails a source object no longer points at (best-effort; after the media item sync, issue #434) |
 | `MEDIA_SYSTEM_ACCESS`, `MediaSystemAccess` | token | the cross-organization database client for the global `thumbnail_repair` scan, bound under the host's media housekeeping reason |
+| `MEDIA_RECOVERY_SYSTEM_ACCESS` | token | a `MediaSystemAccess` for the `media.storage.recover_stuck` and `media.storage.reprocess` jobs, bound under the host's storage recovery reason |
 | `FACE_CONFIG`, `FACE_PERSON_AVATARS`, `FACE_STORAGE_ORG` | token | the face slice's three host hooks: the configuration reader, the account-avatar code and the organization of a derived storage row |
 | `MEMORIES_OPTIONS`, `MEMORIES_ALBUMS`, `MEMORIES_EMAIL_READINESS`, `MEMORIES_GENERATION_HOOK` | token | the memories slice's host hooks: the resolved options (digest signing key), save-as-album over the host's album code, e-mail readiness, and the after-generation hook |
 

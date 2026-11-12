@@ -20,8 +20,10 @@ import {
   type NotificationChannel,
   type NotificationRegistration,
 } from '@marinoscar/platform-api/notifications';
+import { PrismaService } from '../../prisma/prisma.service';
 import type {
   MemoriahubEmailKit,
+  MemoriahubLiveStateRow,
   MemoriahubEmailTemplateDef,
   MemoriahubNotificationEventDef,
   MemoriahubNotifyCountedOptions,
@@ -52,7 +54,10 @@ import type {
 export class PlatformMemoriahubNotifyAdapter implements MemoriahubNotifyPort {
   private readonly logger = new Logger(PlatformMemoriahubNotifyAdapter.name);
 
-  constructor(private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly notifications: NotificationsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   registerEvents(defs: readonly MemoriahubNotificationEventDef[]): void {
     for (const def of defs) {
@@ -110,6 +115,22 @@ export class PlatformMemoriahubNotifyAdapter implements MemoriahubNotifyPort {
     options?: MemoriahubNotifyStateOptions,
   ): void {
     this.detach(eventKey, () => this.notifications.notifyState(eventKey, userId, data, options));
+  }
+
+  /**
+   * The live STATE rows of the given events: not dismissed and carrying the platform's `state:` dedup key,
+   * optionally in one scope (the `notifications` table is the platform inbox, read here with the main client).
+   */
+  async liveStates(eventKeys: readonly string[], scopeId?: string): Promise<MemoriahubLiveStateRow[]> {
+    return this.prisma.notification.findMany({
+      where: {
+        eventKey: { in: [...eventKeys] },
+        dismissedAt: null,
+        dedupKey: { startsWith: 'state:' },
+        ...(scopeId ? { scopeId } : {}),
+      },
+      select: { userId: true, eventKey: true, scopeId: true },
+    });
   }
 
   async notifyNow(

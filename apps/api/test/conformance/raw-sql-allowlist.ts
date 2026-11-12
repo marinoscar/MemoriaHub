@@ -11,7 +11,7 @@ export const RAW_SQL_ALLOWLIST: ReadonlyArray<{ file: string; why: string }> = [
   { file: 'duplicate.service.ts', why: 'pgvector similarity queries scoped by circle id; not user data. In the dedup slice package (packages/memoriahub-api/src/dedup).' },
   { file: 'visual-embedding.service.ts', why: 'pgvector column reads and writes (Prisma cannot type vector columns), keyed by media item id.' },
   { file: 'doctor/checks/core/pgvector.doctor-check.ts', why: 'Read-only extension probe.' },
-  { file: 'doctor/checks/face/pgvector.doctor-check.ts', why: 'Read-only column and index probe.' },
+  { file: 'doctor/pgvector.doctor-check.ts', why: 'Read-only column and index probe. In the face slice package (packages/memoriahub-api/src/face).' },
   { file: 'face-matching.service.ts', why: 'pgvector KNN over face embeddings, scoped by circle id. In the face slice package (packages/memoriahub-api/src/face).' },
   { file: 'insights.service.ts', why: 'Storage insight aggregates over the whole deployment. In the insights slice package (packages/memoriahub-api/src/insights).' },
   { file: 'legacy/media-shares-import.ts', why: 'Data migration only (RETRO-I4): reads the dropped-from-Prisma media_shares table, finds already-imported link grants by token hash, and re-keys share_expiring stamps; no request input, run by the operator script.' },

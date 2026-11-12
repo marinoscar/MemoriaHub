@@ -29,8 +29,7 @@ import { ThumbnailRepairTask } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeTask } from '@marinoscar/memoriahub-api/media';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 import { NodeBackupStaleTask } from '../../src/node-backup/node-backup-stale.task';
-import { NotificationReconcileTask } from '../../src/notification-producers/notification-reconcile.task';
-import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
+import { ReviewQueueReconcileHandler, ReviewQueueReconcileTask, StorageRecoveryTask } from '@marinoscar/memoriahub-api/media';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
 import { ShareExpiringTask } from '../../src/notification-producers/share-expiring.task';
 import { configuredWorkerMode } from '../../src/platform/jobs/legacy-env';
@@ -121,6 +120,19 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
     gate: { env: 'JOBS_WORKER_MODE', value: 'off' },
   },
   {
+    name: 'StorageRecoveryTask',
+    type: 'media.storage.recover_stuck',
+    // The media slice's cron (RETRO-J5): the same enqueue through the jobs port.
+    tick: (w) =>
+      new StorageRecoveryTask({
+        enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+          const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('StorageRecoveryTask'), type, what });
+          return job ? { id: job.id } : null;
+        },
+      } as never).enqueueRecovery(),
+    gate: { env: 'STORAGE_PROCESSING_STUCK_RESET_ENABLED', value: 'false' },
+  },
+  {
     name: 'NodeBackupStaleTask',
     type: 'node_backup.stale_sweep',
     tick: (w) => new NodeBackupStaleTask(w.jobs as never, w.prisma as never).handleStaleSweep(),
@@ -128,7 +140,14 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
   {
     name: 'NotificationReconcileTask',
     type: 'notifications.review_queue_reconcile',
-    tick: (w) => new NotificationReconcileTask(w.jobs as never, w.prisma as never).handleScheduledReconcile(),
+    // The media slice's cron asks the jobs port for the housekeeping job (RETRO-J10).
+    tick: (w) =>
+      new ReviewQueueReconcileTask({
+        enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+          const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('ReviewQueueReconcileTask'), type, what });
+          return job ? { id: job.id } : null;
+        },
+      } as never).handleScheduledReconcile(),
     gate: { env: 'NOTIFICATIONS_RECONCILE_ENABLED', value: 'false' },
   },
   {
@@ -146,6 +165,7 @@ const GATE_ENVS = [
   'ENRICHMENT_WORKER_ENABLED',
   'FACE_WORKER_ENABLED',
   'NOTIFICATIONS_RECONCILE_ENABLED',
+  'STORAGE_PROCESSING_STUCK_RESET_ENABLED',
   'NOTIFICATIONS_SHARE_EXPIRING_ENABLED',
 ];
 
@@ -447,7 +467,7 @@ function sweepSeed(fail = false): void {
 describeJobHandlerConformance(
   'notifications.review_queue_reconcile',
   () =>
-    new ReviewQueueReconcileHandler(registry, {
+    new ReviewQueueReconcileHandler({ registerHandler: (handler: unknown) => registry.register(handler as never) } as never, {
       reconcileAll: async () => {
         if (sweeps.fail) throw new Error('reconcile exploded');
         sweeps.reconciled = 1; // a re-statement converges: the second run changes nothing

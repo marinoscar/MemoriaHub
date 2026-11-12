@@ -364,7 +364,8 @@
         "@nestjs/common",
         "@nestjs/schedule",
         "@nestjs/swagger",
-        "nestjs-zod"
+        "nestjs-zod",
+        "exiftool-vendored"
       ]
     }
   },

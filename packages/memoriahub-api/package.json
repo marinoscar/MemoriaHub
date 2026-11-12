@@ -184,7 +184,8 @@
     "nestjs-zod": "^5.4.0",
     "zod": "^4.4.3",
     "onnxruntime-node": "^1.27.0",
-    "local-reverse-geocoder": "^0.16.7"
+    "local-reverse-geocoder": "^0.16.7",
+    "exiftool-vendored": "35.21.0"
   },
   "peerDependenciesMeta": {
     "@marinoscar/memoriahub-compute": {
@@ -224,6 +225,9 @@
       "optional": true
     },
     "local-reverse-geocoder": {
+      "optional": true
+    },
+    "exiftool-vendored": {
       "optional": true
     }
   },

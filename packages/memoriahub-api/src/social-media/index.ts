@@ -9,3 +9,4 @@ export * from './social-media-backfill.service.js';
 export * from './social-media-upload-enrichment.js';
 export * from './social-media-media.controller.js';
 export * from './admin-social-media.controller.js';
+export * from './doctor/social-media.doctor-check.js';

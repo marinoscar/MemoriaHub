@@ -4,7 +4,7 @@ import {
   OBJECT_PROCESSED_EVENT,
   ObjectProcessedEvent,
 } from '../../media-processing/events/object-processed.event';
-import { MediaEnrichmentService } from './media-enrichment.service';
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 
 /**
  * MediaEnrichmentEnqueueListener

@@ -14,7 +14,6 @@ import { BurstModule } from '../burst/burst.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { LocationInferenceModule } from '../location-inference/location-inference.module';
 import { EnrichmentModule } from '../enrichment/enrichment.module';
-import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
 import { WorkflowActionsHandler } from './actions/workflow-actions.handler';
 import { registerReviewCatalog } from './registry/review-catalog';
 import { WorkflowTriggerListener } from './runs/workflow-trigger.listener';
@@ -40,8 +39,8 @@ registerReviewCatalog();
  *   - `WorkflowRunsRetentionHandler`: the nightly `workflow_history_purge`, bound to the platform's retention policy.
  *
  * The modules imported here own the services the actions reuse (each re-exports the injected service); none of
- * them imports WorkflowsModule, so no forwardRef is required. NotificationProducersModule imports NOTHING, so
- * its edge (WorkflowRunNotificationService) cannot close a cycle.
+ * them imports WorkflowsModule, so no forwardRef is required. The `workflow_run_completed` producer is the
+ * slice's (RETRO-J10), reached through `WorkflowRunObserverModule`.
  */
 @Module({
   imports: [
@@ -55,7 +54,6 @@ registerReviewCatalog();
     DedupModule,
     LocationInferenceModule,
     EnrichmentModule,
-    NotificationProducersModule,
   ],
   controllers: [WorkflowsController, WorkflowRunsController, WorkflowsAdminController],
   providers: [

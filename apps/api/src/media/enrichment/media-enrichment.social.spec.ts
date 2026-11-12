@@ -23,7 +23,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaEnrichmentService } from './media-enrichment.service';
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 import { mediaEnrichmentProvider } from '../../../test/helpers/media-enrichment';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';
@@ -273,12 +273,16 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
   describe('enqueueVideoPostDetectionEnrichment', () => {
     const settingsAllOn = makeSettings({ faceRecognition: true, videoEnabled: true });
 
+    beforeEach(() => {
+      mockSystemSettings.getSettings.mockResolvedValue(settingsAllOn);
+    });
+
     it.each([
       [JobReason.rerun, 0],
       [JobReason.upload, 20],
       [JobReason.backfill, 100],
     ])('maps reason=%s to priority %d', async (reason, expectedPriority) => {
-      await service.enqueueVideoPostDetectionEnrichment(videoItem, reason, settingsAllOn as any);
+      await service.enqueueVideoPostDetectionEnrichment(videoItem, reason);
 
       expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -290,7 +294,7 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
     });
 
     it('upserts MediaFaceStatus to pending on successful enqueue', async () => {
-      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload, settingsAllOn as any);
+      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload);
 
       expect(mockPrisma.mediaFaceStatus.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -300,12 +304,12 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
       );
     });
 
-    it('resolves getSettings itself when resolvedSettings is omitted', async () => {
+    it('reads the settings namespaces it gates on (features, face, autoTagging) itself', async () => {
       mockSystemSettings.getSettings.mockResolvedValue(settingsAllOn);
 
       await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload);
 
-      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(1);
+      expect(mockSystemSettings.getSettings).toHaveBeenCalledTimes(3);
       expect(mockEnrichmentJobService.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'video_face_detection' }),
       );
@@ -314,7 +318,8 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
     it('skips (no enqueue) when faceRecognition is OFF', async () => {
       const settingsOff = makeSettings({ faceRecognition: false, videoEnabled: true });
 
-      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload, settingsOff as any);
+      mockSystemSettings.getSettings.mockResolvedValue(settingsOff);
+      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload);
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
       expect(mockPrisma.mediaFaceStatus.upsert).not.toHaveBeenCalled();
@@ -323,7 +328,8 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
     it('skips (no enqueue) when face.video.enabled is false', async () => {
       const settingsVideoOff = makeSettings({ faceRecognition: true, videoEnabled: false });
 
-      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload, settingsVideoOff as any);
+      mockSystemSettings.getSettings.mockResolvedValue(settingsVideoOff);
+      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload);
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
@@ -331,7 +337,7 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
     it('skips (no enqueue) when FACE_AUTO_DETECT=false, even with faceRecognition ON', async () => {
       process.env['FACE_AUTO_DETECT'] = 'false';
 
-      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload, settingsAllOn as any);
+      await service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload);
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
@@ -340,14 +346,13 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
       await service.enqueueVideoPostDetectionEnrichment(
         { ...videoItem, deletedAt: new Date() },
         JobReason.upload,
-        settingsAllOn as any,
       );
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
 
     it('skips (no enqueue) for a non-video item', async () => {
-      await service.enqueueVideoPostDetectionEnrichment(photoItem, JobReason.upload, settingsAllOn as any);
+      await service.enqueueVideoPostDetectionEnrichment(photoItem, JobReason.upload);
 
       expect(mockEnrichmentJobService.enqueue).not.toHaveBeenCalled();
     });
@@ -356,7 +361,7 @@ describe('MediaEnrichmentService — social-media detection video routing', () =
       mockEnrichmentJobService.enqueue.mockRejectedValueOnce(new Error('DB down'));
 
       await expect(
-        service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload, settingsAllOn as any),
+        service.enqueueVideoPostDetectionEnrichment(videoItem, JobReason.upload),
       ).resolves.toBeUndefined();
     });
   });

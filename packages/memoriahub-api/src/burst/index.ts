@@ -9,3 +9,4 @@ export * from './burst-upload-enrichment.js';
 export * from './burst-group.strategy.js';
 export * from './burst.controller.js';
 export * from './admin-burst.controller.js';
+export * from './doctor/burst-config.doctor-check.js';

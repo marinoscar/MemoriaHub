@@ -36,7 +36,8 @@ import {
   MockPrismaService,
 } from '../../test/mocks/prisma.mock';
 
-import { MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
+import { ALL_MEMORIAHUB_DOCTOR_CHECKS as MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
+import { MEMORIAHUB_DOCTOR, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '@marinoscar/memoriahub-api/ports';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
@@ -238,10 +239,30 @@ describe('MemoriaHub Doctor checks', () => {
       ['VisualEmbeddingService', mockVisualEmbeddingService],
     ];
     const byName = new Map(tokens);
+    // The slices' checks inject the ports by token (`@Inject(MEMORIAHUB_*)`), the app's by class.
+    const byToken = new Map<unknown, unknown>([
+      [MEMORIAHUB_DOCTOR, { registerCheck: jest.fn() }],
+      [MEMORIAHUB_PRISMA, mockPrisma],
+      [
+        MEMORIAHUB_SETTINGS,
+        {
+          readSystem: async (name: string) => ({
+            value: ((await mockSystemSettings.readKnownValue()) as unknown as Record<string, unknown>)[name],
+            version: 1,
+          }),
+        },
+      ],
+    ]);
 
     const instances: PlatformDoctorCheck[] = MEMORIAHUB_DOCTOR_CHECKS.map((Check) => {
       const paramTypes: Array<{ name: string }> = Reflect.getMetadata('design:paramtypes', Check) ?? [];
-      const args = paramTypes.map((type) => {
+      const injected: Array<{ index: number; param: unknown }> = Reflect.getMetadata('self:paramtypes', Check) ?? [];
+      const args = paramTypes.map((type, index) => {
+        const token = injected.find((i) => i.index === index)?.param;
+        if (token !== undefined) {
+          if (!byToken.has(token)) throw new Error(`${Check.name}: no test double for the port ${String(token)}`);
+          return byToken.get(token);
+        }
         if (!byName.has(type.name)) throw new Error(`${Check.name}: no test double for ${type.name}`);
         return byName.get(type.name);
       });
@@ -355,33 +376,37 @@ describe('MemoriaHub Doctor checks', () => {
     it('runs the 25 kept checks (the 35 documented ones minus the 3 the host core and the 2 the jobs slice retired, core.pgClientVersion, replaced by the db-backup slice backup.pg-client, the two storage checks, replaced by the storage slice storage.config / storage.bucket, and android.assetlinks / android.releases, now the android-app slice checks (RETRO-D5))', async () => {
       const report = await service.runDiagnostics();
 
-      expect(report.checks.map((c) => c.key)).toEqual([
-        'core.pgvector',
-        'core.appUrl',
-        'auth.jwt',
-        'auth.googleOauth',
-        'auth.adminBootstrap',
-        'ai.search',
-        'ai.tagging',
-        'ai.embedding',
-        'ai.flagConsistency',
-        'ai.socialMedia',
-        'ai.duplicateDetection',
-        'ai.pictureEnhancer',
-        'ai.videoTagging',
-        'face.detection',
-        'face.flagConsistency',
-        'face.pgvector',
-        'geo.reverseProvider',
-        'jobs.burstConfig',
-        'nodes.registeredCount',
-        'nodes.heartbeatFreshness',
-        'nodes.staleLeases',
-        'nodes.capabilityHealth',
-        'workflows.state',
-        'android.mediaSync',
-        'android.uploadPath',
-      ]);
+      // The set, not the order: a slice's checks register from its own module (RETRO-J10), so the row
+      // order inside a category follows the module graph; the ids and statuses are what is pinned.
+      expect(report.checks.map((c) => c.key).sort()).toEqual(
+        [
+          'core.pgvector',
+          'core.appUrl',
+          'auth.jwt',
+          'auth.googleOauth',
+          'auth.adminBootstrap',
+          'ai.search',
+          'ai.tagging',
+          'ai.embedding',
+          'ai.flagConsistency',
+          'ai.socialMedia',
+          'ai.duplicateDetection',
+          'ai.pictureEnhancer',
+          'ai.videoTagging',
+          'face.detection',
+          'face.flagConsistency',
+          'face.pgvector',
+          'geo.reverseProvider',
+          'jobs.burstConfig',
+          'nodes.registeredCount',
+          'nodes.heartbeatFreshness',
+          'nodes.staleLeases',
+          'nodes.capabilityHealth',
+          'workflows.state',
+          'android.mediaSync',
+          'android.uploadPath',
+        ].sort(),
+      );
     });
 
     it('gives every ported check a remedy on warn/fail (platform contract rule 2)', async () => {

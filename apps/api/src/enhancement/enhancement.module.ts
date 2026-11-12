@@ -19,11 +19,9 @@ import { MediaProcessingModule } from '../media-processing/media-processing.modu
 import { configuredWorkerMode } from '../platform/jobs/legacy-env';
 import { ENRICHMENT_RATELIMIT_MAX_HITS } from '../platform/jobs/queue-limits';
 import { EnhancementImageToolsAdapter, EnhancementKeyStatusAdapter } from './enhancement-host.adapters';
-import { ExifCarryoverService } from './exif-carryover.service';
 
 const packagedEnhancement = PackagedEnhancementModule.forRoot({
   providers: [
-    ExifCarryoverService,
     EnhancementImageToolsAdapter,
     EnhancementKeyStatusAdapter,
     { provide: ENHANCEMENT_IMAGE_TOOLS, useExisting: EnhancementImageToolsAdapter },

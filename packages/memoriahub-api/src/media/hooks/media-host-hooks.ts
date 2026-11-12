@@ -90,6 +90,18 @@ export interface MediaSystemAccess {
   asSystem(): MediaModels;
 }
 
+/**
+ * Injection token of the cross-organization client the storage recovery jobs use.
+ *
+ * @extensionPoint token
+ * @stability experimental
+ */
+export const MEDIA_RECOVERY_SYSTEM_ACCESS = Symbol.for('@marinoscar/memoriahub/MEDIA_RECOVERY_SYSTEM_ACCESS');
+
+// A {@link MediaSystemAccess} bound under its own reason: the `media.storage.recover_stuck` and
+// `media.storage.reprocess` jobs scan and update `storage_objects` across organizations, a purpose the host
+// names apart from the thumbnail repair sweep's housekeeping (its audit trail keeps the two apart).
+
 // =============================================================================
 // What the gallery service needs of the host (RETRO-J5, #613)
 // =============================================================================

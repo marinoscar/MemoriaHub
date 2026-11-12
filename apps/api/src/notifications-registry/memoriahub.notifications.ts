@@ -33,8 +33,9 @@
 // still render. Every link is root-relative (the platform drops anything else).
 // =============================================================================
 
-import { UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
+import { REVIEW_QUEUE_EVENT_KEYS, UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
 import { MEMORIES_READY_EVENT_KEY, MEMORIES_READY_WINDOW_MS } from '@marinoscar/memoriahub-api/memories';
+import { WORKFLOW_RUN_COMPLETED_EVENT_KEY } from '@marinoscar/memoriahub-api/workflows';
 import { createHash } from 'node:crypto';
 
 import type { NotificationType } from '@prisma/client';
@@ -49,13 +50,14 @@ import {
 
 /** MemoriaHub's own event keys. PERMANENT: add, never rename. */
 export const MEMORIAHUB_EVENT_KEYS = {
-  reviewBursts: 'review.bursts',
-  reviewDuplicates: 'review.duplicates',
-  reviewLocationSuggestions: 'review.location_suggestions',
-  reviewEnhancements: 'review.enhancements',
+  // The four review-queue STATE events are the media slice's, which reconciles them.
+  reviewBursts: REVIEW_QUEUE_EVENT_KEYS.bursts,
+  reviewDuplicates: REVIEW_QUEUE_EVENT_KEYS.duplicates,
+  reviewLocationSuggestions: REVIEW_QUEUE_EVENT_KEYS.locationSuggestions,
+  reviewEnhancements: REVIEW_QUEUE_EVENT_KEYS.enhancements,
   uploadCompleted: UPLOAD_COMPLETED_EVENT_KEY,
   enrichmentFailed: 'media.enrichment_failed',
-  workflowRunCompleted: 'workflows.run_completed',
+  workflowRunCompleted: WORKFLOW_RUN_COMPLETED_EVENT_KEY,
   shareExpiring: 'shares.expiring',
   memoriesReady: MEMORIES_READY_EVENT_KEY,
 } as const;

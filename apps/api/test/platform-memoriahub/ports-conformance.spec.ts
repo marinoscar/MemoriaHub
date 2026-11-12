@@ -319,7 +319,7 @@ function webUnderTest(): MemoriahubPortsUnderTest {
     objectStore: { port: new PlatformMemoriahubObjectStoreAdapter(resolver as never, new ObjectProcessorRegistry()) },
     access: accessUnderTest(),
     identity: identityUnderTest(),
-    notify: { port: new PlatformMemoriahubNotifyAdapter(notifications as never), event: { key: 'conformance.checked', userId: 'user-1' } },
+    notify: { port: new PlatformMemoriahubNotifyAdapter(notifications as never, { notification: { findMany: async () => [] } } as never), event: { key: 'conformance.checked', userId: 'user-1' } },
     events: { port: new PlatformMemoriahubEventsAdapter(bus as never) },
     settings: settingsUnderTest(),
     secrets: { port: new PlatformMemoriahubSecretsAdapter(credentials as never), purpose: 'geo_provider', name: 'google', actorUserId: 'user-1' },

@@ -16,3 +16,4 @@ export * from './tagging.controller.js';
 export * from './admin-tagging.controller.js';
 export * from './tagging-backfill.service.js';
 export * from './tagging-upload-enrichment.js';
+export * from './doctor/flag-consistency.doctor-check.js';

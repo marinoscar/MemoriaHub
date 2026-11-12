@@ -1,7 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { WORKFLOW_RUN_OBSERVER } from '@marinoscar/memoriahub-api/workflows';
+import { WORKFLOW_RUN_OBSERVER, WorkflowsModule as WorkflowsSliceModule } from '@marinoscar/memoriahub-api/workflows';
 
-import { NotificationProducersModule } from '../notification-producers/notification-producers.module';
 import { AppWorkflowRunObserver } from './workflow-run-observer.adapter';
 
 /**
@@ -12,7 +11,8 @@ import { AppWorkflowRunObserver } from './workflow-run-observer.adapter';
  */
 @Global()
 @Module({
-  imports: [NotificationProducersModule],
+  // The slice's `WorkflowRunNotificationService` (the `workflow_run_completed` producer) is what the observer calls.
+  imports: [WorkflowsSliceModule.forRoot()],
   providers: [AppWorkflowRunObserver, { provide: WORKFLOW_RUN_OBSERVER, useExisting: AppWorkflowRunObserver }],
   exports: [WORKFLOW_RUN_OBSERVER],
 })

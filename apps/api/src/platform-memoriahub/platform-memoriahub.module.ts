@@ -13,6 +13,7 @@ import { webhooksModule } from '../platform/webhooks/webhooks.config';
 import { PlatformMemoriahubAccessAdapter } from './access/platform-memoriahub-access.adapter';
 import { PlatformMemoriahubAiAdapter } from './ai/platform-memoriahub-ai.adapter';
 import { PlatformMemoriahubAuditAdapter } from './audit/platform-memoriahub-audit.adapter';
+import { PlatformMemoriahubDoctorAdapter } from './doctor/platform-memoriahub-doctor.adapter';
 import { PlatformMemoriahubEventsAdapter } from './events/platform-memoriahub-events.adapter';
 import { PlatformMemoriahubIdentityAdapter } from './identity/platform-memoriahub-identity.adapter';
 import { PlatformMemoriahubJobsAdapter } from './jobs/platform-memoriahub-jobs.adapter';
@@ -90,6 +91,7 @@ export const platformMemoriahubPorts: MemoriahubPortBindings = {
   audit: { useClass: PlatformMemoriahubAuditAdapter },
   webhooks: { useClass: PlatformMemoriahubWebhooksAdapter },
   metrics: { useClass: PlatformMemoriahubMetricsAdapter },
+  doctor: { useClass: PlatformMemoriahubDoctorAdapter },
   imports: [PlatformMemoriahubDepsModule],
 };
 

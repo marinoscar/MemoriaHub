@@ -7,12 +7,12 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { stringify as csvStringify } from 'csv-stringify';
 import {
   MEDIA_CSV_STRINGIFIER,
-  MEDIA_ENRICHMENT,
   MEDIA_FORWARD_GEOCODER,
   MEDIA_GEO_LOCATION_PROVIDER,
   MEDIA_ITEM_PURGER,
   MEDIA_LOCATION_RESOLVER,
   MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_RECOVERY_SYSTEM_ACCESS,
   MEDIA_SYSTEM_ACCESS,
   MEDIA_THUMBNAIL_PRUNER,
   MEDIA_WEBHOOK_EVENTS,
@@ -24,6 +24,10 @@ import {
   MediaThumbnailRerunController,
   MediaService,
   MediaModule as MediaCoreModule,
+  StorageRecoveryHandler,
+  StorageRecoveryService,
+  StorageRecoveryTask,
+  StorageReprocessHandler,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
   ThumbnailNodePersistService,
@@ -41,8 +45,8 @@ import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
+import { MediaRecoverySystemAccessAdapter } from './media-recovery-system-access.adapter';
 import { MediaSystemAccessAdapter } from './media-system-access.adapter';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -123,7 +127,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
     { provide: MEDIA_GEO_LOCATION_PROVIDER, useExisting: GEO_LOCATION_PROVIDER },
     { provide: MEDIA_FORWARD_GEOCODER, useExisting: ForwardGeocodeService },
-    { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
     { provide: MEDIA_WEBHOOK_EVENTS, useExisting: MemoriaHubWebhooks },
     { provide: MEDIA_CSV_STRINGIFIER, useValue: { create: (columns: string[]) => csvStringify({ header: true, columns }) } },
     ThumbnailProcessor,
@@ -141,7 +144,14 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     { provide: MEDIA_THUMBNAIL_PRUNER, useExisting: ThumbnailPruneService },
     MediaSystemAccessAdapter,
     { provide: MEDIA_SYSTEM_ACCESS, useExisting: MediaSystemAccessAdapter },
-    MediaEnrichmentService,
+    // The stuck/failed storage object recovery and the admin bulk reprocess (RETRO-D1b): the media slice's
+    // jobs and cron; the host binds the cross-organization client under its own audit reason.
+    MediaRecoverySystemAccessAdapter,
+    { provide: MEDIA_RECOVERY_SYSTEM_ACCESS, useExisting: MediaRecoverySystemAccessAdapter },
+    StorageRecoveryService,
+    StorageRecoveryHandler,
+    StorageReprocessHandler,
+    StorageRecoveryTask,
     MediaEnrichmentEnqueueListener,
     MediaOrientationEditService,
     ThumbnailRegenHandler,
@@ -149,6 +159,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaCoreModule.forRoot()],
+  exports: [MediaService, MediaMetadataSyncService, MediaCoreModule.forRoot()],
 })
 export class MediaModule {}

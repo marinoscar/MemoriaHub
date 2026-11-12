@@ -8,6 +8,7 @@ import { BurstDetectionService } from './burst-detection.service.js';
 import { BurstGroupReviewStrategy } from './burst-group.strategy.js';
 import { BurstUploadEnrichment } from './burst-upload-enrichment.js';
 import { BurstService } from './burst.service.js';
+import { BurstConfigDoctorCheck } from './doctor/burst-config.doctor-check.js';
 
 /**
  * Options of {@link BurstModule.forRoot}. None yet: the thresholds are the `burst` settings namespace, read
@@ -56,6 +57,7 @@ export class BurstModule {
         BurstDetectionService,
         BurstDetectionHandler,
         BurstGroupReviewStrategy,
+        BurstConfigDoctorCheck,
       ],
       exports: [BurstService, BurstDetectionService],
     };

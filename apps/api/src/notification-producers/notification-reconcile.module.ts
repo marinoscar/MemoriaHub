@@ -1,15 +1,14 @@
 import { Module } from '@nestjs/common';
 
+import { ReviewQueueReconcileHandler, ReviewQueueReconcileService, ReviewQueueReconcileTask } from '@marinoscar/memoriahub-api/media';
+
 import { MediaModule } from '../media/media.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { sharingModule } from '../platform/sharing/sharing.config';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
 import { EnrichmentFailureNotificationListener } from './enrichment-failure-notification.listener';
-import { NotificationReconcileTask } from './notification-reconcile.task';
-import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
 import { ShareExpiringService } from './share-expiring.service';
 import { ShareExpiringTask } from './share-expiring.task';
-import { ReviewQueueReconcileHandler } from './review-queue-reconcile.handler';
 import { ShareExpiringHandler } from './share-expiring.handler';
 
 /** The self-driven producers; see `notification-producers.module.ts`. */
@@ -17,7 +16,7 @@ import { ShareExpiringHandler } from './share-expiring.handler';
   imports: [MediaModule, sharingModule, OwnerAccessModule],
   providers: [
     ReviewQueueReconcileService,
-    NotificationReconcileTask,
+    ReviewQueueReconcileTask,
     ShareExpiringService,
     ShareExpiringTask,
     EnrichmentFailureNotificationListener,
