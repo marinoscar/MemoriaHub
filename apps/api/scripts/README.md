@@ -189,7 +189,7 @@ npm run prisma:migrate
 - `package.json` - Defines npm scripts using this helper
 - `prisma/schema/` - GENERATED Prisma schema folder (compose it from `prisma/fragments/` with `npm run db:compose`, which first runs `memoriahub-db sync` to refresh the generated `memoriahub.*.prisma` domain copies)
 - `scripts/memoriahub-db-env.js` - same `DATABASE_URL` construction for the `memoriahub-db` command (`db:memoriahub:check:database`)
-- `scripts/db-drift-memoriahub.mjs` - `db:drift:memoriahub`, the platform drift check with an (empty) allowlist, `prisma/drift-allowlist.json`
+- `scripts/db-drift-memoriahub.mjs` - `db:drift:memoriahub`, the platform drift check filtered by `prisma/drift-allowlist.json` (every pre-existing drift statement, each with a reason and a removeIn; a new statement fails the API DB tier)
 - `scripts/platform-env.js` - same `DATABASE_URL` construction for the `platform db` commands (`db:drift`, `db:check:database`, `db:baseline`)
 - `src/config/configuration.ts` - Runtime configuration (constructs DATABASE_URL for the app)
 - `infra/compose/.env.example` - Environment variables template

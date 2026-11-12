@@ -1,0 +1,669 @@
+{
+  "entries": [
+    {
+      "statement": "ALTER TABLE \"ai_provider_credentials\" DROP CONSTRAINT \"ai_provider_credentials_updated_by_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" DROP CONSTRAINT \"burst_groups_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" DROP CONSTRAINT \"burst_groups_resolved_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" DROP CONSTRAINT \"burst_groups_suggested_best_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" DROP CONSTRAINT \"duplicate_groups_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" DROP CONSTRAINT \"duplicate_groups_resolved_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" DROP CONSTRAINT \"duplicate_groups_suggested_best_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"face_provider_credentials\" DROP CONSTRAINT \"face_provider_credentials_updated_by_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"faces\" DROP CONSTRAINT \"faces_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"faces\" DROP CONSTRAINT \"faces_person_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" DROP CONSTRAINT \"location_suggestions_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" DROP CONSTRAINT \"location_suggestions_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" DROP CONSTRAINT \"location_suggestions_resolved_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancement_batches\" DROP CONSTRAINT \"media_enhancement_batches_created_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancement_batches\" DROP CONSTRAINT \"media_enhancement_batches_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" DROP CONSTRAINT \"media_enhancements_batch_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" DROP CONSTRAINT \"media_enhancements_created_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" DROP CONSTRAINT \"media_enhancements_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" DROP CONSTRAINT \"media_enhancements_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" DROP CONSTRAINT \"media_enhancements_result_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_face_status\" DROP CONSTRAINT \"media_face_status_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_item_embedding\" DROP CONSTRAINT \"media_item_embedding_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" DROP CONSTRAINT \"media_items_burst_group_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" DROP CONSTRAINT \"media_items_duplicate_group_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_sync_devices\" DROP CONSTRAINT \"media_sync_devices_pat_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_visual_embedding\" DROP CONSTRAINT \"media_visual_embedding_media_item_id_fkey\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_visual_embedding\" DROP CONSTRAINT \"media_visual_embedding_org_id_fkey\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_visual_embedding\" DROP CONSTRAINT \"media_visual_embedding_owner_group_id_org_id_fkey\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_visual_embedding\" DROP CONSTRAINT \"media_visual_embedding_owner_user_id_fkey\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" DROP CONSTRAINT \"mh_legacy_database_backup_runs_created_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" DROP CONSTRAINT \"mh_legacy_database_backup_runs_pre_restore_backup_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" DROP CONSTRAINT \"mh_legacy_database_backup_runs_restored_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_notifications\" DROP CONSTRAINT \"mh_legacy_notifications_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"node_backup_configs\" DROP CONSTRAINT \"node_backup_configs_node_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"node_backup_runs\" DROP CONSTRAINT \"node_backup_runs_node_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" DROP CONSTRAINT \"people_added_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" DROP CONSTRAINT \"people_cover_face_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" DROP CONSTRAINT \"people_merged_into_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" DROP CONSTRAINT \"review_run_items_burst_group_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" DROP CONSTRAINT \"review_run_items_duplicate_group_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" DROP CONSTRAINT \"review_run_items_location_suggestion_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" DROP CONSTRAINT \"review_run_items_run_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" DROP CONSTRAINT \"review_run_items_run_id_subject_type_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_runs\" DROP CONSTRAINT \"review_runs_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_runs\" DROP CONSTRAINT \"review_runs_started_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_run_items\" DROP CONSTRAINT \"trash_empty_run_items_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_run_items\" DROP CONSTRAINT \"trash_empty_run_items_run_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_runs\" DROP CONSTRAINT \"trash_empty_runs_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_runs\" DROP CONSTRAINT \"trash_empty_runs_started_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_run_items\" DROP CONSTRAINT \"workflow_run_items_media_item_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_run_items\" DROP CONSTRAINT \"workflow_run_items_run_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" DROP CONSTRAINT \"workflow_runs_approved_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" DROP CONSTRAINT \"workflow_runs_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" DROP CONSTRAINT \"workflow_runs_started_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" DROP CONSTRAINT \"workflow_runs_workflow_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflows\" DROP CONSTRAINT \"workflows_created_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflows\" DROP CONSTRAINT \"workflows_owner_user_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "DROP INDEX \"faces_embedding_vec_hnsw_idx\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "DROP INDEX \"media_item_embedding_hnsw_idx\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"ai_provider_credentials\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"album_items\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"albums\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"face_provider_credentials\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"faces\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"video_timestamps\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"insights_snapshots\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancement_batches\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_face_status\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_item_embedding\" ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_tags\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_notifications\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"node_backup_configs\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"node_backup_runs\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"personal_libraries\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_runs\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"tags\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_run_items\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_runs\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_run_items\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflows\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"updated_at\" DROP DEFAULT;",
+      "reason": "UUID and timestamp defaults. The migrations create the columns with DEFAULT gen_random_uuid() / now() so raw-SQL inserts (the job queue, backfills, the platform migrations) work; the Prisma fragments declare uuid() / @updatedAt, which Prisma generates client-side and so diffs as a DROP DEFAULT. Dropping the SQL defaults would break those inserts.",
+      "removeIn": "never: intentional (documented in docs/runbooks/identity-adoption.md, db:drift row)"
+    },
+    {
+      "statement": "DROP TABLE \"media_visual_embedding\";",
+      "reason": "pgvector objects Prisma cannot express: the `media_visual_embedding` table (vector(512)) and the HNSW cosine indexes on faces.embedding_vec and media_item_embedding. They are raw SQL in the migrations and are asserted against pg_indexes / the schema-object inventory by `memoriahub-db check --database` and `platform db drift` (INDEX_MISSING and the like are never filtered).",
+      "removeIn": "never: intentional (packages/memoriahub-db/raw-sql-indexes.json, schema-objects.json)"
+    },
+    {
+      "statement": "ALTER TABLE \"albums\" RENAME CONSTRAINT \"albums_owner_id_fkey\" TO \"albums_added_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" RENAME CONSTRAINT \"media_items_owner_id_fkey\" TO \"media_items_added_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"tags\" RENAME CONSTRAINT \"tags_owner_id_fkey\" TO \"tags_added_by_id_fkey\";",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" ADD CONSTRAINT \"burst_groups_suggested_best_item_id_fkey\" FOREIGN KEY (\"suggested_best_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"burst_groups\" ADD CONSTRAINT \"burst_groups_resolved_by_id_fkey\" FOREIGN KEY (\"resolved_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" ADD CONSTRAINT \"duplicate_groups_suggested_best_item_id_fkey\" FOREIGN KEY (\"suggested_best_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"duplicate_groups\" ADD CONSTRAINT \"duplicate_groups_resolved_by_id_fkey\" FOREIGN KEY (\"resolved_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" ADD CONSTRAINT \"media_enhancements_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" ADD CONSTRAINT \"media_enhancements_result_media_item_id_fkey\" FOREIGN KEY (\"result_media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" ADD CONSTRAINT \"media_enhancements_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancements\" ADD CONSTRAINT \"media_enhancements_batch_id_fkey\" FOREIGN KEY (\"batch_id\") REFERENCES \"media_enhancement_batches\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_enhancement_batches\" ADD CONSTRAINT \"media_enhancement_batches_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" ADD CONSTRAINT \"people_added_by_id_fkey\" FOREIGN KEY (\"added_by_id\") REFERENCES \"users\"(\"id\") ON DELETE RESTRICT ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" ADD CONSTRAINT \"people_cover_face_id_fkey\" FOREIGN KEY (\"cover_face_id\") REFERENCES \"faces\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"people\" ADD CONSTRAINT \"people_merged_into_id_fkey\" FOREIGN KEY (\"merged_into_id\") REFERENCES \"people\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"faces\" ADD CONSTRAINT \"faces_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"faces\" ADD CONSTRAINT \"faces_person_id_fkey\" FOREIGN KEY (\"person_id\") REFERENCES \"people\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_face_status\" ADD CONSTRAINT \"media_face_status_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" ADD CONSTRAINT \"location_suggestions_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"location_suggestions\" ADD CONSTRAINT \"location_suggestions_resolved_by_id_fkey\" FOREIGN KEY (\"resolved_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" ADD CONSTRAINT \"media_items_burst_group_id_fkey\" FOREIGN KEY (\"burst_group_id\") REFERENCES \"burst_groups\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_items\" ADD CONSTRAINT \"media_items_duplicate_group_id_fkey\" FOREIGN KEY (\"duplicate_group_id\") REFERENCES \"duplicate_groups\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"media_item_embedding\" ADD CONSTRAINT \"media_item_embedding_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_runs\" ADD CONSTRAINT \"review_runs_started_by_id_fkey\" FOREIGN KEY (\"started_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" ADD CONSTRAINT \"review_run_items_run_id_fkey\" FOREIGN KEY (\"run_id\") REFERENCES \"review_runs\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" ADD CONSTRAINT \"review_run_items_burst_group_id_fkey\" FOREIGN KEY (\"burst_group_id\") REFERENCES \"burst_groups\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" ADD CONSTRAINT \"review_run_items_duplicate_group_id_fkey\" FOREIGN KEY (\"duplicate_group_id\") REFERENCES \"duplicate_groups\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"review_run_items\" ADD CONSTRAINT \"review_run_items_location_suggestion_id_fkey\" FOREIGN KEY (\"location_suggestion_id\") REFERENCES \"location_suggestions\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_runs\" ADD CONSTRAINT \"trash_empty_runs_started_by_id_fkey\" FOREIGN KEY (\"started_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_run_items\" ADD CONSTRAINT \"trash_empty_run_items_run_id_fkey\" FOREIGN KEY (\"run_id\") REFERENCES \"trash_empty_runs\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"trash_empty_run_items\" ADD CONSTRAINT \"trash_empty_run_items_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflows\" ADD CONSTRAINT \"workflows_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" ADD CONSTRAINT \"workflow_runs_workflow_id_fkey\" FOREIGN KEY (\"workflow_id\") REFERENCES \"workflows\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" ADD CONSTRAINT \"workflow_runs_started_by_id_fkey\" FOREIGN KEY (\"started_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_runs\" ADD CONSTRAINT \"workflow_runs_approved_by_id_fkey\" FOREIGN KEY (\"approved_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_run_items\" ADD CONSTRAINT \"workflow_run_items_run_id_fkey\" FOREIGN KEY (\"run_id\") REFERENCES \"workflow_runs\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"workflow_run_items\" ADD CONSTRAINT \"workflow_run_items_media_item_id_fkey\" FOREIGN KEY (\"media_item_id\") REFERENCES \"media_items\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"ai_provider_credentials\" ADD CONSTRAINT \"ai_provider_credentials_updated_by_user_id_fkey\" FOREIGN KEY (\"updated_by_user_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"face_provider_credentials\" ADD CONSTRAINT \"face_provider_credentials_updated_by_user_id_fkey\" FOREIGN KEY (\"updated_by_user_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" ADD CONSTRAINT \"mh_legacy_database_backup_runs_created_by_id_fkey\" FOREIGN KEY (\"created_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" ADD CONSTRAINT \"mh_legacy_database_backup_runs_restored_by_id_fkey\" FOREIGN KEY (\"restored_by_id\") REFERENCES \"users\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_database_backup_runs\" ADD CONSTRAINT \"mh_legacy_database_backup_runs_pre_restore_backup_id_fkey\" FOREIGN KEY (\"pre_restore_backup_id\") REFERENCES \"mh_legacy_database_backup_runs\"(\"id\") ON DELETE SET NULL ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER TABLE \"mh_legacy_notifications\" ADD CONSTRAINT \"mh_legacy_notifications_user_id_fkey\" FOREIGN KEY (\"user_id\") REFERENCES \"users\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "reason": "Pre-existing legacy-table foreign-key drift: constraints the migrations create (and the RETRO-I2 ownership migration re-creates, with the owner_user_id / owner_group_id keys) whose definition or name differs from the Prisma relation the fragments declare; the legacy columns were also renamed (owner_id to added_by_id) without renaming the constraint. Behaviour is correct (referential actions are the ones the code relies on); documented in docs/runbooks/identity-adoption.md and jobs-cutover.md. Closing it needs a constraint-alignment migration, which would rewrite production foreign keys and is not scheduled.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    },
+    {
+      "statement": "ALTER INDEX \"media_item_embedding_circle_idx\" RENAME TO \"media_item_embedding_circle_id_idx\";",
+      "reason": "An index the migrations created under an older name; the fragment @@index would name it differently. Renaming it is a production DDL change with no functional effect.",
+      "removeIn": "a constraint-alignment migration (not scheduled; see docs/runbooks/identity-adoption.md)"
+    }
+  ]
+}

@@ -247,9 +247,10 @@ jobs:
       # migration copies against platform.lock and the memoriahub-db lock offline;
       # `db:check:database` asserts the live database against the raw-SQL inventory and the
       # RLS policies; `db:drift` replays prisma/migrations into a throwaway shadow database and
-      # diffs it against the composed schema. Intentional raw-SQL drift (the partial and
-      # expression indexes) is declared in raw-sql-indexes.json and is asserted against
-      # pg_indexes, never hidden: any other statement fails this job.
+      # diffs it against the composed schema. The legacy tables' pre-existing drift (UUID defaults,
+      # foreign-key names, the pgvector objects: 133 statements) is listed one by one, each with a
+      # reason, in apps/api/prisma/drift-allowlist.json; any other statement, and any missing raw-SQL
+      # index or RLS policy (asserted against pg_indexes / pg_policies, never filtered), fails this job.
       - run: npm run db:check --workspace=api
       - run: npm run db:check:database --workspace=api
       # `prisma migrate diff` resets its shadow database before replaying, which drops the `vector`
@@ -257,11 +258,19 @@ jobs:
       # only the replay: this step runs no application code) connects as the service container's
       # bootstrap superuser. The ordinary-role guarantees of the suites below are untouched.
       - name: Schema drift (replay in a shadow database)
-        run: npm run db:drift --workspace=api
+        run: npm run db:drift:memoriahub --workspace=api
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-throwaway
           DATABASE_URL: postgresql://postgres:ci-throwaway@localhost:5432/memoriahub_test
+
+      # The host-neutral bare host against the migrated database (RETRO-J, #627): the packed
+      # memoriahub-db runs `check --database` over the same PostgreSQL the suites use. The slices
+      # themselves run on the bare host's in-memory ports, with no platform package.
+      - name: Bare host with the database contract
+        run: node examples/bare-host/run.mjs --from pack --db postgres
+        env:
+          BARE_HOST_DATABASE_URL: postgresql://memoriahub_app:ci-app-throwaway@localhost:5432/memoriahub_test
 
       - run: npm run test:db --workspace=api
 
