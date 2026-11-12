@@ -2,6 +2,8 @@ import type {
   ApplyEnhancement,
   EnhanceParams,
   EnhancementStatus as ContractEnhancementStatus,
+  EnhancementStatusAlias,
+  ListEnhancementsQuery,
 } from '@marinoscar/memoriahub-contract/enhancement';
 import { api, MemoriahubApiError as ApiError } from '../../../core/headless/index.js';
 import type { BaseRun } from '../../../review-runs/headless/index.js';
@@ -119,24 +121,20 @@ export interface StartEnhanceResult {
  *
  * @stability experimental
  */
-export type EnhancementStatusFilter =
-  | EnhancementStatus
-  | 'in_progress'
-  | 'awaiting_decision'
-  | 'terminal';
+export type EnhancementStatusFilter = EnhancementStatus | EnhancementStatusAlias;
 
 /**
  * Columns the list endpoint can order by (server default: `createdAt`).
  *
  * @stability experimental
  */
-export type EnhancementSortBy = 'createdAt' | 'updatedAt';
+export type EnhancementSortBy = NonNullable<ListEnhancementsQuery['sortBy']>;
 /**
  * The sort order of the enhancement listing.
  *
  * @stability experimental
  */
-export type EnhancementSortOrder = 'asc' | 'desc';
+export type EnhancementSortOrder = NonNullable<ListEnhancementsQuery['sortOrder']>;
 
 /**
  * Image descriptor in a LIST row. Deliberately NOT `EnhanceImageInfo`: the list

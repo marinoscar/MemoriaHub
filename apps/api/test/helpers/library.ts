@@ -1,11 +1,41 @@
 // Seeds libraries for real-database specs (RETRO-K2): a shared library is a platform group of the
 // scope id the content rows carry; a personal library is a `personal_libraries` row. Both take any
 // object with `query(sql, params)` (a `pg` client) or a Prisma client (`$executeRawUnsafe`).
-type Q = { query: (sql: string, params?: unknown[]) => Promise<unknown> } | { $executeRawUnsafe: (sql: string, ...params: unknown[]) => Promise<unknown> };
+type PgLike = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
+type PrismaLike = {
+  $executeRawUnsafe: (sql: string, ...params: unknown[]) => Promise<unknown>;
+  $transaction?: <R>(fn: (tx: { $executeRawUnsafe: (sql: string, ...params: unknown[]) => Promise<unknown> }) => Promise<R>) => Promise<R>;
+};
+type Q = PgLike | PrismaLike;
+
+/**
+ * The statement that opens the row-level-security scope: the default organization, written with
+ * `set_config(name, value, true)` (transaction-local) as the FIRST statement of the transaction, the way
+ * `PrismaService.runInOrg` does. `groups` and `group_members` force RLS on `org_id`, so an ordinary role
+ * (the API's role in production and in the DB tier) is refused without it.
+ */
+const ORG_SCOPE = `SELECT set_config('app.org_id', mh_default_org_id()::text, true)`;
 
 async function run(q: Q, sql: string, params: unknown[]): Promise<void> {
-  if ('query' in q) await q.query(sql, params);
-  else await q.$executeRawUnsafe(sql, ...params);
+  if ('query' in q) {
+    // A `pg` client: one short transaction per statement, scope first.
+    await q.query('BEGIN');
+    try {
+      await q.query(ORG_SCOPE);
+      await q.query(sql, params);
+      await q.query('COMMIT');
+    } catch (error) {
+      await q.query('ROLLBACK');
+      throw error;
+    }
+  } else if (typeof q.$transaction === 'function') {
+    await q.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(ORG_SCOPE);
+      await tx.$executeRawUnsafe(sql, ...params);
+    });
+  } else {
+    await q.$executeRawUnsafe(sql, ...params);
+  }
 }
 
 export type GroupRoleName = 'admin' | 'editor' | 'viewer';

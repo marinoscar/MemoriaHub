@@ -32,6 +32,7 @@ import { OwnerAccessService } from '../../src/platform/sharing/owner-scope';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SharingDataAdapter } from '../../src/platform/sharing/sharing-data.adapter';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -70,14 +71,14 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
   beforeAll(async () => {
     admin = new Client(connection());
     await admin.connect();
-    orgId = (await admin.query(`SELECT id::text AS id FROM organizations WHERE is_default`)).rows[0].id;
+    orgId = (await orgScoped(admin).query(`SELECT id::text AS id FROM organizations WHERE is_default`)).rows[0].id;
 
-    await admin.query(`CREATE ROLE ${role.name} LOGIN PASSWORD '${role.password}' NOSUPERUSER NOBYPASSRLS`);
-    await admin.query(`GRANT USAGE ON SCHEMA public TO ${role.name}`);
-    await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role.name}`);
+    await orgScoped(admin).query(`CREATE ROLE ${role.name} LOGIN PASSWORD '${role.password}' NOSUPERUSER NOBYPASSRLS`);
+    await orgScoped(admin).query(`GRANT USAGE ON SCHEMA public TO ${role.name}`);
+    await orgScoped(admin).query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role.name}`);
 
     for (const [key, id] of Object.entries(users)) {
-      await admin.query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
+      await orgScoped(admin).query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
     }
     // A shared library is a group; a personal library is a `personal_libraries` row (RETRO-K2).
     await createSharedLibrary(admin, {
@@ -104,16 +105,16 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
     await appPrisma?.$disconnect();
     if (admin) {
       await dropLibraries(admin, [shared, personal]).catch(() => undefined);
-      await admin.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
-      await admin.query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
-      await admin.query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
+      await orgScoped(admin).query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
+      await orgScoped(admin).query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
+      await orgScoped(admin).query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
       await admin.end();
     }
   });
 
   it('the shared circle is a group with its member roles', async () => {
     const rows = (
-      await admin.query(`SELECT user_id::text AS u, role FROM group_members WHERE group_id = $1 ORDER BY role`, [shared])
+      await orgScoped(admin).query(`SELECT user_id::text AS u, role FROM group_members WHERE group_id = $1 ORDER BY role`, [shared])
     ).rows;
     expect(Object.fromEntries(rows.map((r) => [r.u, r.role]))).toEqual({
       [users.owner]: 'admin',
@@ -148,9 +149,9 @@ describeMaybeDb('RETRO-I3 owner-scope access on platform groups (DB_GATED: real 
   });
 
   it('a role change and a removal in group_members are seen on the next check', async () => {
-    await admin.query(`UPDATE group_members SET role = 'editor' WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
+    await orgScoped(admin).query(`UPDATE group_members SET role = 'editor' WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
     await expect(service.roleIn(users.viewer, shared)).resolves.toBe('editor');
-    await admin.query(`DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
+    await orgScoped(admin).query(`DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, [shared, users.viewer]);
     await expect(service.requireOwnerRole(users.viewer, shared, [], 'viewer')).rejects.toBeInstanceOf(NotFoundException);
   });
 

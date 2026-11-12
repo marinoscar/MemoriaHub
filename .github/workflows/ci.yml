@@ -152,15 +152,22 @@ jobs:
   # in one process (some are destructive and share the database, so never in
   # parallel).
   #
-  # The suites connect as the bootstrap superuser, exactly as apps/api/.env.test
-  # declares: their seeding helpers (test/helpers/library.ts and the specs that
-  # insert rows directly) write `groups`, `media_items` and the like without
-  # setting app.org_id, and as an ordinary role the forced row-level security
-  # policies refuse those inserts. The suites that assert tenant isolation
-  # (db-backup-rls, storage-objects-rls, ownership, owner-access) create and
-  # SET ROLE to their own ordinary, NOBYPASSRLS roles, so the policies are still
-  # exercised. The credentials are throwaway values for a service container that
-  # lives for this job only.
+  # The suites run as an ORDINARY role (RETRO-I3, #573): `memoriahub_app`, NOSUPERUSER NOBYPASSRLS, owner
+  # of the database and so of every table the migrations create, which is how the forced row-level
+  # security policies on the `org` tables apply to the whole suite, exactly as they do to the API. The
+  # bootstrap superuser (`postgres`, a throwaway for this service container) is used only by the
+  # "Create the application role" step below: to create the role and the `vector` extension (a
+  # superuser-only extension) in `template1` and in the database, so the scratch databases some specs
+  # create (`CREATE DATABASE` by the ordinary role, which holds CREATEDB and CREATEROLE, with `createrole_self_grant`, but neither
+  # SUPERUSER nor BYPASSRLS) inherit it. The code under test never connects as the superuser.
+  #
+  # The seeding helpers set the row-level security scope the way production code does
+  # (`set_config(name, value, true)` as the first statement of a transaction; test/helpers/library.ts,
+  # test/helpers/org-scope.ts). A spec of MemoriaHub's own domain services, which still read the
+  # organization tables on the plain client (docs/platform-adoption/local-exceptions.md, "API connects as
+  # the bootstrap superuser"), takes the bypass explicitly on a connection of its own
+  # (`rlsBypassPrisma`, the `app.rls_bypass` option), never a superuser. `test/tenancy/db-role.db.spec.ts`
+  # fails this job if the role were ever a superuser or held BYPASSRLS.
   api-db-test:
     name: API DB tier
     runs-on: ubuntu-latest
@@ -183,11 +190,13 @@ jobs:
       NODE_ENV: test
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ci-throwaway
+      # The ordinary application role created by the "Create the application role" step.
+      POSTGRES_USER: memoriahub_app
+      POSTGRES_PASSWORD: ci-app-throwaway
       POSTGRES_DB: memoriahub_test
       POSTGRES_SSL: 'false'
-      DATABASE_URL: postgresql://postgres:ci-throwaway@localhost:5432/memoriahub_test
+      DATABASE_URL: postgresql://memoriahub_app:ci-app-throwaway@localhost:5432/memoriahub_test
+      REQUIRE_ORDINARY_DB_ROLE: '1'
       JWT_SECRET: ci-only-jwt-secret-minimum-32-characters-long
       SECRETS_ENCRYPTION_KEY: Y2ktb25seS10aHJvd2F3YXkta2V5LTMyLWJ5dGVzISE=
       INITIAL_ADMIN_EMAIL: admin@example.test
@@ -215,6 +224,23 @@ jobs:
 
       - run: npm run build -w @marinoscar/memoriahub-db
       - run: npm run db:compose:check --workspace=api
+
+      - name: Create the application role
+        env:
+          PGPASSWORD: ci-throwaway
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE memoriahub_app LOGIN PASSWORD 'ci-app-throwaway' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;
+          ALTER DATABASE memoriahub_test OWNER TO memoriahub_app;
+          -- A role it creates (the specs that build their own ordinary roles and databases) is granted back
+          -- to it with SET, as `CREATE DATABASE ... OWNER <that role>` requires of a non-superuser.
+          ALTER ROLE memoriahub_app SET createrole_self_grant = 'set,inherit';
+          \c template1
+          CREATE EXTENSION IF NOT EXISTS vector;
+          \c memoriahub_test
+          CREATE EXTENSION IF NOT EXISTS vector;
+          SQL
+
       - run: npm run prisma:migrate --workspace=api
       - run: npm run prisma:seed --workspace=api
       - run: npm run db:check:database --workspace=api

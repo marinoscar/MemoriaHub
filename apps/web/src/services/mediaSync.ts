@@ -8,6 +8,7 @@
  */
 import { api, ApiError } from './api';
 
+import type { MediaSyncErrorReason } from '@marinoscar/memoriahub-contract/errors';
 import type {
   ConfigResult,
   DeviceView,
@@ -27,6 +28,7 @@ import type {
   ReportSummaryView,
   ReportView,
   RunView,
+  UpdateConfigInput,
 } from '@marinoscar/memoriahub-contract/media-sync';
 
 // The vocabulary and the device, config, run and report shapes are the wire
@@ -53,16 +55,11 @@ export type MediaSyncInventoryFolder = InventoryFolder;
 /** One device as the API lists it. */
 export type MediaSyncDevice = DeviceView;
 
-/** The editable part of the config (commands own `paused` and the generations). */
-export interface MediaSyncConfigPatch {
-  targetCircleId?: string;
-  folders?: MediaSyncFolder[];
-  includePhotos?: boolean;
-  includeVideos?: boolean;
-  network?: MediaSyncNetworkPolicy;
-  requireCharging?: boolean;
-  uploadExisting?: MediaSyncUploadExisting;
-}
+/**
+ * The editable part of the config (commands own `paused` and the generations). The contract's
+ * `UpdateConfigInput` minus `inventory`, which only the phone's own PAT may send.
+ */
+export type MediaSyncConfigPatch = Omit<UpdateConfigInput, 'inventory'>;
 
 export type MediaSyncConfigResult = ConfigResult;
 
@@ -148,7 +145,7 @@ export function unknownFolderIds(err: unknown): string[] {
 export function mediaSyncErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.status === 403) return 'You do not have permission to do this.';
-    if (mediaSyncErrorReason(err) === 'DEVICE_REVOKED') {
+    if (mediaSyncErrorReason(err) === ('DEVICE_REVOKED' satisfies MediaSyncErrorReason)) {
       return 'This phone was unpaired. Pair it again from the app.';
     }
     return err.message || fallback;

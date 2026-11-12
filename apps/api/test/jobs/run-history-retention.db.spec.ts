@@ -18,6 +18,7 @@ import { ReviewRunsRetentionHandler } from '../../src/review-runs/review-runs-re
 import { WorkflowExecuteBatchHandler } from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { housekeepingClient, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -26,6 +27,7 @@ const ago = (days: number) => new Date(Date.now() - days * DAY);
 
 describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
   let userId: string;
   let circleId: string;
   let workflowId: string;
@@ -42,10 +44,11 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
     const user = await prisma.user.create({ data: { email: `retention-${Date.now()}@example.test` } });
     userId = user.id;
     circleId = (await newLibrary(prisma, { ownerId: userId, name: 'Circle Alpha' })).id;
-    const workflow = await prisma.workflow.create({
+    const workflow = await seed.workflow.create({
       data: { circleId, name: 'Workflow A', subjectType: 'media_item', trigger: 'manual', definition: {} },
     });
     workflowId = workflow.id;
@@ -53,9 +56,9 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
 
   afterAll(async () => {
     // No circle cascade any more (RETRO-K2): the library's rows go first.
-    await prisma.reviewRun.deleteMany({ where: { circleId } });
-    await prisma.trashEmptyRun.deleteMany({ where: { circleId } });
-    await prisma.workflow.deleteMany({ where: { circleId } });
+    await seed.reviewRun.deleteMany({ where: { circleId } });
+    await seed.trashEmptyRun.deleteMany({ where: { circleId } });
+    await seed.workflow.deleteMany({ where: { circleId } });
     await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: userId } });
     jest.restoreAllMocks();
@@ -63,7 +66,7 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
   });
 
   const workflowRun = (status: string, updatedAt: Date, finishedAt: Date | null) =>
-    prisma.workflowRun.create({
+    seed.workflowRun.create({
       data: {
         workflowId,
         circleId,
@@ -82,9 +85,9 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     const recent = await workflowRun('completed', ago(10), ago(10));
     const running = await workflowRun('running', ago(40), null);
 
-    await new WorkflowRunsRetentionHandler(registry, prisma, settings as never).process(job);
+    await new WorkflowRunsRetentionHandler(registry, housekeepingClient(prisma), settings as never).process(job);
 
-    const left = await prisma.workflowRun.findMany({ where: { workflowId }, select: { id: true, status: true } });
+    const left = await seed.workflowRun.findMany({ where: { workflowId }, select: { id: true, status: true } });
     const byId = new Map(left.map((r) => [r.id, r.status]));
     expect(byId.get(approval.id)).toBe('expired');
     expect(byId.has(old.id)).toBe(false);
@@ -95,20 +98,20 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
 
   it('canDelete reads the real run: a pending batch of a running run is vetoed', async () => {
     const run = await workflowRun('running', new Date(), null);
-    const handler = new WorkflowExecuteBatchHandler({} as never, prisma as never, {} as never, {} as never, {} as never);
+    const handler = new WorkflowExecuteBatchHandler({} as never, seed as never, {} as never, {} as never, {} as never);
     const pending = { status: 'pending', payload: { runId: run.id, itemIds: [] } } as unknown as Job;
     expect(await handler.canDelete(pending)).toContain('Cancel the run');
-    await prisma.workflowRun.update({ where: { id: run.id }, data: { status: 'cancelled' } });
+    await seed.workflowRun.update({ where: { id: run.id }, data: { status: 'cancelled' } });
     expect(await handler.canDelete(pending)).toBeNull();
   });
 
   it('reviewRuns: fails stuck runs and purges old review and empty-trash runs', async () => {
     const review = (status: string, updatedAt: Date, finishedAt: Date | null) =>
-      prisma.reviewRun.create({
+      seed.reviewRun.create({
         data: { circleId, subjectType: 'burst_group', action: 'dismiss', threshold: 50, status: status as never, updatedAt, finishedAt },
       });
     const trash = (status: string, updatedAt: Date, finishedAt: Date | null) =>
-      prisma.trashEmptyRun.create({ data: { circleId, status: status as never, updatedAt, finishedAt } });
+      seed.trashEmptyRun.create({ data: { circleId, status: status as never, updatedAt, finishedAt } });
 
     const stale = await review('evaluating', ago(2), null);
     const oldReview = await review('failed', ago(40), ago(40));
@@ -116,13 +119,13 @@ describeMaybeDb('Run-history retention purges (DB_GATED: real PostgreSQL)', () =
     const staleTrash = await trash('running', ago(3), null);
     const oldTrash = await trash('completed', ago(31), ago(31));
 
-    await new ReviewRunsRetentionHandler(registry, prisma, settings as never).process(job);
+    await new ReviewRunsRetentionHandler(registry, housekeepingClient(prisma), settings as never).process(job);
 
     const reviews = new Map(
-      (await prisma.reviewRun.findMany({ where: { circleId } })).map((r) => [r.id, r]),
+      (await seed.reviewRun.findMany({ where: { circleId } })).map((r) => [r.id, r]),
     );
     const trashes = new Map(
-      (await prisma.trashEmptyRun.findMany({ where: { circleId } })).map((r) => [r.id, r]),
+      (await seed.trashEmptyRun.findMany({ where: { circleId } })).map((r) => [r.id, r]),
     );
     expect(reviews.get(stale.id)?.status).toBe('failed');
     expect(reviews.get(stale.id)?.lastError).toMatch(/stale/);
