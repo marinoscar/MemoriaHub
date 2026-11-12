@@ -16,13 +16,12 @@ import {
   Slider,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../services/adminDuplicates';
-import type { DuplicateBackfillResult, DuplicatesModelStatus } from '../../services/adminDuplicates';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../headless/services/adminDuplicates.js';
+import type { DuplicateBackfillResult, DuplicatesModelStatus } from '../../headless/services/adminDuplicates.js';
 
 function DuplicatesSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // Model status
@@ -342,6 +341,11 @@ function DuplicatesSettingsContent() {
   );
 }
 
+/**
+ * The admin Duplicate Detection page: the global switch, the matching thresholds, the auto-resolve threshold, the model status and the global backfill.
+ *
+ * @stability experimental
+ */
 export default function DuplicatesSettingsPage() {
   const { isAdmin } = usePermissions();
 

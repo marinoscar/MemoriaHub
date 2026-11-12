@@ -316,18 +316,27 @@ export interface MemoriahubFaceSettings {
 }
 
 /**
- * The review-queue half of the deployment settings: the confidence floors the
- * burst, duplicate and location-suggestion pages preselect for their bulk actions.
+ * The review-queue half of the deployment settings: the detection parameters the
+ * admin pages of the burst, duplicate and location features edit, and the confidence
+ * floors the review pages preselect for their bulk actions.
  *
  * @stability experimental
  */
 export interface MemoriahubReviewSettings {
-  /** `burst`: the auto-resolve threshold (percent). */
-  burst?: { autoResolveThreshold?: number };
-  /** `dedup`: the auto-resolve threshold (percent). */
-  dedup?: { autoResolveThreshold?: number };
-  /** `locationInference`: the bulk-accept threshold (percent). */
-  locationInference?: { bulkAcceptThreshold?: number };
+  /** `burst`: the detection parameters and the auto-resolve threshold (percent). */
+  burst?: { timeGapSeconds?: number; hashDistance?: number; minGroupSize?: number; autoResolveThreshold?: number };
+  /** `dedup`: the matching thresholds and the auto-resolve threshold (percent). */
+  dedup?: { similarityThreshold?: number; hashMaxDistance?: number; knnCandidates?: number; autoResolveThreshold?: number };
+  /** `locationInference`: the inference parameters and the bulk-accept threshold (percent). */
+  locationInference?: {
+    maxGapMinutes?: number;
+    maxExtrapolationGapMinutes?: number;
+    autoApplyMaxGapMinutes?: number;
+    requireSameDevice?: boolean;
+    maxAnchorDistanceKm?: number;
+    maxImpliedSpeedKmh?: number;
+    bulkAcceptThreshold?: number;
+  };
 }
 
 /**

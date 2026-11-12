@@ -25,21 +25,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/adminDuplicates', () => ({
+vi.mock('../../src/review/headless/services/adminDuplicates.js', () => ({
   runGlobalDuplicatesBackfill: vi.fn(),
   getDuplicatesStatus: vi.fn(),
 }));
@@ -48,13 +46,15 @@ vi.mock('../../services/adminDuplicates', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import DuplicatesSettingsPage from '../../pages/Admin/DuplicatesSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../services/adminDuplicates';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import DuplicatesSettingsPage from '../../src/review/ui/admin/DuplicatesSettingsPage.js';
+import { runGlobalDuplicatesBackfill, getDuplicatesStatus } from '../../src/review/headless/services/adminDuplicates.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 const mockRunGlobalDuplicatesBackfill = vi.mocked(runGlobalDuplicatesBackfill);
 const mockGetDuplicatesStatus = vi.mocked(getDuplicatesStatus);
 
@@ -125,6 +125,10 @@ function makeModelStatus(overrides: Partial<{ modelAvailable: boolean; modelPath
 describe('DuplicatesSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(adminPermissions() as any);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(false) as any);
     mockGetDuplicatesStatus.mockResolvedValue(makeModelStatus());

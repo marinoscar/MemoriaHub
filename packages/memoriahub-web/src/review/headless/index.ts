@@ -4,3 +4,6 @@ export * from './services/locationSuggestions.js';
 export * from './hooks/useBursts.js';
 export * from './hooks/useDuplicates.js';
 export * from './hooks/useLocationSuggestions.js';
+export * from './services/adminBursts.js';
+export * from './services/adminDuplicates.js';
+export * from './services/adminLocationInference.js';

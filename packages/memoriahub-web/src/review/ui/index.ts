@@ -11,3 +11,6 @@ export { default as DuplicatesPage } from './pages/DuplicatesPage.js';
 export { default as DuplicateGroupPage } from './pages/DuplicateGroupPage.js';
 export { default as LocationSuggestionsPage } from './pages/LocationSuggestionsPage.js';
 export { default as LocationSuggestionRunRedirect } from './pages/LocationSuggestionRunRedirect.js';
+export { default as BurstsSettingsPage } from './admin/BurstsSettingsPage.js';
+export { default as DuplicatesSettingsPage } from './admin/DuplicatesSettingsPage.js';
+export { default as LocationInferenceSettingsPage } from './admin/LocationInferenceSettingsPage.js';

@@ -15,13 +15,12 @@ import {
   Snackbar,
 } from '@mui/material';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalBurstBackfill } from '../../services/adminBackfill';
-import type { GlobalBackfillResult } from '../../services/adminBackfill';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { runGlobalBurstBackfill } from '../../headless/services/adminBursts.js';
+import type { GlobalBackfillResult } from '../../headless/services/adminBursts.js';
 
 function BurstsSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // Burst parameters local state
@@ -284,6 +283,11 @@ function BurstsSettingsContent() {
   );
 }
 
+/**
+ * The admin Burst Detection page: the global switch, the detection parameters, the auto-resolve threshold and the global backfill.
+ *
+ * @stability experimental
+ */
 export default function BurstsSettingsPage() {
   const { isAdmin } = usePermissions();
 

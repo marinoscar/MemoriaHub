@@ -146,14 +146,14 @@ const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TaggingSettingsPage })),
 );
-const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
-const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
+const BurstsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsSettingsPage })));
+const DuplicatesSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesSettingsPage })));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
 const EnhancerSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancerSettingsPage })));
 const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
 );
-const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
+const LocationInferenceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationInferenceSettingsPage })));
 const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() =>

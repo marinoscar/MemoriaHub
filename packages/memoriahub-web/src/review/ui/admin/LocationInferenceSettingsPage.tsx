@@ -17,13 +17,12 @@ import {
   Divider,
 } from '@mui/material';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalLocationInferenceBackfill } from '../../services/adminLocationInference';
-import type { LocationInferenceBackfillResult } from '../../services/adminLocationInference';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { runGlobalLocationInferenceBackfill } from '../../headless/services/adminLocationInference.js';
+import type { LocationInferenceBackfillResult } from '../../headless/services/adminLocationInference.js';
 
 function LocationInferenceSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // Matching parameters local state
@@ -390,6 +389,11 @@ function LocationInferenceSettingsContent() {
   );
 }
 
+/**
+ * The admin Location Inference page: the global switch, the inference parameters, the bulk-accept threshold and the global backfill.
+ *
+ * @stability experimental
+ */
 export default function LocationInferenceSettingsPage() {
   const { isAdmin } = usePermissions();
 
