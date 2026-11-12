@@ -25,6 +25,7 @@ import { NODE_TOKEN_PREFIX, NodeCredentialService } from '@marinoscar/platform-a
 
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { MIGRATIONS_DIR, applyMigration, connectionUrl, createScratchDatabase, type Row, type ScratchDatabase } from './scratch-db';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -36,7 +37,7 @@ describeMaybeDb('RETRO-C2 worker nodes and nod_ credentials move to the platform
   let scratch: ScratchDatabase;
   let prisma: PrismaClient;
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await scratch.db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(scratch.db, { bypass: true }).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
 
   const owner = randomUUID();

@@ -32,6 +32,7 @@ import { Client } from 'pg';
 import '../../src/app-registrations/sharing';
 import { applyMediaSharesImport, planMediaSharesImport } from '../../src/legacy/media-shares-import';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -86,7 +87,7 @@ describeMaybeDb('RETRO-I4 media shares to link grants (DB_GATED: real PostgreSQL
   const shares: Array<{ id: string; token: string; type: 'media_item' | 'album'; resourceId: string; state: string }> = [];
   let creatorId: string;
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db, { bypass: true }).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
 
   const runImport = () =>

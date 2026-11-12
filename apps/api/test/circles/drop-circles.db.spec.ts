@@ -25,6 +25,7 @@ import { Client } from 'pg';
 
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { createPersonalLibrary, createSharedLibrary } from '../helpers/library';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -77,7 +78,7 @@ describeMaybeDb('RETRO-K2 drops circles without touching content (DB_GATED: real
   let before: Record<string, { n: number; h: string }>;
   let personalBefore: Row[];
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db, { bypass: true }).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
 
   const fingerprint = async (): Promise<Record<string, { n: number; h: string }>> => {
