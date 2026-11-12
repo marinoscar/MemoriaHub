@@ -71,7 +71,7 @@ const COLORIZE_FIDELITY_CONSTRAINT =
  * of intent or preset — they are the core safety guardrails of the feature.
  *
  * @param params - the preset, the adjustments and the free-text guidance.
- * @param strength - how hard the correction pushes.
+ * @param effectiveStrength - how hard the correction pushes.
  * @stability experimental
  */
 export function buildEnhancePrompt(
