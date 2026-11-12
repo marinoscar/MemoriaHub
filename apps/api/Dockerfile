@@ -117,7 +117,7 @@ FROM base AS deps
 # the final image stays lean. sharp locates libvips via
 # `pkg-config --modversion vips-cpp`; node-gyp is provided by npm.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ pkg-config libvips-dev \
+      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Root workspace manifests plus the two workspace members apps/api needs:
