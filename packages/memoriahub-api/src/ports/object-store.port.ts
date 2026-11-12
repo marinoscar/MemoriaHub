@@ -70,12 +70,32 @@ export interface MemoriahubDeleteManyResult {
 }
 
 /**
+ * What a store can do with a multipart upload a phone drives: whether it hands out presigned part URLs
+ * (S3, R2) or takes the part bytes through the API (local disk, `proxied`), and whether it can accept a
+ * part body at all.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubObjectStoreCapabilities {
+  /** `presigned` when a client puts each part to a URL; `proxied` when the part goes through the API. */
+  readonly partUploadMode: 'presigned' | 'proxied';
+  /** True when the store can write a part body it is given (what a `proxied` store needs). */
+  readonly acceptsPartBytes: boolean;
+}
+
+/**
  * One object store: a driver bound to a bucket.
  *
  * @extensionPoint token
  * @stability experimental
  */
 export interface MemoriahubObjectStore {
+  /**
+   * What the store can do with a client-driven multipart upload. Optional: a diagnostic that needs it
+   * reports "unknown" when the host does not say.
+   */
+  readonly capabilities?: MemoriahubObjectStoreCapabilities;
+
   /** The driver kind (`s3`, `r2`, `local`, ...). */
   readonly kind: string;
 

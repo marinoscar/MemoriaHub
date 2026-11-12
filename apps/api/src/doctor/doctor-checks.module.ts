@@ -13,7 +13,7 @@
 // `MEMORIAHUB_DOCTOR` port from their slice's `forRoot` providers (see `SLICE_DOCTOR_CHECKS`), bound to
 // the platform registry by `PlatformMemoriahubDoctorAdapter`. What stays here is what has no slice to
 // own it (core, auth, nodes), what needs a platform service (the AI admin probes over the platform
-// `AiService`, the storage resolver of `android.upload-path`). Nothing imports this module except
+// `AiService`). Nothing imports this module except
 // `AppModule`, so it closes no cycle.
 //
 // The platform ships `db.connection`, `db.migrations`, `secrets.encryption-key`
@@ -29,7 +29,7 @@ import { GeoModule } from '../geo/geo.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 
-import { AndroidMediaSyncDoctorCheck } from '@marinoscar/memoriahub-api/media';
+import { AndroidMediaSyncDoctorCheck, AndroidUploadPathDoctorCheck } from '@marinoscar/memoriahub-api/media';
 import { DuplicateDetectionDoctorCheck } from '@marinoscar/memoriahub-api/dedup';
 import { BurstConfigDoctorCheck } from '@marinoscar/memoriahub-api/burst';
 import { SocialMediaDoctorCheck } from '@marinoscar/memoriahub-api/social-media';
@@ -56,8 +56,6 @@ import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-heal
 import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.doctor-check';
 import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
 import { NodesStaleLeasesDoctorCheck } from './checks/nodes/stale-leases.doctor-check';
-// `android.upload-path` needs the platform storage resolver; `android.media-sync` is the media slice's.
-import { AndroidUploadPathDoctorCheck } from '../media-sync/doctor/upload-path.doctor-check';
 
 /**
  * The `memoriahub.*` checks: the 35 documented ones minus the 3 the host core retired, the 2 the
@@ -90,8 +88,7 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   NodesCapabilityHealthDoctorCheck,
   // workflows
   // android (`android.assetlinks` and `android.releases` are the android-app slice's since
-  // RETRO-D5; `android.media-sync` is the media slice's since RETRO-J10)
-  AndroidUploadPathDoctorCheck,
+  // RETRO-D5; `android.media-sync` and `android.upload-path` are the media slice's since RETRO-J10)
 ];
 
 /**
@@ -116,6 +113,7 @@ export const SLICE_DOCTOR_CHECKS = [
   WorkflowsStateDoctorCheck,
   // android
   AndroidMediaSyncDoctorCheck,
+  AndroidUploadPathDoctorCheck,
 ];
 
 /** Every `memoriahub.*` check of the application, the slices' and this module's. */

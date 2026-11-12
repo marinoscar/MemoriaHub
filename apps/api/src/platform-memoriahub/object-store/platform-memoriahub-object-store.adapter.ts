@@ -15,6 +15,7 @@ import type {
   MemoriahubKeyPrefixDef,
   MemoriahubObjectProcessor,
   MemoriahubObjectStore,
+  MemoriahubObjectStoreCapabilities,
   MemoriahubObjectStorePort,
   MemoriahubUploadOptions,
   MemoriahubUploadResult,
@@ -48,6 +49,14 @@ class PlatformObjectStore implements MemoriahubObjectStore {
 
   getBucket(): string {
     return this.provider.getBucket();
+  }
+
+  /** The platform driver's contract (RETRO-D1): `partUploadMode: 'proxied'` means the API part route, which needs `uploadPart`. */
+  get capabilities(): MemoriahubObjectStoreCapabilities {
+    return {
+      partUploadMode: this.provider.partUploadMode === 'proxied' ? 'proxied' : 'presigned',
+      acceptsPartBytes: typeof this.provider.uploadPart === 'function',
+    };
   }
 
   async upload(key: string, body: Readable, options: MemoriahubUploadOptions): Promise<MemoriahubUploadResult> {

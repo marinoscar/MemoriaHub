@@ -37,7 +37,7 @@ import {
 } from '../../test/mocks/prisma.mock';
 
 import { ALL_MEMORIAHUB_DOCTOR_CHECKS as MEMORIAHUB_DOCTOR_CHECKS } from './doctor-checks.module';
-import { MEMORIAHUB_DOCTOR, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '@marinoscar/memoriahub-api/ports';
+import { MEMORIAHUB_DOCTOR, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA, MEMORIAHUB_SETTINGS } from '@marinoscar/memoriahub-api/ports';
 import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
 
 // ---------------------------------------------------------------------------
@@ -243,6 +243,26 @@ describe('MemoriaHub Doctor checks', () => {
     const byToken = new Map<unknown, unknown>([
       [MEMORIAHUB_DOCTOR, { registerCheck: jest.fn() }],
       [MEMORIAHUB_PRISMA, mockPrisma],
+      [
+        // The object-store port over the storage double: the same capability mapping the platform adapter makes.
+        MEMORIAHUB_OBJECT_STORE,
+        {
+          active: async () => {
+            const target = await mockStorageResolver.getActiveProvider();
+            return {
+              id: target.id,
+              store: {
+                kind: target.id,
+                getBucket: () => target.provider.getBucket(),
+                capabilities: {
+                  partUploadMode: target.provider.partUploadMode === 'proxied' ? 'proxied' : 'presigned',
+                  acceptsPartBytes: typeof target.provider.uploadPart === 'function',
+                },
+              },
+            };
+          },
+        },
+      ],
       [
         MEMORIAHUB_SETTINGS,
         {
