@@ -105,7 +105,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # itself, which is what the sharp addon (built against it below) links.
 COPY --from=vips /opt/vips /opt/vips
 ENV LD_LIBRARY_PATH=/opt/vips/lib \
-    PKG_CONFIG_PATH=/opt/vips/lib/pkgconfig
+    PKG_CONFIG_PATH=/opt/vips/lib/pkgconfig \
+    CPATH=/opt/vips/include
 
 # -----------------------------------------------------------------------------
 # Dependencies stage
@@ -164,6 +165,7 @@ RUN npm install --ignore-scripts
 RUN mkdir /tmp/sharp-tools && cd /tmp/sharp-tools \
  && npm init -y >/dev/null \
  && npm install --no-audit --no-fund node-addon-api@8.9.0 node-gyp@12.4.0 \
+ && pkg-config --cflags vips-cpp && pkg-config --libs vips-cpp \
  && cd /app/node_modules/sharp \
  && PATH=/tmp/sharp-tools/node_modules/.bin:$PATH NODE_PATH=/tmp/sharp-tools/node_modules \
     SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \

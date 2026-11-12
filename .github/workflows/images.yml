@@ -80,6 +80,11 @@ jobs:
             fi
           done
 
+      - name: sharp build info (inside the API image)
+        run: |
+          docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-api:parity-gate \
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif))"
+
       - name: Golden-vector parity gate (inside the API image)
         # REQUIRE_CLIP_MODEL is not set: the API image does not bake the CLIP
         # model, so that assertion skips while the dHash ones run. The HEIC case
@@ -123,6 +128,11 @@ jobs:
           push: false
           tags: memoriahub-worker:parity-gate
           cache-from: type=gha,scope=worker
+
+      - name: sharp build info (inside the worker image)
+        run: |
+          docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-worker:parity-gate \
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif))"
 
       - name: Golden-vector parity gate (inside the worker image)
         # The worker image bakes the CLIP model, so a missing one is a failure.
