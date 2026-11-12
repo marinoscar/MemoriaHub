@@ -437,6 +437,33 @@ describe('WorkflowRunService', () => {
         ).rejects.toThrow(BadRequestException);
       });
 
+      it('writes no exclusion when the confirmation is refused (#735)', async () => {
+        prisma.workflowRun.findUnique.mockResolvedValue(makeHardDeleteRun(7) as any);
+        const user = makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE, PERMISSIONS.MEDIA_DELETE] });
+
+        for (const confirmation of [undefined, 'DELETE 6']) {
+          await expect(
+            service.approveRun(RUN_ID, { excludedItemIds: [randomUUID()], confirmation }, user),
+          ).rejects.toThrow(/Confirmation required/);
+        }
+        expect(prisma.workflowRunItem.updateMany).not.toHaveBeenCalled();
+        expect(prisma.workflowRun.update).not.toHaveBeenCalled();
+      });
+
+      it('writes no exclusion when gated-action re-authorization is refused (#735)', async () => {
+        prisma.workflowRun.findUnique.mockResolvedValue(makeHardDeleteRun(7) as any);
+        // allowHardDelete stays off, so the re-check refuses after a correct confirmation.
+        await expect(
+          service.approveRun(
+            RUN_ID,
+            { excludedItemIds: [randomUUID()], confirmation: 'DELETE 7' },
+            makeUser({ permissions: [PERMISSIONS.MEDIA_WRITE, PERMISSIONS.MEDIA_DELETE] }),
+          ),
+        ).rejects.toThrow();
+        expect(prisma.workflowRunItem.updateMany).not.toHaveBeenCalled();
+        expect(prisma.workflowRun.update).not.toHaveBeenCalled();
+      });
+
       it('accepts the exact "DELETE <matchedCount>" confirmation string', async () => {
         prisma.workflowRun.findUnique.mockResolvedValue(makeHardDeleteRun(7) as any);
         prisma.workflowRun.update.mockResolvedValue(
