@@ -9,7 +9,7 @@ import {
 import { JobReason, MediaTagSource, MediaTagStatusType, MediaType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MediaService } from '@marinoscar/memoriahub-api/media';
-import { MediaEnrichmentService } from '../../media/enrichment/media-enrichment.service';
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 import { PeopleService } from '@marinoscar/memoriahub-api/face';
 import { BurstService, ResolveBurstDto } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateService, ResolveDuplicateDto } from '@marinoscar/memoriahub-api/dedup';

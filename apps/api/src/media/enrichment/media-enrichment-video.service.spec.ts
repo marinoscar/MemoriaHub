@@ -28,7 +28,7 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { MediaEnrichmentService } from './media-enrichment.service';
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 import { mediaEnrichmentProvider } from '../../../test/helpers/media-enrichment';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EnrichmentJobService } from '../../enrichment/enrichment-job.service';

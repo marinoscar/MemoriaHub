@@ -2,6 +2,8 @@ import { Module, type DynamicModule } from '@nestjs/common';
 
 import { UploadEnrichmentRegistry } from './enrichment-fanout/upload-enrichment.registry.js';
 import { UploadEnrichmentService } from './enrichment-fanout/upload-enrichment.service.js';
+import { MediaEnrichmentService } from './enrichment/media-enrichment.service.js';
+import { MEDIA_ENRICHMENT } from './hooks/media-host-hooks.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
 import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service.js';
 import { MediaThumbnailService } from './thumbnails/media-thumbnail.service.js';
@@ -25,7 +27,8 @@ export interface MediaModuleOptions {
  * `@marinoscar/memoriahub-api/ports` (the host binds them once with
  * `MemoriahubPortsModule.forRoot`) and exports what the host and the other slices inject:
  * the upload fan-out registry and service, the sidecar touch service, the `upload_completed`
- * producer and the Media Sync device service.
+ * producer, the enrichment service (the `MEDIA_ENRICHMENT` hook the gallery calls and the video
+ * post-detection fan-out) and the Media Sync device service.
  *
  * The slice's controllers (`MediaSyncController`, `TrashEmptyRunsController`) are exported classes, not
  * mounted by `forRoot()`: the host lists them in the `controllers` of the module where its routes belong,
@@ -56,6 +59,8 @@ export class MediaModule {
         UploadEnrichmentRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
+        MediaEnrichmentService,
+        { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
         MediaSyncService,
         MediaThumbnailService,
         TrashEmptyRunService,
@@ -65,6 +70,8 @@ export class MediaModule {
         UploadEnrichmentRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
+        MediaEnrichmentService,
+        MEDIA_ENRICHMENT,
         MediaSyncService,
         MediaThumbnailService,
         TrashEmptyRunService,

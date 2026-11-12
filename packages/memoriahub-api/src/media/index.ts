@@ -5,6 +5,7 @@ export * from './touch/media-touch.service.js';
 export * from './producers/upload-notification.service.js';
 export * from './enrichment-fanout/upload-enrichment.registry.js';
 export * from './enrichment-fanout/upload-enrichment.service.js';
+export * from './enrichment/media-enrichment.service.js';
 export { MediaSyncService, updateStatus, type CurrentRelease, type MediaSyncCaller, type MediaSyncCredential } from './media-sync/media-sync.service.js';
 export { applyCommand, applyPatch, defaultConfig, readConfig } from './media-sync/media-sync-config.js';
 export { mediaSyncRefusal } from './media-sync/media-sync-refusal.js';

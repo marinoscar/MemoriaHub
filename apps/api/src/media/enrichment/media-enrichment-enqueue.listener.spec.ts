@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaEnrichmentEnqueueListener } from './media-enrichment-enqueue.listener';
-import { MediaEnrichmentService } from './media-enrichment.service';
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 import { ObjectProcessedEvent } from '../../media-processing/events/object-processed.event';
 
 describe('MediaEnrichmentEnqueueListener', () => {

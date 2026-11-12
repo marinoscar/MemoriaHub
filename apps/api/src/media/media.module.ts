@@ -7,7 +7,6 @@ import { EnrichmentModule } from '../enrichment/enrichment.module';
 import { stringify as csvStringify } from 'csv-stringify';
 import {
   MEDIA_CSV_STRINGIFIER,
-  MEDIA_ENRICHMENT,
   MEDIA_FORWARD_GEOCODER,
   MEDIA_GEO_LOCATION_PROVIDER,
   MEDIA_ITEM_PURGER,
@@ -41,7 +40,6 @@ import { MediaMetadataSyncListener } from './sync/media-metadata-sync.listener';
 import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/location';
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
-import { MediaEnrichmentService } from './enrichment/media-enrichment.service';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
 import { MediaSystemAccessAdapter } from './media-system-access.adapter';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
@@ -123,7 +121,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     { provide: MEDIA_LOCATION_RESOLVER, useExisting: LocationGroupResolverService },
     { provide: MEDIA_GEO_LOCATION_PROVIDER, useExisting: GEO_LOCATION_PROVIDER },
     { provide: MEDIA_FORWARD_GEOCODER, useExisting: ForwardGeocodeService },
-    { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
     { provide: MEDIA_WEBHOOK_EVENTS, useExisting: MemoriaHubWebhooks },
     { provide: MEDIA_CSV_STRINGIFIER, useValue: { create: (columns: string[]) => csvStringify({ header: true, columns }) } },
     ThumbnailProcessor,
@@ -141,7 +138,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     { provide: MEDIA_THUMBNAIL_PRUNER, useExisting: ThumbnailPruneService },
     MediaSystemAccessAdapter,
     { provide: MEDIA_SYSTEM_ACCESS, useExisting: MediaSystemAccessAdapter },
-    MediaEnrichmentService,
     MediaEnrichmentEnqueueListener,
     MediaOrientationEditService,
     ThumbnailRegenHandler,
@@ -149,6 +145,6 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     TrashEmptyEvaluateHandler,
     TrashEmptyExecuteBatchHandler,
   ],
-  exports: [MediaService, MediaMetadataSyncService, MediaEnrichmentService, MediaCoreModule.forRoot()],
+  exports: [MediaService, MediaMetadataSyncService, MediaCoreModule.forRoot()],
 })
 export class MediaModule {}

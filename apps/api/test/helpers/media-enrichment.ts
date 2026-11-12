@@ -1,5 +1,5 @@
 // =============================================================================
-// A real `MediaEnrichmentService` over mocked collaborators (RETRO-J5, #613)
+// The packaged `MediaEnrichmentService` over mocked collaborators (RETRO-J5, #613)
 // =============================================================================
 //
 // The upload fan-out is the media slice's `UploadEnrichmentRegistry`; each slice
@@ -10,7 +10,7 @@
 // =============================================================================
 
 import { JobReason } from '@prisma/client';
-import { UploadEnrichmentRegistry, UploadEnrichmentService } from '@marinoscar/memoriahub-api/media';
+import { MediaEnrichmentService, UploadEnrichmentRegistry, UploadEnrichmentService } from '@marinoscar/memoriahub-api/media';
 
 import { registerBurstUploadEnrichment } from '@marinoscar/memoriahub-api/burst';
 import { registerDedupUploadEnrichment } from '@marinoscar/memoriahub-api/dedup';
@@ -18,7 +18,6 @@ import { EnrichmentJobService } from '../../src/enrichment/enrichment-job.servic
 import { registerFaceUploadEnrichment } from '@marinoscar/memoriahub-api/face';
 import { registerLocationInferenceUploadEnrichment } from '@marinoscar/memoriahub-api/location';
 import type { MemoriahubEnqueueInput, MemoriahubJobsPort } from '@marinoscar/memoriahub-api/ports';
-import { MediaEnrichmentService } from '../../src/media/enrichment/media-enrichment.service';
 import { AppSystemSettingsService } from '../../src/platform/settings/app-system-settings.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { registerSocialMediaUploadEnrichment } from '@marinoscar/memoriahub-api/social-media';
@@ -40,9 +39,9 @@ export function buildMediaEnrichment(
 
   const registry = new UploadEnrichmentRegistry();
   const service = new MediaEnrichmentService(
-    prisma,
-    jobs,
-    systemSettings,
+    prisma as never,
+    facadeAsJobsPort(jobs),
+    settingsPort as never,
     new UploadEnrichmentService(registry, settingsPort as never),
   );
 

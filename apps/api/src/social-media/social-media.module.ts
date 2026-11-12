@@ -6,15 +6,15 @@ import {
   SocialMediaModule as PackagedSocialMediaModule,
 } from '@marinoscar/memoriahub-api/social-media';
 
+import { MediaEnrichmentService } from '@marinoscar/memoriahub-api/media';
 import { FaceModule } from '../face/face.module';
 import { MediaModule } from '../media/media.module';
 import { videoJobTimeoutMs } from '../platform/jobs/legacy-env';
-import { SocialMediaPostDetectionAdapter } from './post-detection.adapter';
 
 const packagedSocialMedia = PackagedSocialMediaModule.forRoot({
   providers: [
-    SocialMediaPostDetectionAdapter,
-    { provide: SOCIAL_MEDIA_POST_DETECTION, useExisting: SocialMediaPostDetectionAdapter },
+    // The video fan-out withheld while a video is classified is the packaged media enrichment service's.
+    { provide: SOCIAL_MEDIA_POST_DETECTION, useExisting: MediaEnrichmentService },
   ],
   // The face module provides the frame extractor of the Tier-2 OCR; the media module the post-detection fan-out.
   imports: [FaceModule, MediaModule],
