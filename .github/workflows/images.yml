@@ -98,7 +98,7 @@ jobs:
             -e MODELS_DIR=/app/models \
             -w /app/packages/memoriahub-compute \
             memoriahub-api:parity-gate \
-            --test --test-name-pattern='^(?!.*HEIC)' test/golden.test.mjs
+            --test --test-name-pattern='/^(?!.*HEIC)/' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the API image)
         run: |
@@ -156,7 +156,7 @@ jobs:
             -e REQUIRE_CLIP_MODEL=1 \
             -w /app/packages/memoriahub-compute \
             memoriahub-worker:parity-gate \
-            --test --test-name-pattern='^(?!.*(HEIC|CLIP embedding))' test/golden.test.mjs
+            --test --test-name-pattern='/^(?!.*(HEIC|CLIP embedding))/' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the worker image)
         run: |
@@ -220,7 +220,7 @@ jobs:
         # is taken from the worker image and mounted read-only into both runs.
         run: |
           set -euo pipefail
-          mkdir -p out models
+          mkdir -p out models && chmod 777 out
           docker create --name modelsrc memoriahub-worker:parity-gate
           docker cp modelsrc:/app/models/. models/
           docker rm modelsrc
