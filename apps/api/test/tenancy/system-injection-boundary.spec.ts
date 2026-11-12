@@ -47,9 +47,9 @@ const ALLOWLIST: Record<string, string> = {
     'media-housekeeping: the MEDIA_SYSTEM_ACCESS hook of the media slice, for the global thumbnail_repair sweep that finds and counts repair attempts across organizations',
   'platform-extensions/telemetry/memoriahub-telemetry-signals.service.ts':
     'admin-aggregate: the app.media.processing.backlog gauge counts storage_objects by status across organizations (RETRO-T3)',
-  'media-processing/recovery/storage-recovery.service.ts':
-    'storage-processing-recovery: the media.storage.recover_stuck and media.storage.reprocess jobs scan storage_objects ' +
-    'across organizations and bump retry counters (RETRO-D1b)',
+  'media/media-recovery-system-access.adapter.ts':
+    'storage-processing-recovery: the MEDIA_RECOVERY_SYSTEM_ACCESS hook of the media slice, for the media.storage.recover_stuck and ' +
+    'media.storage.reprocess jobs that scan storage_objects across organizations and bump retry counters (RETRO-D1b, RETRO-J5)',
 };
 
 function sources(dir: string): string[] {

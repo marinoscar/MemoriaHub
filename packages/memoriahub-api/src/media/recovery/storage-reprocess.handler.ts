@@ -10,40 +10,45 @@
 // request, which on a large library outlived any proxy timeout.
 //
 // SERVER-ONLY: no node-result pair (reads `storage_objects` across organizations
-// on the system client, reason `storage-processing-recovery`).
+// on the cross-organization client).
 // =============================================================================
 
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { trace } from '@opentelemetry/api';
+
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+  MEMORIAHUB_JOBS,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
 
-import { STORAGE_REPROCESS_TYPE, parseReprocessPayload } from './storage-recovery.constants';
-import { StorageRecoveryService } from './storage-recovery.service';
+import { parseReprocessPayload } from './storage-recovery.constants.js';
+import { STORAGE_REPROCESS_TYPE } from './storage-recovery-types.js';
+import { StorageRecoveryService } from './storage-recovery.service.js';
 
+/** The `media.storage.recover_stuck` job (server-only). @stability experimental */
 @Injectable()
-export class StorageReprocessHandler implements JobHandler, OnModuleInit {
+export class StorageReprocessHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = STORAGE_REPROCESS_TYPE;
 
   readonly label = 'Media reprocess (bulk)';
 
   /** One enqueue per object of a whole library: thirty minutes, three attempts (re-queuing is idempotent). */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 30 * 60_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 30 * 60_000, maxAttempts: 3 };
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly recovery: StorageRecoveryService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  async process(job: MemoriahubJob): Promise<void> {
     const { circleId } = parseReprocessPayload(job.payload);
     const result = await this.recovery.reprocessMediaObjects(circleId);
     trace.getActiveSpan()?.setAttributes({

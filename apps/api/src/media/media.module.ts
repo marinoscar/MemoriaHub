@@ -12,6 +12,7 @@ import {
   MEDIA_ITEM_PURGER,
   MEDIA_LOCATION_RESOLVER,
   MEDIA_OBJECT_REPROCESSOR,
+  MEDIA_RECOVERY_SYSTEM_ACCESS,
   MEDIA_SYSTEM_ACCESS,
   MEDIA_THUMBNAIL_PRUNER,
   MEDIA_WEBHOOK_EVENTS,
@@ -23,6 +24,10 @@ import {
   MediaThumbnailRerunController,
   MediaService,
   MediaModule as MediaCoreModule,
+  StorageRecoveryHandler,
+  StorageRecoveryService,
+  StorageRecoveryTask,
+  StorageReprocessHandler,
   TrashEmptyEvaluateHandler,
   TrashEmptyExecuteBatchHandler,
   ThumbnailNodePersistService,
@@ -41,6 +46,7 @@ import { LocationGroupResolverService } from '@marinoscar/memoriahub-api/locatio
 import { ThumbnailProcessor } from '../media-processing/processors/thumbnail.processor';
 import { ImageDimensionsProcessor } from '../media-processing/processors/image-dimensions.processor';
 import { MediaEnrichmentEnqueueListener } from './enrichment/media-enrichment-enqueue.listener';
+import { MediaRecoverySystemAccessAdapter } from './media-recovery-system-access.adapter';
 import { MediaSystemAccessAdapter } from './media-system-access.adapter';
 import { ObjectReprocessService } from '../media-processing/recovery/object-reprocess.service';
 import { ThumbnailPruneService } from '../media-processing/thumbnail-prune.service';
@@ -138,6 +144,14 @@ import { AppSystemSettingsService } from '../platform/settings/app-system-settin
     { provide: MEDIA_THUMBNAIL_PRUNER, useExisting: ThumbnailPruneService },
     MediaSystemAccessAdapter,
     { provide: MEDIA_SYSTEM_ACCESS, useExisting: MediaSystemAccessAdapter },
+    // The stuck/failed storage object recovery and the admin bulk reprocess (RETRO-D1b): the media slice's
+    // jobs and cron; the host binds the cross-organization client under its own audit reason.
+    MediaRecoverySystemAccessAdapter,
+    { provide: MEDIA_RECOVERY_SYSTEM_ACCESS, useExisting: MediaRecoverySystemAccessAdapter },
+    StorageRecoveryService,
+    StorageRecoveryHandler,
+    StorageReprocessHandler,
+    StorageRecoveryTask,
     MediaEnrichmentEnqueueListener,
     MediaOrientationEditService,
     ThumbnailRegenHandler,

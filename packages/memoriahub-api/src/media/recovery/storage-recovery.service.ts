@@ -1,39 +1,37 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { HOUSEKEEPING_PRIORITY, JobsService, type Job } from '@marinoscar/platform-api/jobs';
-import {
-  STORAGE_OBJECT_PROCESS_TYPE,
-  STORAGE_OBJECT_SUBJECT_TYPE,
-} from '@marinoscar/platform-api/storage';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { STORAGE_PROCESSING_RECOVERY_REASON } from '../../app-registrations/system-access-reasons';
-import { PrismaService } from '../../prisma/prisma.service';
-import { PrismaSystemService } from '../../prisma/prisma-system.service';
 import {
+  MEMORIAHUB_JOBS,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+import { MEDIA_RECOVERY_SYSTEM_ACCESS, type MediaSystemAccess } from '../hooks/media-host-hooks.js';
+import {
+  RECOVERY_BACKGROUND_PRIORITY,
   RECOVERY_SCAN_BATCH,
+  STORAGE_OBJECT_JOB_SUBJECT_TYPE,
+  STORAGE_OBJECT_PROCESS_JOB_TYPE,
   maxRetriesFromEnv,
   stuckMinutesFromEnv,
-} from './storage-recovery.constants';
+} from './storage-recovery.constants.js';
 
 // =============================================================================
-// StorageRecoveryService: the work of the recovery and reprocess jobs (RETRO-D1b, #567)
+// StorageRecoveryService: the work of the recovery and reprocess jobs (RETRO-D1b #567, RETRO-J5 #613)
 // =============================================================================
 //
-// Runs ONLY inside the `media.storage.recover_stuck` and `media.storage.reprocess`
-// jobs (never in a cron, never in a request). Each scan is a keyset walk over
-// `storage_objects` on the system client (the rows of every organization, reason
-// `storage-processing-recovery`); per object it queues the platform's own
-// `storage.object.process` job, in the object's organization, instead of running
-// the processors inline. The processing job does the work, retries it, and marks
-// a still-`processing` object `failed` when it gives up.
+// Runs ONLY inside the `media.storage.recover_stuck` and `media.storage.reprocess` jobs. Each scan is a
+// keyset walk over `storage_objects` on the cross-organization client (the rows of every organization);
+// per object it queues the host's own `storage.object.process` job, in the object's organization, instead
+// of running the processors inline. The processing job does the work, retries it, and marks a
+// still-`processing` object `failed` when it gives up.
 //
-// The retry cap is unchanged: `metadata._processingRetryCount` is incremented
-// BEFORE the processing job is queued, so a crash between the two still spends
-// the attempt, and an object at `STORAGE_PROCESSING_MAX_RETRIES` is marked
-// `failed` (`_processingRetryExhausted: true`) instead of re-queued.
+// The retry cap: `metadata._processingRetryCount` is incremented BEFORE the processing job is queued, so
+// a crash between the two still spends the attempt, and an object at `STORAGE_PROCESSING_MAX_RETRIES` is
+// marked `failed` (`_processingRetryExhausted: true`) instead of re-queued.
 // =============================================================================
 
-/** What one recovery run did. `reprocessed` counts the processing jobs it queued. */
+/** What one recovery run did. `reprocessed` counts the processing jobs it queued. @stability experimental */
 export interface StorageProcessingRecoveryResult {
   claimed: number;
   reprocessed: number;
@@ -41,7 +39,7 @@ export interface StorageProcessingRecoveryResult {
   errors: number;
 }
 
-/** What one bulk reprocess run did. `reprocessed` counts the processing jobs it queued. */
+/** What one bulk reprocess run did. `reprocessed` counts the processing jobs it queued. @stability experimental */
 export interface StorageReprocessResult {
   reprocessed: number;
   failed: number;
@@ -54,25 +52,32 @@ const SCAN_SELECT = {
   metadata: true,
 } as const;
 
-type ScannedObject = { id: string; orgId: string; metadata: Prisma.JsonValue | null };
+type ScannedObject = { id: string; orgId: string; metadata: unknown };
 
-function metaOf(object: { metadata: Prisma.JsonValue | null }): Record<string, unknown> {
+function metaOf(object: { metadata: unknown }): Record<string, unknown> {
   const meta = object.metadata;
   return meta && typeof meta === 'object' && !Array.isArray(meta) ? { ...(meta as Record<string, unknown>) } : {};
 }
 
+/**
+ * The work of the recovery and reprocess jobs: keyset scans of the stored objects and one queued
+ * `storage.object.process` job per object. It runs only inside those two jobs (never in a cron, never in a
+ * request); the cross-organization client is the host's `MEDIA_RECOVERY_SYSTEM_ACCESS`.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class StorageRecoveryService {
   private readonly logger = new Logger(StorageRecoveryService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly system: PrismaSystemService,
-    private readonly jobs: JobsService,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
+    @Inject(MEDIA_RECOVERY_SYSTEM_ACCESS) private readonly system: MediaSystemAccess,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
   ) {}
 
   private get objects() {
-    return this.system.asSystem(STORAGE_PROCESSING_RECOVERY_REASON).storageObject;
+    return this.system.asSystem().storageObject;
   }
 
   /**
@@ -138,7 +143,7 @@ export class StorageRecoveryService {
         where: { id: object.id },
         data: {
           status: 'failed',
-          metadata: { ...meta, _processingRetryExhausted: true } as Prisma.InputJsonValue,
+          metadata: { ...meta, _processingRetryExhausted: true },
         },
       });
       result.exhausted++;
@@ -154,7 +159,7 @@ export class StorageRecoveryService {
     // another threshold window.
     await this.objects.update({
       where: { id: object.id },
-      data: { metadata: { ...meta, _processingRetryCount: retryCount + 1 } as Prisma.InputJsonValue },
+      data: { metadata: { ...meta, _processingRetryCount: retryCount + 1 } },
     });
     await this.enqueueProcessing(object, { priority: 0, reason: 'rerun' });
     result.reprocessed++;
@@ -194,7 +199,7 @@ export class StorageRecoveryService {
           const { _processingRetryCount, _processingRetryExhausted, ...rest } = metaOf(object);
           await this.objects.update({
             where: { id: object.id },
-            data: { status: 'processing', metadata: rest as Prisma.InputJsonValue },
+            data: { status: 'processing', metadata: rest },
           });
           await this.enqueueProcessing(object, { priority: 0, reason: 'rerun' });
           result.reprocessed++;
@@ -227,7 +232,7 @@ export class StorageRecoveryService {
     let cursor: string | undefined;
     for (;;) {
       // `media_items` carries no row-level security: the main client reads it.
-      const items = await this.prisma.mediaItem.findMany({
+      const items: Array<{ id: string; storageObjectId: string }> = await this.prisma.mediaItem.findMany({
         where: {
           deletedAt: null,
           ...(circleId ? { circleId } : {}),
@@ -252,7 +257,7 @@ export class StorageRecoveryService {
       });
       for (const object of objects) {
         try {
-          await this.enqueueProcessing(object, { priority: HOUSEKEEPING_PRIORITY, reason: 'backfill' });
+          await this.enqueueProcessing(object, { priority: RECOVERY_BACKGROUND_PRIORITY, reason: 'backfill' });
           result.reprocessed++;
         } catch (err) {
           result.failed++;
@@ -278,11 +283,11 @@ export class StorageRecoveryService {
   private enqueueProcessing(
     object: { id: string; orgId: string },
     opts: { priority: number; reason: 'rerun' | 'backfill' },
-  ): Promise<Job> {
+  ): Promise<unknown> {
     return this.jobs.enqueue({
-      type: STORAGE_OBJECT_PROCESS_TYPE,
+      type: STORAGE_OBJECT_PROCESS_JOB_TYPE,
       reason: opts.reason,
-      subjectType: STORAGE_OBJECT_SUBJECT_TYPE,
+      subjectType: STORAGE_OBJECT_JOB_SUBJECT_TYPE,
       subjectId: object.id,
       payload: { objectId: object.id, orgId: object.orgId },
       orgId: object.orgId,
@@ -294,9 +299,9 @@ export class StorageRecoveryService {
   private async withoutLiveProcessingJob<T extends { id: string }>(objects: T[]): Promise<T[]> {
     if (objects.length === 0) return objects;
     // `jobs` has no row-level security: the main client reads it.
-    const live = await this.prisma.job.findMany({
+    const live: Array<{ subjectId: string | null }> = await this.prisma.job.findMany({
       where: {
-        type: STORAGE_OBJECT_PROCESS_TYPE,
+        type: STORAGE_OBJECT_PROCESS_JOB_TYPE,
         status: { in: ['pending', 'running'] },
         subjectId: { in: objects.map((object) => object.id) },
       },

@@ -2,7 +2,7 @@
 // media.storage.recover_stuck: the storage processing recovery job (RETRO-D1b, #567)
 // =============================================================================
 //
-// A native platform `JobHandler`, a SYSTEM job (`orgId: null`, no subject):
+// A native job handler (registered through the jobs port), a SYSTEM job (`orgId: null`, no subject):
 //
 //   * mode `stuck` (the 10-minute `StorageRecoveryTask`, which only enqueues, and
 //     `POST /api/admin/media/reprocess-stuck`): objects orphaned at `processing`
@@ -15,40 +15,45 @@
 // `storage.object.process` job (see `StorageRecoveryService`).
 //
 // SERVER-ONLY: no node-result pair. It reads and writes `storage_objects` across
-// organizations on the system client (reason `storage-processing-recovery`).
+// organizations on the host's cross-organization client.
 // =============================================================================
 
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { trace } from '@opentelemetry/api';
+
 import {
-  JobHandlerRegistry,
-  type Job,
-  type JobExecutionProfile,
-  type JobHandler,
-} from '@marinoscar/platform-api/jobs';
+  MEMORIAHUB_JOBS,
+  type MemoriahubJob,
+  type MemoriahubJobHandler,
+  type MemoriahubJobProfile,
+  type MemoriahubJobsPort,
+} from '../../ports/index.js';
 
-import { STORAGE_RECOVER_STUCK_TYPE, parseRecoverPayload } from './storage-recovery.constants';
-import { StorageRecoveryService } from './storage-recovery.service';
+import { parseRecoverPayload } from './storage-recovery.constants.js';
+import { STORAGE_RECOVER_STUCK_TYPE } from './storage-recovery-types.js';
+import { StorageRecoveryService } from './storage-recovery.service.js';
 
+/** The `media.storage.recover_stuck` job (server-only). @stability experimental */
 @Injectable()
-export class StorageRecoveryHandler implements JobHandler, OnModuleInit {
+export class StorageRecoveryHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = STORAGE_RECOVER_STUCK_TYPE;
 
   readonly label = 'Storage processing recovery';
 
   /** A keyset scan and one enqueue per object: ten minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 10 * 60_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 10 * 60_000, maxAttempts: 3 };
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly recovery: StorageRecoveryService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
-  async process(job: Job): Promise<void> {
+  async process(job: MemoriahubJob): Promise<void> {
     const payload = parseRecoverPayload(job.payload);
     const result =
       payload.mode === 'failed'

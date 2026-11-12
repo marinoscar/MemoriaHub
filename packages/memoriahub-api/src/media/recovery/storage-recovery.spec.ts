@@ -1,11 +1,10 @@
 // =============================================================================
-// Storage processing recovery as queue jobs (RETRO-D1b, #567)
+// Storage processing recovery as queue jobs (RETRO-D1b, #567; moved to the media slice by RETRO-J5, #613)
 // =============================================================================
 //
-// Pins, over a small in-memory world:
+// Host-free: the ports are plain doubles. Pins, over a small in-memory world:
 //
-//   * the cron only enqueues (`enqueueHousekeepingJob`), and passes the platform
-//     `cron-enqueue-only` scan over `src/media-processing/` with no exemption;
+//   * the cron only enqueues (`enqueueHousekeeping`);
 //   * `media.storage.recover_stuck` (mode stuck): an orphaned object is
 //     re-queued as a platform `storage.object.process` job in its organization,
 //     its retry counter is persisted BEFORE the enqueue, an object with a live
@@ -13,24 +12,19 @@
 //   * mode `failed`: image objects are reset to `processing`, bookkeeping cleared;
 //   * `media.storage.reprocess`: ready/failed media objects are queued at
 //     background priority, statuses untouched;
-//   * both handlers are server-only and satisfy the platform handler contract.
+//   * both handlers are server-only (no node pair) and register themselves through the jobs port;
+//   (the platform handler contract and the cron-enqueue-only scan of this file run in the host's
+//   `apps/api/test/jobs` conformance specs.)
 // =============================================================================
 
-import { join } from 'node:path';
-import { cronEnqueueOnlySuite } from '@marinoscar/platform-api/testing';
-import { JobHandlerRegistry, type Job, type JobHandler } from '@marinoscar/platform-api/jobs';
-import { findJobHandlerContractViolations } from '@marinoscar/platform-api/jobs/testing';
+import { StorageRecoveryHandler } from './storage-recovery.handler.js';
+import { StorageRecoveryService } from './storage-recovery.service.js';
+import { StorageRecoveryTask } from './storage-recovery.task.js';
+import { StorageReprocessHandler } from './storage-reprocess.handler.js';
+import { parseRecoverPayload } from './storage-recovery.constants.js';
+import { STORAGE_RECOVER_STUCK_TYPE, STORAGE_REPROCESS_TYPE } from './storage-recovery-types.js';
 
-import { StorageRecoveryHandler } from '../../src/media-processing/recovery/storage-recovery.handler';
-import { StorageRecoveryService } from '../../src/media-processing/recovery/storage-recovery.service';
-import { StorageRecoveryTask } from '../../src/media-processing/recovery/storage-recovery.task';
-import { StorageReprocessHandler } from '../../src/media-processing/recovery/storage-reprocess.handler';
-import {
-  STORAGE_RECOVER_STUCK_TYPE,
-  STORAGE_REPROCESS_TYPE,
-  parseRecoverPayload,
-} from '../../src/media-processing/recovery/storage-recovery.constants';
-import { STORAGE_PROCESSING_RECOVERY_REASON } from '../../src/app-registrations/system-access-reasons';
+import type { MemoriahubJob as Job } from '../../ports/index.js';
 
 const ORG = '00000000-0000-4000-8000-0000000000a1';
 const OLD = new Date(Date.now() - 60 * 60_000);
@@ -77,8 +71,8 @@ function world(objects: Obj[], opts: { liveJobFor?: string[]; mediaItems?: { id:
     }),
   };
   const system = {
-    asSystem: jest.fn((reason: string) => {
-      reasons.push(reason);
+    asSystem: jest.fn(() => {
+      reasons.push('system');
       return { storageObject };
     }),
   };
@@ -129,35 +123,19 @@ beforeEach(() => ENV_KEYS.forEach((k) => ((savedEnv[k] = process.env[k]), delete
 afterEach(() => ENV_KEYS.forEach((k) => (savedEnv[k] === undefined ? delete process.env[k] : (process.env[k] = savedEnv[k]))));
 
 describe('StorageRecoveryTask (the cron only enqueues)', () => {
-  it('queues one housekeeping job of the recovery type and does nothing else', async () => {
-    const jobs = { enqueue: jest.fn(async () => ({ id: 'job-1', status: 'pending' })) };
-    const prisma = { job: { findFirst: jest.fn(async () => null) } };
-    await new StorageRecoveryTask(jobs as never, prisma as never).enqueueRecovery();
-    expect(jobs.enqueue).toHaveBeenCalledTimes(1);
-    expect(jobs.enqueue).toHaveBeenCalledWith(expect.objectContaining({ type: STORAGE_RECOVER_STUCK_TYPE, orgId: null }));
-  });
-
-  it('skips the tick when a recovery job is already in flight', async () => {
-    const jobs = { enqueue: jest.fn() };
-    const prisma = { job: { findFirst: jest.fn(async () => ({ id: 'job-live', status: 'running' })) } };
-    await new StorageRecoveryTask(jobs as never, prisma as never).enqueueRecovery();
+  it('asks the jobs port for one housekeeping job of the recovery type and does nothing else', async () => {
+    const jobs = { enqueueHousekeeping: jest.fn(async () => ({ id: 'job-1' })), enqueue: jest.fn() };
+    await new StorageRecoveryTask(jobs as never).enqueueRecovery();
+    expect(jobs.enqueueHousekeeping).toHaveBeenCalledTimes(1);
+    expect(jobs.enqueueHousekeeping).toHaveBeenCalledWith(expect.objectContaining({ type: STORAGE_RECOVER_STUCK_TYPE }));
     expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 
   it('is off when STORAGE_PROCESSING_STUCK_RESET_ENABLED=false', async () => {
     process.env['STORAGE_PROCESSING_STUCK_RESET_ENABLED'] = 'false';
-    const jobs = { enqueue: jest.fn() };
-    const prisma = { job: { findFirst: jest.fn(async () => null) } };
-    await new StorageRecoveryTask(jobs as never, prisma as never).enqueueRecovery();
-    expect(jobs.enqueue).not.toHaveBeenCalled();
-    expect(prisma.job.findFirst).not.toHaveBeenCalled();
-  });
-
-  it('passes the platform cron-enqueue-only scan over src/media-processing with no exemption', () => {
-    const root = join(__dirname, '..', '..', 'src', 'media-processing');
-    const report = cronEnqueueOnlySuite.check({ sourceRoots: [root] } as never, { exempt: [], minCronFiles: 1 });
-    expect(report.scannedFiles['cronFiles']).toEqual(['recovery/storage-recovery.task.ts']);
-    expect(report.findings).toEqual([]);
+    const jobs = { enqueueHousekeeping: jest.fn() };
+    await new StorageRecoveryTask(jobs as never).enqueueRecovery();
+    expect(jobs.enqueueHousekeeping).not.toHaveBeenCalled();
   });
 });
 
@@ -178,7 +156,7 @@ describe('media.storage.recover_stuck, mode stuck', () => {
         priority: 0,
       },
     ]);
-    expect(w.reasons.every((r) => r === STORAGE_PROCESSING_RECOVERY_REASON)).toBe(true);
+    expect(w.reasons.length).toBeGreaterThan(0);
   });
 
   it('persists the incremented retry counter BEFORE queueing the job (crash-safe cap)', async () => {
@@ -294,17 +272,19 @@ describe('media.storage.reprocess', () => {
 });
 
 describe('the two handlers', () => {
-  const registry = { register: jest.fn() } as unknown as JobHandlerRegistry;
+  const registry = { registerHandler: jest.fn() };
 
-  it('are server-only and satisfy the platform handler contract', () => {
-    const handlers: JobHandler[] = [
-      new StorageRecoveryHandler(registry, {} as never),
-      new StorageReprocessHandler(registry, {} as never),
+  it('are server-only, carry a profile and register through the jobs port', () => {
+    const handlers = [
+      new StorageRecoveryHandler(registry as never, {} as never),
+      new StorageReprocessHandler(registry as never, {} as never),
     ];
     for (const handler of handlers) {
-      expect(handler.nodeResultSchema).toBeUndefined();
-      expect(handler.persistNodeResult).toBeUndefined();
-      expect(findJobHandlerContractViolations(handler)).toEqual([]);
+      expect((handler as any).nodeResultSchema).toBeUndefined();
+      expect((handler as any).persistNodeResult).toBeUndefined();
+      expect(handler.profile).toEqual({ maxRuntimeMs: expect.any(Number), maxAttempts: 3 });
+      handler.onModuleInit();
+      expect(registry.registerHandler).toHaveBeenCalledWith(handler);
     }
     expect(STORAGE_RECOVER_STUCK_TYPE).toBe('media.storage.recover_stuck');
     expect(STORAGE_REPROCESS_TYPE).toBe('media.storage.reprocess');
@@ -316,14 +296,14 @@ describe('the two handlers', () => {
       recoverFailedImageObjects: jest.fn(async () => ({ claimed: 0, reprocessed: 0, exhausted: 0, errors: 0 })),
       reprocessMediaObjects: jest.fn(async () => ({ reprocessed: 0, failed: 0 })),
     };
-    const recover = new StorageRecoveryHandler(registry, recovery as never);
+    const recover = new StorageRecoveryHandler(registry as never, recovery as never);
     await recover.process({ payload: null } as unknown as Job);
     await recover.process({ payload: { mode: 'stuck', olderThanMinutes: 30 } } as unknown as Job);
     await recover.process({ payload: { mode: 'failed', limit: 5 } } as unknown as Job);
     expect(recovery.recoverStuckObjects.mock.calls).toEqual([[undefined], [30]]);
     expect(recovery.recoverFailedImageObjects).toHaveBeenCalledWith({ limit: 5 });
 
-    const reprocess = new StorageReprocessHandler(registry, recovery as never);
+    const reprocess = new StorageReprocessHandler(registry as never, recovery as never);
     await reprocess.process({ payload: { circleId: 'c1' } } as unknown as Job);
     await reprocess.process({ payload: {} } as unknown as Job);
     expect(recovery.reprocessMediaObjects.mock.calls).toEqual([['c1'], [undefined]]);
