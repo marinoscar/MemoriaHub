@@ -40,6 +40,7 @@ import { NodeJobInputsAdapter } from '../../src/platform/jobs/node-job-inputs.ad
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { createSharedLibrary } from '../helpers/library';
 import { connectionUrl, createScratchDatabase, type ScratchDatabase } from './scratch-db';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -57,7 +58,7 @@ describeMaybeDb('RETRO-C2 platform nodes slice: claim to result over the Memoria
   let ownerId: string;
   let nodeId: string;
 
-  const q = async (sql: string, params: unknown[] = []) => (await scratch.db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []) => (await orgScoped(scratch.db, { bypass: true }).query(sql, params)).rows;
 
   const checksumHandler: JobHandler = {
     type: NODE_TYPE,

@@ -27,6 +27,7 @@ import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { dropLibraries, newLibrary } from '../helpers/library';
+import { seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -36,6 +37,7 @@ const configFor = (backend: 'app' | 'pgvector'): FaceConfigReader => ({
 
 describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
   let orgId: string;
   let userId: string;
   const libraries: string[] = [];
@@ -44,6 +46,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
     const org = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
     if (org.length === 0) throw new Error('no organization row: run the migrations first');
     orgId = org[0]!.id;
@@ -52,11 +55,11 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
 
   afterAll(async () => {
     for (const circleId of libraries) {
-      await prisma.person.deleteMany({ where: { circleId } });
-      await prisma.mediaItem.deleteMany({ where: { circleId } });
+      await seed.person.deleteMany({ where: { circleId } });
+      await seed.mediaItem.deleteMany({ where: { circleId } });
       await dropLibraries(prisma, [circleId]);
     }
-    if (objects.length > 0) await prisma.storageObject.deleteMany({ where: { id: { in: objects } } });
+    if (objects.length > 0) await seed.storageObject.deleteMany({ where: { id: { in: objects } } });
     if (userId) await prisma.user.delete({ where: { id: userId } });
     await prisma.$disconnect();
   });
@@ -66,11 +69,11 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
     const circle = await newLibrary(prisma, { ownerId: userId });
     libraries.push(circle.id);
     const objectId = randomUUID();
-    await prisma.$executeRaw`
+    await seed.$executeRaw`
       INSERT INTO storage_objects (id, org_id, name, size, mime_type, storage_key, storage_provider, status, updated_at)
       VALUES (${objectId}::uuid, ${orgId}::uuid, 'photo.jpg', 1024, 'image/jpeg', ${`uploads/${objectId}.jpg`}, 's3', 'ready', now())`;
     objects.push(objectId);
-    const item = await prisma.mediaItem.create({
+    const item = await seed.mediaItem.create({
       data: {
         storageObjectId: objectId,
         circleId: circle.id,
@@ -105,7 +108,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
     );
 
     const addFace = async (key: string, data: Record<string, unknown>): Promise<string> => {
-      const row = await prisma.face.create({
+      const row = await seed.face.create({
         data: {
           mediaItemId,
           circleId,
@@ -129,7 +132,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
           for (const f of faces) await addFace(f.key, { manuallyAssigned: f.manuallyAssigned, embedding: [] });
         },
         faceKeys: async () => {
-          const ids = (await prisma.face.findMany({ where: { mediaItemId }, select: { id: true } })).map((r) => r.id);
+          const ids = (await seed.face.findMany({ where: { mediaItemId }, select: { id: true } })).map((r) => r.id);
           return [...keys.entries()].filter(([, id]) => ids.includes(id)).map(([key]) => key);
         },
       },
@@ -141,13 +144,13 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
           for (const f of faces) await addFace(f.key, { embedding: f.embedding, hiddenAt: f.hidden ? new Date() : null });
         },
         personOf: async (key: string) =>
-          (await prisma.face.findUnique({ where: { id: keys.get(key)! }, select: { personId: true } }))?.personId ?? null,
+          (await seed.face.findUnique({ where: { id: keys.get(key)! }, select: { personId: true } }))?.personId ?? null,
       },
       autoArchive: {
         service: matching('pgvector'),
         circleId,
         seedPool: async (embedding: number[]) => {
-          const person = await prisma.person.create({ data: { circleId, addedById: userId, name: 'Person A' } as never, select: { id: true } });
+          const person = await seed.person.create({ data: { circleId, addedById: userId, name: 'Person A' } as never, select: { id: true } });
           const archived = await addFace('archived', { embedding, hiddenAt: new Date() });
           await addFace('live', { embedding });
           await addFace('assigned', { embedding, hiddenAt: new Date(), personId: person.id });
@@ -163,7 +166,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
         seedPeople: async () => {
           const ids: string[] = [];
           for (const [i, axis] of [2, 11, 40].entries()) {
-            const person = await prisma.person.create({ data: { circleId, addedById: userId, name: `Person ${i}` } as never, select: { id: true } });
+            const person = await seed.person.create({ data: { circleId, addedById: userId, name: `Person ${i}` } as never, select: { id: true } });
             ids.push(person.id);
             for (const n of [1, 2]) await addFace(`p${i}-${n}`, { personId: person.id, embedding: faceFixtureVector(axis, 0.02 * n) });
           }

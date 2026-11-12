@@ -38,6 +38,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { defaultOrgId } from '../helpers/default-org';
 import { newLibrary } from '../helpers/library';
+import { seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -72,6 +73,7 @@ const resolver = {
 
 describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
   let orgId: string;
   let handler: ExportRunHandler;
   let service: ExportsService;
@@ -104,7 +106,7 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
   }
 
   async function media(circleId: string, addedById: string, filename: string, extra: Record<string, unknown> = {}) {
-    const object = await prisma.storageObject.create({
+    const object = await seed.storageObject.create({
       data: {
         name: filename,
         size: BigInt(1234),
@@ -116,7 +118,7 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
       },
     });
     const { storageKey: _ignored, ...columns } = extra;
-    return prisma.mediaItem.create({
+    return seed.mediaItem.create({
       data: {
         storageObjectId: object.id,
         circleId,
@@ -155,13 +157,14 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
     await handler.process({ ...(row as unknown as Job), payload, attempts: 1 });
     const job = await prisma.job.findUniqueOrThrow({ where: { id: row.id } });
     const result = (job.payload as { result?: { storageObjectId: string } }).result!;
-    const object = await prisma.storageObject.findUniqueOrThrow({ where: { id: result.storageObjectId } });
+    const object = await seed.storageObject.findUniqueOrThrow({ where: { id: result.storageObjectId } });
     return { id: row.id, text: exportFileText(stored.get(object.storageKey)!.bytes) };
   }
 
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
     orgId = await defaultOrgId(prisma);
 
     const system: ExportsSystemData = { asSystem: (reason) => forSystem(prisma, reason) as never };
@@ -195,13 +198,13 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
     await media(shared, userB, marks.sharedByB);
     await media(personalB, userB, marks.personalB);
 
-    const tag = await prisma.tag.create({ data: { circleId: personalA, addedById: userA, name: 'placeholder-tag' } });
-    await prisma.mediaTag.create({ data: { tagId: tag.id, mediaItemId: itemA.id } });
-    const album = await prisma.album.create({ data: { circleId: personalA, addedById: userA, name: 'Album Alpha' } });
+    const tag = await seed.tag.create({ data: { circleId: personalA, addedById: userA, name: 'placeholder-tag' } });
+    await seed.mediaTag.create({ data: { tagId: tag.id, mediaItemId: itemA.id } });
+    const album = await seed.album.create({ data: { circleId: personalA, addedById: userA, name: 'Album Alpha' } });
     await prisma.albumItem.create({ data: { albumId: album.id, mediaItemId: itemA.id } });
-    await prisma.album.create({ data: { circleId: personalB, addedById: userB, name: 'Album Beta' } });
-    const person = await prisma.person.create({ data: { circleId: personalA, addedById: userA, name: 'Person Alpha' } });
-    await prisma.face.create({
+    await seed.album.create({ data: { circleId: personalB, addedById: userB, name: 'Album Beta' } });
+    const person = await seed.person.create({ data: { circleId: personalA, addedById: userA, name: 'Person Alpha' } });
+    await seed.face.create({
       data: {
         mediaItemId: itemA.id,
         circleId: personalA,
@@ -212,7 +215,7 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
         modelVersion: 'v1',
       },
     });
-    await prisma.person.create({ data: { circleId: personalB, addedById: userB, name: 'Person Beta' } });
+    await seed.person.create({ data: { circleId: personalB, addedById: userB, name: 'Person Beta' } });
 
     const memoryBase = {
       periodKey: '2026-06-20',
@@ -223,15 +226,15 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
       generatedAt: new Date(),
       refreshedAt: new Date(),
     };
-    const memory = await prisma.memory.create({
+    const memory = await seed.memory.create({
       data: { ...memoryBase, circleId: personalA, type: 'trip', title: 'Memory Alpha' },
     });
-    await prisma.memoryItem.create({ data: { memoryId: memory.id, mediaItemId: itemA.id, position: 0 } });
-    await prisma.memoryUserState.create({ data: { memoryId: memory.id, userId: userA, favoritedAt: new Date() } });
-    await prisma.memory.create({
+    await seed.memoryItem.create({ data: { memoryId: memory.id, mediaItemId: itemA.id, position: 0 } });
+    await seed.memoryUserState.create({ data: { memoryId: memory.id, userId: userA, favoritedAt: new Date() } });
+    await seed.memory.create({
       data: { ...memoryBase, circleId: personalA, type: 'seasonal', title: 'Memory Tombstoned', deletedAt: new Date() },
     });
-    await prisma.memory.create({ data: { ...memoryBase, circleId: personalB, type: 'trip', title: 'Memory Beta' } });
+    await seed.memory.create({ data: { ...memoryBase, circleId: personalB, type: 'trip', title: 'Memory Beta' } });
   });
 
   afterAll(async () => {
@@ -286,7 +289,7 @@ describeMaybeDb('export.run with MemoriaHub sources (DB_GATED: real PostgreSQL)'
     const { id } = await run('memoriahub-albums', 'csv', userA);
     const job = await prisma.job.findUniqueOrThrow({ where: { id } });
     const result = (job.payload as { result: { storageObjectId: string; expiresAt: string } }).result;
-    const object = await prisma.storageObject.findUniqueOrThrow({ where: { id: result.storageObjectId } });
+    const object = await seed.storageObject.findUniqueOrThrow({ where: { id: result.storageObjectId } });
     expect(object.storageKey.startsWith('exports/')).toBe(true);
     expect(object.storageProvider).toBe('s3');
     expect(object.bucket).toBe('s3-bucket');

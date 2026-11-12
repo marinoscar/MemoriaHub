@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -102,7 +103,7 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
       job: randomUUID(),
       user: randomUUID(),
     };
-    const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await client.query(sql, params)).rows;
+    const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(client, { bypass: true }).query(sql, params)).rows;
     const inSchema = async (kind: 'table' | 'type' | 'index' | 'constraint'): Promise<string[]> => {
       const sql = {
         table: `SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind = 'r'`,
@@ -258,24 +259,24 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
     beforeAll(async () => {
       pg = newClient();
       await pg.connect();
-      const have = await pg.query(
+      const have = await orgScoped(pg).query(
         `SELECT to_regclass('public.mh_legacy_storage_migration_runs') AS legacy, to_regclass('public.storage_migration_runs') AS platform`,
       );
       if (!have.rows[0].legacy || !have.rows[0].platform) {
         throw new Error('the database is not migrated through the A5b rename and platform 0042: run `npm run prisma:migrate` first');
       }
       ready = true;
-      await pg.query(
+      await orgScoped(pg).query(
         `INSERT INTO storage_objects (id, name, size, mime_type, storage_key, org_id, updated_at)
          SELECT $1, 'a5b.jpg', 10, 'image/jpeg', $2, id, now() FROM organizations WHERE is_default`,
         [ids.object, `a5b-spec/${ids.object}`],
       );
-      await pg.query(
+      await orgScoped(pg).query(
         `INSERT INTO mh_legacy_storage_migration_runs (id, source_provider, target_provider, status, total_count, migrated_count)
          VALUES ($1, 's3', 'r2', 'completed', 1, 0)`,
         [ids.run],
       );
-      await pg.query(
+      await orgScoped(pg).query(
         `INSERT INTO mh_legacy_storage_migration_items (id, run_id, object_id, status, new_storage_key, updated_at)
          VALUES ($1, $2, $3, 'completed', 'r2/a5b', now())`,
         [ids.item, ids.run, ids.object],
@@ -286,8 +287,8 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
 
     afterAll(async () => {
       if (ready) {
-        await pg.query(`DELETE FROM mh_legacy_storage_migration_runs WHERE id = $1`, [ids.run]);
-        await pg.query(`DELETE FROM storage_objects WHERE id = $1`, [ids.object]);
+        await orgScoped(pg).query(`DELETE FROM mh_legacy_storage_migration_runs WHERE id = $1`, [ids.run]);
+        await orgScoped(pg).query(`DELETE FROM storage_objects WHERE id = $1`, [ids.object]);
       }
       await prisma?.$disconnect();
       await pg.end();
@@ -304,7 +305,7 @@ describeMaybeDb('legacy storage-migration rename (DB_GATED: real PostgreSQL)', (
     });
 
     it('leaves the platform storage_migration_* tables alone', async () => {
-      const rows = await pg.query(`SELECT count(*)::int AS n FROM storage_migration_items WHERE id = $1`, [ids.item]);
+      const rows = await orgScoped(pg).query(`SELECT count(*)::int AS n FROM storage_migration_items WHERE id = $1`, [ids.item]);
       expect(rows.rows).toEqual([{ n: 0 }]);
     });
   });

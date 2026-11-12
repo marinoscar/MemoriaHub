@@ -49,6 +49,7 @@ import { RecordAccessService } from '../../src/platform/sharing/record-access';
 import '../../src/app-registrations/sharing';
 import { OWNER_SCOPE_SWEEP_REASON } from '../../src/app-registrations/system-access-reasons';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -98,12 +99,12 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
 
   async function insertItem(circleId: string, addedBy: string): Promise<string> {
     const object = randomUUID();
-    await admin.query(
+    await orgScoped(admin).query(
       `INSERT INTO storage_objects (id, name, size, mime_type, storage_key, updated_at, org_id, status)
        VALUES ($1, 'photo.jpg', 1000, 'image/jpeg', $2, now(), $3, 'ready')`,
       [object, `seed/i3b/${object}`, orgId],
     );
-    const row = await admin.query(
+    const row = await orgScoped(admin).query(
       `INSERT INTO media_items (storage_object_id, added_by_id, updated_at, type, source, original_filename, circle_id, content_hash)
        VALUES ($1, $2, now(), 'photo', 'web', 'photo.jpg', $3, $4) RETURNING id::text AS id`,
       [object, addedBy, circleId, randomUUID()],
@@ -114,14 +115,14 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
   beforeAll(async () => {
     admin = new Client(connection());
     await admin.connect();
-    orgId = (await admin.query(`SELECT id::text AS id FROM organizations WHERE is_default`)).rows[0].id;
+    orgId = (await orgScoped(admin).query(`SELECT id::text AS id FROM organizations WHERE is_default`)).rows[0].id;
 
-    await admin.query(`CREATE ROLE ${role.name} LOGIN PASSWORD '${role.secret}' NOSUPERUSER NOBYPASSRLS`);
-    await admin.query(`GRANT USAGE ON SCHEMA public TO ${role.name}`);
-    await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role.name}`);
+    await orgScoped(admin).query(`CREATE ROLE ${role.name} LOGIN PASSWORD '${role.secret}' NOSUPERUSER NOBYPASSRLS`);
+    await orgScoped(admin).query(`GRANT USAGE ON SCHEMA public TO ${role.name}`);
+    await orgScoped(admin).query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role.name}`);
 
     for (const [key, id] of Object.entries(users)) {
-      await admin.query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
+      await orgScoped(admin).query(`INSERT INTO users (id, email, updated_at) VALUES ($1, $2, now())`, [id, `${key}-${tag}@example.test`]);
     }
     for (const [key, members] of [
       ['a', [[users.u, 'editor'], [users.v, 'admin'], [users.w, 'viewer']]],
@@ -170,13 +171,13 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     await app?.$disconnect();
     if (admin) {
       const all = Object.values(circles);
-      await admin.query(`DELETE FROM grants WHERE resource_id = ANY($1::uuid[])`, [Object.values(items)]).catch(() => undefined);
-      await admin.query(`DELETE FROM media_items WHERE circle_id = ANY($1::uuid[])`, [all]).catch(() => undefined);
-      await admin.query(`DELETE FROM storage_objects WHERE storage_key LIKE 'seed/i3b/%'`).catch(() => undefined);
+      await orgScoped(admin).query(`DELETE FROM grants WHERE resource_id = ANY($1::uuid[])`, [Object.values(items)]).catch(() => undefined);
+      await orgScoped(admin).query(`DELETE FROM media_items WHERE circle_id = ANY($1::uuid[])`, [all]).catch(() => undefined);
+      await orgScoped(admin).query(`DELETE FROM storage_objects WHERE storage_key LIKE 'seed/i3b/%'`).catch(() => undefined);
       await dropLibraries(admin, all).catch(() => undefined);
-      await admin.query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
-      await admin.query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
-      await admin.query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
+      await orgScoped(admin).query(`DELETE FROM users WHERE id = ANY($1::uuid[])`, [Object.values(users)]).catch(() => undefined);
+      await orgScoped(admin).query(`DROP OWNED BY ${role.name}`).catch(() => undefined);
+      await orgScoped(admin).query(`DROP ROLE IF EXISTS ${role.name}`).catch(() => undefined);
       await admin.end();
     }
   });
@@ -189,10 +190,10 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     expect(scopes.filter((scope) => scope.kind === 'group').map((scope) => scope.id).sort()).toEqual([circles.a, circles.b, circles.c].sort());
     expect(scopes.find((scope) => scope.kind === 'personal')).toMatchObject({ id: circles.p, ownerId: users.u });
     // The personal library's content is user-owned: no group behind it.
-    const personal = (await admin.query(`SELECT owner_user_id::text AS u, owner_group_id FROM media_items WHERE id = $1`, [items.p])).rows[0];
+    const personal = (await orgScoped(admin).query(`SELECT owner_user_id::text AS u, owner_group_id FROM media_items WHERE id = $1`, [items.p])).rows[0];
     expect(personal).toEqual({ u: users.u, owner_group_id: null });
     // A group's content is owned by the group, derived from circle_id by the trigger.
-    const group = (await admin.query(`SELECT owner_group_id::text AS g, owner_user_id FROM media_items WHERE id = $1`, [items.a])).rows[0];
+    const group = (await orgScoped(admin).query(`SELECT owner_group_id::text AS g, owner_user_id FROM media_items WHERE id = $1`, [items.a])).rows[0];
     expect(group).toEqual({ g: circles.a, owner_user_id: null });
   });
 
@@ -216,13 +217,13 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
   it.each(['a', 'b', 'c'] as const)('2. circle %s: reconcile audience = group editor+admin, digest audience = all members', async (key) => {
     const circleId = circles[key];
     const reconcile = await directory.membersOf(circleId, ['admin', 'editor']);
-    const editors = await admin.query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1 AND role IN ('editor', 'admin')`, [
+    const editors = await orgScoped(admin).query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1 AND role IN ('editor', 'admin')`, [
       circleId,
     ]);
     expect(new Set(reconcile.map((m) => m.userId))).toEqual(new Set(editors.rows.map((r) => r.u)));
 
     const digest = await directory.membersOf(circleId);
-    const everyone = await admin.query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1`, [circleId]);
+    const everyone = await orgScoped(admin).query(`SELECT user_id::text AS u FROM group_members WHERE group_id = $1`, [circleId]);
     expect(new Set(digest.map((m) => m.userId))).toEqual(new Set(everyone.rows.map((r) => r.u)));
   });
 
@@ -260,7 +261,7 @@ describeMaybeDb('RETRO-I3 cross-group queries (DB_GATED: real PostgreSQL)', () =
     expect(await visibleItems(users.u)).toEqual(new Set([items.a, items.b, items.p]));
     expect(await visibleItems(users.w)).toEqual(new Set([items.a, items.c]));
 
-    await admin.query(
+    await orgScoped(admin).query(
       `INSERT INTO grants (id, org_id, resource_type, resource_id, grantee_kind, grantee_user_id, role, granted_by_id, updated_at)
        VALUES ($1, $2, 'media_item', $3, 'user', $4, 'viewer', $5, now())`,
       [randomUUID(), orgId, items.c, users.u, users.w],

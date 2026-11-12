@@ -29,6 +29,7 @@ import {
   applyNotificationsCarryOver,
   planNotificationsCarryOver,
 } from '../../src/legacy/legacy-notifications-migration';
+import { orgScoped } from '../helpers/org-scope';
 
 type Row = Record<string, unknown>;
 
@@ -63,7 +64,7 @@ describe('legacy notifications carry-over (db)', () => {
     delivery: randomUUID(),
   };
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await client!.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(client!, { bypass: true }).query(sql, params)).rows;
 
   async function legacyFingerprint(): Promise<string> {
     const parts: unknown[] = [];

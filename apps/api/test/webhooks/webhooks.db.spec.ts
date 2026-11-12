@@ -24,11 +24,13 @@ import { webhooksSystemPrisma } from '../../src/platform/webhooks/webhooks-host.
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { PrismaSystemService } from '../../src/prisma/prisma-system.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
 describeMaybeDb('media webhook events on the platform tables (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
   let system: PrismaSystemService;
   let endpointId: string;
   const circleId = randomUUID();
@@ -40,7 +42,8 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
     system = new PrismaSystemService();
     await system.$connect();
     await prisma.$connect();
-    const endpoint = await prisma.webhookEndpoint.create({
+    seed = await seedClient(prisma);
+    const endpoint = await seed.webhookEndpoint.create({
       data: {
         orgId: null,
         scope: 'system',
@@ -56,7 +59,7 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
   });
 
   afterAll(async () => {
-    await prisma.webhookEndpoint.deleteMany({ where: { id: endpointId } });
+    await seed.webhookEndpoint.deleteMany({ where: { id: endpointId } });
     await prisma.job.deleteMany({
       where: { type: { in: ['webhooks.fanout', 'webhooks.deliver'] }, createdAt: { gte: new Date(Date.now() - 3_600_000) } },
     });
@@ -90,7 +93,7 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
     const fanout = new WebhookFanoutHandler({ register: () => undefined } as never, webhooks);
     for (const job of created) await fanout.process(job as never);
 
-    const deliveries = await prisma.webhookDelivery.findMany({ where: { endpointId } });
+    const deliveries = await seed.webhookDelivery.findMany({ where: { endpointId } });
     expect(deliveries).toHaveLength(2);
     expect(new Set(deliveries.map((delivery) => delivery.eventKey))).toEqual(new Set(['media.item.created']));
     const deliverJobs = await prisma.job.count({ where: { type: 'webhooks.deliver', createdAt: { gte: since } } });
@@ -98,11 +101,11 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
 
     // Replaying a fan-out (a retried job) inserts nothing new: (endpoint, eventId) is unique.
     await fanout.process(created[0] as never);
-    expect(await prisma.webhookDelivery.count({ where: { endpointId } })).toBe(2);
+    expect(await seed.webhookDelivery.count({ where: { endpointId } })).toBe(2);
   });
 
   it('a deployment without a subscribed endpoint queues nothing', async () => {
-    await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { enabled: false } });
+    await seed.webhookEndpoint.update({ where: { id: endpointId }, data: { enabled: false } });
     try {
       const jobs = new JobsService(prisma as never);
       const repository = new PrismaWebhooksRepository(prisma as never, webhooksSystemPrisma(system), jobs);
@@ -113,7 +116,7 @@ describeMaybeDb('media webhook events on the platform tables (DB_GATED: real Pos
       await events.flushPending();
       expect(await prisma.job.count({ where: { type: 'webhooks.fanout', createdAt: { gte: since } } })).toBe(0);
     } finally {
-      await prisma.webhookEndpoint.update({ where: { id: endpointId }, data: { enabled: true } });
+      await seed.webhookEndpoint.update({ where: { id: endpointId }, data: { enabled: true } });
     }
   });
 });

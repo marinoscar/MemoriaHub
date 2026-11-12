@@ -43,6 +43,7 @@ import { Client } from 'pg';
 import { SHARING_MODULE_OPTIONS } from '../../src/platform/sharing/sharing.config';
 import { SINGLE_TENANCY } from '../../src/platform/sharing/sharing-host.module';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -103,7 +104,7 @@ describeMaybeDb('RETRO-I5 circle invites to group invites, auto-claimed at sign-
   const upperAddress = `Person-F-${randomUUID().slice(0, 8)}@Example.TEST`;
   const ids: Record<string, string> = {};
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db, { bypass: true }).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
   const principal = (userId: string, email: string): UserPrincipal => ({
     kind: 'user',
