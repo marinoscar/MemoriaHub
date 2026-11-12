@@ -158,7 +158,7 @@ jobs:
   # bootstrap superuser (`postgres`, a throwaway for this service container) is used only by the
   # "Create the application role" step below: to create the role and the `vector` extension (a
   # superuser-only extension) in `template1` and in the database, so the scratch databases some specs
-  # create (`CREATE DATABASE` by the ordinary role, which holds CREATEDB and CREATEROLE but neither
+  # create (`CREATE DATABASE` by the ordinary role, which holds CREATEDB and CREATEROLE, with `createrole_self_grant`, but neither
   # SUPERUSER nor BYPASSRLS) inherit it. The code under test never connects as the superuser.
   #
   # The seeding helpers set the row-level security scope the way production code does
@@ -232,6 +232,9 @@ jobs:
           psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE memoriahub_app LOGIN PASSWORD 'ci-app-throwaway' NOSUPERUSER NOBYPASSRLS CREATEDB CREATEROLE;
           ALTER DATABASE memoriahub_test OWNER TO memoriahub_app;
+          -- A role it creates (the specs that build their own ordinary roles and databases) is granted back
+          -- to it with SET, as `CREATE DATABASE ... OWNER <that role>` requires of a non-superuser.
+          ALTER ROLE memoriahub_app SET createrole_self_grant = 'set,inherit';
           \c template1
           CREATE EXTENSION IF NOT EXISTS vector;
           \c memoriahub_test
