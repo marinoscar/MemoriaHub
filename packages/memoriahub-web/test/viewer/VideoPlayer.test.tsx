@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Mock @vidstack/react — replace heavy browser-media implementation with
@@ -80,7 +80,7 @@ vi.mock('@vidstack/react/player/layouts/default', () => {
 vi.mock('@vidstack/react/player/styles/default/theme.css', () => ({}));
 vi.mock('@vidstack/react/player/styles/default/layouts/video.css', () => ({}));
 
-import { VideoPlayer } from '../../../components/media/VideoPlayer';
+import { VideoPlayer } from '../../src/viewer/ui/components/VideoPlayer.js';
 
 // ---------------------------------------------------------------------------
 // Tests

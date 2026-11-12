@@ -50,12 +50,12 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'memoriahub-web/search/ui/components/TopbarSearch.tsx': WHY.searchPill,
   'hooks/useContextPaneVisible.ts': WHY.contextPane,
 
-  'components/media/MediaDetailDrawer.tsx': WHY.dialog,
+  'memoriahub-web/viewer/ui/components/MediaDetailDrawer.tsx': WHY.dialog,
   'memoriahub-web/search/ui/components/SearchPanel.tsx': WHY.dialog,
 
   'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
-  'components/media/MediaLightbox.tsx': WHY.media,
-  'components/media/VideoPlayer.tsx': WHY.media,
+  'memoriahub-web/viewer/ui/components/MediaLightbox.tsx': WHY.media,
+  'memoriahub-web/viewer/ui/components/VideoPlayer.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoriesCarousel.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoryCard.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoryStoryPlayer.tsx': WHY.media,

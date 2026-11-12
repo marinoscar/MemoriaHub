@@ -13,14 +13,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
-import { render, flushPendingAsyncWork } from '../../utils/test-utils';
-import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { render, flushPendingAsyncWork } from '../utils/test-utils.js';
+import { MediaDetailDrawer } from '../../src/viewer/ui/components/MediaDetailDrawer.js';
+import type { MediaItem } from '../../src/media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Service mocks
 // ---------------------------------------------------------------------------
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   patchMedia: vi.fn(),
   getMedia: vi.fn(),
@@ -40,12 +40,12 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { getMedia } from '../../src/media/headless/index.js';
 
 const mockGetMedia = vi.mocked(getMedia);
 
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   // The drawer's face hook fetches on mount; a stable stub keeps the file's async work deterministic.
   useMediaFaces: () => ({
     faces: [],
@@ -70,7 +70,7 @@ vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => 
   updatePerson: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/tagging/headless', async (importOriginal) => ({
+vi.mock('../../src/tagging/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   // The drawer's tag hook fetches on mount; a stable stub keeps the file's async work deterministic.
   useMediaTags: () => ({
@@ -91,11 +91,11 @@ vi.mock('@marinoscar/memoriahub-web/tagging/headless', async (importOriginal) =>
 
 
 
-vi.mock('../../../components/media/VideoPlayer', () => ({
+vi.mock('../../src/viewer/ui/components/VideoPlayer.js', () => ({
   VideoPlayer: ({ src }: any) => <div data-testid="video-player" data-src={src} />,
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   LocationMiniMap: ({ lat, lng }: any) => (
     <div data-testid="location-mini-map" data-lat={lat} data-lng={lng} />

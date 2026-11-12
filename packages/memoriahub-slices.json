@@ -256,6 +256,14 @@
       "workflows",
       "people",
       "memories"
+    ],
+    "viewer": [
+      "core",
+      "media",
+      "people",
+      "tagging",
+      "review",
+      "enhancement"
     ]
   }
 }

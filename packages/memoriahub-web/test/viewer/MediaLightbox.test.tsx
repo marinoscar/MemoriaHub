@@ -22,15 +22,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../../__tests__/utils/test-utils';
-import { MediaLightbox } from '../MediaLightbox';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { render } from '../utils/test-utils.js';
+import { MediaLightbox } from '../../src/viewer/ui/components/MediaLightbox.js';
+import type { MediaItem } from '../../src/media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — declared before any import of the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
   patchMedia: vi.fn(),
@@ -46,7 +46,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 }));
 
 // Stub out VideoPlayer — Vidstack pulls in heavy DOM internals that break jsdom.
-vi.mock('../VideoPlayer', () => ({
+vi.mock('../../src/viewer/ui/components/VideoPlayer.js', () => ({
   VideoPlayer: ({ src, title }: { src: string; title?: string }) => (
     <video data-testid="video-player" src={src} aria-label={title ?? 'Video'} />
   ),
@@ -56,7 +56,7 @@ vi.mock('../VideoPlayer', () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { getMedia, patchMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { getMedia, patchMedia } from '../../src/media/headless/index.js';
 
 const mockGetMedia = vi.mocked(getMedia);
 const mockPatchMedia = vi.mocked(patchMedia);

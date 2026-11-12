@@ -20,7 +20,7 @@ import { Alert, Box, Button, Card, CardActionArea, CardContent, CardMedia, Skele
 import FolderSharedIcon from '@mui/icons-material/FolderShared';
 import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
 
-import { MediaLightbox } from '../../components/media/MediaLightbox';
+import { MediaLightbox } from '@marinoscar/memoriahub-web/viewer/ui';
 import { listSharedAlbums, listSharedMedia } from '@marinoscar/memoriahub-web/media/headless';
 import type { Album, MediaItem } from '@marinoscar/memoriahub-web/media/headless';
 

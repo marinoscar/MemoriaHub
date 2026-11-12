@@ -21,15 +21,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, flushPendingAsyncWork } from '../../utils/test-utils';
-import { MediaDetailDrawer } from '../../../components/media/MediaDetailDrawer';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { render, flushPendingAsyncWork, setTestHostDefaults, resetTestHostDefaults } from '../utils/test-utils.js';
+import { MediaDetailDrawer } from '../../src/viewer/ui/components/MediaDetailDrawer.js';
+import type { MediaItem } from '../../src/media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Mock the media service (both patchMedia and getMedia)
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   patchMedia: vi.fn(),
   getMedia: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 }));
 
-import { patchMedia, getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { patchMedia, getMedia } from '../../src/media/headless/index.js';
 
 const mockPatchMedia = vi.mocked(patchMedia);
 const mockGetMedia = vi.mocked(getMedia);
@@ -60,22 +60,11 @@ const mockGetMedia = vi.mocked(getMedia);
 // test output with "fetch failed" errors.
 // ---------------------------------------------------------------------------
 
-// The sharing slice's link hook (RETRO-I4): the panel's contents are covered by LinkSharePanel.test.tsx.
-vi.mock('@marinoscar/platform-web/sharing/headless', () => ({
-  useLinkGrants: () => ({
-    data: [],
-    loading: false,
-    error: null,
-    pending: false,
-    refresh: vi.fn(),
-    create: vi.fn(),
-    revoke: vi.fn(),
-    copyUrl: vi.fn(),
-  }),
-}));
+// The platform's inline link-share panel is a host slot of the viewer; its contents are the platform's (the app's LinkSharePanel.test.tsx).
+const LinkSharePanelStub = ({ target }: { target: { id: string } }) => <button type="button">Create link {target.id}</button>;
 
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   // The drawer's face hook fetches on mount; a stable stub keeps the file's async work deterministic.
   useMediaFaces: () => ({
     faces: [],
@@ -110,7 +99,7 @@ vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => 
 // finish (issue #196).
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/tagging/headless', async (importOriginal) => ({
+vi.mock('../../src/tagging/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   // The drawer's tag hook fetches on mount; a stable stub keeps the file's async work deterministic.
   useMediaTags: () => ({
@@ -135,7 +124,7 @@ vi.mock('@marinoscar/memoriahub-web/tagging/headless', async (importOriginal) =>
 // Mock VideoPlayer — avoids @vidstack/react dependency in tests
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../components/media/VideoPlayer', () => ({
+vi.mock('../../src/viewer/ui/components/VideoPlayer.js', () => ({
   VideoPlayer: ({ src, poster, title }: any) => (
     <div
       data-testid="video-player"
@@ -150,7 +139,7 @@ vi.mock('../../../components/media/VideoPlayer', () => ({
 // Mock LocationMiniMap — avoids react-leaflet/leaflet dependency in tests
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   LocationMiniMap: ({ lat, lng, label }: any) => (
     <div
@@ -199,7 +188,7 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 // — location inference behavior added in commit eba3e6b.
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/review/headless', async (importOriginal) => ({
+vi.mock('../../src/review/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSuggestLocation: vi.fn(),
   useItemAutoAppliedSuggestion: vi.fn(),
@@ -212,7 +201,7 @@ import {
   useItemAutoAppliedSuggestion,
   useItemLocationCandidate,
   revertLocationSuggestion,
-} from '@marinoscar/memoriahub-web/review/headless';
+} from '../../src/review/headless/index.js';
 
 const mockUseSuggestLocation = vi.mocked(useSuggestLocation);
 const mockUseItemAutoAppliedSuggestion = vi.mocked(useItemAutoAppliedSuggestion);
@@ -225,7 +214,7 @@ const mockRevertLocationSuggestion = vi.mocked(revertLocationSuggestion);
 
 
 
-import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
+import { rerunThumbnail } from '../../src/media/headless/index.js';
 
 const mockRerunThumbnail = vi.mocked(rerunThumbnail);
 
@@ -301,6 +290,7 @@ function defaultProps(overrides: Partial<MediaItem> = {}) {
 describe('MediaDetailDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setTestHostDefaults({ slots: { 'viewer.linkSharePanel': LinkSharePanelStub } });
     // Default: patchMedia returns the item passed back as updated
     mockPatchMedia.mockImplementation(async (id, dto) => ({
       ...makeMediaItem(),
@@ -325,6 +315,7 @@ describe('MediaDetailDrawer', () => {
   // doc comment for why this matters (issue #196).
   afterEach(async () => {
     await flushPendingAsyncWork();
+    resetTestHostDefaults();
   });
 
   // -------------------------------------------------------------------------

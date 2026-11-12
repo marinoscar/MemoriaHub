@@ -43,24 +43,24 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTheme } from '@mui/material/styles';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import type { MediaItem } from '../../../media/headless/index.js';
 import {
   getMedia,
   patchMedia as patchMediaApi,
   bulkArchive,
   bulkUnarchive,
   bulkDelete,
-} from '@marinoscar/memoriahub-web/media/headless';
-import { rerunMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
-import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
-import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
-import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
-import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
-import { AddToAlbumDialog } from '@marinoscar/memoriahub-web/media/ui';
-import { MediaOrientationEditor } from '@marinoscar/memoriahub-web/media/ui';
-import { MediaEnhancementDrawer } from '@marinoscar/memoriahub-web/enhancement/ui';
-import { VideoPlayer } from './VideoPlayer';
-import { useFeatureFlags } from '../../hooks/useFeatureFlags';
+} from '../../../media/headless/index.js';
+import { rerunMediaFaces } from '../../../people/headless/index.js';
+import { rerunThumbnail } from '../../../media/headless/index.js';
+import { useMediaTags } from '../../../tagging/headless/index.js';
+import { useMediaMetadata } from '../../../media/headless/index.js';
+import { LinkSharePanel } from '../slots.js';
+import { AddToAlbumDialog } from '../../../media/ui/index.js';
+import { MediaOrientationEditor } from '../../../media/ui/index.js';
+import { MediaEnhancementDrawer } from '../../../enhancement/ui/index.js';
+import { VideoPlayer } from './VideoPlayer.js';
+import { useFeatureFlags } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Module-scope cache so full items survive lightbox close/reopen
@@ -72,12 +72,23 @@ const fullItemCache = new Map<string, MediaItem>();
 // Props
 // ---------------------------------------------------------------------------
 
-interface MediaLightboxProps {
+/**
+ * The props of {@link MediaLightbox}.
+ *
+ * @stability experimental
+ */
+export interface MediaLightboxProps {
+  /** The items being browsed. */
   items: MediaItem[];
+  /** The open item's index, `null` when closed. */
   index: number | null;
+  /** Called with the new index. */
   onIndexChange: (i: number) => void;
+  /** Close the viewer. */
   onClose: () => void;
+  /** Open the properties drawer for an item. */
   onOpenProperties: (item: MediaItem) => void;
+  /** Called after the viewer changed an item. */
   onItemUpdated?: (updated: MediaItem) => void;
   /** Start a slideshow (auto-advance) when the lightbox opens. Default false. */
   autoPlay?: boolean;
@@ -90,6 +101,13 @@ const SLIDESHOW_INTERVAL_MS = 4000;
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The full-screen viewer of the gallery: browse, play, slideshow, favorite, download, edit the orientation, enhance and share.
+ *
+ * @param props - see {@link MediaLightboxProps}
+ * @returns the viewer
+ * @stability experimental
+ */
 export function MediaLightbox({
   items,
   index,

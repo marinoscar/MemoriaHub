@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as names from '@marinoscar/memoriahub-web/media/headless';
+import { VIEWER_LINK_SHARE_PANEL_SLOT } from '@marinoscar/memoriahub-web/viewer/headless';
 
 import { APP_SLOT_NAMES, appMemoriahubSlots } from '../../platform-memoriahub/slots';
 
@@ -20,6 +21,7 @@ describe('app slots', () => {
       albumPeopleDialog: names.ALBUM_PEOPLE_DIALOG_SLOT,
       personMultiSelect: names.PERSON_MULTI_SELECT_SLOT,
       mergeLocationsDialog: names.MERGE_LOCATIONS_DIALOG_SLOT,
+      linkSharePanel: VIEWER_LINK_SHARE_PANEL_SLOT,
     });
   });
 

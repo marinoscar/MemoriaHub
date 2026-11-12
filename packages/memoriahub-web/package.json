@@ -68,6 +68,14 @@
       "types": "./dist/face/ui/index.d.ts",
       "default": "./dist/face/ui/index.js"
     },
+    "./viewer/headless": {
+      "types": "./dist/viewer/headless/index.d.ts",
+      "default": "./dist/viewer/headless/index.js"
+    },
+    "./viewer/ui": {
+      "types": "./dist/viewer/ui/index.d.ts",
+      "default": "./dist/viewer/ui/index.js"
+    },
     "./hubs/headless": {
       "types": "./dist/hubs/headless/index.d.ts",
       "default": "./dist/hubs/headless/index.js"
@@ -198,6 +206,7 @@
     "@mui/material": "^9.1.0",
     "@mui/x-charts": "^9.14.0",
     "@testing-library/react": "^16.3.2",
+    "@vidstack/react": "^1.15.6",
     "hash-wasm": "^4.12.0",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
@@ -221,6 +230,9 @@
       "optional": true
     },
     "@testing-library/react": {
+      "optional": true
+    },
+    "@vidstack/react": {
       "optional": true
     },
     "hash-wasm": {
@@ -257,6 +269,7 @@
     "@types/node": "^22.10.7",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vidstack/react": "^1.15.6",
     "hash-wasm": "^4.12.0",
     "jsdom": "^29.1.1",
     "leaflet": "^1.9.4",

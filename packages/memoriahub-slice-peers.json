@@ -608,6 +608,20 @@
           "react-router-dom"
         ]
       }
+    },
+    "viewer": {
+      "peers": [
+        "react",
+        "react-dom",
+        "@vidstack/react"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

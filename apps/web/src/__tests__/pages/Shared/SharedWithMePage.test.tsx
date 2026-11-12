@@ -5,7 +5,7 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>();
   return { ...actual, listSharedAlbums: vi.fn(), listSharedMedia: vi.fn() };
 });
-vi.mock('../../../components/media/MediaLightbox', () => ({ MediaLightbox: () => null }));
+vi.mock('@marinoscar/memoriahub-web/viewer/ui', () => ({ MediaLightbox: () => null }));
 
 import { render } from '../../utils/test-utils';
 import SharedWithMePage from '../../../pages/Shared/SharedWithMePage';

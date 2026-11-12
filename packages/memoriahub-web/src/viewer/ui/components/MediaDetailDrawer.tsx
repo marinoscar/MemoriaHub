@@ -41,7 +41,7 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import BurstModeIcon from '@mui/icons-material/BurstMode';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
+import { LinkSharePanel } from '../slots.js';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
@@ -49,7 +49,7 @@ import type {
   MediaItem,
   PatchMediaDto,
   MediaMetadataStatusType,
-} from '@marinoscar/memoriahub-web/media/headless';
+} from '../../../media/headless/index.js';
 import {
   patchMedia as patchMediaApi,
   getMedia,
@@ -63,19 +63,19 @@ import {
   civilInputToIso,
   formatCivilDateTime,
   isoToCivilInput,
-} from '@marinoscar/memoriahub-web/media/headless';
-import { VideoPlayer } from './VideoPlayer';
-import { LocationMiniMap, LocationSearchPicker, TagAutocomplete } from '@marinoscar/memoriahub-web/media/ui';
-import { FaceMarkerStrip, FaceThumbnails, VideoFacePanel } from '@marinoscar/memoriahub-web/people/ui';
-import { useMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
-import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
-import type { MediaTagStatusType } from '@marinoscar/memoriahub-web/tagging/headless';
+} from '../../../media/headless/index.js';
+import { VideoPlayer } from './VideoPlayer.js';
+import { LocationMiniMap, LocationSearchPicker, TagAutocomplete } from '../../../media/ui/index.js';
+import { FaceMarkerStrip, FaceThumbnails, VideoFacePanel } from '../../../people/ui/index.js';
+import { useMediaFaces } from '../../../people/headless/index.js';
+import { useMediaTags } from '../../../tagging/headless/index.js';
+import type { MediaTagStatusType } from '../../../tagging/headless/index.js';
 import {
   useSuggestLocation,
   useItemAutoAppliedSuggestion,
   useItemLocationCandidate,
   revertLocationSuggestion,
-} from '@marinoscar/memoriahub-web/review/headless';
+} from '../../../review/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -201,10 +201,19 @@ function geoDisplay(
 // Props
 // ---------------------------------------------------------------------------
 
-interface MediaDetailDrawerProps {
+/**
+ * The props of {@link MediaDetailDrawer}.
+ *
+ * @stability experimental
+ */
+export interface MediaDetailDrawerProps {
+  /** The item, `null` when none. */
   item: MediaItem | null;
+  /** Whether the drawer is open. */
   open: boolean;
+  /** Close the drawer. */
   onClose: () => void;
+  /** Called after the drawer changed the item. */
   onItemUpdated: (updated: MediaItem) => void;
 }
 
@@ -212,6 +221,13 @@ interface MediaDetailDrawerProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The properties drawer of a photo or video: metadata and its editing, tags, faces, location suggestions, the AI enhancement and the inline public link.
+ *
+ * @param props - see {@link MediaDetailDrawerProps}
+ * @returns the drawer
+ * @stability experimental
+ */
 export function MediaDetailDrawer({
   item,
   open,

@@ -24,9 +24,17 @@ import type React from 'react';
 // Props
 // ---------------------------------------------------------------------------
 
-interface VideoPlayerProps {
+/**
+ * The props of {@link VideoPlayer}.
+ *
+ * @stability experimental
+ */
+export interface VideoPlayerProps {
+  /** The video URL. */
   src: string;
+  /** The poster image, if any. */
   poster?: string | null;
+  /** The accessible title. */
   title?: string;
   /**
    * Optional ref forwarded to the underlying MediaPlayer instance.
@@ -147,6 +155,13 @@ function CenterPlayButton() {
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The video player (Vidstack) with the app's controls and gestures.
+ *
+ * @param props - see {@link VideoPlayerProps}
+ * @returns the player
+ * @stability experimental
+ */
 export function VideoPlayer({ src, poster, title, playerRef, fill = false }: VideoPlayerProps) {
   return (
     /*
