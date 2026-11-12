@@ -1,0 +1,582 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`MediaDetailDrawer render snapshot > a photo with location, camera and a description 1`] = `
+"<div aria-hidden="true">
+</div>
+<div role="presentation" class="MuiDrawer-root MuiDrawer-anchorRight MuiDrawer-modal MuiModal-root">
+<div class="MuiBackdrop-root MuiModal-backdrop" style="opacity: 1; transition: opacity 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;" aria-hidden="true">
+</div>
+<div tabindex="0" data-testid="sentinelStart">
+</div>
+<div class="MuiPaper-root MuiPaper-elevation MuiPaper-elevation16 MuiDrawer-paper" role="dialog" aria-modal="true" data-mui-focusable="" tabindex="-1" style="--Paper-shadow: 0px 8px 10px -5px rgba(0,0,0,0.2),0px 16px 24px 2px rgba(0,0,0,0.14),0px 6px 30px 5px rgba(0,0,0,0.12); transform: none; transition: transform 225ms cubic-bezier(0.0, 0, 0.2, 1) 0ms;">
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Close detail panel">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="CloseIcon">
+<path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z">
+</path>
+</svg>
+</button>
+<h6 class="MuiTypography-root MuiTypography-h6 MuiTypography-noWrap">DSC_0001.jpg</h6>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium" tabindex="0" type="button" aria-label="Toggle favorite" data-mui-internal-clone-element="true">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="StarBorderIcon">
+<path d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z">
+</path>
+</svg>
+</button>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium" tabindex="0" type="button" aria-label="Share publicly" data-mui-internal-clone-element="true">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="IosShareIcon">
+<path d="m16 5-1.42 1.42-1.59-1.59V16h-1.98V4.83L9.42 6.42 8 5l4-4zm4 5v11c0 1.1-.9 2-2 2H6c-1.11 0-2-.9-2-2V10c0-1.11.89-2 2-2h3v2H6v11h12V10h-3V8h3c1.1 0 2 .89 2 2">
+</path>
+</svg>
+</button>
+</div>
+<div class="MuiBox-root">
+<div class="MuiBox-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="BrokenImageIcon">
+<path d="M21 5v6.59l-3-3.01-4 4.01-4-4-4 4-3-3.01V5c0-1.1.9-2 2-2h14c1.1 0 2 .9 2 2m-3 6.42 3 3.01V19c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-6.58l3 2.99 4-4 4 4z">
+</path>
+</svg>
+<span class="MuiTypography-root MuiTypography-caption">Image not available</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-text MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="EditIcon">
+<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z">
+</path>
+</svg>
+</span>Edit</button>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">Beautiful sunset at Arenal</p>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Details</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Type</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">photo</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Captured</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 15, 2024, 10:30 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Imported</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 08:00 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Source</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">web</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Dimensions</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">4032 × 3024</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Orientation</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">1</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">GPS</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">9.928100, -84.090700</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Altitude</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">1247.5 m</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Camera</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Apple iPhone 15 Pro</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Content Hash</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">abc123def456</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Filename</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">DSC_0001.jpg</span>
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Location</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Country</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Costa Rica</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Region</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Alajuela</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Sub-region</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">San Carlos</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">City</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">La Fortuna</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Place</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Arenal Volcano</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Geo Source</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">geonames-offline</span>
+</div>
+</div>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="AddLocationIcon">
+<path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7m4 8h-3v3h-2v-3H8V8h3V5h2v3h3z">
+</path>
+</svg>
+</span>Edit Location</button>
+</div>
+<div class="MuiBox-root">
+<div data-testid="location-mini-map" data-lat="9.9281" data-lng="-84.0907" data-label="Arenal Volcano">
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">People / Faces</span>
+<div class="MuiBox-root">
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="FaceIcon">
+<path d="M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25m6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8">
+</path>
+</svg>
+<span class="MuiChip-label">Not Processed</span>
+</div>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run face detection</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Tags</span>
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="LocalOfferIcon">
+<path d="m21.41 11.58-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42M5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7">
+</path>
+</svg>
+<span class="MuiChip-label">Not Tagged</span>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run AI tagging</button>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">No tags</p>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">Edit Tags</button>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Metadata</span>
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="InfoOutlinedIcon">
+<path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8">
+</path>
+</svg>
+<span class="MuiChip-label">Not Extracted</span>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run metadata extraction</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Thumbnail</span>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Retry thumbnail</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Origin</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Burst review</span>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-text MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeSmall" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="BurstModeIcon">
+<path d="M1 5h2v14H1zm4 0h2v14H5zm17 0H10c-.55 0-1 .45-1 1v12c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V6c0-.55-.45-1-1-1M11 17l2.5-3.15L15.29 16l2.5-3.22L21 17z">
+</path>
+</svg>
+</span>View group</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Created</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 08:00 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Updated</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 09:00 AM</span>
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Actions</span>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="UnarchiveIcon">
+<path d="m20.55 5.22-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.15.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.49-.17-.93-.45-1.28M12 9.5l5.5 5.5H14v2h-4v-2H6.5zM5.12 5l.82-1h12l.93 1z">
+</path>
+</svg>
+</span>Unarchive</button>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorError" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="DeleteIcon">
+<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z">
+</path>
+</svg>
+</span>Move to Trash</button>
+</div>
+</div>
+</div>
+<div tabindex="0" data-testid="sentinelEnd">
+</div>
+</div>"
+`;
+
+exports[`MediaDetailDrawer render snapshot > a video shows its duration 1`] = `
+"<div aria-hidden="true">
+</div>
+<div role="presentation" class="MuiDrawer-root MuiDrawer-anchorRight MuiDrawer-modal MuiModal-root">
+<div class="MuiBackdrop-root MuiModal-backdrop" style="opacity: 1; transition: opacity 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;" aria-hidden="true">
+</div>
+<div tabindex="0" data-testid="sentinelStart">
+</div>
+<div class="MuiPaper-root MuiPaper-elevation MuiPaper-elevation16 MuiDrawer-paper" role="dialog" aria-modal="true" data-mui-focusable="" tabindex="-1" style="--Paper-shadow: 0px 8px 10px -5px rgba(0,0,0,0.2),0px 16px 24px 2px rgba(0,0,0,0.14),0px 6px 30px 5px rgba(0,0,0,0.12); transform: none; transition: transform 225ms cubic-bezier(0.0, 0, 0.2, 1) 0ms;">
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Close detail panel">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="CloseIcon">
+<path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z">
+</path>
+</svg>
+</button>
+<h6 class="MuiTypography-root MuiTypography-h6 MuiTypography-noWrap">DSC_0001.jpg</h6>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium" tabindex="0" type="button" aria-label="Toggle favorite" data-mui-internal-clone-element="true">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="StarBorderIcon">
+<path d="m22 9.24-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28z">
+</path>
+</svg>
+</button>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium" tabindex="0" type="button" aria-label="Share publicly" data-mui-internal-clone-element="true">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="IosShareIcon">
+<path d="m16 5-1.42 1.42-1.59-1.59V16h-1.98V4.83L9.42 6.42 8 5l4-4zm4 5v11c0 1.1-.9 2-2 2H6c-1.11 0-2-.9-2-2V10c0-1.11.89-2 2-2h3v2H6v11h12V10h-3V8h3c1.1 0 2 .89 2 2">
+</path>
+</svg>
+</button>
+</div>
+<div class="MuiBox-root">
+<span class="MuiCircularProgress-root MuiCircularProgress-indeterminate MuiCircularProgress-colorPrimary" style="width: 40px; height: 40px;" role="progressbar">
+<svg class="MuiCircularProgress-svg" viewBox="22 22 44 44">
+<circle class="MuiCircularProgress-circle" cx="44" cy="44" r="20.2" fill="none" stroke-width="3.6">
+</circle>
+</svg>
+</span>
+</div>
+<div class="MuiBox-root">
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-text MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="EditIcon">
+<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z">
+</path>
+</svg>
+</span>Edit</button>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">Beautiful sunset at Arenal</p>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Details</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Type</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">video</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Captured</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 15, 2024, 10:30 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Imported</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 08:00 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Source</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">web</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Dimensions</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">4032 × 3024</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Duration</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">1m 2s</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Orientation</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">1</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">GPS</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">9.928100, -84.090700</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Altitude</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">1247.5 m</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Camera</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Apple iPhone 15 Pro</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Content Hash</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">abc123def456</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Filename</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">DSC_0001.jpg</span>
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Location</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Country</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Costa Rica</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Region</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Alajuela</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Sub-region</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">San Carlos</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">City</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">La Fortuna</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Place</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Arenal Volcano</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Geo Source</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">geonames-offline</span>
+</div>
+</div>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="AddLocationIcon">
+<path d="M12 2C8.14 2 5 5.14 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7m4 8h-3v3h-2v-3H8V8h3V5h2v3h3z">
+</path>
+</svg>
+</span>Edit Location</button>
+</div>
+<div class="MuiBox-root">
+<div data-testid="location-mini-map" data-lat="9.9281" data-lng="-84.0907" data-label="Arenal Volcano">
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">People / Faces</span>
+<div class="MuiBox-root">
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="FaceIcon">
+<path d="M9 11.75c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25m6 0c-.69 0-1.25.56-1.25 1.25s.56 1.25 1.25 1.25 1.25-.56 1.25-1.25-.56-1.25-1.25-1.25M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8 0-.29.02-.58.05-.86 2.36-1.05 4.23-2.98 5.21-5.37C11.07 8.33 14.05 10 17.42 10c.78 0 1.53-.09 2.25-.26.21.71.33 1.47.33 2.26 0 4.41-3.59 8-8 8">
+</path>
+</svg>
+<span class="MuiChip-label">Not Processed</span>
+</div>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run face detection</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Tags</span>
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="LocalOfferIcon">
+<path d="m21.41 11.58-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42M5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7">
+</path>
+</svg>
+<span class="MuiChip-label">Not Tagged</span>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run AI tagging</button>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">No tags</p>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">Edit Tags</button>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Metadata</span>
+<div class="MuiStack-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="InfoOutlinedIcon">
+<path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8">
+</path>
+</svg>
+<span class="MuiChip-label">Not Extracted</span>
+</div>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Re-run metadata extraction</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Thumbnail</span>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="RefreshIcon">
+<path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z">
+</path>
+</svg>
+</span>Retry thumbnail</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Origin</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Burst review</span>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-text MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeSmall" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="BurstModeIcon">
+<path d="M1 5h2v14H1zm4 0h2v14H5zm17 0H10c-.55 0-1 .45-1 1v12c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V6c0-.55-.45-1-1-1M11 17l2.5-3.15L15.29 16l2.5-3.22L21 17z">
+</path>
+</svg>
+</span>View group</button>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Created</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 08:00 AM</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Updated</span>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Jun 16, 2024, 09:00 AM</span>
+</div>
+</div>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<span class="MuiTypography-root MuiTypography-overline">Actions</span>
+<div class="MuiStack-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="UnarchiveIcon">
+<path d="m20.55 5.22-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.15.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.49-.17-.93-.45-1.28M12 9.5l5.5 5.5H14v2h-4v-2H6.5zM5.12 5l.82-1h12l.93 1z">
+</path>
+</svg>
+</span>Unarchive</button>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeSmall MuiButton-colorError" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="DeleteIcon">
+<path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z">
+</path>
+</svg>
+</span>Move to Trash</button>
+</div>
+</div>
+</div>
+<div tabindex="0" data-testid="sentinelEnd">
+</div>
+</div>"
+`;

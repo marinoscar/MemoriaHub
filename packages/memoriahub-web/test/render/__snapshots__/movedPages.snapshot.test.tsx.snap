@@ -1,0 +1,574 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`moved pages render through the fake host > MediaSyncPage with no phone paired 1`] = `
+"<div class="MuiContainer-root MuiContainer-maxWidthMd">
+<div class="MuiBox-root">
+<h1 class="MuiTypography-root MuiTypography-h4 MuiTypography-gutterBottom">Media sync</h1>
+<p class="MuiTypography-root MuiTypography-body1">Phones that back up their photos and videos to this server: what is synced, what is missing, and how each one syncs.</p>
+<div class="MuiPaper-root MuiPaper-outlined MuiPaper-rounded MuiCard-root">
+<div class="MuiCardContent-root">
+<div class="MuiBox-root" data-testid="get-android-app">
+<h3 class="MuiTypography-root MuiTypography-subtitle1">Get the Product X Android app</h3>
+<p class="MuiTypography-root MuiTypography-body2">Back up photos and videos from your phone automatically.</p>
+<a class="MuiButtonBase-root MuiButton-root MuiButton-contained MuiButton-sizeMedium MuiButton-colorPrimary" tabindex="0" href="/settings/android-app" data-discover="true">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="PhoneAndroidIcon">
+<path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3m-2 20h-4v-1h4zm3.25-3H6.75V4h10.5z">
+</path>
+</svg>
+</span>Download</a>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">Then open the app, enter this server's address and tap Connect on its Media sync screen.</p>
+</div>
+</div>
+</div>
+</div>"
+`;
+
+exports[`moved pages render through the fake host > MemoriesPage 1`] = `
+"<div class="MuiBox-root">
+<div class="MuiStack-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-colorPrimary MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="AutoAwesomeMotionIcon">
+<path d="M14 2H4c-1.11 0-2 .9-2 2v10h2V4h10zm4 4H8c-1.11 0-2 .9-2 2v10h2V8h10zm2 4h-8c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h8c1.1 0 2-.9 2-2v-8c0-1.1-.9-2-2-2">
+</path>
+</svg>
+<h1 class="MuiTypography-root MuiTypography-h4">Memories</h1>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">Every moment MemoriaHub has brought back for Test User's Library.</p>
+<div class="MuiStack-root" role="group" aria-label="Filter memories">
+<div class="MuiButtonBase-root MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorPrimary MuiChip-clickable" tabindex="0" role="button" aria-pressed="true">
+<span class="MuiChip-label">All</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">On This Day</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">Trips</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">People</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">Themes</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">Seasons</span>
+</div>
+<div class="MuiButtonBase-root MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault MuiChip-clickable" tabindex="0" role="button" aria-pressed="false">
+<span class="MuiChip-label">Years</span>
+</div>
+<div class="MuiFormControl-root MuiTextField-root">
+<div class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" id="<generated>">Year</div>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-formControl MuiInputBase-sizeSmall MuiSelect-root">
+<div tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="<generated>" id="<generated>" class="MuiSelect-select MuiSelect-outlined MuiInputBase-input MuiOutlinedInput-input">
+<span class="notranslate" aria-hidden="true">​</span>
+</div>
+<input aria-invalid="false" aria-hidden="true" tabindex="-1" class="MuiSelect-nativeInput" id="<generated>" value="">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium MuiSelect-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="ArrowDropDownIcon">
+<path d="M7 10l5 5 5-5z">
+</path>
+</svg>
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>Year</span>
+</legend>
+</fieldset>
+</div>
+</div>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Show favorites only" aria-pressed="false" data-mui-internal-clone-element="true">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="FavoriteBorderIcon">
+<path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3m-4.4 15.55-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05">
+</path>
+</svg>
+</button>
+</div>
+<div class="MuiBox-root">
+<h2 class="MuiTypography-root MuiTypography-overline">August 2026</h2>
+<div class="MuiBox-root">
+<div class="MuiBox-root">
+<div class="MuiBox-root" data-testid="memory-card" data-memory-id="mem-1" data-unseen="true">
+<button class="MuiButtonBase-root MuiCardActionArea-root" tabindex="0" type="button" aria-label="Memory: Trip to the coast, March 2023, 24 items, not yet viewed (Trip)">
+<div class="MuiBox-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeLarge" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="PhotoLibraryIcon">
+<path d="M22 16V4c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2m-11-4 2.03 2.71L16 11l4 5H8zM2 6v14c0 1.1.9 2 2 2h14v-2H4V6z">
+</path>
+</svg>
+</div>
+<div class="MuiBox-root">
+</div>
+<div class="MuiBox-root">
+<span class="MuiBox-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeInherit" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="FlightTakeoffIcon">
+<path d="M2.5 19h19v2h-19zm19.57-9.36c-.21-.8-1.04-1.28-1.84-1.06L14.92 10l-6.9-6.43-1.93.51 4.14 7.17-4.97 1.33-1.97-1.54-1.45.39 2.59 4.49s7.12-1.9 16.57-4.43c.81-.23 1.28-1.05 1.07-1.85">
+</path>
+</svg>
+</span>
+<span class="MuiBox-root">Trip</span>
+</div>
+<div class="MuiBox-root">
+<div class="MuiBox-root">24</div>
+</div>
+<div class="MuiBox-root">
+<div class="MuiTypography-root MuiTypography-body1">Trip to the coast</div>
+<div class="MuiTypography-root MuiTypography-body1">March 2023</div>
+</div>
+<span class="MuiCardActionArea-focusHighlight">
+</span>
+</button>
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Actions for Trip to the coast">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeSmall" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="MoreVertIcon">
+<path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2m0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2m0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2">
+</path>
+</svg>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+</div>
+</div>"
+`;
+
+exports[`moved pages render through the fake host > ReviewHubPage 1`] = `
+"<div class="MuiBox-root">
+<h1 class="MuiTypography-root MuiTypography-h4">Review</h1>
+<div class="MuiBox-root">
+<ul class="MuiList-root">
+<li class="MuiListItem-root MuiListItem-gutters">
+<a class="MuiButtonBase-root MuiListItemButton-root MuiListItemButton-gutters" tabindex="0" href="/review/bursts" aria-label="Bursts, 2 pending" data-discover="true">
+<div class="MuiListItemIcon-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="BurstModeIcon">
+<path d="M1 5h2v14H1zm4 0h2v14H5zm17 0H10c-.55 0-1 .45-1 1v12c0 .55.45 1 1 1h12c.55 0 1-.45 1-1V6c0-.55-.45-1-1-1M11 17l2.5-3.15L15.29 16l2.5-3.22L21 17z">
+</path>
+</svg>
+</div>
+<div class="MuiListItemText-root">
+<p class="MuiTypography-root MuiTypography-body1 MuiTypography-noWrap MuiListItemText-primary">Bursts</p>
+</div>
+<span class="MuiTypography-root MuiTypography-body1" aria-hidden="true">2</span>
+</a>
+</li>
+<li class="MuiListItem-root MuiListItem-gutters">
+<a class="MuiButtonBase-root MuiListItemButton-root MuiListItemButton-gutters" tabindex="0" href="/review/duplicates" aria-label="Duplicates, 5 pending" data-discover="true">
+<div class="MuiListItemIcon-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="ContentCopyIcon">
+<path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z">
+</path>
+</svg>
+</div>
+<div class="MuiListItemText-root">
+<p class="MuiTypography-root MuiTypography-body1 MuiTypography-noWrap MuiListItemText-primary">Duplicates</p>
+</div>
+<span class="MuiTypography-root MuiTypography-body1" aria-hidden="true">5</span>
+</a>
+</li>
+<li class="MuiListItem-root MuiListItem-gutters">
+<a class="MuiButtonBase-root MuiListItemButton-root MuiListItemButton-gutters" tabindex="0" href="/review/locations" aria-label="Locations, none pending" data-discover="true">
+<div class="MuiListItemIcon-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="MyLocationIcon">
+<path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4m8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7">
+</path>
+</svg>
+</div>
+<div class="MuiListItemText-root">
+<p class="MuiTypography-root MuiTypography-body1 MuiTypography-noWrap MuiListItemText-primary">Locations</p>
+</div>
+<span class="MuiTypography-root MuiTypography-body1" aria-hidden="true">—</span>
+</a>
+</li>
+</ul>
+<hr class="MuiDivider-root MuiDivider-fullWidth">
+<ul class="MuiList-root">
+<li class="MuiListItem-root MuiListItem-gutters">
+<a class="MuiButtonBase-root MuiListItemButton-root MuiListItemButton-gutters" tabindex="0" href="/review/insights" aria-label="Insights" data-discover="true">
+<div class="MuiListItemIcon-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="InsightsIcon">
+<path d="M21 8c-1.45 0-2.26 1.44-1.93 2.51l-3.55 3.56c-.3-.09-.74-.09-1.04 0l-2.55-2.55C12.27 10.45 11.46 9 10 9c-1.45 0-2.27 1.44-1.93 2.52l-4.56 4.55C2.44 15.74 1 16.55 1 18c0 1.1.9 2 2 2 1.45 0 2.26-1.44 1.93-2.51l4.55-4.56c.3.09.74.09 1.04 0l2.55 2.55C12.73 16.55 13.54 18 15 18c1.45 0 2.27-1.44 1.93-2.52l3.56-3.55c1.07.33 2.51-.48 2.51-1.93 0-1.1-.9-2-2-2">
+</path>
+<path d="m15 9 .94-2.07L18 6l-2.06-.93L15 3l-.92 2.07L12 6l2.08.93zM3.5 11 4 9l2-.5L4 8l-.5-2L3 8l-2 .5L3 9z">
+</path>
+</svg>
+</div>
+<div class="MuiListItemText-root">
+<p class="MuiTypography-root MuiTypography-body1 MuiTypography-noWrap MuiListItemText-primary">Insights</p>
+</div>
+</a>
+</li>
+</ul>
+</div>
+</div>"
+`;
+
+exports[`moved pages render through the fake host > SearchPanel 1`] = `
+"<div aria-hidden="true">
+</div>
+<div role="presentation" class="MuiDialog-root MuiModal-root">
+<div class="MuiBackdrop-root MuiModal-backdrop MuiDialog-backdrop" style="opacity: 1; transition: opacity 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;" aria-hidden="true">
+</div>
+<div tabindex="0" data-testid="sentinelStart">
+</div>
+<div class="MuiDialog-container MuiDialog-scrollPaper" style="opacity: 1; transition: opacity 225ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;" role="presentation" tabindex="-1">
+<div class="MuiPaper-root MuiPaper-elevation MuiPaper-rounded MuiPaper-elevation24 MuiDialog-paper MuiDialog-paperWidthSm MuiDialog-paperFullWidth" role="dialog" aria-labelledby="search-panel-title" aria-modal="true" tabindex="-1" data-mui-focusable="" style="--Paper-shadow: 0px 11px 15px -7px rgba(0,0,0,0.2),0px 24px 38px 3px rgba(0,0,0,0.14),0px 9px 46px 8px rgba(0,0,0,0.12);">
+<h2 class="MuiTypography-root MuiTypography-h6 MuiDialogTitle-root" id="search-panel-title">
+<div class="MuiBox-root">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="TuneIcon">
+<path d="M3 17v2h6v-2zM3 5v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z">
+</path>
+</svg>
+<span class="MuiTypography-root MuiTypography-h6">Search photos</span>
+</div>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Close search panel">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="CloseIcon">
+<path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z">
+</path>
+</svg>
+</button>
+</h2>
+<div class="MuiDialogContent-root">
+<div class="MuiStack-root">
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">People</h6>
+<div class="MuiBox-root">
+<div class="MuiAutocomplete-root">
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" for="<generated>" id="<generated>">People</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall MuiAutocomplete-inputRoot">
+<input aria-invalid="false" autocomplete="off" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input MuiAutocomplete-input MuiAutocomplete-inputFocused" aria-autocomplete="list" aria-expanded="false" autocapitalize="none" spellcheck="false" role="combobox" type="text" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>People</span>
+</legend>
+</fieldset>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<div role="group" class="MuiToggleButtonGroup-root MuiToggleButtonGroup-horizontal">
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root Mui-selected MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-firstButton" tabindex="0" type="button" value="all" aria-pressed="true">All</button>
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-lastButton" tabindex="0" type="button" value="any" aria-pressed="false">Any</button>
+</div>
+<span class="MuiTypography-root MuiTypography-caption">All = everyone appears together · Any = at least one</span>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">Location</h6>
+<div role="group" class="MuiToggleButtonGroup-root MuiToggleButtonGroup-horizontal">
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root Mui-selected MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-firstButton" tabindex="0" type="button" value="picklists" aria-pressed="true">Pick from list</button>
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-lastButton" tabindex="0" type="button" value="map" aria-pressed="false">Map radius</button>
+</div>
+<div class="MuiPaper-root MuiPaper-elevation MuiPaper-rounded MuiPaper-elevation0 MuiAlert-root MuiAlert-colorInfo MuiAlert-standard" role="alert" style="--Paper-shadow: none;">
+<div class="MuiAlert-icon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeInherit" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="InfoOutlinedIcon">
+<path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20, 12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10, 10 0 0,0 12,2M11,17H13V11H11V17Z">
+</path>
+</svg>
+</div>
+<div class="MuiAlert-message">No geocoded photos yet. An admin can run a geocode backfill in <a class="MuiTypography-root MuiTypography-inherit MuiLink-root MuiLink-underlineHover" href="/admin/settings/geo">Admin Settings → Geo</a>.</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">Date taken</h6>
+<div class="MuiBox-root">
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="true" for="<generated>" id="<generated>">From</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="date" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>From</span>
+</legend>
+</fieldset>
+</div>
+</div>
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="true" for="<generated>" id="<generated>">To</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="date" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>To</span>
+</legend>
+</fieldset>
+</div>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">Upload date</h6>
+<div class="MuiBox-root">
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="true" for="<generated>" id="<generated>">From</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="date" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>From</span>
+</legend>
+</fieldset>
+</div>
+</div>
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-shrink MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="true" for="<generated>" id="<generated>">To</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="date" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>To</span>
+</legend>
+</fieldset>
+</div>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">Media type</h6>
+<div role="group" class="MuiToggleButtonGroup-root MuiToggleButtonGroup-horizontal">
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root Mui-selected MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-firstButton" tabindex="0" type="button" value="all" aria-pressed="true">All</button>
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-middleButton" tabindex="0" type="button" value="photo" aria-pressed="false">Photos</button>
+<button class="MuiButtonBase-root MuiToggleButtonGroup-grouped MuiToggleButton-root MuiToggleButton-sizeSmall MuiToggleButton-standard MuiToggleButtonGroup-grouped MuiToggleButtonGroup-lastButton" tabindex="0" type="button" value="video" aria-pressed="false">Videos</button>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">Tag</h6>
+<div class="MuiAutocomplete-root MuiAutocomplete-fullWidth MuiAutocomplete-hasPopupIcon">
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" for="<generated>" id="<generated>">Tag</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall MuiInputBase-adornedEnd MuiAutocomplete-inputRoot">
+<input aria-invalid="false" autocomplete="off" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input MuiAutocomplete-input MuiAutocomplete-inputFocused" aria-autocomplete="list" aria-expanded="false" autocapitalize="none" spellcheck="false" role="combobox" type="text" value="">
+<div class="MuiAutocomplete-endAdornment">
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium MuiAutocomplete-popupIndicator" tabindex="-1" type="button" aria-label="Open" title="Open">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="ArrowDropDownIcon">
+<path d="M7 10l5 5 5-5z">
+</path>
+</svg>
+</button>
+</div>
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>Tag</span>
+</legend>
+</fieldset>
+</div>
+</div>
+</div>
+</div>
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">AI description</h6>
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" for="<generated>" id="<generated>">Describe the photo (AI)</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall MuiInputBase-multiline">
+<textarea aria-invalid="false" aria-describedby="<generated>" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" style="height: 0px; overflow: hidden;">
+</textarea>
+<textarea aria-hidden="true" class="MuiInputBase-input MuiOutlinedInput-input" readonly="" tabindex="-1" style="visibility: hidden; position: absolute; overflow: hidden; height: 0px; top: 0px; left: 0px; transform: translateZ(0); padding-top: 0px; padding-bottom: 0px; width: 100%;">
+</textarea>
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>Describe the photo (AI)</span>
+</legend>
+</fieldset>
+</div>
+<p class="MuiFormHelperText-root MuiFormHelperText-sizeSmall MuiFormHelperText-contained" id="<generated>">Combines with filters above</p>
+</div>
+</div>
+<div class="MuiPaper-root MuiPaper-elevation MuiPaper-rounded MuiPaper-elevation0 MuiAccordion-root MuiAccordion-rounded" style="--Paper-shadow: none;">
+<h3 class="MuiAccordion-heading">
+<button class="MuiButtonBase-root MuiAccordionSummary-root" tabindex="0" type="button" aria-expanded="false">
+<span class="MuiAccordionSummary-content">
+<h6 class="MuiTypography-root MuiTypography-subtitle2">More filters</h6>
+</span>
+<span class="MuiAccordionSummary-expandIconWrapper">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="ExpandMoreIcon">
+<path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z">
+</path>
+</svg>
+</span>
+</button>
+</h3>
+<div style="min-height: 0px;" class="MuiCollapse-root MuiCollapse-vertical MuiCollapse-hidden">
+<div class="MuiCollapse-wrapper MuiCollapse-vertical">
+<div class="MuiCollapse-wrapperInner MuiCollapse-vertical">
+<div role="region" class="MuiAccordion-region">
+<div class="MuiAccordionDetails-root">
+<div class="MuiStack-root">
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">Favorites only</span>
+</label>
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">Exclude archived</span>
+</label>
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">Missing capture date</span>
+</label>
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">Missing GPS</span>
+</label>
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">Missing camera info</span>
+</label>
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<span class="MuiTypography-root MuiTypography-body1 MuiFormControlLabel-label">No faces</span>
+</label>
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" for="<generated>" id="<generated>">Camera make</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="text" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>Camera make</span>
+</legend>
+</fieldset>
+</div>
+</div>
+<div class="MuiFormControl-root MuiFormControl-fullWidth MuiTextField-root">
+<label class="MuiFormLabel-root MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined MuiFormLabel-colorPrimary MuiInputLabel-root MuiInputLabel-formControl MuiInputLabel-animated MuiInputLabel-sizeSmall MuiInputLabel-outlined" data-shrink="false" for="<generated>" id="<generated>">Camera model</label>
+<div class="MuiInputBase-root MuiOutlinedInput-root MuiInputBase-colorPrimary MuiInputBase-fullWidth MuiInputBase-formControl MuiInputBase-sizeSmall">
+<input aria-invalid="false" id="<generated>" class="MuiInputBase-input MuiOutlinedInput-input" type="text" value="">
+<fieldset aria-hidden="true" class="MuiOutlinedInput-notchedOutline">
+<legend>
+<span>Camera model</span>
+</legend>
+</fieldset>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="MuiDialogActions-root MuiDialogActions-spacing">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-text MuiButton-sizeMedium MuiButton-colorPrimary" tabindex="0" type="button">Clear all</button>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-contained MuiButton-sizeMedium MuiButton-colorPrimary" tabindex="0" type="button">Search</button>
+</div>
+</div>
+</div>
+<div tabindex="0" data-testid="sentinelEnd">
+</div>
+</div>"
+`;
+
+exports[`moved pages render through the fake host > WorkflowListPage 1`] = `
+"<div class="MuiBox-root">
+<div class="MuiBox-root">
+<h1 class="MuiTypography-root MuiTypography-h5">Workflows</h1>
+<div class="MuiBox-root">
+<button class="MuiButtonBase-root MuiButton-root MuiButton-outlined MuiButton-sizeMedium MuiButton-colorPrimary" tabindex="0" type="button">Browse templates</button>
+<button class="MuiButtonBase-root MuiButton-root MuiButton-contained MuiButton-sizeMedium MuiButton-colorPrimary" tabindex="0" type="button">
+<span class="MuiButton-icon MuiButton-startIcon">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeMedium" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="AddIcon">
+<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z">
+</path>
+</svg>
+</span>New workflow</button>
+</div>
+</div>
+<div class="MuiGrid-root MuiGrid-container MuiGrid-direction-xs-row MuiGrid-spacing-xs-2">
+<div class="MuiGrid-root MuiGrid-direction-xs-row MuiGrid-grid-xs-12 MuiGrid-grid-sm-6 MuiGrid-grid-md-4">
+<div class="MuiPaper-root MuiPaper-outlined MuiPaper-rounded MuiCard-root">
+<div class="MuiCardContent-root">
+<div class="MuiBox-root">
+<h6 class="MuiTypography-root MuiTypography-subtitle1 MuiTypography-noWrap" title="Archive screenshots">Archive screenshots</h6>
+<button class="MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeSmall" tabindex="0" type="button" aria-label="Workflow actions">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeSmall" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="MoreVertIcon">
+<path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2m0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2m0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2">
+</path>
+</svg>
+</button>
+</div>
+<p class="MuiTypography-root MuiTypography-body2">Moves screenshots out of the gallery</p>
+<div class="MuiBox-root">
+<div class="MuiChip-root MuiChip-filled MuiChip-sizeSmall MuiChip-colorDefault">
+<span class="MuiChip-label">Media Items</span>
+</div>
+<div class="MuiChip-root MuiChip-outlined MuiChip-sizeSmall MuiChip-colorDefault">
+<svg class="MuiSvgIcon-root MuiSvgIcon-fontSizeSmall MuiChip-icon" focusable="false" aria-hidden="true" viewBox="0 0 24 24" data-testid="TouchAppIcon">
+<path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74m9.84 4.63-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74c-3.6-.76-3.54-.75-3.67-.75-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38">
+</path>
+</svg>
+<span class="MuiChip-label">Manual</span>
+</div>
+</div>
+<div class="MuiBox-root">
+<span class="MuiTypography-root MuiTypography-caption">Never run</span>
+</div>
+<div class="MuiBox-root">
+<label class="MuiFormControlLabel-root MuiFormControlLabel-labelPlacementEnd">
+<span class="MuiSwitch-root MuiSwitch-sizeSmall">
+<span class="MuiButtonBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary Mui-checked PrivateSwitchBase-root MuiSwitch-switchBase MuiSwitch-colorPrimary Mui-checked Mui-checked">
+<input role="switch" class="PrivateSwitchBase-input MuiSwitch-input" type="checkbox" checked="">
+<span class="MuiSwitch-thumb">
+</span>
+</span>
+<span class="MuiSwitch-track">
+</span>
+</span>
+<p class="MuiTypography-root MuiTypography-body2">Enabled</p>
+</label>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>"
+`;
