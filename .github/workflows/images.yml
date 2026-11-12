@@ -159,6 +159,9 @@ jobs:
           })();
           EOF2
 
+      - name: Runner CPU (the quantized CLIP model is CPU-feature dependent)
+        run: grep -m1 'model name' /proc/cpuinfo; grep -m1 -o -E 'avx512_vnni|avx_vnni|avx512f' /proc/cpuinfo | sort -u || true
+
       - name: Golden-vector parity gate (inside the worker image)
         # The worker image bakes the CLIP model, so a missing one is a failure.
         run: |
