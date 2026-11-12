@@ -205,9 +205,14 @@ describeMaybeDb('workflows slice on the real host (DB_GATED: real PostgreSQL)', 
     await evaluate.process(await queuedJob('workflow_evaluate', libraryId));
     expect((await seed.workflowRun.findUniqueOrThrow({ where: { id: created.runId } })).matchedCount).toBe(2);
 
+    const exclusion = (await seed.workflowRunItem.findFirstOrThrow({ where: { runId: created.runId } })).mediaItemId;
     for (const wrong of [undefined, '', 'DELETE', 'DELETE 1', 'delete 2', 'DELETE 2 ']) {
-      await expect(runs.approveRun(created.runId, wrong === undefined ? {} : { confirmation: wrong }, user)).rejects.toThrow(/Confirmation required/);
+      // A refused approval must not exclude anything either (#735).
+      await expect(
+        runs.approveRun(created.runId, { excludedItemIds: [exclusion], ...(wrong === undefined ? {} : { confirmation: wrong }) }, user),
+      ).rejects.toThrow(/Confirmation required/);
       expect((await seed.workflowRun.findUniqueOrThrow({ where: { id: created.runId } })).status).toBe('awaiting_approval');
+      expect(await seed.workflowRunItem.count({ where: { runId: created.runId, status: 'matched' } })).toBe(2);
     }
     expect(await prisma.job.count({ where: { type: 'workflow_execute_batch', subjectId: libraryId } })).toBe(0);
 
