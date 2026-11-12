@@ -25,12 +25,8 @@
  * sits in the queue unclaimable.
  */
 
-import { ConfigService } from '@nestjs/config';
-import { JobHandlerRegistry, ProviderThrottleService } from '@marinoscar/platform-api/jobs';
+import { JobHandlerRegistry, type JobHandler } from '@marinoscar/platform-api/jobs';
 
-import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
-import type { EnrichmentHandler } from '../../src/enrichment/enrichment-handler.interface';
-import { LegacyEnrichmentHandlerAdapter } from '../../src/platform/jobs/legacy-handlers.adapter';
 import {
   RETIRED_NOTIFICATION_JOB_TYPES,
   RetiredNotificationJobTypes,
@@ -45,20 +41,15 @@ import {
 
 
 describe('job type snapshot (job type strings are permanent)', () => {
-  let handlers: EnrichmentHandler[];
-  let registry: EnrichmentHandlerRegistry;
+  let handlers: JobHandler[];
 
   beforeEach(() => {
-    registry = new EnrichmentHandlerRegistry();
-    handlers = ALL_HANDLER_CLASSES.map(
-      (HandlerClass) => new (HandlerClass as unknown as new () => EnrichmentHandler)(),
-    );
-    for (const handler of handlers) registry.register(handler);
+    handlers = ALL_HANDLER_CLASSES.map((HandlerClass) => new (HandlerClass as unknown as new () => JobHandler)());
   });
 
   it('registers exactly the 42 pinned type strings', () => {
     expect(ALL_HANDLER_CLASSES).toHaveLength(42);
-    expect(registry.types().sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
+    expect(handlers.map((handler) => handler.type).sort()).toEqual([...EXPECTED_JOB_TYPES].sort());
   });
 
   it('has no duplicate type string', () => {
@@ -75,7 +66,10 @@ describe('job type snapshot (job type strings are permanent)', () => {
   });
 
   it('derives the server-only set as the complement of the node-eligible set', () => {
-    const serverOnly = registry.serverOnlyTypes().sort();
+    const serverOnly = handlers
+      .filter((handler) => !(handler.nodeResultSchema && typeof handler.persistNodeResult === 'function'))
+      .map((handler) => handler.type)
+      .sort();
     const expected = EXPECTED_JOB_TYPES.filter((type) => !EXPECTED_NODE_ELIGIBLE_TYPES.includes(type)).sort();
     expect(serverOnly).toEqual(expected);
   });
@@ -97,17 +91,13 @@ describe('job type snapshot (job type strings are permanent)', () => {
   });
 });
 
-describe('job type snapshot through the platform adapter (RETRO-C1)', () => {
+describe('job type snapshot on the platform registry (RETRO-C1)', () => {
   let platform: JobHandlerRegistry;
-  let legacy: EnrichmentHandlerRegistry;
 
   beforeEach(() => {
     platform = new JobHandlerRegistry();
-    const throttle = new ProviderThrottleService(new ConfigService());
-    const prisma = {} as never;
-    legacy = new EnrichmentHandlerRegistry(new LegacyEnrichmentHandlerAdapter(platform, throttle, prisma, {} as never));
     for (const HandlerClass of ALL_HANDLER_CLASSES) {
-      legacy.register(new (HandlerClass as unknown as new () => EnrichmentHandler)());
+      platform.register(new (HandlerClass as unknown as new () => JobHandler)());
     }
   });
 
