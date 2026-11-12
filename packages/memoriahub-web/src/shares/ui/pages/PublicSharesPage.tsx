@@ -57,11 +57,14 @@ import EditIcon from '@mui/icons-material/Edit';
 import RevokeIcon from '@mui/icons-material/Block';
 import PublicIcon from '@mui/icons-material/Public';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useMediaShares } from '../../hooks/useMediaShares';
-import type { MediaShare } from '../../types/sharing';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableBulkAction, DataTableFilterModel, DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import type {
+  MemoriahubDataTableBulkAction as DataTableBulkAction,
+  MemoriahubDataTableFilterModel as DataTableFilterModel,
+  MemoriahubDataTableRowAction as DataTableRowAction,
+} from '../../../core/headless/index.js';
+import { useMediaShares } from '../../headless/index.js';
+import type { MediaShare } from '../../headless/types.js';
 import {
   SHARES_EMPTY_STATE,
   SHARES_TABLE_ID,
@@ -71,9 +74,8 @@ import {
   toShareQuery,
   withStatusFilter,
   type ShareStatusFilter,
-} from './sharesTable';
-import { scrollableTabsProps } from '../../components/common/tabs';
-import { AdminBackLink } from '../../components/admin/AdminPageHeader';
+} from '../sharesTable.js';
+import { scrollableTabsProps } from '../../../core/ui/index.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -265,6 +267,7 @@ function BulkExpirationDialog({ open, onClose, onSave, count }: BulkExpirationDi
 // ---------------------------------------------------------------------------
 
 function PublicSharesPageContent() {
+  const { DataTable, AdminBackLink } = useMemoriahubAdmin();
   // --- Controlled table state (all of it lives HERE, above the table) --------
 
   const [filterModel, setFilterModel] = useState<DataTableFilterModel>([]);

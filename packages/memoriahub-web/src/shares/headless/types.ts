@@ -4,10 +4,25 @@
  * shape it had over `media_shares` (`MediaShare`), mapped by `services/shareService.ts`.
  */
 
+/**
+ * What a public link points at.
+ *
+ * @stability experimental
+ */
 export type ShareTargetType = 'media_item' | 'album';
 
+/**
+ * A link's state.
+ *
+ * @stability experimental
+ */
 export type ShareStatus = 'active' | 'expired' | 'revoked';
 
+/**
+ * One public link as the admin page lists it.
+ *
+ * @stability experimental
+ */
 export interface MediaShare {
   /** The link grant's id (`PATCH` / `DELETE /api/grants/:id`). */
   id: string;
@@ -26,11 +41,20 @@ export interface MediaShare {
   };
 }
 
+/**
+ * A new expiry for a link (`null` never expires).
+ *
+ * @stability experimental
+ */
 export interface UpdateShareRequest {
   expiresAt: string | null;
 }
 
-/** Revoke or re-date several links (a loop over the slice's per-grant routes; no hard delete). */
+/**
+ * Revoke or re-date several links (a loop over the slice's per-grant routes; no hard delete).
+ *
+ * @stability experimental
+ */
 export interface BulkShareRequest {
   ids: string[];
   action: 'revoke' | 'set_expiration';

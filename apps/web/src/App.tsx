@@ -189,7 +189,7 @@ const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirec
 const PublicLinkPage = lazy(() =>
   import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.PublicLinkPage })),
 );
-const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
+const PublicSharesPage = lazy(() => import('@marinoscar/memoriahub-web/shares/ui').then((m) => ({ default: m.PublicSharesPage })));
 // RETRO-J11: the workflow list and builder pages are the packaged slice's.
 const WorkflowListPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),

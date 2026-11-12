@@ -51,6 +51,82 @@ export interface MemoriahubDataTableColumn<Row> {
   hideable?: boolean;
   /** Share of the free width. */
   flex?: number;
+  /**
+   * Whether the column can be filtered: `true` for the default operators of its {@link MemoriahubDataTableColumn.filterType},
+   * or the operators to offer. Filtering is server-side: the table emits the filter model and never filters `rows`.
+   */
+  filterable?: boolean | string[];
+  /** The kind of value behind a filterable column (`text`, `number`, `date`, `enum`, `boolean`); default `text`. */
+  filterType?: string;
+  /** The options of an `enum` column. */
+  enumValues?: MemoriahubDataTableEnumValue[];
+  /** False keeps the column out of the CSV export (a column carrying a credential must never leave the app). */
+  exportable?: boolean;
+}
+
+/**
+ * One option of an enum column.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubDataTableEnumValue {
+  /** The value sent to the server. */
+  value: string;
+  /** The label shown to the user. */
+  label: string;
+}
+
+/**
+ * One entry of a table's filter model: a column, an operator and a value.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubDataTableFilter {
+  /** The id of the filtered column. */
+  columnId: string;
+  /** The comparison operator. */
+  operator: string;
+  /** The comparison value (a list for `between` and `isAnyOf`). */
+  value: string | number | boolean | (string | number)[] | null;
+}
+
+/**
+ * The whole filter model: an ordered list of filters, AND-ed by convention. The table hands it back on every change and the page maps it onto its endpoint.
+ *
+ * @stability experimental
+ */
+export type MemoriahubDataTableFilterModel = MemoriahubDataTableFilter[];
+
+/**
+ * Controlled row selection (a set of row ids, page-scoped).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubDataTableSelection {
+  /** The ids of the selected rows. */
+  selectedIds: Set<string>;
+  /** Called with the next set of ids. */
+  onSelectionChange: (next: Set<string>) => void;
+}
+
+/**
+ * An action over the selected rows, shown in the bulk bar while any row is selected.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubDataTableBulkAction {
+  /** Stable id. */
+  id: string;
+  /** The visible label. */
+  label: string;
+  /** A leading glyph. */
+  icon?: ReactNode;
+  /** Receives the selected row ids. */
+  onClick: (ids: string[]) => void;
+  /** Styles the action as destructive. */
+  destructive?: boolean;
+  /** Whether the action is unavailable. */
+  disabled?: boolean | ((ids: string[]) => boolean);
 }
 
 /**
@@ -137,6 +213,16 @@ export interface MemoriahubDataTableProps<Row> {
   csvExport?: { filename?: string };
   /** Turns the generic CSV export off (a page with its own round trip). */
   disableExport?: boolean;
+  /** A message shown above the table (a failed fetch). */
+  error?: string | null;
+  /** The filter model (controlled); filtering is server-side. */
+  filters?: MemoriahubDataTableFilterModel;
+  /** Receives the whole next filter model on every change. */
+  onFiltersChange?: (next: MemoriahubDataTableFilterModel) => void;
+  /** Controlled row selection; absent makes the table not selectable. */
+  selection?: MemoriahubDataTableSelection;
+  /** Actions over the selected rows. */
+  bulkActions?: MemoriahubDataTableBulkAction[];
 }
 
 /**

@@ -43,8 +43,8 @@ import { Avatar, Box, Chip, IconButton, Stack, Tooltip, Typography } from '@mui/
 import CopyIcon from '@mui/icons-material/ContentCopy';
 import ImageIcon from '@mui/icons-material/Image';
 import AlbumIcon from '@mui/icons-material/PhotoLibrary';
-import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
-import type { MediaShare, ShareStatus, ShareTargetType } from '../../types/sharing';
+import type { MemoriahubDataTableColumn, MemoriahubDataTableFilterModel } from '../../core/headless/index.js';
+import type { MediaShare, ShareStatus, ShareTargetType } from '../headless/types.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -140,7 +140,7 @@ export function shortShareId(id: string): string {
  */
 export function buildShareColumns({
   onCopy,
-}: ShareColumnHandlers): DataTableColumn<MediaShare>[] {
+}: ShareColumnHandlers): MemoriahubDataTableColumn<MediaShare>[] {
   return [
     // --- primary ------------------------------------------------------------
     {
@@ -302,7 +302,7 @@ export const SHARES_EMPTY_STATE: ReactNode = <span>No shares found.</span>;
 // ---------------------------------------------------------------------------
 
 /** Read the active status tab back out of the filter model. */
-export function statusFromFilters(model: DataTableFilterModel): ShareStatusFilter {
+export function statusFromFilters(model: MemoriahubDataTableFilterModel): ShareStatusFilter {
   for (let index = model.length - 1; index >= 0; index -= 1) {
     const filter = model[index];
     if (filter.columnId !== 'status' || filter.operator !== 'is') continue;
@@ -321,9 +321,9 @@ export function statusFromFilters(model: DataTableFilterModel): ShareStatusFilte
  * as `processedWithin` handles it on the job queue (§18.1).
  */
 export function withStatusFilter(
-  model: DataTableFilterModel,
+  model: MemoriahubDataTableFilterModel,
   status: ShareStatusFilter,
-): DataTableFilterModel {
+): MemoriahubDataTableFilterModel {
   const withoutStatus = model.filter((filter) => filter.columnId !== 'status');
   if (status === 'all') return withoutStatus;
   return [...withoutStatus, { columnId: 'status', operator: 'is', value: status }];
@@ -343,9 +343,9 @@ export interface ShareFilterQuery {
  * Reduce an emitted model to one this endpoint can answer: at most one filter
  * per column, last one wins (every param here is single-valued).
  */
-export function normalizeShareFilters(model: DataTableFilterModel): DataTableFilterModel {
+export function normalizeShareFilters(model: MemoriahubDataTableFilterModel): MemoriahubDataTableFilterModel {
   const claimed = new Set<string>();
-  const out: DataTableFilterModel = [];
+  const out: MemoriahubDataTableFilterModel = [];
   for (let index = model.length - 1; index >= 0; index -= 1) {
     const filter = model[index];
     if (claimed.has(filter.columnId)) continue;
@@ -361,7 +361,7 @@ export function normalizeShareFilters(model: DataTableFilterModel): DataTableFil
  * Unknown columns, operators and enum values are ignored rather than forwarded:
  * a filter restored from a stale URL should drop, not produce a 400.
  */
-export function toShareQuery(model: DataTableFilterModel): ShareFilterQuery {
+export function toShareQuery(model: MemoriahubDataTableFilterModel): ShareFilterQuery {
   const query: ShareFilterQuery = {};
 
   for (const filter of model) {

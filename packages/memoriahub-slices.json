@@ -265,6 +265,9 @@
       "tagging",
       "review",
       "enhancement"
+    ],
+    "shares": [
+      "core"
     ]
   }
 }

@@ -180,7 +180,15 @@
       "types": "./dist/workflows/ui/index.d.ts",
       "default": "./dist/workflows/ui/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./shares/headless": {
+      "types": "./dist/shares/headless/index.d.ts",
+      "default": "./dist/shares/headless/index.js"
+    },
+    "./shares/ui": {
+      "types": "./dist/shares/ui/index.d.ts",
+      "default": "./dist/shares/ui/index.js"
+    }
   },
   "files": [
     "dist",
