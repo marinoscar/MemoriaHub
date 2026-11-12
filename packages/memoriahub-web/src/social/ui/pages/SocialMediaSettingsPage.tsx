@@ -17,13 +17,12 @@ import {
 } from '@mui/material';
 import MovieIcon from '@mui/icons-material/Movie';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { backfillSocialMedia, getSocialMediaStatus } from '../../services/adminSocialMedia';
-import type { SocialMediaBackfillResult, SocialMediaOcrStatus } from '../../services/adminSocialMedia';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { backfillSocialMedia, getSocialMediaStatus } from '../../headless/services/socialMedia.js';
+import type { SocialMediaBackfillResult, SocialMediaOcrStatus } from '../../headless/services/socialMedia.js';
 
 function SocialMediaSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // OCR model status
@@ -449,6 +448,11 @@ function SocialMediaSettingsContent() {
   );
 }
 
+/**
+ * The admin Social Media detection page: the global switch, the OCR and cap tuning, the OCR model status and the backfill. Admin only.
+ *
+ * @stability experimental
+ */
 export default function SocialMediaSettingsPage() {
   const { isAdmin } = usePermissions();
 

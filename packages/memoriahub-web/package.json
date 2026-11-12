@@ -68,6 +68,14 @@
       "types": "./dist/face/ui/index.d.ts",
       "default": "./dist/face/ui/index.js"
     },
+    "./social/headless": {
+      "types": "./dist/social/headless/index.d.ts",
+      "default": "./dist/social/headless/index.js"
+    },
+    "./social/ui": {
+      "types": "./dist/social/ui/index.d.ts",
+      "default": "./dist/social/ui/index.js"
+    },
     "./media/headless": {
       "types": "./dist/media/headless/index.d.ts",
       "default": "./dist/media/headless/index.js"

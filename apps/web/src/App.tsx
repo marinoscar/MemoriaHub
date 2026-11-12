@@ -148,7 +148,7 @@ const TaggingSettingsPage = lazy(() =>
 );
 const BurstsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsSettingsPage })));
 const DuplicatesSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesSettingsPage })));
-const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
+const SocialMediaSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/social/ui').then((m) => ({ default: m.SocialMediaSettingsPage })));
 const EnhancerSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancerSettingsPage })));
 const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),

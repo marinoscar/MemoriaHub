@@ -359,6 +359,26 @@ export interface MemoriahubEnhancementSettings {
 }
 
 /**
+ * The social-media detection half of the deployment settings (`socialMedia.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubSocialSettings {
+  /** `socialMedia`: the OCR fallback and the size and duration caps; every key is absent until first saved. */
+  socialMedia?: {
+    ocrEnabled?: boolean;
+    ocrLanguages?: string[];
+    ocrMaxFrames?: number;
+    ocrTimeoutSeconds?: number;
+    minConfidence?: number;
+    /** Videos longer than this are treated as clean without download or OCR. */
+    maxDurationSeconds?: number;
+    /** Size fallback (bytes) used only when the duration is unknown. */
+    maxSizeBytes?: number;
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -370,7 +390,8 @@ export interface MemoriahubSystemSettings
     MemoriahubMemoriesSettings,
     MemoriahubFaceSettings,
     MemoriahubReviewSettings,
-    MemoriahubEnhancementSettings {
+    MemoriahubEnhancementSettings,
+    MemoriahubSocialSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */

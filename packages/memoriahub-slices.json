@@ -233,6 +233,9 @@
       "core",
       "media",
       "review-runs"
+    ],
+    "social": [
+      "core"
     ]
   }
 }
