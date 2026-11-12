@@ -1,6 +1,7 @@
 export * from './access.port.js';
 export * from './ai.port.js';
 export * from './audit.port.js';
+export * from './doctor.port.js';
 export * from './events.port.js';
 export * from './identity.port.js';
 export * from './jobs.port.js';

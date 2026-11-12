@@ -13,6 +13,7 @@ import { GeoLocationService } from './geo/geo-location.service.js';
 import { GeoSettingsService } from './geo/geo-settings.service.js';
 import { GeocodeBackfillService } from './geo/geocode-backfill.service.js';
 import { GeocodeHandler } from './geo/geocode.handler.js';
+import { GeoReverseProviderDoctorCheck } from './doctor/reverse-provider.doctor-check.js';
 import { GoogleGeoLocationProvider } from './geo/google-geo-location.provider.js';
 import { GoogleGeocodeKeyBroker } from './geo/google-geocode-key.broker.js';
 import { NominatimGeoLocationProvider } from './geo/nominatim-geo-location.provider.js';
@@ -71,6 +72,7 @@ export class LocationModule {
         GeocodeBackfillService,
         GoogleGeocodeKeyBroker,
         GeocodeHandler,
+        GeoReverseProviderDoctorCheck,
       ],
       exports: [
         LocationGroupResolverService,

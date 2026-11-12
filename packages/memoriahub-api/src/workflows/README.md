@@ -40,3 +40,5 @@ Five job handlers register through the jobs port. Type strings and profiles are 
 | `WorkflowActionHandlerRegistry`, `WorkflowActionHandler` | registry, interface | the host's implementation of one or more action types; an action type with no handler is a failed outcome |
 | `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver` | token, interface | optional: what happens after a run's terminal or approval write commits (webhook events, the run-completed notification); never throws |
 | `describeWorkflowsSliceConformance`, `FakeWorkflowsDb` | conformance kit | proves the five handlers, node eligibility, malformed payloads, the delete guards and the executor dispatch |
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.workflows.state` check (`WorkflowsStateDoctorCheck`: kill switch, stuck and stale runs, blocked scheduled workflows) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

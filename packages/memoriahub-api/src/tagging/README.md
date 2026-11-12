@@ -23,3 +23,5 @@ Both job types are SERVER-ONLY, permanently: they declare `usesAi` and no node r
 ## Extension-point catalog
 
 None: the slice has no registry of its own. It is a client of one, the media slice's `UploadEnrichmentRegistry` (it registers `auto_tagging` at order 100, priority 20).
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.ai.flag-consistency` check (`AiFlagConsistencyDoctorCheck`) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

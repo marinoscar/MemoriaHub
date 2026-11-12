@@ -88,3 +88,4 @@ export * from './location/apply-location.js';
 export * from './gallery/media-reply.js';
 export * from './gallery/media.service.js';
 export * from './gallery/media.controller.js';
+export * from './doctor/android-media-sync.doctor-check.js';

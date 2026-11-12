@@ -10,6 +10,9 @@ import { FaceDetectionService } from './face-detection.service.js';
 import { FaceMatchingService } from './face-matching.service.js';
 import { FaceSettingsService } from './face-settings.service.js';
 import { FaceUploadEnrichment } from './face-upload-enrichment.js';
+import { FaceDetectionDoctorCheck } from './doctor/detection.doctor-check.js';
+import { FaceFlagConsistencyDoctorCheck } from './doctor/flag-consistency.doctor-check.js';
+import { FacePgvectorDoctorCheck } from './doctor/pgvector.doctor-check.js';
 import { FACE_CONFIG } from './host/face-config.js';
 import { FaceJobs } from './host/face-jobs.js';
 import { FaceSystemSettings } from './host/face-system-settings.js';
@@ -81,6 +84,9 @@ export class FaceModule {
         VideoFaceDetectionService,
         VideoFaceDetectionHandler,
         FaceAutoArchiveSweepHandler,
+        FaceDetectionDoctorCheck,
+        FaceFlagConsistencyDoctorCheck,
+        FacePgvectorDoctorCheck,
       ],
       exports: [
         FACE_CONFIG,

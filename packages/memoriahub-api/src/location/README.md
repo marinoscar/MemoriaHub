@@ -23,3 +23,5 @@ The location slice of the MemoriaHub domain (RETRO-J10, #624). It carries **loca
 ## Extension-point catalog
 
 `GEO_LOCATION_PROVIDER` (the active reverse geocoder; the slice binds it, a host may override it) and the media slice's `UploadEnrichmentRegistry` (this slice registers `location_inference`). The slice registers two job handlers through `MEMORIAHUB_JOBS` and exposes the resolver, the rebuild enqueue helper and the management service to the host. Every host write path that touches a `geo_canonical_*` column must go through `LocationGroupResolverService`. `describeLocationSliceConformance` (`./location/testing`) proves alias-beats-radius, the smallest-radius rule, the identity behaviour with the feature off and the enqueue rule of the rebuild.
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.geo.reverse-provider` check (`GeoReverseProviderDoctorCheck`: one reverse lookup through the active provider) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

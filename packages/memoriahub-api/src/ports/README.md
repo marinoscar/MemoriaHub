@@ -1,6 +1,6 @@
 # ports
 
-The host ports of the MemoriaHub domain: one injection token and one interface per outside dependency a slice has (database, queue, models, object storage, access, identity, notifications, settings, secrets, events, audit, webhooks, metrics).
+The host ports of the MemoriaHub domain: one injection token and one interface per outside dependency a slice has (database, queue, models, object storage, access, identity, notifications, settings, secrets, events, audit, webhooks, metrics, doctor).
 
 ## Purpose and scope
 
@@ -20,4 +20,4 @@ None. The slice reads no environment variable.
 
 ## Extension-point catalog
 
-Each port token is an extension point a host binds: `MEMORIAHUB_PRISMA`, `MEMORIAHUB_JOBS`, `MEMORIAHUB_AI`, `MEMORIAHUB_OBJECT_STORE`, `MEMORIAHUB_ACCESS`, `MEMORIAHUB_IDENTITY`, `MEMORIAHUB_NOTIFY`, `MEMORIAHUB_SETTINGS`, `MEMORIAHUB_SECRETS`, `MEMORIAHUB_EVENTS`, `MEMORIAHUB_AUDIT`, `MEMORIAHUB_WEBHOOKS` and `MEMORIAHUB_METRICS`, each with its `Memoriahub<Name>Port` interface (`MemoriahubPrismaClientLike` for the database). The handler a slice registers is `MemoriahubJobHandler`, the post-upload step is `MemoriahubObjectProcessor`, and a scoped model client is `MemoriahubAiClient`.
+Each port token is an extension point a host binds: `MEMORIAHUB_PRISMA`, `MEMORIAHUB_JOBS`, `MEMORIAHUB_AI`, `MEMORIAHUB_OBJECT_STORE`, `MEMORIAHUB_ACCESS`, `MEMORIAHUB_IDENTITY`, `MEMORIAHUB_NOTIFY`, `MEMORIAHUB_SETTINGS`, `MEMORIAHUB_SECRETS`, `MEMORIAHUB_EVENTS`, `MEMORIAHUB_AUDIT`, `MEMORIAHUB_WEBHOOKS`, `MEMORIAHUB_METRICS` and `MEMORIAHUB_DOCTOR` (optional: the diagnostics a slice registers, `MemoriahubDoctorCheck`; the default registers nothing), each with its `Memoriahub<Name>Port` interface (`MemoriahubPrismaClientLike` for the database). The handler a slice registers is `MemoriahubJobHandler`, the post-upload step is `MemoriahubObjectProcessor`, and a scoped model client is `MemoriahubAiClient`.

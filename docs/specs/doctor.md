@@ -93,7 +93,7 @@ The report's `verdict` is the worst status (`pass < skip < warn < fail`). The ol
 
 ## 4. Check Catalog
 
-The former 35 checks, now 29 app checks: 3 moved to the platform host (B1b), 2 to the jobs slice (C1) and `core.pgClientVersion` to the db-backup slice (D4). One class per check in `apps/api/src/doctor/checks/<section>/<name>.doctor-check.ts`, each a `@Injectable()` that registers with `DoctorCheckRegistry` in `onModuleInit`, with a pure `decide*()` function the unit tests drive; they are provided by `DoctorChecksModule` (`doctor-checks.module.ts`). Ids are lower-case kebab (`memoriahub.core.pg-client-version`), which the platform's identity rule requires, so the camelCase tails of the old keys changed (`pgClientVersion` is `pg-client-version`, `mediaSync` is `media-sync`). Every check keeps the old 10 s ceiling (`timeoutMs`); the platform default is 5 s.
+The former 35 checks, now 29 app checks: 3 moved to the platform host (B1b), 2 to the jobs slice (C1) and `core.pgClientVersion` to the db-backup slice (D4). One class per check, each a `@Injectable()` that registers in `onModuleInit`, with a pure `decide*()` function the unit tests drive. The checks with no owning slice, or that need a platform service, are in `apps/api/src/doctor/checks/<section>/<name>.doctor-check.ts`, register with `DoctorCheckRegistry` and are provided by `DoctorChecksModule` (`doctor-checks.module.ts`). Since RETRO-J10 (#624) ten domain checks are their slice's (`<slice>/doctor/*.doctor-check.ts` in `@marinoscar/memoriahub-api`): they register through the `MEMORIAHUB_DOCTOR` port (bound to the registry by `PlatformMemoriahubDoctorAdapter`), from their slice's `forRoot` providers; `SLICE_DOCTOR_CHECKS` and `ALL_MEMORIAHUB_DOCTOR_CHECKS` in `doctor-checks.module.ts` list them for the specs. The five AI probes (`ai.search`, `ai.tagging`, `ai.embedding`, `ai.pictureEnhancer`, `ai.videoTagging`) and `android.uploadPath` stay in the app: they read the platform AI admin service and the storage resolver, which no port carries. Ids are lower-case kebab (`memoriahub.core.pg-client-version`), which the platform's identity rule requires, so the camelCase tails of the old keys changed (`pgClientVersion` is `pg-client-version`, `mediaSync` is `media-sync`). Every check keeps the old 10 s ceiling (`timeoutMs`); the platform default is 5 s.
 
 ### Mapping from the former keys
 
@@ -113,26 +113,26 @@ The former 35 checks, now 29 app checks: 3 moved to the platform host (B1b), 2 t
 | `ai.search` | `memoriahub.ai.search` | `ai` | Stays an app check; retired by the AI slice (RETRO-E1/E2) |
 | `ai.tagging` | `memoriahub.ai.tagging` | `ai` | Stays an app check; retired by the AI slice (RETRO-E1/E2) |
 | `ai.embedding` | `memoriahub.ai.embedding` | `ai` | Stays an app check; retired by the AI slice (RETRO-E1/E2) |
-| `ai.flagConsistency` | `memoriahub.ai.flag-consistency` | `ai` | Stays an app check; retired by the AI slice (RETRO-E1/E2) |
-| `ai.socialMedia` | `memoriahub.ai.social-media` | `ai` | Domain check; stays an app check |
-| `ai.duplicateDetection` | `memoriahub.ai.duplicate-detection` | `ai` | Domain check; stays an app check |
+| `ai.flagConsistency` | `memoriahub.ai.flag-consistency` | `ai` | Domain check; the `tagging` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/tagging/doctor/flag-consistency.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
+| `ai.socialMedia` | `memoriahub.ai.social-media` | `ai` | Domain check; the `social-media` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/social-media/doctor/social-media.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
+| `ai.duplicateDetection` | `memoriahub.ai.duplicate-detection` | `ai` | Domain check; the `dedup` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/dedup/doctor/duplicate-detection.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
 | `ai.pictureEnhancer` | `memoriahub.ai.picture-enhancer` | `ai` | Domain check; stays an app check |
 | `ai.videoTagging` | `memoriahub.ai.video-tagging` | `ai` | Domain check; stays an app check |
-| `face.detection` | `memoriahub.face.detection` | `face` | Domain check; stays an app check |
-| `face.flagConsistency` | `memoriahub.face.flag-consistency` | `face` | Domain check; stays an app check |
-| `face.pgvector` | `memoriahub.face.pgvector` | `face` | Domain check; stays an app check |
-| `geo.reverseProvider` | `memoriahub.geo.reverse-provider` | `geo` | Domain check; stays an app check |
+| `face.detection` | `memoriahub.face.detection` | `face` | Domain check; the `face` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/face/doctor/detection.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
+| `face.flagConsistency` | `memoriahub.face.flag-consistency` | `face` | Domain check; the `face` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/face/doctor/flag-consistency.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
+| `face.pgvector` | `memoriahub.face.pgvector` | `face` | Domain check; the `face` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/face/doctor/pgvector.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
+| `geo.reverseProvider` | `memoriahub.geo.reverse-provider` | `geo` | Domain check; the `location` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/location/doctor/reverse-provider.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
 | `jobs.workerEnabled` | `memoriahub.jobs.worker-enabled` | `jobs` | Stays an app check; retired by the jobs slice (RETRO-C1) |
 | `jobs.queueHealth` | `memoriahub.jobs.queue-health` | `jobs` | Stays an app check; retired by the jobs slice (RETRO-C1) |
-| `jobs.burstConfig` | `memoriahub.jobs.burst-config` | `jobs` | Domain check; stays an app check |
+| `jobs.burstConfig` | `memoriahub.jobs.burst-config` | `jobs` | Domain check; the `burst` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/burst/doctor/burst-config.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
 | `nodes.registeredCount` | `memoriahub.nodes.registered-count` | `nodes` | Stays an app check; retired by the nodes slice (RETRO-C2) |
 | `nodes.heartbeatFreshness` | `memoriahub.nodes.heartbeat-freshness` | `nodes` | Stays an app check; retired by the nodes slice (RETRO-C2) |
 | `nodes.staleLeases` | `memoriahub.nodes.stale-leases` | `nodes` | Stays an app check; retired by the nodes slice (RETRO-C2) |
 | `nodes.capabilityHealth` | `memoriahub.nodes.capability-health` | `nodes` | Stays an app check; retired by the nodes slice (RETRO-C2) |
-| `workflows.state` | `memoriahub.workflows.state` | `workflows` | Domain check; stays an app check |
+| `workflows.state` | `memoriahub.workflows.state` | `workflows` | Domain check; the `workflows` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/workflows/doctor/state.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
 | `android.assetlinks` | `android.assetlinks` (slice) | `android` | **Retired by the android-app slice (RETRO-D5, #586):** the slice's `android.assetlinks` reads the phones through MemoriaHub's Media Sync device source |
 | `android.releases` | `android.releases` (slice) | `android` | **Retired by the android-app slice (RETRO-D5, #586):** the slice's `android.releases`; `devicesBehind` comes from the Media Sync device source |
-| `android.mediaSync` | `memoriahub.android.media-sync` | `android` | Domain check; stays an app check (in `apps/api/src/media-sync/doctor/` since RETRO-D5) |
+| `android.mediaSync` | `memoriahub.android.media-sync` | `android` | Domain check; the `media` slice's since RETRO-J10 (#624): `packages/memoriahub-api/src/media/doctor/android-media-sync.doctor-check.ts`, registered through `MEMORIAHUB_DOCTOR`; id and statuses unchanged |
 | `android.uploadPath` | `memoriahub.android.upload-path` | `android` | Domain check; stays an app check (in `apps/api/src/media-sync/doctor/` since RETRO-D5) |
 
 The tables below keep the former key in the first column for continuity; read it through the mapping above. Statuses are written in the old vocabulary (`ok`/`warning`/`error`/`skipped` = `pass`/`warn`/`fail`/`skip`). `dependsOn: ['db.connection']` is declared on every check that queries the database, so a dead database yields one `fail` and skipped dependents, not a wall of errors.
@@ -308,7 +308,7 @@ Some "test connection" methods throw (a `BadRequestException` for missing creden
 
 ### Adding a check
 
-Add `checks/<section>/<name>.doctor-check.ts` (id via `checkId(section, name)`, kebab-case; a pure `decide*`; a `remedy` on every `warn`/`fail`; `timeoutMs`; `dependsOn: ['db.connection']` when it queries), add the class to `MEMORIAHUB_DOCTOR_CHECKS` in `doctor-checks.module.ts`, a unit test, and a row to §4. For the Android section also update the table in `docs/runbooks/android-app.md` (CLAUDE.md Android rule 13).
+Add the check to its owning slice (`<slice>/doctor/<name>.doctor-check.ts` in `@marinoscar/memoriahub-api`: id via `doctorCheckId(section, name)`, kebab-case; a pure `decide*`; a `remedy` on every `warn`/`fail`; `timeoutMs`; `dependsOn: ['db.connection']` when it queries; registered through `MEMORIAHUB_DOCTOR` in `onModuleInit`), add the class to the slice module's providers and to `SLICE_DOCTOR_CHECKS` in `doctor-checks.module.ts`, a unit test, and a row to §4. A check with no slice (or one that needs a platform service) goes in `apps/api/src/doctor/checks/<section>/` with `checkId(...)` and in `MEMORIAHUB_DOCTOR_CHECKS`. For the Android section also update the table in `docs/runbooks/android-app.md` (CLAUDE.md Android rule 13).
 
 ---
 

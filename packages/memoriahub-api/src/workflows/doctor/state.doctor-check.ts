@@ -1,15 +1,24 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
+
 import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
-
-import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
-
-import { PrismaService } from '../../../prisma/prisma.service';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
-import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  pass,
+  readSystemNamespaces,
+  skip,
+  warn,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_PRISMA,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import { WORKFLOW_RUN_STATUS, WORKFLOW_TRIGGER } from '../workflows.constants.js';
+import type { WorkflowsDb } from '../data/workflows-db.js';
 
 // Ported from `DoctorService.checkWorkflowsState` (key `workflows.state`).
 // READ-ONLY: pure DB counts. Surfaces operational inconsistencies an admin
@@ -22,9 +31,12 @@ import { AppSystemSettingsService } from '../../../platform/settings/app-system-
  * How long a workflow run may sit non-terminal (running/evaluating) without any
  * counter progress before it's flagged as stuck. Deliberately generous: a
  * single run can legitimately churn through 150k+ items across many batch jobs.
+ *
+ * @stability experimental
  */
 export const WORKFLOW_STUCK_MINUTES = 30;
 
+/** The facts the workflow engine state check decides on. @stability experimental */
 export interface WorkflowStateFacts {
   featureEnabled: boolean;
   envDisabled: boolean;
@@ -34,6 +46,7 @@ export interface WorkflowStateFacts {
   scheduledWorkflowsBlocked: number;
 }
 
+/** The status ladder of the workflow engine state check. @stability experimental */
 export function decideWorkflowsState(f: WorkflowStateFacts): DoctorCheckOutcome {
   if (!f.featureEnabled) return skip('Workflows feature is disabled.');
 
@@ -74,8 +87,9 @@ export function decideWorkflowsState(f: WorkflowStateFacts): DoctorCheckOutcome 
 }
 
 @Injectable()
-export class WorkflowsStateDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('workflows', 'state');
+/** The workflow engine state check. @stability experimental */
+export class WorkflowsStateDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('workflows', 'state');
   readonly category = 'workflows';
   readonly label = 'Workflow engine state';
   readonly settingsPath = '/admin/settings/workflows';
@@ -83,17 +97,19 @@ export class WorkflowsStateDoctorCheck implements DoctorCheck, OnModuleInit {
   readonly dependsOn = ['db.connection'] as const;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly prisma: PrismaService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: WorkflowsDb,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.readKnownValue();
+    const settings = await readSystemNamespaces(this.settings, ['features', 'workflows']);
     const base = {
       featureEnabled: settings.features?.['workflows'] === true,
       envDisabled: process.env['WORKFLOWS_ENABLED'] === 'false',
@@ -113,18 +129,18 @@ export class WorkflowsStateDoctorCheck implements DoctorCheck, OnModuleInit {
       // Runs non-terminal past the stuck window; served by (status, updatedAt).
       this.prisma.workflowRun.count({
         where: {
-          status: { in: [WorkflowRunStatus.running, WorkflowRunStatus.evaluating] },
+          status: { in: [WORKFLOW_RUN_STATUS.running, WORKFLOW_RUN_STATUS.evaluating] },
           updatedAt: { lt: stuckCutoff },
         },
       }),
       // awaiting_approval runs past their TTL: the history-purge task mirrors this predicate.
       this.prisma.workflowRun.count({
-        where: { status: WorkflowRunStatus.awaiting_approval, updatedAt: { lt: approvalCutoff } },
+        where: { status: WORKFLOW_RUN_STATUS.awaiting_approval, updatedAt: { lt: approvalCutoff } },
       }),
       // Enabled scheduled workflows never fire while the master switch is off.
       scheduledTriggerOn
         ? Promise.resolve(0)
-        : this.prisma.workflow.count({ where: { enabled: true, trigger: WorkflowTrigger.scheduled } }),
+        : this.prisma.workflow.count({ where: { enabled: true, trigger: WORKFLOW_TRIGGER.scheduled } }),
     ]);
 
     return decideWorkflowsState({ ...base, stuckRuns, staleApprovalRuns, scheduledWorkflowsBlocked });

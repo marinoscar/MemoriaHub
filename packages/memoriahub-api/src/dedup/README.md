@@ -25,3 +25,5 @@ The near-duplicate detection and review slice of the MemoriaHub domain (RETRO-J1
 | `DUPLICATE_OBSERVER`, `DuplicateObserver` | token, interface | optional: what happens after a resolve with `trash` commits (the `media.item.trashed` webhook); never throws; bind it from a global module |
 
 The slice registers three job handlers through `MEMORIAHUB_JOBS`, one fan-out with the media slice's `UploadEnrichmentRegistry` and one strategy with the review-run engine. `describeDedupSliceConformance` (`./dedup/testing`) proves the registration: photos only, priority 10, gated by the feature flag.
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.ai.duplicate-detection` check (`DuplicateDetectionDoctorCheck`: skipped when the feature is off, a warning when the CLIP model is unavailable and dedup runs dHash-only) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

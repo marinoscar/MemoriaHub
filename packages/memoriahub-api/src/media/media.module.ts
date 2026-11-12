@@ -2,6 +2,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 
 import { UploadEnrichmentRegistry } from './enrichment-fanout/upload-enrichment.registry.js';
 import { UploadEnrichmentService } from './enrichment-fanout/upload-enrichment.service.js';
+import { AndroidMediaSyncDoctorCheck } from './doctor/android-media-sync.doctor-check.js';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service.js';
 import { MEDIA_ENRICHMENT } from './hooks/media-host-hooks.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
@@ -59,6 +60,7 @@ export class MediaModule {
         UploadEnrichmentRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
+        AndroidMediaSyncDoctorCheck,
         MediaEnrichmentService,
         { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
         MediaSyncService,

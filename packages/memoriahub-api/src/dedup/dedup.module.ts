@@ -12,6 +12,7 @@ import { DuplicateGroupReviewStrategy } from './duplicate-group.strategy.js';
 import { DuplicateService } from './duplicate.service.js';
 import { ReviewInsightsService } from './review-insights.service.js';
 import { VisualEmbeddingService } from './visual-embedding.service.js';
+import { DuplicateDetectionDoctorCheck } from './doctor/duplicate-detection.doctor-check.js';
 
 /**
  * Options of {@link DedupModule.forRoot}. None yet: the CLIP model directory is `MODELS_DIR` and the
@@ -61,6 +62,7 @@ export class DedupModule {
         ReviewInsightsService,
         DuplicateService,
         DuplicateGroupReviewStrategy,
+        DuplicateDetectionDoctorCheck,
       ],
       exports: [
         VisualEmbeddingService,

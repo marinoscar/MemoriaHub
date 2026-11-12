@@ -25,3 +25,5 @@ The burst photo detection slice of the MemoriaHub domain (RETRO-J10, #624).
 | `BURST_OBSERVER`, `BurstObserver` | token, interface | optional: what happens after a resolve with `trash` commits (the `media.item.trashed` webhook); never throws |
 
 `describeBurstSliceConformance` (`./burst/testing`) proves the fan-out registration: photos only, priority 5, gated by the feature flag.
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.jobs.burst-config` check (`BurstConfigDoctorCheck`) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

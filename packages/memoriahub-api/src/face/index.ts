@@ -31,3 +31,6 @@ export * from './http/face-settings.controller.js';
 export * from './http/merge-people.dto.js';
 export * from './http/people.controller.js';
 export * from './http/people.dto.js';
+export * from './doctor/detection.doctor-check.js';
+export * from './doctor/flag-consistency.doctor-check.js';
+export * from './doctor/pgvector.doctor-check.js';

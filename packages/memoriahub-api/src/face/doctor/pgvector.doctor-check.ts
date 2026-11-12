@@ -1,13 +1,23 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { PrismaService } from '../../../prisma/prisma.service';
-import { DEFAULT_FACE_VECTOR_BACKEND } from '@marinoscar/memoriahub-api/face';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass, skip, warn } from '../outcome';
+import {
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  errorMessage,
+  fail,
+  pass,
+  skip,
+  warn,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubPrismaClientLike,
+} from '../../ports/index.js';
+import { DEFAULT_FACE_VECTOR_BACKEND } from '../face-matching.service.js';
 
 // Ported from `DoctorService.checkFacePgvector` (key `face.pgvector`).
 // READ-ONLY: two catalog SELECTs.
@@ -20,6 +30,7 @@ const ROLLBACK_HINT =
   'Run migrations (npx prisma migrate deploy) to add the face pgvector column/indexes, ' +
   'or set FACE_VECTOR_BACKEND=app to roll back to in-app cosine matching.';
 
+/** The facts the face pgvector index check decides on. @stability experimental */
 export interface FacePgvectorFacts {
   columnPresent: boolean;
   mainIndexPresent: boolean;
@@ -27,6 +38,7 @@ export interface FacePgvectorFacts {
   assignedIndexPresent: boolean;
 }
 
+/** The status ladder of the face pgvector index check. @stability experimental */
 export function decideFacePgvector(backend: string, facts: FacePgvectorFacts): DoctorCheckOutcome {
   if (backend === 'app') {
     return skip('FACE_VECTOR_BACKEND=app; face matching uses in-app cosine (pgvector column not required).');
@@ -57,22 +69,25 @@ export function decideFacePgvector(backend: string, facts: FacePgvectorFacts): D
 }
 
 @Injectable()
-export class FacePgvectorDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('face', 'pgvector');
+/** The face pgvector index check. @stability experimental */
+export class FacePgvectorDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('face', 'pgvector');
   readonly category = 'face';
   readonly label = 'Face pgvector index';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
   readonly dependsOn = ['db.connection'] as const;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MemoriahubPrismaClientLike,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
     const backend = process.env['FACE_VECTOR_BACKEND'] ?? DEFAULT_FACE_VECTOR_BACKEND;
     if (backend === 'app') {

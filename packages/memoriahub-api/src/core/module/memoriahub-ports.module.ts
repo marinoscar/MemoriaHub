@@ -17,6 +17,7 @@ import {
   MEMORIAHUB_IDENTITY,
   MEMORIAHUB_JOBS,
   MEMORIAHUB_METRICS,
+  MEMORIAHUB_DOCTOR,
   MEMORIAHUB_NOTIFY,
   MEMORIAHUB_OBJECT_STORE,
   MEMORIAHUB_PRISMA,
@@ -26,6 +27,7 @@ import {
   type MemoriahubAccessPort,
   type MemoriahubAiPort,
   type MemoriahubAuditPort,
+  type MemoriahubDoctorPort,
   type MemoriahubEventsPort,
   type MemoriahubIdentityPort,
   type MemoriahubJobsPort,
@@ -94,8 +96,8 @@ export type MemoriahubPortBinding<T> =
   | MemoriahubFactoryBinding<T>;
 
 /**
- * The bindings of every port. The first nine are required; `events`, `audit`, `webhooks` and `metrics`
- * are optional and default to an in-process emitter and three no-ops.
+ * The bindings of every port. The first nine are required; `events`, `audit`, `webhooks`, `metrics` and
+ * `doctor` are optional and default to an in-process emitter and four no-ops.
  *
  * @extensionPoint token
  * @stability experimental
@@ -127,6 +129,8 @@ export interface MemoriahubPortBindings {
   webhooks?: MemoriahubPortBinding<MemoriahubWebhooksPort>;
   /** The metrics port, bound to `MEMORIAHUB_METRICS`. Optional; defaults to a no-op. */
   metrics?: MemoriahubPortBinding<MemoriahubMetricsPort>;
+  /** The diagnostics port, bound to `MEMORIAHUB_DOCTOR`. Optional; defaults to a no-op. */
+  doctor?: MemoriahubPortBinding<MemoriahubDoctorPort>;
   /** Modules the bindings' providers need (a binding by `useClass` resolves its dependencies from them). */
   imports?: ModuleMetadata['imports'];
 }
@@ -177,7 +181,18 @@ export const NOOP_MEMORIAHUB_METRICS: MemoriahubMetricsPort = Object.freeze({
   },
 });
 
-type RequiredPort = Exclude<keyof MemoriahubPortBindings, 'events' | 'audit' | 'webhooks' | 'metrics' | 'imports'>;
+/**
+ * A diagnostics port that registers nothing: the default when a host binds none.
+ *
+ * @stability experimental
+ */
+export const NOOP_MEMORIAHUB_DOCTOR: MemoriahubDoctorPort = Object.freeze({
+  registerCheck(): void {
+    // Intentionally empty.
+  },
+});
+
+type RequiredPort = Exclude<keyof MemoriahubPortBindings, 'events' | 'audit' | 'webhooks' | 'metrics' | 'doctor' | 'imports'>;
 
 /** Required ports in the order they are reported, with their tokens. */
 const REQUIRED: ReadonlyArray<readonly [RequiredPort, symbol, string]> = [
@@ -268,6 +283,9 @@ export class MemoriahubPortsModule {
       isBinding(bindings.metrics)
         ? provider(MEMORIAHUB_METRICS, bindings.metrics as MemoriahubPortBinding<unknown>)
         : { provide: MEMORIAHUB_METRICS, useValue: NOOP_MEMORIAHUB_METRICS },
+      isBinding(bindings.doctor)
+        ? provider(MEMORIAHUB_DOCTOR, bindings.doctor as MemoriahubPortBinding<unknown>)
+        : { provide: MEMORIAHUB_DOCTOR, useValue: NOOP_MEMORIAHUB_DOCTOR },
     );
 
     return {
@@ -275,7 +293,7 @@ export class MemoriahubPortsModule {
       global: true,
       imports: bindings.imports ?? [],
       providers,
-      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS],
+      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS, MEMORIAHUB_DOCTOR],
     };
   }
 }

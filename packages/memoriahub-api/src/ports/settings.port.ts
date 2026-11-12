@@ -77,6 +77,16 @@ export interface MemoriahubSettingsPort {
   readSystem<T>(name: string): Promise<MemoriahubVersionedSettings<T>>;
 
   /**
+   * Reads one system namespace WITHOUT creating anything: the host's read-only path (a store that
+   * writes its defaults on first read would break the diagnostics' read-only rule on a fresh install).
+   * Not cached. Optional: a host whose reads never write binds `readSystem` alone, and a diagnostics
+   * read falls back to it.
+   *
+   * @param name - the namespace key.
+   */
+  peekSystem?<T>(name: string): Promise<MemoriahubVersionedSettings<T>>;
+
+  /**
    * Merges a patch into a system namespace. Drops the host's cache.
    *
    * @param name - the namespace key.

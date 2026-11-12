@@ -16,3 +16,4 @@ export * from './http/dedup-permissions.js';
 export * from './http/duplicate.controller.js';
 export * from './http/admin-duplicate.controller.js';
 export * from './http/review-insights.controller.js';
+export * from './doctor/duplicate-detection.doctor-check.js';

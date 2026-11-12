@@ -9,10 +9,12 @@
 // with the live provider probes listed in
 // `docs/platform-adoption/local-exceptions.md`.
 //
-// This module imports the domain modules whose services the checks read. Android
-// checks read `media_sync_devices` through the global PrismaModule;
-// `MediaSyncModule` is deliberately NOT imported. Nothing imports this module
-// except `AppModule`, so it closes no cycle.
+// The checks a domain slice owns (RETRO-J10, #624) are the slice's: they register through the
+// `MEMORIAHUB_DOCTOR` port from their slice's `forRoot` providers (see `SLICE_DOCTOR_CHECKS`), bound to
+// the platform registry by `PlatformMemoriahubDoctorAdapter`. What stays here is what has no slice to
+// own it (core, auth, nodes), what needs a platform service (the AI admin probes over the platform
+// `AiService`, the storage resolver of `android.upload-path`). Nothing imports this module except
+// `AppModule`, so it closes no cycle.
 //
 // The platform ships `db.connection`, `db.migrations`, `secrets.encryption-key`
 // (retiring `core.database`, `core.migrations`, `core.secretsKey`) and more with
@@ -20,7 +22,6 @@
 // =============================================================================
 
 import { Module } from '@nestjs/common';
-
 import { AiPortModule } from '../ai-port/ai-port.module';
 import { DedupModule } from '../dedup/dedup.module';
 import { FaceModule } from '../face/face.module';
@@ -28,31 +29,34 @@ import { GeoModule } from '../geo/geo.module';
 import { SocialMediaModule } from '../social-media/social-media.module';
 import { MediaProcessingModule } from '../media-processing/media-processing.module';
 
+import { AndroidMediaSyncDoctorCheck } from '@marinoscar/memoriahub-api/media';
+import { DuplicateDetectionDoctorCheck } from '@marinoscar/memoriahub-api/dedup';
+import { BurstConfigDoctorCheck } from '@marinoscar/memoriahub-api/burst';
+import { SocialMediaDoctorCheck } from '@marinoscar/memoriahub-api/social-media';
+import {
+  FaceDetectionDoctorCheck,
+  FaceFlagConsistencyDoctorCheck,
+  FacePgvectorDoctorCheck,
+} from '@marinoscar/memoriahub-api/face';
+import { GeoReverseProviderDoctorCheck } from '@marinoscar/memoriahub-api/location';
+import { WorkflowsStateDoctorCheck } from '@marinoscar/memoriahub-api/workflows';
+import { AiFlagConsistencyDoctorCheck } from '@marinoscar/memoriahub-api/tagging';
+
 import { AdminBootstrapDoctorCheck } from './checks/auth/admin-bootstrap.doctor-check';
 import { GoogleOauthDoctorCheck } from './checks/auth/google-oauth.doctor-check';
 import { JwtDoctorCheck } from './checks/auth/jwt.doctor-check';
 import { AiEmbeddingDoctorCheck } from './checks/ai/embedding.doctor-check';
-import { AiFlagConsistencyDoctorCheck } from './checks/ai/flag-consistency.doctor-check';
 import { AiSearchDoctorCheck } from './checks/ai/search.doctor-check';
 import { AiTaggingDoctorCheck } from './checks/ai/tagging.doctor-check';
-import { DuplicateDetectionDoctorCheck } from './checks/ai/duplicate-detection.doctor-check';
 import { PictureEnhancerDoctorCheck } from './checks/ai/picture-enhancer.doctor-check';
-import { SocialMediaDoctorCheck } from './checks/ai/social-media.doctor-check';
 import { VideoTaggingDoctorCheck } from './checks/ai/video-tagging.doctor-check';
 import { AppUrlDoctorCheck } from './checks/core/app-url.doctor-check';
 import { PgvectorDoctorCheck } from './checks/core/pgvector.doctor-check';
-import { FaceDetectionDoctorCheck } from './checks/face/detection.doctor-check';
-import { FaceFlagConsistencyDoctorCheck } from './checks/face/flag-consistency.doctor-check';
-import { FacePgvectorDoctorCheck } from './checks/face/pgvector.doctor-check';
-import { GeoReverseProviderDoctorCheck } from './checks/geo/reverse-provider.doctor-check';
-import { BurstConfigDoctorCheck } from './checks/jobs/burst-config.doctor-check';
 import { NodesCapabilityHealthDoctorCheck } from './checks/nodes/capability-health.doctor-check';
 import { NodesHeartbeatDoctorCheck } from './checks/nodes/heartbeat-freshness.doctor-check';
 import { NodesRegisteredDoctorCheck } from './checks/nodes/registered-count.doctor-check';
 import { NodesStaleLeasesDoctorCheck } from './checks/nodes/stale-leases.doctor-check';
-import { WorkflowsStateDoctorCheck } from './checks/workflows/state.doctor-check';
-// Media Sync's two checks live with their domain (RETRO-D5, #586).
-import { AndroidMediaSyncDoctorCheck } from '../media-sync/doctor/media-sync.doctor-check';
+// `android.upload-path` needs the platform storage resolver; `android.media-sync` is the media slice's.
 import { AndroidUploadPathDoctorCheck } from '../media-sync/doctor/upload-path.doctor-check';
 
 /**
@@ -74,11 +78,32 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   AiSearchDoctorCheck,
   AiTaggingDoctorCheck,
   AiEmbeddingDoctorCheck,
+  PictureEnhancerDoctorCheck,
+  VideoTaggingDoctorCheck,
+  // face
+  // geo
+  // jobs
+  // nodes
+  NodesRegisteredDoctorCheck,
+  NodesHeartbeatDoctorCheck,
+  NodesStaleLeasesDoctorCheck,
+  NodesCapabilityHealthDoctorCheck,
+  // workflows
+  // android (`android.assetlinks` and `android.releases` are the android-app slice's since
+  // RETRO-D5; `android.media-sync` is the media slice's since RETRO-J10)
+  AndroidUploadPathDoctorCheck,
+];
+
+/**
+ * The checks the domain slices own and register themselves (through `MEMORIAHUB_DOCTOR`, from their `forRoot`
+ * providers): listed here for the inventory, and for the specs that run the whole set. NOT providers of this
+ * module (a second registration would throw as a duplicate id).
+ */
+export const SLICE_DOCTOR_CHECKS = [
+  // ai
   AiFlagConsistencyDoctorCheck,
   SocialMediaDoctorCheck,
   DuplicateDetectionDoctorCheck,
-  PictureEnhancerDoctorCheck,
-  VideoTaggingDoctorCheck,
   // face
   FaceDetectionDoctorCheck,
   FaceFlagConsistencyDoctorCheck,
@@ -87,23 +112,21 @@ export const MEMORIAHUB_DOCTOR_CHECKS = [
   GeoReverseProviderDoctorCheck,
   // jobs
   BurstConfigDoctorCheck,
-  // nodes
-  NodesRegisteredDoctorCheck,
-  NodesHeartbeatDoctorCheck,
-  NodesStaleLeasesDoctorCheck,
-  NodesCapabilityHealthDoctorCheck,
   // workflows
   WorkflowsStateDoctorCheck,
-  // android (`android.assetlinks` and `android.releases` are the android-app slice's since
-  // RETRO-D5; Media Sync keeps its two)
+  // android
   AndroidMediaSyncDoctorCheck,
-  AndroidUploadPathDoctorCheck,
 ];
+
+/** Every `memoriahub.*` check of the application, the slices' and this module's. */
+export const ALL_MEMORIAHUB_DOCTOR_CHECKS = [...SLICE_DOCTOR_CHECKS, ...MEMORIAHUB_DOCTOR_CHECKS];
 
 @Module({
   imports: [
-    
     AiPortModule,
+    // The slices' own checks no longer need these modules' services, but the OpenAPI document follows the
+    // module graph's discovery order, which these edges set: dropping them moves the routes of these four
+    // modules in the document (it is byte-identical to the one before RETRO-J10 with them).
     FaceModule,
     GeoModule,
     MediaProcessingModule,

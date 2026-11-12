@@ -9,6 +9,7 @@ import { TaggingUploadEnrichment } from './tagging-upload-enrichment.js';
 import { VideoAutoTaggingHandler } from './video-auto-tagging.handler.js';
 import { VideoAutoTaggingService } from './video-auto-tagging.service.js';
 import { VideoInputResolver } from './video-input.service.js';
+import { AiFlagConsistencyDoctorCheck } from './doctor/flag-consistency.doctor-check.js';
 
 /**
  * Options of {@link TaggingModule.forRoot}. None yet: the image budget is `TAG_MAX_IMAGE_DIM`, the
@@ -61,6 +62,7 @@ export class TaggingModule {
         TagLabelsService,
         TaggingBackfillService,
         TaggingUploadEnrichment,
+        AiFlagConsistencyDoctorCheck,
       ],
       exports: [AutoTaggingService, VideoAutoTaggingService, TagLabelsService, TaggingBackfillService],
     };

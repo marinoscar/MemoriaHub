@@ -26,3 +26,5 @@ Classifies whether a VIDEO was downloaded or re-shared from TikTok, Instagram, F
 | `SOCIAL_MEDIA_OPTIONS`, `SocialMediaModuleOptions` | token, interface | set by `forRoot`: the job's `maxRuntimeMs` (`videoJobTimeoutMs`) |
 
 `describeSocialMediaSliceConformance` (`./social-media/testing`) proves the fan-out registration: videos only, priority 10, the `pending` status, the withheld jobs and the direct post-detection fan-out while the feature is off.
+
+**Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.ai.social-media` check (`SocialMediaDoctorCheck`: range checks of the `socialMedia.*` settings, the OCR model availability) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.

@@ -1,21 +1,32 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { PrismaService } from '../../prisma/prisma.service';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../../doctor/checks/outcome';
+import { DOCTOR_CHECK_TIMEOUT_MS, doctorCheckId, pass, skip, warn } from '../../core/index.js';
 import {
-  ANDROID_DEVICE_STALE_HOURS,
-  ANDROID_LIST_LIMIT_DEVICES,
-  ANDROID_SETTINGS_PATH,
-} from './constants';
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_PRISMA,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+} from '../../ports/index.js';
+import type { MediaDb } from '../data/media-db.js';
+
+/** Where an administrator manages trusted apps and APK releases. @stability experimental */
+export const ANDROID_SETTINGS_PATH = '/admin/settings/android';
+
+/**
+ * A paired Android Media Sync device that has not checked in for this long is flagged by
+ * `android.media-sync` (#507). The phone's WorkManager check-in runs at least every few hours; two days of
+ * silence means it is off, uninstalled without unpairing, or blocked by the OS.
+ *
+ * @stability experimental
+ */
+export const ANDROID_DEVICE_STALE_HOURS = 48;
+
+/** How many devices a single Android check names before eliding with "…". @stability experimental */
+export const ANDROID_LIST_LIMIT_DEVICES = 5;
 
 // Ported from `DoctorService.checkAndroidMediaSync` (key `android.mediaSync`).
-// READ-ONLY: one `findMany` over `media_sync_devices` (the Media Sync module
-// owns their writes; this module does not import it).
+// READ-ONLY: one `findMany` over `media_sync_devices` and one over the paired tokens.
 //
 // Active devices are checking in and able to upload. Warns on a device silent
 // for more than 48 h, with blocked files, without full media permission, or
@@ -26,8 +37,10 @@ import {
 // check did, because the remedy is to contact that owner. The report is
 // admin-only (`system_settings:read`) and the support bundle's redaction pass
 // removes email addresses.
-// Domain check: stays an app check (Media Sync is MemoriaHub's domain).
+// A domain check: the media slice's (Media Sync is MemoriaHub's domain), registered through
+// `MEMORIAHUB_DOCTOR` under the permanent id `memoriahub.android.media-sync`.
 
+/** One active device, with its paired token. @stability experimental */
 export interface MediaSyncDeviceRow {
   name: string;
   lastSeenAt: Date | null;
@@ -39,12 +52,14 @@ export interface MediaSyncDeviceRow {
 }
 
 /** `stats.blocked` from a device's last check-in, or 0 when absent/malformed. */
+/** @stability experimental */
 export function readBlockedCount(stats: unknown): number {
   if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return 0;
   const blocked = (stats as Record<string, unknown>)['blocked'];
   return typeof blocked === 'number' && Number.isFinite(blocked) && blocked > 0 ? blocked : 0;
 }
 
+/** The status ladder of the `android.media-sync` check. @stability experimental */
 export function decideAndroidMediaSync(devices: MediaSyncDeviceRow[], now: number): DoctorCheckOutcome {
   if (devices.length === 0) return skip('No active Media Sync device is paired.');
 
@@ -123,9 +138,15 @@ export function decideAndroidMediaSync(devices: MediaSyncDeviceRow[], now: numbe
   );
 }
 
+/**
+ * The `android.media-sync` check: paired devices that are silent, blocked, without full media permission
+ * or without a usable token.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class AndroidMediaSyncDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('android', 'media-sync');
+export class AndroidMediaSyncDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('android', 'media-sync');
   readonly category = 'android';
   readonly label = 'Media sync devices';
   readonly settingsPath = ANDROID_SETTINGS_PATH;
@@ -133,16 +154,18 @@ export class AndroidMediaSyncDoctorCheck implements DoctorCheck, OnModuleInit {
   readonly dependsOn = ['db.connection'] as const;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly prisma: PrismaService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_PRISMA) private readonly prisma: MediaDb,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const devices = await this.prisma.mediaSyncDevice.findMany({
+    const devices: Array<Omit<MediaSyncDeviceRow, 'pat'>> = await this.prisma.mediaSyncDevice.findMany({
       where: { status: 'active' },
       select: {
         name: true,
@@ -156,7 +179,7 @@ export class AndroidMediaSyncDoctorCheck implements DoctorCheck, OnModuleInit {
     });
     // PLATFORM-ADOPTION-SHIM(RETRO-B2): the pat_id relation is not modelled; read the tokens in one query.
     const patIds = [...new Set(devices.map((d) => d.patId).filter((id): id is string => !!id))];
-    const pats = patIds.length
+    const pats: Array<{ id: string; revokedAt: Date | null; expiresAt: Date }> = patIds.length
       ? await this.prisma.personalAccessToken.findMany({
           where: { id: { in: patIds } },
           select: { id: true, revokedAt: true, expiresAt: true },

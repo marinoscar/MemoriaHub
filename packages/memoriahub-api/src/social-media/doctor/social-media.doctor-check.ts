@@ -1,17 +1,27 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { SocialMediaOcrService } from '@marinoscar/memoriahub-api/social-media';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, pass, skip, warn } from '../outcome';
-import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
+import {
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  pass,
+  readSystemNamespaces,
+  skip,
+  warn,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import { SocialMediaOcrService } from '../social-media-ocr.service.js';
 
 // Ported from `DoctorService.checkSocialMedia` (key `ai.socialMedia`).
 // READ-ONLY: a settings read and the OCR model's availability status.
 
+/** The facts the social media detection check decides on. @stability experimental */
 export interface SocialMediaInput {
   featureEnabled: boolean;
   envDisabled: boolean;
@@ -20,7 +30,7 @@ export interface SocialMediaInput {
   ocrStatus?: { ocrAvailable: boolean; degraded: boolean } | null;
 }
 
-/** Out-of-range `socialMedia.*` tunables, as sentences. */
+/** Out-of-range `socialMedia.*` tunables, as sentences. @stability experimental */
 export function socialMediaRangeErrors(cfg: SocialMediaInput['cfg']): string[] {
   const rangeErrors: string[] = [];
   if (cfg) {
@@ -33,6 +43,7 @@ export function socialMediaRangeErrors(cfg: SocialMediaInput['cfg']): string[] {
   return rangeErrors;
 }
 
+/** The status ladder of the social media detection check. @stability experimental */
 export function decideSocialMedia(input: SocialMediaInput): DoctorCheckOutcome {
   if (!input.featureEnabled) return skip('Social media detection disabled');
 
@@ -65,25 +76,28 @@ export function decideSocialMedia(input: SocialMediaInput): DoctorCheckOutcome {
 }
 
 @Injectable()
-export class SocialMediaDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('ai', 'social-media');
+/** The social media detection check. @stability experimental */
+export class SocialMediaDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('ai', 'social-media');
   readonly category = 'ai';
   readonly label = 'Social media detection';
   readonly settingsPath = '/admin/settings/social-media';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly socialMediaOcr: SocialMediaOcrService,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.readKnownValue();
+    const settings = await readSystemNamespaces(this.settings, ['features', 'socialMedia']);
     const base: SocialMediaInput = {
       featureEnabled: settings.features?.['socialMediaDetection'] === true,
       envDisabled: process.env['SOCIAL_MEDIA_DETECTION_ENABLED'] === 'false',

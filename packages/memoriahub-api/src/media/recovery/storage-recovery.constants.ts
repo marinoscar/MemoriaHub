@@ -34,16 +34,16 @@ export const STORAGE_OBJECT_PROCESS_JOB_TYPE = 'storage.object.process';
  */
 export const STORAGE_OBJECT_JOB_SUBJECT_TYPE = 'storage_object';
 
-/** The queue priority of the bulk reprocess: the housekeeping priority, so an upload is always claimed first. */
+/** The queue priority of the bulk reprocess: the housekeeping priority, so an upload is always claimed first. @stability experimental */
 export const RECOVERY_BACKGROUND_PRIORITY = 100;
 
-/** Default minutes an object may read `processing` before the sweep treats it as orphaned. */
+/** Default minutes an object may read `processing` before the sweep treats it as orphaned. @stability experimental */
 export const DEFAULT_STUCK_MINUTES = 10;
 
-/** Default automatic recovery attempts per object before it is marked `failed`. */
+/** Default automatic recovery attempts per object before it is marked `failed`. @stability experimental */
 export const DEFAULT_MAX_RETRIES = 3;
 
-/** Rows read per keyset page of a scan. */
+/** Rows read per keyset page of a scan. @stability experimental */
 export const RECOVERY_SCAN_BATCH = 100;
 
 /** `media.storage.recover_stuck` payload. A null payload (the cron's) is `{ mode: 'stuck' }`. @stability experimental */

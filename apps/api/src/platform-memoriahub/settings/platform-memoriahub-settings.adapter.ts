@@ -62,6 +62,17 @@ export class PlatformMemoriahubSettingsAdapter implements MemoriahubSettingsPort
     return { value: (document[name] ?? this.declared.get(`system:${name}`)?.defaults) as T, version: document.version };
   }
 
+  /**
+   * The read-only read the Doctor checks use: `readKnownValue` salvages the stored document and never creates the
+   * row, where `getSettings` writes the defaults on a fresh install (a check must not write).
+   */
+  @Trace()
+  async peekSystem<T>(name: string): Promise<MemoriahubVersionedSettings<T>> {
+    const document = (await this.system.readKnownValue()) as unknown as Record<string, unknown> & { version?: number };
+
+    return { value: (document[name] ?? this.declared.get(`system:${name}`)?.defaults) as T, version: document.version ?? 0 };
+  }
+
   @Trace()
   async patchSystem<T>(
     name: string,

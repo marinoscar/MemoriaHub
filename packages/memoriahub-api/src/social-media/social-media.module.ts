@@ -7,6 +7,7 @@ import { SocialMediaDetectionHandler } from './social-media-detection.handler.js
 import { SocialMediaDetectorService } from './social-media-detector.service.js';
 import { SocialMediaOcrService } from './social-media-ocr.service.js';
 import { SocialMediaUploadEnrichment } from './social-media-upload-enrichment.js';
+import { SocialMediaDoctorCheck } from './doctor/social-media.doctor-check.js';
 
 /**
  * Options of {@link SocialMediaModule.forRoot}: the host's hook binding and the job budget.
@@ -59,6 +60,7 @@ export class SocialMediaModule {
         SocialMediaOcrService,
         SocialMediaDetectionHandler,
         SocialMediaBackfillService,
+        SocialMediaDoctorCheck,
       ],
       exports: [SocialMediaOcrService, SocialMediaDetectorService, SocialMediaBackfillService],
     };

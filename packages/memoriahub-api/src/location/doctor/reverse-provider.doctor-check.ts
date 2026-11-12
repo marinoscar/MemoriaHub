@@ -1,19 +1,29 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 
-import { GeoSettingsService } from '@marinoscar/memoriahub-api/location';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, errorMessage, fail, pass } from '../outcome';
-import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
+import {
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  errorMessage,
+  fail,
+  pass,
+  readSystemNamespaces,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+import { GeoSettingsService } from '../geo/geo-settings.service.js';
 
 // Ported from `DoctorService.checkGeoReverseProvider` (key
 // `geo.reverseProvider`). Live probe: one reverse-geocode lookup of a fixed
 // coordinate through the active provider (a read; a Google lookup is a billed
 // request). Writes nothing.
 
+/** The status ladder of the geo reverse provider check. @stability experimental */
 export function decideGeoReverseProvider(
   provider: string,
   result: { ok: boolean; error?: string },
@@ -29,25 +39,28 @@ export function decideGeoReverseProvider(
 }
 
 @Injectable()
-export class GeoReverseProviderDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('geo', 'reverse-provider');
+/** The geo reverse provider check. @stability experimental */
+export class GeoReverseProviderDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('geo', 'reverse-provider');
   readonly category = 'geo';
   readonly label = 'Reverse geocoding';
   readonly settingsPath = '/admin/settings/geo';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
     private readonly geoSettings: GeoSettingsService,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.readKnownValue();
+    const settings = await readSystemNamespaces(this.settings, ['geo']);
     const provider = settings.geo?.reverseProvider ?? process.env['GEO_PROVIDER'] ?? 'offline';
     try {
       const result = await this.geoSettings.testProvider({
