@@ -9,9 +9,9 @@ import {
   MediaSyncConfigEditor,
   NO_INVENTORY_MESSAGE,
   buildConfigPatch,
-} from '../../../components/settings/mediaSync/MediaSyncConfigEditor';
+} from '@marinoscar/memoriahub-web/media-sync/ui';
 import { CIRCLE_ID, DEVICE_ID, OTHER_CIRCLE_ID, makeDevice } from '../../fixtures/mediaSync';
-import type { MediaSyncDevice } from '../../../services/mediaSync';
+import type { MediaSyncDevice } from '@marinoscar/memoriahub-web/media-sync/headless';
 
 const circles = [
   { id: CIRCLE_ID, name: 'Family' },

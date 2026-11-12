@@ -8,6 +8,8 @@ The review queues of the web app: the burst, duplicate and location-suggestion p
 
 `review/ui` also carries the three admin settings pages of the features: `BurstsSettingsPage`, `DuplicatesSettingsPage` and `LocationInferenceSettingsPage` (the global switch, the detection parameters, the auto-resolve and bulk-accept thresholds and the global backfill), with their backfill clients in `review/headless` (`runGlobalBurstBackfill`, `runGlobalDuplicatesBackfill`, `getDuplicatesStatus`, `runGlobalLocationInferenceBackfill`). They take their page header and system-settings hook from the host's admin port and stay registered in the app's admin section registry.
 
+`review/ui` also carries `ReviewInsightsPage` (the burst and duplicate queue metrics of the active circle, charted with the `insights` slice's `CompositionDonut` and `ProportionBar`) with its `getReviewInsights` client and `useReviewInsights` hook.
+
 The review pages read the confidence floors they preselect (`burst.autoResolveThreshold`, `dedup.autoResolveThreshold`, `locationInference.bulkAcceptThreshold`) through the host's admin port (`useMemoriahubAdmin().useSystemSettings`) and the feature flags (`useFeatureFlags`) through `core`: a loaded flag record that does not say `true` means the feature is off, while a flags outage stays silent.
 
 Staying in the app: the Review hub and queue pages with their registry (`ReviewHubPage`, `ReviewQueuePage`, `config/reviewQueues`, `useReviewQueues`, `useReviewCounts`, `ReviewQueueList`), because the shell's badge, the context pane and the Collections hub read them and the queue page opens the enhancement page; and the review insights page (it shares the chart components with the admin Storage Insights page).

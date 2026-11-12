@@ -50,19 +50,19 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'memoriahub-web/search/ui/components/TopbarSearch.tsx': WHY.searchPill,
   'hooks/useContextPaneVisible.ts': WHY.contextPane,
 
-  'components/media/MediaDetailDrawer.tsx': WHY.dialog,
+  'memoriahub-web/viewer/ui/components/MediaDetailDrawer.tsx': WHY.dialog,
   'memoriahub-web/search/ui/components/SearchPanel.tsx': WHY.dialog,
 
   'memoriahub-web/media/ui/components/MediaGallery.tsx': WHY.media,
-  'components/media/MediaLightbox.tsx': WHY.media,
-  'components/media/VideoPlayer.tsx': WHY.media,
+  'memoriahub-web/viewer/ui/components/MediaLightbox.tsx': WHY.media,
+  'memoriahub-web/viewer/ui/components/VideoPlayer.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoriesCarousel.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoryCard.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoryStoryPlayer.tsx': WHY.media,
 
   'memoriahub-web/review/ui/components/MemberComparison.tsx': WHY.panel,
-  'components/settings/mediaSync/DiagnosticsSection.tsx': WHY.panel,
-  'components/settings/mediaSync/SyncHistory.tsx': WHY.panel,
+  'memoriahub-web/media-sync/ui/components/DiagnosticsSection.tsx': WHY.panel,
+  'memoriahub-web/media-sync/ui/components/SyncHistory.tsx': WHY.panel,
   'memoriahub-web/workflows/ui/components/builder/WorkflowPreviewPanel.tsx': WHY.panel,
 };
 
@@ -83,8 +83,6 @@ const CHROME = [
   'contexts/ThemeContext.tsx',
   'pages/UserSettingsHubPage.tsx',
   'pages/Admin/SettingsHubPage.tsx',
-  'pages/Collections/CollectionsHubPage.tsx',
-  'pages/Reviews/ReviewHubPage.tsx',
   'platform/platformHost.tsx',
   'platform/shellProviders.tsx',
   'theme/index.ts',

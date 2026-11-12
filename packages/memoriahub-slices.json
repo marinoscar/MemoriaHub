@@ -227,12 +227,44 @@
     "review": [
       "core",
       "media",
-      "review-runs"
+      "review-runs",
+      "insights"
     ],
     "enhancement": [
       "core",
       "media",
       "review-runs"
+    ],
+    "social": [
+      "core"
+    ],
+    "location": [
+      "core",
+      "media"
+    ],
+    "insights": [
+      "core"
+    ],
+    "media-sync": [
+      "core"
+    ],
+    "hubs": [
+      "core",
+      "media",
+      "review",
+      "enhancement",
+      "workflows",
+      "people",
+      "memories",
+      "viewer"
+    ],
+    "viewer": [
+      "core",
+      "media",
+      "people",
+      "tagging",
+      "review",
+      "enhancement"
     ]
   }
 }

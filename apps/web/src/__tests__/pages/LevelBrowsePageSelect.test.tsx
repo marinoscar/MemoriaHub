@@ -26,9 +26,9 @@ import type { MockUser } from '../utils/test-utils';
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/locationGroups', async () => {
-  const actual = await vi.importActual<typeof import('../../services/locationGroups')>(
-    '../../services/locationGroups',
+vi.mock('@marinoscar/memoriahub-web/location/headless', async () => {
+  const actual = await vi.importActual<typeof import('@marinoscar/memoriahub-web/location/headless')>(
+    '@marinoscar/memoriahub-web/location/headless',
   );
   return {
     ...actual,
@@ -50,8 +50,8 @@ vi.mock('react-router-dom', async (importOriginal) => {
 import { http, HttpResponse } from 'msw';
 import { LevelBrowsePage } from '@marinoscar/memoriahub-web/media/ui';
 import { server } from '../mocks/server';
-import { listLocationGroups, mergeLocationGroups } from '../../services/locationGroups';
-import type { MergeLocationGroupsResult } from '../../services/locationGroups';
+import { listLocationGroups, mergeLocationGroups } from '@marinoscar/memoriahub-web/location/headless';
+import type { MergeLocationGroupsResult } from '@marinoscar/memoriahub-web/location/headless';
 
 // The packaged page loads its tiles over the host's API client, so the tier is
 // served by the MSW handler below; `mockGetLevel` stays the test's seam.

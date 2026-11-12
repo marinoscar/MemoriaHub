@@ -25,3 +25,67 @@ export function formatBytes(bytes: string | bigint): string {
   const display = (whole + remainder).toFixed(unitIndex === 0 ? 0 : 2);
   return `${display} ${units[unitIndex]}`;
 }
+
+/**
+ * Formats a count compactly: `4,217` stays whole, `12480` becomes `12.5K`.
+ *
+ * @param n - the count.
+ * @returns the formatted count (compact notation from 10,000).
+ *
+ * @stability experimental
+ */
+export function formatCompactNumber(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: n >= 10000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+/**
+ * The ratio `part / whole` as a percentage from 0 to 100, computed in BigInt so a count the API serialises as a string never loses precision.
+ *
+ * @param part - the numerator, as the API's string or a number.
+ * @param whole - the denominator; `0` yields `0`.
+ * @returns the percentage with two decimals.
+ *
+ * @stability experimental
+ */
+export function percent(part: string | number, whole: string | number): number {
+  const w = BigInt(whole);
+  if (w === 0n) return 0;
+  const p = BigInt(part);
+  // Scale before dividing so the integer division does not truncate the fraction.
+  return Number((p * 10000n) / w) / 100;
+}
+
+/**
+ * Converts a BigInt string to a number, for chart proportions (a single media type's byte count is far inside the safe integer range).
+ *
+ * @param bytes - the count as the API's string.
+ * @returns the number.
+ *
+ * @stability experimental
+ */
+export function bytesToNumber(bytes: string): number {
+  return Number(BigInt(bytes));
+}
+
+/**
+ * A short relative time (`just now`, `5m ago`, `3h ago`, `2d ago`).
+ *
+ * @param isoString - the instant, ISO 8601.
+ * @returns the relative time.
+ *
+ * @stability experimental
+ */
+export function relativeTime(isoString: string): string {
+  const then = new Date(isoString).getTime();
+  const diffSec = Math.floor((Date.now() - then) / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}

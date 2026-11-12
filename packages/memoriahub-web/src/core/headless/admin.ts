@@ -179,13 +179,31 @@ export interface MemoriahubAdminPageHeaderProps {
 export type MemoriahubAdminPageHeaderComponent = (props: MemoriahubAdminPageHeaderProps) => ReactNode;
 
 /**
+ * Props of the host's back link to the settings hub.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAdminBackLinkProps {
+  /** Where the link points; defaults to the settings hub. */
+  to?: string;
+}
+
+/**
+ * The host's "Back to Settings" link, for an admin page whose own header is a deliberate design (hidden below the small breakpoint, like the page header's).
+ *
+ * @stability experimental
+ * @extensionPoint host
+ */
+export type MemoriahubAdminBackLinkComponent = (props: MemoriahubAdminBackLinkProps) => ReactNode;
+
+/**
  * The stored-secret presentation a {@link MemoriahubSecretFieldProps} shows.
  *
  * @stability experimental
  */
 export interface MemoriahubSavedSecret {
-  /** A masked hint of the stored secret (for example its last four characters). */
-  hint: string;
+  /** A masked hint of the stored secret (for example its last four characters); `null` when the stored secret has none. */
+  hint: string | null;
   /** When the secret was last changed (ISO 8601). */
   updatedAt?: string | null;
 }
@@ -359,6 +377,60 @@ export interface MemoriahubEnhancementSettings {
 }
 
 /**
+ * The social-media detection half of the deployment settings (`socialMedia.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubSocialSettings {
+  /** `socialMedia`: the OCR fallback and the size and duration caps; every key is absent until first saved. */
+  socialMedia?: {
+    ocrEnabled?: boolean;
+    ocrLanguages?: string[];
+    ocrMaxFrames?: number;
+    ocrTimeoutSeconds?: number;
+    minConfidence?: number;
+    /** Videos longer than this are treated as clean without download or OCR. */
+    maxDurationSeconds?: number;
+    /** Size fallback (bytes) used only when the duration is unknown. */
+    maxSizeBytes?: number;
+  };
+}
+
+/**
+ * The geo half of the deployment settings (`geo.*`, `locationGrouping.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubGeoSettings {
+  /** `geo`: the reverse provider and the forward search switch; every key is absent until first saved. */
+  geo?: {
+    reverseProvider?: 'offline' | 'nominatim' | 'google';
+    forwardSearchEnabled?: boolean;
+  };
+  /**
+   * Location Grouping tuning. `features.locationGrouping` is the master toggle; `maxRadiusKm` is the
+   * ceiling the API validates a group's radius against, so the radius slider binds its maximum to it.
+   */
+  locationGrouping?: {
+    radiusCaptureEnabled?: boolean;
+    maxRadiusKm?: number;
+    suggestionMinItems?: number;
+  };
+}
+
+/**
+ * The storage half of the deployment settings the domain admin pages edit (`storage.trash.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubStorageSettings {
+  /** `storage`: the trash retention; every key is absent until first saved. */
+  storage?: {
+    trash?: { retentionDays?: number };
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -370,7 +442,10 @@ export interface MemoriahubSystemSettings
     MemoriahubMemoriesSettings,
     MemoriahubFaceSettings,
     MemoriahubReviewSettings,
-    MemoriahubEnhancementSettings {
+    MemoriahubEnhancementSettings,
+    MemoriahubSocialSettings,
+    MemoriahubGeoSettings,
+    MemoriahubStorageSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */
@@ -464,6 +539,8 @@ export interface MemoriahubAdminPort {
   DataTable: MemoriahubDataTableComponent;
   /** The admin console page header. */
   AdminPageHeader: MemoriahubAdminPageHeaderComponent;
+  /** The back link alone, for a page with its own header. */
+  AdminBackLink: MemoriahubAdminBackLinkComponent;
   /** The write-only secret input (provider API keys). */
   SecretField: MemoriahubSecretFieldComponent;
   /**

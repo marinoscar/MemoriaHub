@@ -12,8 +12,8 @@ import {
   syncCounts,
   unknownFolderIds,
   updateDeviceConfig,
-} from '../../services/mediaSync';
-import { createDownloadLink, formatMegabytes, getLatestRelease } from '../../services/androidApp';
+} from '@marinoscar/memoriahub-web/media-sync/headless';
+import { createDownloadLink, formatMegabytes, getLatestRelease } from '@marinoscar/memoriahub-web/media-sync/headless';
 import { ApiError } from '../../services/api';
 import { DEVICE_ID, makeDevice, makeRelease } from '../fixtures/mediaSync';
 

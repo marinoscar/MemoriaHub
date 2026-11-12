@@ -14,6 +14,7 @@ import { createContext, createElement, useContext } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 
 import type { MemoriahubAdminPort } from './admin.js';
+import type { MemoriahubAndroidPort } from './android.js';
 import type { MemoriahubOwnerScopeValue } from './owner-scope.js';
 
 /**
@@ -28,6 +29,8 @@ export interface MemoriahubRequestOptions {
   skipAuth?: boolean;
   /** Aborts the request. */
   signal?: AbortSignal;
+  /** A pre-serialised JSON body, for the rare `DELETE` that carries one. */
+  body?: string;
 }
 
 /**
@@ -188,6 +191,12 @@ export interface MemoriahubShellPort {
    * the same function for the life of the host and follow the rules of hooks.
    */
   useMainVariant(variant: 'padded' | 'full-bleed'): void;
+  /**
+   * A React hook: true while the shell's context pane is showing beside the rail (the rail is expanded).
+   * The hub pages are the phone and tablet form of what the pane shows, so they redirect into their first
+   * entry while it is on screen. It must be the same function for the life of the host.
+   */
+  useContextPaneVisible(): boolean;
 }
 
 /**
@@ -241,6 +250,8 @@ export interface MemoriahubWebHost {
   shell?: MemoriahubShellPort;
   /** The host's admin port (data table, page header, deployment settings); absent in a host that mounts no admin page. */
   admin?: MemoriahubAdminPort;
+  /** The host's Android port (app identity, TWA helpers, release hooks); absent in a host that mounts no Android page. */
+  android?: MemoriahubAndroidPort;
   /** The active owner scope ("My library" or one group) and the caller's role in it. */
   ownerScope: MemoriahubOwnerScopeValue;
   /** Tell the user something happened. */

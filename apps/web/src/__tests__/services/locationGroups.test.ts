@@ -31,7 +31,7 @@ import {
   rebuildLocationGroups,
   removeLocationGroupMembers,
   updateLocationGroup,
-} from '../../services/locationGroups';
+} from '@marinoscar/memoriahub-web/location/headless';
 
 const BASE = 'http://localhost:3000/api';
 

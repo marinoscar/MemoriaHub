@@ -11,7 +11,7 @@ import {
   errorReason,
   formatMegabytes,
   isNoReleaseError,
-} from '../../services/androidApp';
+} from '@marinoscar/memoriahub-web/media-sync/headless';
 
 describe('errorReason', () => {
   it('reads details.reason of an ApiError, never the code', () => {

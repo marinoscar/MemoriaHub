@@ -539,6 +539,89 @@
           "react-router-dom"
         ]
       }
+    },
+    "social": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "location": {
+      "peers": [
+        "react",
+        "react-dom",
+        "@marinoscar/memoriahub-contract"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "insights": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "@mui/x-charts",
+          "react-router-dom"
+        ]
+      }
+    },
+    "media-sync": {
+      "peers": [
+        "react",
+        "react-dom",
+        "@marinoscar/memoriahub-contract"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "hubs": {
+      "peers": [
+        "react",
+        "react-dom",
+        "@marinoscar/memoriahub-contract"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "viewer": {
+      "peers": [
+        "react",
+        "react-dom",
+        "@vidstack/react"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

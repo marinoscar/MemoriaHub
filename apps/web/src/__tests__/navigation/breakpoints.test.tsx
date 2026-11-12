@@ -39,13 +39,10 @@ vi.mock('@marinoscar/platform-web/notifications/headless', async (importOriginal
   }),
 }));
 vi.mock('../../hooks/useCircleLinkParam', () => ({ useCircleLinkParam: vi.fn() }));
-vi.mock('../../hooks/useReviewQueues', () => ({
-  useReviewQueues: () => ({ entries: [], counts: null, totalPending: 0, isLoading: false, anyEnabled: true }),
-}));
-vi.mock('../../components/collections/CollectionsList', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   CollectionsList: () => <div data-testid="collections-list" />,
-}));
-vi.mock('../../components/review/ReviewQueueList', () => ({
+  useReviewQueues: () => ({ entries: [], counts: null, totalPending: 0, isLoading: false, anyEnabled: true }),
   ReviewQueueList: () => <div data-testid="review-list" />,
   reviewQueuePath: (key: string) => `/review/${key}`,
 }));

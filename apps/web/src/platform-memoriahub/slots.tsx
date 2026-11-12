@@ -1,18 +1,17 @@
 /**
  * The components the packaged media slice asks its host for (`slots` of
- * `MemoriahubWebHost`): the ones that belong to slices that have not moved into
- * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer, the
- * location-merge dialog), the platform's share dialog, and four components of
- * packaged slices that stay slots for good because those slices import the media
- * slice, so the media pages cannot import them: the two people pickers and the
- * AI enhancement drawer and batch dialog. Those four are bound straight to the
- * packaged components. Each is lazy, so the page that needs it keeps it out of
- * the main chunk exactly as before. A slot is deleted when its component moves
- * into the package and the slice that owns it can import it.
+ * `MemoriahubWebHost`): the platform's share dialog and inline link-share panel,
+ * and the components of packaged slices that stay slots for good because those
+ * slices import the media slice, so the media pages cannot import them: the
+ * lightbox and detail drawer (the `viewer` slice), the two people pickers, the AI
+ * enhancement drawer and batch dialog and the location-merge dialog (bound through
+ * a small bridge). Each is lazy, so the page that needs it keeps it out of the main
+ * chunk exactly as before. The link-share panel is the `viewer` slice's own slot.
  */
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { MemoriahubWebSlots } from '@marinoscar/memoriahub-web/core/headless';
+import type { LinkSharePanelSlotProps } from '@marinoscar/memoriahub-web/viewer/ui';
 import type {
   AlbumPeopleDialogSlotProps,
   BatchEnhanceDialogSlotProps,
@@ -36,6 +35,7 @@ export const APP_SLOT_NAMES = {
   albumPeopleDialog: 'media.albumPeopleDialog',
   personMultiSelect: 'media.personMultiSelect',
   mergeLocationsDialog: 'media.mergeLocationsDialog',
+  linkSharePanel: 'viewer.linkSharePanel',
 } as const;
 
 /** A lazy component behind a null-fallback Suspense, so a slot renders like the eager import did. */
@@ -50,10 +50,14 @@ function lazySlot<P extends object>(load: () => Promise<{ default: ComponentType
 }
 
 const MediaLightboxSlot = lazySlot<MediaLightboxSlotProps>(() =>
-  import('../components/media/MediaLightbox').then((m) => ({ default: m.MediaLightbox })),
+  import('@marinoscar/memoriahub-web/viewer/ui').then((m) => ({ default: m.MediaLightbox })),
 );
 const MediaDetailDrawerSlot = lazySlot<MediaDetailDrawerSlotProps>(() =>
-  import('../components/media/MediaDetailDrawer').then((m) => ({ default: m.MediaDetailDrawer })),
+  import('@marinoscar/memoriahub-web/viewer/ui').then((m) => ({ default: m.MediaDetailDrawer })),
+);
+// The platform's inline public-link controls, for the packaged viewer (the lightbox and the drawer).
+const LinkSharePanelSlot = lazySlot<LinkSharePanelSlotProps>(() =>
+  import('../platform/sharing/LinkSharePanel').then((m) => ({ default: m.LinkSharePanel })),
 );
 const MediaEnhancementDrawerSlot = lazySlot<MediaEnhancementDrawerSlotProps>(() =>
   import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.MediaEnhancementDrawer })),
@@ -71,13 +75,13 @@ const AlbumPeopleDialogSlot = lazySlot<AlbumPeopleDialogSlotProps>(() =>
 const PersonMultiSelectSlot = lazySlot<PersonMultiSelectSlotProps>(() =>
   import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.PersonMultiSelect })),
 );
-// The dialog reports the merge result; the package wants the group's name.
+// The packaged location slice's dialog reports the merge result; the media slot wants the group's name.
 const MergeLocationsDialogSlot = lazySlot<MergeLocationsDialogSlotProps>(() =>
   Promise.all([
-    import('../components/locations/MergeLocationsDialog'),
-    import('../services/locationGroups'),
+    import('@marinoscar/memoriahub-web/location/ui'),
+    import('@marinoscar/memoriahub-web/location/headless'),
   ]).then(([dialog, groups]) => {
-    const MergeLocationsDialog = dialog.default;
+    const MergeLocationsDialog = dialog.MergeLocationsDialog;
     const Bridge = ({ onMerged, ...rest }: MergeLocationsDialogSlotProps) => (
       <MergeLocationsDialog {...rest} onMerged={(result) => onMerged(groups.mergedGroupName(result))} />
     );
@@ -95,4 +99,5 @@ export const appMemoriahubSlots: MemoriahubWebSlots = {
   [APP_SLOT_NAMES.albumPeopleDialog]: AlbumPeopleDialogSlot,
   [APP_SLOT_NAMES.personMultiSelect]: PersonMultiSelectSlot,
   [APP_SLOT_NAMES.mergeLocationsDialog]: MergeLocationsDialogSlot,
+  [APP_SLOT_NAMES.linkSharePanel]: LinkSharePanelSlot,
 };

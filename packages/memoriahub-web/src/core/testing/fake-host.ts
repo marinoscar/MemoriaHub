@@ -86,6 +86,8 @@ export interface FakeMemoriahubWebHostOptions {
   ownerScope?: Partial<MemoriahubOwnerScopeValue>;
   /** Slots. */
   slots?: MemoriahubWebHost['slots'];
+  /** The Android port, for a page that reads one. Default: none. */
+  android?: MemoriahubWebHost['android'];
   /** The deployment settings the fake admin port serves; `null` keeps the settings hook loading. Default: an empty document. */
   systemSettings?: Partial<MemoriahubSystemSettings> | null;
   /** With `systemSettings: null`, the load failure the fake settings hook reports. */
@@ -211,6 +213,7 @@ export function createFakeMemoriahubWebHost(options: FakeMemoriahubWebHostOption
     },
     timeZone: null,
     slots: options.slots,
+    android: options.android,
     admin: admin.port,
   };
 

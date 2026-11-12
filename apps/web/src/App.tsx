@@ -65,8 +65,8 @@ const TimeZoneSettingsPage = lazy(() => import('./pages/settings/TimeZoneSetting
 const NotificationPreferencesPage = lazy(() => import('./pages/settings/NotificationPreferencesPage'));
 const MemoriesPreferencesPage = lazy(() => import('./pages/settings/MemoriesPreferencesPage'));
 const SearchPreferencesPage = lazy(() => import('./pages/settings/SearchPreferencesPage'));
-const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
-const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
+const AndroidAppDownloadPage = lazy(() => import('@marinoscar/memoriahub-web/media-sync/ui').then((m) => ({ default: m.AndroidAppDownloadPage })));
+const MediaSyncPage = lazy(() => import('@marinoscar/memoriahub-web/media-sync/ui').then((m) => ({ default: m.MediaSyncPage })));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const MediaLibraryPage = lazyMediaPage('MediaLibraryPage');
@@ -101,7 +101,7 @@ const AiConfigRoute = lazy(() => import('./platform/ai/AiConfigRoute'));
 const AiModelsRoute = lazy(() => import('./platform/ai/AiModelsRoute'));
 const AiUsageRoute = lazy(() => import('./platform/ai/AiUsageRoute'));
 const FaceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/face/ui').then((m) => ({ default: m.FaceSettingsPage })));
-const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
+const GeoSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/location/ui').then((m) => ({ default: m.GeoSettingsPage })));
 // The platform's email settings page (RETRO-D2, #570): transports, sender, write-only secrets and the
 // test send to the caller's own address (`@marinoscar/platform-web/email/ui`).
 const EmailSettingsPage = lazy(() =>
@@ -139,7 +139,7 @@ const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowsSettingsPage })),
 );
-const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
+const StorageInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/insights/ui').then((m) => ({ default: m.StorageInsightsPage })));
 const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 // RETRO-J11 (#626): the packaged Tagging settings page (vocabulary included); the host supplies its table, header and settings hook.
@@ -148,14 +148,14 @@ const TaggingSettingsPage = lazy(() =>
 );
 const BurstsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsSettingsPage })));
 const DuplicatesSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesSettingsPage })));
-const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
+const SocialMediaSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/social/ui').then((m) => ({ default: m.SocialMediaSettingsPage })));
 const EnhancerSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancerSettingsPage })));
 const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
 );
 const LocationInferenceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationInferenceSettingsPage })));
-const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
-const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
+const LocationGroupsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/location/ui').then((m) => ({ default: m.LocationGroupsSettingsPage })));
+const ArchivingSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/media/ui').then((m) => ({ default: m.ArchivingSettingsPage })));
 const SearchPage = lazy(() =>
   import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
 );
@@ -175,12 +175,12 @@ const DuplicateGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/
 const LocationSuggestionsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })));
 const LocationSuggestionRunRedirect = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionRunRedirect })));
 const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.ReviewRunPage })));
-const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
-const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
-const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
-const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
+const ReviewHubPage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.ReviewHubPage })));
+const CollectionsHubPage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.CollectionsHubPage })));
+const ReviewQueuePage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.ReviewQueuePage })));
+const ReviewInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.ReviewInsightsPage })));
 const ArchivePage = lazyMediaPage('ArchivePage');
-const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
+const SharedWithMePage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.SharedWithMePage })));
 const TrashPage = lazyMediaPage('TrashPage');
 const TrashEmptyRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.TrashEmptyRunPage })));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));

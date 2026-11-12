@@ -13,12 +13,13 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { BottomNav } from '../../../components/navigation/BottomNav';
 import { renderShell } from '../../utils/shell-harness';
 
-vi.mock('../../../hooks/useReviewQueues', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useReviewQueues: vi.fn(),
 }));
 
-import { useReviewQueues } from '../../../hooks/useReviewQueues';
-import type { UseReviewQueuesResult } from '../../../hooks/useReviewQueues';
+import { useReviewQueues } from '@marinoscar/memoriahub-web/hubs/ui';
+import type { UseReviewQueuesResult } from '@marinoscar/memoriahub-web/hubs/ui';
 
 const mockUseReviewQueues = vi.mocked(useReviewQueues);
 

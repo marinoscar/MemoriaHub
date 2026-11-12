@@ -12,6 +12,7 @@ import { useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type {
+  MemoriahubAdminBackLinkProps,
   MemoriahubAdminPageHeaderProps,
   MemoriahubAdminPort,
   MemoriahubAiSettings,
@@ -117,6 +118,10 @@ function FakeAdminPageHeader({ title, icon, titleAdornment, description, actions
   );
 }
 
+function FakeAdminBackLink({ to = '/admin/settings' }: MemoriahubAdminBackLinkProps): ReactNode {
+  return <a href={to}>&larr; Back to Settings</a>;
+}
+
 function FakeSecretField({ label, value, onChange, saved, emptyHelp, disabled, id, name }: MemoriahubSecretFieldProps): ReactNode {
   const inputId = id ?? `fake-secret-${label.replace(/\W+/g, '-')}`;
   return (
@@ -211,6 +216,7 @@ export function createFakeAdminPort(
     port: {
       DataTable: FakeDataTable,
       AdminPageHeader: FakeAdminPageHeader,
+      AdminBackLink: FakeAdminBackLink,
       SecretField: FakeSecretField,
       useSystemSettings: useFakeSystemSettings,
       useAiSettings: useFakeAiSettings,

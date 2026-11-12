@@ -68,6 +68,54 @@
       "types": "./dist/face/ui/index.d.ts",
       "default": "./dist/face/ui/index.js"
     },
+    "./viewer/headless": {
+      "types": "./dist/viewer/headless/index.d.ts",
+      "default": "./dist/viewer/headless/index.js"
+    },
+    "./viewer/ui": {
+      "types": "./dist/viewer/ui/index.d.ts",
+      "default": "./dist/viewer/ui/index.js"
+    },
+    "./hubs/headless": {
+      "types": "./dist/hubs/headless/index.d.ts",
+      "default": "./dist/hubs/headless/index.js"
+    },
+    "./hubs/ui": {
+      "types": "./dist/hubs/ui/index.d.ts",
+      "default": "./dist/hubs/ui/index.js"
+    },
+    "./media-sync/headless": {
+      "types": "./dist/media-sync/headless/index.d.ts",
+      "default": "./dist/media-sync/headless/index.js"
+    },
+    "./media-sync/ui": {
+      "types": "./dist/media-sync/ui/index.d.ts",
+      "default": "./dist/media-sync/ui/index.js"
+    },
+    "./insights/headless": {
+      "types": "./dist/insights/headless/index.d.ts",
+      "default": "./dist/insights/headless/index.js"
+    },
+    "./insights/ui": {
+      "types": "./dist/insights/ui/index.d.ts",
+      "default": "./dist/insights/ui/index.js"
+    },
+    "./location/headless": {
+      "types": "./dist/location/headless/index.d.ts",
+      "default": "./dist/location/headless/index.js"
+    },
+    "./location/ui": {
+      "types": "./dist/location/ui/index.d.ts",
+      "default": "./dist/location/ui/index.js"
+    },
+    "./social/headless": {
+      "types": "./dist/social/headless/index.d.ts",
+      "default": "./dist/social/headless/index.js"
+    },
+    "./social/ui": {
+      "types": "./dist/social/ui/index.d.ts",
+      "default": "./dist/social/ui/index.js"
+    },
     "./media/headless": {
       "types": "./dist/media/headless/index.d.ts",
       "default": "./dist/media/headless/index.js"
@@ -156,7 +204,9 @@
     "@marinoscar/memoriahub-contract": ">=0.0.0-0 || >=0.1.0-0",
     "@mui/icons-material": "^9.1.0",
     "@mui/material": "^9.1.0",
+    "@mui/x-charts": "^9.14.0",
     "@testing-library/react": "^16.3.2",
+    "@vidstack/react": "^1.15.6",
     "hash-wasm": "^4.12.0",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
@@ -176,7 +226,13 @@
     "@mui/material": {
       "optional": true
     },
+    "@mui/x-charts": {
+      "optional": true
+    },
     "@testing-library/react": {
+      "optional": true
+    },
+    "@vidstack/react": {
       "optional": true
     },
     "hash-wasm": {
@@ -203,6 +259,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.1.1",
     "@mui/material": "^9.1.0",
+    "@mui/x-charts": "^9.14.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -212,6 +269,7 @@
     "@types/node": "^22.10.7",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vidstack/react": "^1.15.6",
     "hash-wasm": "^4.12.0",
     "jsdom": "^29.1.1",
     "leaflet": "^1.9.4",

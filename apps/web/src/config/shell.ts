@@ -27,7 +27,7 @@ import type { ShellDestination, ShellNavigation } from '@marinoscar/platform-web
 // the feature map.
 import './settingsFeatures';
 import { CollectionsContextPane, ReviewContextPane } from '../components/navigation/NavContextPane';
-import { useReviewQueues } from '../hooks/useReviewQueues';
+import { useReviewQueues } from '@marinoscar/memoriahub-web/hubs/ui';
 import { ADMIN_HUB_PATH, ADMIN_HUB_TITLE, ADMIN_SECTIONS } from './adminSections';
 import { DESTINATION_ROUTES } from './destinations';
 import type { DestinationKey } from './destinations';

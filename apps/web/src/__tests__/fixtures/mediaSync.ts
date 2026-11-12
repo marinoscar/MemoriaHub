@@ -1,6 +1,6 @@
 /** Media Sync / Android release fixtures (issue #515). Shapes mirror the #504/#505 DTOs. */
-import type { MediaSyncDevice, MediaSyncRun } from '../../services/mediaSync';
-import type { PublicRelease } from '../../services/androidApp';
+import type { MediaSyncDevice, MediaSyncRun } from '@marinoscar/memoriahub-web/media-sync/headless';
+import type { PublicRelease } from '@marinoscar/memoriahub-web/media-sync/headless';
 import type { Circle } from '../../types/circles';
 
 export const CIRCLE_ID = '11111111-1111-4111-8111-111111111111';

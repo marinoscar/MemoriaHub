@@ -26,10 +26,9 @@ import type { AddAlbumItemsByFilterDto, MediaItem } from '../headless/types.js';
 //   slices', and stay slots permanently: those slices import `media` (the media
 //   clients), so `media` cannot import them back. The web edition binds them to
 //   the packaged components.
-// - The lightbox and detail drawer (tagging and location-suggestion hooks), the
-//   location-merge dialog and the platform's share dialog are the app's until
-//   their slices move; each of those slots is deleted when its component moves
-//   into the package.
+// - The lightbox and detail drawer (the `viewer` slice) and the location-merge
+//   dialog (the `location` slice) stay slots for good for the same reason: those
+//   slices import `media`. The platform's share dialog is the host's own.
 // =============================================================================
 
 /**

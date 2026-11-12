@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { COLLECTIONS } from '../../config/collections';
+import { COLLECTIONS } from '@marinoscar/memoriahub-web/hubs/ui';
 
 // ---------------------------------------------------------------------------
 // Parse the live App.tsx route table (same technique as the other nav specs)

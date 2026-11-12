@@ -35,3 +35,4 @@ export * from './pages/PlacesOverviewPage.js';
 export * from './pages/TrashPage.js';
 export * from './components/ExploreCarousel.js';
 export * from './slots.js';
+export { default as ArchivingSettingsPage } from './admin/ArchivingSettingsPage.js';
