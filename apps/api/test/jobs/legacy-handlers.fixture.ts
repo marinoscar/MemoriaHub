@@ -40,7 +40,7 @@ import {
   WorkflowScheduleTickHandler,
 } from '@marinoscar/memoriahub-api/workflows';
 import { WorkflowRunsRetentionHandler } from '../../src/workflows/runs/workflow-runs-retention.handler';
-import { ReviewQueueReconcileHandler } from '../../src/notification-producers/review-queue-reconcile.handler';
+import { ReviewQueueReconcileHandler } from '@marinoscar/memoriahub-api/media';
 import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 

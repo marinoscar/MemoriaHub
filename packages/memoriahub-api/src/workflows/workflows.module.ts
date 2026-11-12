@@ -16,6 +16,7 @@ import { WorkflowScheduleTickHandler } from './runs/workflow-schedule-tick.handl
 import { WorkflowTriggerService } from './runs/workflow-trigger.service.js';
 import { WorkflowsService } from './workflows.service.js';
 import { WorkflowsStateDoctorCheck } from './doctor/state.doctor-check.js';
+import { WorkflowRunNotificationService } from './runs/workflow-run-notification.service.js';
 
 /**
  * Options of {@link WorkflowsModule.forRoot}. None yet: the slice is configured through the registries
@@ -76,6 +77,7 @@ export class WorkflowsModule {
       WorkflowScheduleTask,
       WorkflowMicroRunFinalizeTask,
       WorkflowsStateDoctorCheck,
+      WorkflowRunNotificationService,
     ];
     WorkflowsModule.root ??= {
       module: WorkflowsModule,

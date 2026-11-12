@@ -1,5 +1,7 @@
 /**
- * Unit tests for WorkflowRunNotificationService (epic #240, issue #247).
+ * Unit tests for WorkflowRunNotificationService (epic #240, issue #247; moved to the workflows slice by
+ * RETRO-J10, #624). Host-free: the ports are plain doubles. The rendered title and link are the host's
+ * event template (covered by the host's notification registry spec).
  *
  * Covers the acceptance list verbatim:
  *  - an `on_media_enriched` micro-run emits NOTHING (the v1 suppression)
@@ -15,15 +17,19 @@
  *  - best-effort: never throws when the underlying write rejects
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { WorkflowRunStatus, WorkflowTrigger } from '@prisma/client';
-import { NotificationsService } from '@marinoscar/platform-api/notifications';
+import { WorkflowRunNotificationService } from './workflow-run-notification.service.js';
 
-import { createPlatformNotificationsMock } from '../../test/mocks/platform-notifications.mock';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { renderBrowserNotification } from '../notifications-registry/memoriahub.notifications';
-import { PrismaService } from '../prisma/prisma.service';
-import { WorkflowRunNotificationService } from './workflow-run-notification.service';
+const WorkflowRunStatus = {
+  evaluating: 'evaluating',
+  awaiting_approval: 'awaiting_approval',
+  running: 'running',
+  completed: 'completed',
+  completed_with_errors: 'completed_with_errors',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  expired: 'expired',
+} as const;
+const WorkflowTrigger = { manual: 'manual', on_media_enriched: 'on_media_enriched', scheduled: 'scheduled' } as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,49 +56,31 @@ function makeRunRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('WorkflowRunNotificationService', () => {
   let service: WorkflowRunNotificationService;
-  let mockPrisma: MockPrismaService;
+  let mockPrisma: { workflowRun: { findUnique: jest.Mock } };
   let mockNotifications: { emit: jest.Mock };
   /**
-   * #251 micro-run opt-in. Defaults to FALSE — the shipped default, and the
-   * state the pre-#251 "skips on_media_enriched" assertions were written
-   * against.
+   * #251 micro-run opt-in. Defaults to FALSE: the shipped default, and the state the pre-#251
+   * "skips on_media_enriched" assertions were written against.
    */
   let mockPreferences: { allowsWorkflowMicroRuns: jest.Mock };
 
-  beforeEach(async () => {
-    mockPrisma = createMockPrismaService();
+  beforeEach(() => {
+    mockPrisma = { workflowRun: { findUnique: jest.fn() } };
     mockNotifications = { emit: jest.fn().mockResolvedValue(undefined) };
-    mockPreferences = {
-      allowsWorkflowMicroRuns: jest.fn().mockResolvedValue(false),
+    mockPreferences = { allowsWorkflowMicroRuns: jest.fn().mockResolvedValue(false) };
+    // The notify port's `notify(eventKey, userId, data)`, recorded in the shape the assertions below were written for.
+    const notify = {
+      notify: jest.fn((eventKey: string, userId: string, data: Record<string, unknown>) => {
+        // The port's `notify` is detached and never rejects: a rejecting write is swallowed here as the host does.
+        void Promise.resolve(mockNotifications.emit({ type: eventKey, userId, data, circleId: data['circleId'] })).catch(() => undefined);
+      }),
     };
-    // The platform `notify(eventKey, userId, data)` call, recorded with the event
-    // template applied, in the shape the assertions below were written for.
-    const platform = createPlatformNotificationsMock();
-    platform.mock.notify.mockImplementation(async (eventKey: string, userId: string, data: Record<string, unknown>) => {
-      const rendered = renderBrowserNotification(eventKey, data);
-      return mockNotifications.emit({
-        type: eventKey,
-        userId,
-        data,
-        title: rendered?.title,
-        link: rendered?.link,
-        circleId: data['circleId'],
-      });
-    });
-    // `memoriahubNotifications.workflowMicroRuns` (absent means false), read from the user's settings row.
-    (mockPrisma.userSettings.findUnique as jest.Mock).mockImplementation(async (args: { where: { userId: string } }) => ({
-      value: { memoriahubNotifications: { workflowMicroRuns: await mockPreferences.allowsWorkflowMicroRuns(args.where.userId) } },
-    }));
+    // `memoriahubNotifications.workflowMicroRuns` (absent means false), read through the settings port.
+    const settings = {
+      readUser: jest.fn(async (userId: string) => ({ workflowMicroRuns: await mockPreferences.allowsWorkflowMicroRuns(userId) })),
+    };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        WorkflowRunNotificationService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: NotificationsService, useValue: platform.mock },
-      ],
-    }).compile();
-
-    service = module.get<WorkflowRunNotificationService>(WorkflowRunNotificationService);
+    service = new WorkflowRunNotificationService(mockPrisma as never, notify as never, settings as never);
   });
 
   afterEach(() => {
@@ -105,7 +93,7 @@ describe('WorkflowRunNotificationService', () => {
 
   describe('on_media_enriched suppression (v1 volume guard)', () => {
     it('an on_media_enriched run that reaches "completed" emits NOTHING', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({ triggerType: WorkflowTrigger.on_media_enriched }),
       );
 
@@ -115,7 +103,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('an on_media_enriched run that reaches "failed" ALSO emits nothing (the skip is trigger-based, not status-based)', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({
           triggerType: WorkflowTrigger.on_media_enriched,
           status: WorkflowRunStatus.failed,
@@ -128,7 +116,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('a MANUAL run with the same terminal status DOES emit (proves the skip is trigger-specific)', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({ triggerType: WorkflowTrigger.manual, status: WorkflowRunStatus.failed }),
       );
 
@@ -158,7 +146,7 @@ describe('WorkflowRunNotificationService', () => {
 
     for (const status of terminal) {
       it(`emits for status='${status}'`, async () => {
-        (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(makeRunRow({ status }));
+        mockPrisma.workflowRun.findUnique.mockResolvedValue(makeRunRow({ status }));
 
         await service.notifyRunFinished(RUN_ID);
 
@@ -168,7 +156,7 @@ describe('WorkflowRunNotificationService', () => {
 
     for (const status of nonTerminal) {
       it(`does NOT emit for non-terminal status='${status}'`, async () => {
-        (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(makeRunRow({ status }));
+        mockPrisma.workflowRun.findUnique.mockResolvedValue(makeRunRow({ status }));
 
         await service.notifyRunFinished(RUN_ID);
 
@@ -177,7 +165,7 @@ describe('WorkflowRunNotificationService', () => {
     }
 
     it('a run that no longer exists (hard-deleted) emits nothing', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(null);
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(null);
 
       await service.notifyRunFinished(RUN_ID);
 
@@ -191,7 +179,7 @@ describe('WorkflowRunNotificationService', () => {
 
   describe('recipient resolution', () => {
     it('a MANUAL run notifies startedById', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({ triggerType: WorkflowTrigger.manual, startedById: STARTER_ID }),
       );
 
@@ -203,7 +191,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('a SCHEDULED run notifies the workflow createdById, even when startedById is also set', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({
           triggerType: WorkflowTrigger.scheduled,
           startedById: STARTER_ID,
@@ -219,7 +207,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('a SCHEDULED run with no createdById falls back to startedById', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({
           triggerType: WorkflowTrigger.scheduled,
           startedById: STARTER_ID,
@@ -235,7 +223,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('a MANUAL run with no startedById falls back to the workflow createdById', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({
           triggerType: WorkflowTrigger.manual,
           startedById: null,
@@ -251,7 +239,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('a run with NEITHER a starter nor a workflow creator is silently skipped', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(
         makeRunRow({
           triggerType: WorkflowTrigger.manual,
           startedById: null,
@@ -271,7 +259,7 @@ describe('WorkflowRunNotificationService', () => {
 
   describe('per-run rows, never aggregated', () => {
     it('two separate finished runs produce two separate emit() calls, each with its own runId/link/data', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock)
+      mockPrisma.workflowRun.findUnique
         .mockResolvedValueOnce(makeRunRow({ id: 'run-A', succeededCount: 5, failedCount: 1 }))
         .mockResolvedValueOnce(
           makeRunRow({ id: 'run-B', succeededCount: 20, failedCount: 0 }),
@@ -285,36 +273,19 @@ describe('WorkflowRunNotificationService', () => {
         1,
         expect.objectContaining({
           type: 'workflows.run_completed',
-          link: '/workflows/runs/run-A',
           data: expect.objectContaining({ runId: 'run-A', succeededCount: 5, failedCount: 1 }),
         }),
       );
       expect(mockNotifications.emit).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
-          link: '/workflows/runs/run-B',
           data: expect.objectContaining({ runId: 'run-B', succeededCount: 20, failedCount: 0 }),
         }),
       );
     });
 
-    it('title reports the workflow name and succeeded/failed counts', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(
-        makeRunRow({ succeededCount: 7, failedCount: 2 }),
-      );
-
-      await service.notifyRunFinished(RUN_ID);
-
-      expect(mockNotifications.emit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: "Workflow 'Archive old screenshots' finished: 7 applied, 2 failed",
-          circleId: CIRCLE_ID,
-        }),
-      );
-    });
-
     it('re-reads the run rather than trusting a caller-supplied status/counts (single source of truth)', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(makeRunRow());
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(makeRunRow());
 
       await service.notifyRunFinished(RUN_ID);
 
@@ -330,7 +301,7 @@ describe('WorkflowRunNotificationService', () => {
 
   describe('best-effort contract', () => {
     it('notifyRunFinishedAsync() never throws even when the run re-read rejects', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockRejectedValue(new Error('db down'));
+      mockPrisma.workflowRun.findUnique.mockRejectedValue(new Error('db down'));
 
       expect(() => service.notifyRunFinishedAsync(RUN_ID)).not.toThrow();
 
@@ -339,7 +310,7 @@ describe('WorkflowRunNotificationService', () => {
     });
 
     it('notifyRunFinishedAsync() never throws even when emit() itself rejects', async () => {
-      (mockPrisma.workflowRun.findUnique as jest.Mock).mockResolvedValue(makeRunRow());
+      mockPrisma.workflowRun.findUnique.mockResolvedValue(makeRunRow());
       mockNotifications.emit.mockRejectedValue(new Error('write failed'));
 
       expect(() => service.notifyRunFinishedAsync(RUN_ID)).not.toThrow();

@@ -15,22 +15,15 @@ import { MemoriahubPortsModule } from '@marinoscar/memoriahub-api/core';
 import {
   WorkflowEvaluateHandler,
   WorkflowExecuteBatchHandler,
+  WorkflowRunNotificationService,
   WorkflowsModule as WorkflowsSliceModule,
 } from '@marinoscar/memoriahub-api/workflows';
 import { createFakeMemoriahubPorts, fakeMemoriahubBindings } from '@marinoscar/memoriahub-api/testing';
 
-import { NotificationProducersModule } from '../../src/notification-producers/notification-producers.module';
-import { WorkflowRunNotificationService } from '../../src/notification-producers/workflow-run-notification.service';
 import { AppWorkflowRunObserver } from '../../src/workflows/workflow-run-observer.adapter';
 import { WorkflowRunObserverModule } from '../../src/workflows/workflow-run-observer.module';
 
 const notifyRunFinishedAsync = jest.fn();
-
-@Module({
-  providers: [{ provide: WorkflowRunNotificationService, useValue: { notifyRunFinishedAsync } }],
-  exports: [WorkflowRunNotificationService],
-})
-class StubNotificationProducersModule {}
 
 async function build() {
   const fakes = createFakeMemoriahubPorts();
@@ -41,8 +34,8 @@ async function build() {
       WorkflowRunObserverModule,
     ],
   })
-    .overrideModule(NotificationProducersModule)
-    .useModule(StubNotificationProducersModule)
+    .overrideProvider(WorkflowRunNotificationService)
+    .useValue({ notifyRunFinishedAsync })
     .compile();
 }
 

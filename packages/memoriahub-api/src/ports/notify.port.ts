@@ -214,6 +214,20 @@ export interface MemoriahubEmailTemplateDef {
 }
 
 /**
+ * A live state row: the recipient, the event and the scope it is about.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubLiveStateRow {
+  /** The recipient. */
+  userId: string;
+  /** The event key. */
+  eventKey: string;
+  /** The scope the row is about, or `null` for a deployment-wide one. */
+  scopeId: string | null;
+}
+
+/**
  * The notification port.
  *
  * @extensionPoint token
@@ -275,6 +289,16 @@ export interface MemoriahubNotifyPort {
     data: { count: number } & Record<string, unknown>,
     options?: MemoriahubNotifyStateOptions,
   ): void;
+
+  /**
+   * The live (not dismissed) state rows of the given events, optionally in one scope: who still has a
+   * row to drain. Optional: a host that cannot list them binds `notifyState` alone, and a reconcile
+   * then writes the current counts but cannot drain the rows of a queue that went away.
+   *
+   * @param eventKeys - the state events.
+   * @param scopeId - one scope, or every scope when absent.
+   */
+  liveStates?(eventKeys: readonly string[], scopeId?: string): Promise<MemoriahubLiveStateRow[]>;
 
   /**
    * The awaited sibling of `notify`, for a background path that must know whether the send was

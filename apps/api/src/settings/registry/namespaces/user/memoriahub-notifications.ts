@@ -8,7 +8,7 @@
 // per-event, per-channel preference is the platform `notifications` namespace.
 //
 // ABSENT MEANS FALSE (the inverted default), read by
-// `notification-producers/memoriahub-notification-preferences.ts`. No
+// the workflows slice's `WorkflowRunNotificationService` (through `readUser`). No
 // `.default()`: a stored `false` and "never chose" must stay distinguishable.
 // PATCH: `workflowMicroRuns: null` removes the key; the namespace as `null`
 // clears it. The carry-over (`npm run notifications:migrate-legacy`) moves the

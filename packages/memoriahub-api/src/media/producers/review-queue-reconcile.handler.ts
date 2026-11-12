@@ -14,32 +14,35 @@
 // pair): it reads every circle and writes notifications.
 // =============================================================================
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { JobHandlerRegistry, type JobExecutionProfile, type JobHandler } from '@marinoscar/platform-api/jobs';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
-import { REVIEW_QUEUE_RECONCILE_TYPE } from './notification-cron-jobs.constants';
-import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
+import { MEMORIAHUB_JOBS, type MemoriahubJobHandler, type MemoriahubJobProfile, type MemoriahubJobsPort } from '../../ports/index.js';
+import { REVIEW_QUEUE_RECONCILE_TYPE } from './review-queue.constants.js';
+import { ReviewQueueReconcileService } from './review-queue-reconcile.service.js';
 
+/** The `notifications.review_queue_reconcile` job (server-only, a system job). @stability experimental */
 @Injectable()
-export class ReviewQueueReconcileHandler implements JobHandler, OnModuleInit {
+export class ReviewQueueReconcileHandler implements MemoriahubJobHandler, OnModuleInit {
   readonly type = REVIEW_QUEUE_RECONCILE_TYPE;
 
   readonly label = 'Review-queue notification reconcile';
 
   /** Every circle, keyset-paged: fifteen minutes, three attempts. */
-  readonly profile: JobExecutionProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
+  readonly profile: MemoriahubJobProfile = { maxRuntimeMs: 900_000, maxAttempts: 3 };
 
   private readonly logger = new Logger(ReviewQueueReconcileHandler.name);
 
   constructor(
-    private readonly registry: JobHandlerRegistry,
+    @Inject(MEMORIAHUB_JOBS) private readonly jobs: MemoriahubJobsPort,
     private readonly reconcile: ReviewQueueReconcileService,
   ) {}
 
+  /** Registers the handler with the queue. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.jobs.registerHandler(this);
   }
 
+  /** Reconciles every library. */
   async process(): Promise<void> {
     const startedAt = Date.now();
     const result = await this.reconcile.reconcileAll();

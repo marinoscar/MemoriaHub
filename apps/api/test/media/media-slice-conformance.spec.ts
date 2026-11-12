@@ -51,7 +51,7 @@ async function mediaSliceOverTheWebHost() {
   const moduleRef = await Test.createTestingModule({
     imports: [
       MemoriahubPortsModule.forRoot({
-        ports: { ...fakeMemoriahubBindings(fakes), notify: { useValue: new PlatformMemoriahubNotifyAdapter(platform.mock as never) } },
+        ports: { ...fakeMemoriahubBindings(fakes), notify: { useValue: new PlatformMemoriahubNotifyAdapter(platform.mock as never, { notification: { findMany: async () => [] } } as never) } },
       }),
       MediaCoreModule.forRoot(),
     ],
@@ -98,7 +98,7 @@ describe('upload_completed titles (the host registry renders what the producer w
     const moduleRef = await Test.createTestingModule({
       imports: [
         MemoriahubPortsModule.forRoot({
-          ports: { ...fakeMemoriahubBindings(fakes), notify: { useValue: new PlatformMemoriahubNotifyAdapter(platform.mock as never) } },
+          ports: { ...fakeMemoriahubBindings(fakes), notify: { useValue: new PlatformMemoriahubNotifyAdapter(platform.mock as never, { notification: { findMany: async () => [] } } as never) } },
         }),
         MediaCoreModule.forRoot(),
       ],

@@ -1,7 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
-import type { WorkflowRunObserver } from '@marinoscar/memoriahub-api/workflows';
+import { WorkflowRunNotificationService, type WorkflowRunObserver } from '@marinoscar/memoriahub-api/workflows';
 
-import { WorkflowRunNotificationService } from '../notification-producers/workflow-run-notification.service';
 import { MemoriaHubWebhooks } from '../platform/webhooks/memoriahub-webhooks.service';
 
 /**

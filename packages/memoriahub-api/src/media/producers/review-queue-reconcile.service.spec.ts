@@ -1,9 +1,10 @@
 /**
  * Unit tests for ReviewQueueReconcileService (epic #240, issue #246; platform
- * notifications since RETRO-D3, #576).
+ * notifications since RETRO-D3, #576; moved to the media slice by RETRO-J10, #624). Host-free:
+ * the ports are plain doubles.
  *
- * The reconcile writes through the platform's STATE primitive,
- * `NotificationsService.notifyState`, which owns the one-live-row guarantee
+ * The reconcile writes through the notify port's STATE primitive,
+ * `notifyState`, which the host's platform slice owns the one-live-row guarantee
  * (advisory lock + `notifications_live_dedup_uniq_idx`) and the countAtRead
  * re-unread rule. This file proves the producer asks for the right writes:
  *  - 929 groups -> ONE notifyState call per eligible member with count 929,
@@ -14,20 +15,10 @@
  *  - a disabled feature flag produces nothing for that queue AND drains its live rows
  *  - two circles produce two independent writes (scope = circle) for the same user
  *  - computeReviewCounts is called ONCE PER CIRCLE, not once per member
- *  - the rendered titles and links of all four queues (the event templates)
- *  - a per-circle failure is counted, never fatal
+  *  - a per-circle failure is counted, never fatal
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { OwnerScopeSweepService } from '../platform/sharing/owner-scope-sweep.service';
-import { NotificationsService } from '@marinoscar/platform-api/notifications';
-
-import { createPlatformNotificationsMock } from '../../test/mocks/platform-notifications.mock';
-import { createMockPrismaService, MockPrismaService } from '../../test/mocks/prisma.mock';
-import { MediaService } from '@marinoscar/memoriahub-api/media';
-import { PrismaService } from '../prisma/prisma.service';
-import { AppSystemSettingsService } from '../platform/settings/app-system-settings.service';
-import { ReviewQueueReconcileService } from './review-queue-reconcile.service';
+import { ReviewQueueReconcileService } from './review-queue-reconcile.service.js';
 
 const CIRCLE_A = { id: 'circle-a', name: 'Family' };
 const CIRCLE_B = { id: 'circle-b', name: 'Work' };
@@ -60,42 +51,37 @@ function features(overrides: Partial<Record<string, boolean>> = {}) {
 
 describe('ReviewQueueReconcileService', () => {
   let service: ReviewQueueReconcileService;
-  let mockPrisma: MockPrismaService;
-  let platform: ReturnType<typeof createPlatformNotificationsMock>;
-  let mockSystemSettings: { getSettings: jest.Mock };
+  let notify: { notifyState: jest.Mock; liveStates: jest.Mock };
+  let settings: { readSystem: jest.Mock };
   let scopes: { allScopes: jest.Mock; membersOf: jest.Mock };
   let mockMediaService: { computeReviewCounts: jest.Mock };
+  let liveRows: jest.Mock;
 
-  const stateCalls = () => platform.calls('notifyState');
+  /** Each `notifyState` call as `{ eventKey, userId, data, circleId }`. */
+  const stateCalls = () =>
+    notify.notifyState.mock.calls.map(([eventKey, userId, data, options]) => ({
+      eventKey: eventKey as string,
+      userId: userId as string,
+      data: data as Record<string, unknown>,
+      circleId: (options as { scopeId?: string } | undefined)?.scopeId,
+    }));
   const writes = () => stateCalls().filter((c) => (c.data['count'] as number) > 0);
   const drains = () => stateCalls().filter((c) => c.data['count'] === 0);
 
-  beforeEach(async () => {
+  beforeEach(() => {
     for (const key of ['PICTURE_ENHANCEMENT_ENABLED', 'BURST_DETECTION_ENABLED', 'DUPLICATE_DETECTION_ENABLED', 'LOCATION_INFERENCE_ENABLED']) {
       delete process.env[key];
     }
-    mockPrisma = createMockPrismaService();
     scopes = { allScopes: jest.fn(), membersOf: jest.fn() };
-    platform = createPlatformNotificationsMock();
-    mockSystemSettings = { getSettings: jest.fn().mockResolvedValue(features()) };
+    liveRows = jest.fn().mockResolvedValue([]);
+    notify = { notifyState: jest.fn(), liveStates: liveRows };
+    settings = { readSystem: jest.fn(async () => ({ value: features().features, version: 1 })) };
     mockMediaService = { computeReviewCounts: jest.fn().mockResolvedValue(counts()) };
 
     scopes.allScopes.mockResolvedValue([asScope(CIRCLE_A)]);
     scopes.membersOf.mockResolvedValue([{ userId: USER_A, role: 'editor' }]);
-    (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([]);
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        ReviewQueueReconcileService,
-        { provide: PrismaService, useValue: mockPrisma },
-        { provide: NotificationsService, useValue: platform.mock },
-        { provide: AppSystemSettingsService, useValue: mockSystemSettings },
-        { provide: MediaService, useValue: mockMediaService },
-        { provide: OwnerScopeSweepService, useValue: scopes },
-      ],
-    }).compile();
-
-    service = module.get(ReviewQueueReconcileService);
+    service = new ReviewQueueReconcileService(notify as never, scopes as never, settings as never, mockMediaService as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -138,7 +124,7 @@ describe('ReviewQueueReconcileService', () => {
 
   describe('draining', () => {
     it('a queue at zero drains every live row of it in the circle (count 0), and writes nothing else', async () => {
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      liveRows.mockResolvedValue([
         { userId: USER_A, eventKey: 'review.bursts', scopeId: CIRCLE_A.id },
       ]);
 
@@ -153,7 +139,7 @@ describe('ReviewQueueReconcileService', () => {
 
     it('drains the row of a member who can no longer act (demoted to viewer or removed)', async () => {
       mockMediaService.computeReviewCounts.mockResolvedValue(counts({ pendingBurstGroups: 4 }));
-      (mockPrisma.notification.findMany as jest.Mock).mockResolvedValue([
+      liveRows.mockResolvedValue([
         { userId: USER_A, eventKey: 'review.bursts', scopeId: CIRCLE_A.id },
         { userId: USER_DEMOTED, eventKey: 'review.bursts', scopeId: CIRCLE_A.id },
       ]);
@@ -164,22 +150,30 @@ describe('ReviewQueueReconcileService', () => {
       expect(writes().map((c) => c.userId)).toEqual([USER_A]);
     });
 
-    it('reads live rows of STATE events only (dedup key state:*) in the circle', async () => {
+    it('reads the live state rows of the four events in the circle through the port', async () => {
       await service.reconcileAll();
-      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ dismissedAt: null, dedupKey: { startsWith: 'state:' }, scopeId: CIRCLE_A.id }),
-        }),
+      expect(liveRows).toHaveBeenCalledWith(
+        ['review.bursts', 'review.duplicates', 'review.location_suggestions', 'review.enhancements'],
+        CIRCLE_A.id,
       );
+    });
+
+    it('writes the counts but drains nothing when the host cannot list live rows', async () => {
+      delete (notify as { liveStates?: unknown }).liveStates;
+      mockMediaService.computeReviewCounts.mockResolvedValue(counts({ pendingBurstGroups: 2 }));
+      const result = await service.reconcileAll();
+      expect(writes()).toHaveLength(1);
+      expect(drains()).toHaveLength(0);
+      expect(result.errors).toBe(0);
     });
   });
 
   describe('feature flags', () => {
     it('a disabled queue produces nothing and drains its live rows deployment-wide', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue(features({ burstDetection: false }));
+      settings.readSystem.mockResolvedValue({ value: features({ burstDetection: false }).features, version: 1 });
       mockMediaService.computeReviewCounts.mockResolvedValue(counts({ pendingBurstGroups: 9 }));
-      (mockPrisma.notification.findMany as jest.Mock).mockImplementation(async (args: { where: { scopeId?: string } }) =>
-        args.where.scopeId ? [] : [{ userId: USER_B, eventKey: 'review.bursts', scopeId: CIRCLE_B.id }],
+      liveRows.mockImplementation(async (_eventKeys: string[], scopeId?: string) =>
+        scopeId ? [] : [{ userId: USER_B, eventKey: 'review.bursts', scopeId: CIRCLE_B.id }],
       );
 
       await service.reconcileAll();
@@ -189,28 +183,11 @@ describe('ReviewQueueReconcileService', () => {
     });
 
     it('every queue off: no circle is paged', async () => {
-      mockSystemSettings.getSettings.mockResolvedValue({ features: {} });
+      settings.readSystem.mockResolvedValue({ value: {}, version: 1 });
       process.env['PICTURE_ENHANCEMENT_ENABLED'] = 'false';
       await service.reconcileAll();
       expect(scopes.allScopes).not.toHaveBeenCalled();
       expect(mockMediaService.computeReviewCounts).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('rendered rows (the event templates)', () => {
-    it.each([
-      ['pendingBurstGroups', 'review.bursts', '1 burst group ready to review in Family', '3 burst groups ready to review in Family', '/bursts'],
-      ['pendingDuplicateGroups', 'review.duplicates', '1 duplicate group ready to review in Family', '3 duplicate groups ready to review in Family', '/duplicates'],
-      ['pendingLocationSuggestions', 'review.location_suggestions', '1 location suggestion ready to review in Family', '3 location suggestions ready to review in Family', '/location-suggestions'],
-      ['pendingEnhancements', 'review.enhancements', '1 AI enhancement awaiting review in Family', '3 AI enhancements awaiting review in Family', '/enhancements'],
-    ])('%s -> %s', async (countKey, eventKey, one, three, link) => {
-      mockMediaService.computeReviewCounts.mockResolvedValue(counts({ [countKey]: 3 }));
-      await service.reconcileAll();
-      const [call] = writes();
-      expect(call!.eventKey).toBe(eventKey);
-      expect(call!.buildTitle(1)).toBe(one);
-      expect(call!.buildTitle(3)).toBe(three);
-      expect(call!.link).toBe(link);
     });
   });
 
