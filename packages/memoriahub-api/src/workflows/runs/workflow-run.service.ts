@@ -253,11 +253,36 @@ export class WorkflowRunService {
 
     const definition = run.definitionSnapshot as unknown as WorkflowDefinition;
 
-    // Exclusions: flip the selected still-matched items to 'excluded'.
     const excluded = body.excludedItemIds ?? [];
     if (excluded.length > 500) {
       throw new BadRequestException('Cannot exclude more than 500 items');
     }
+
+    // Every refusal comes BEFORE the first write: a refused approval must leave the
+    // run `awaiting_approval` and every item `matched` (#735).
+    // hard_delete safety confirmation — must match the count shown at preview.
+    const hasHardDelete = definition.actions.some(
+      (a: unknown) => (a as Record<string, unknown>)['type'] === 'hard_delete',
+    );
+    if (hasHardDelete) {
+      const expected = `DELETE ${run.matchedCount}`;
+      if (body.confirmation !== expected) {
+        throw new BadRequestException(
+          `Confirmation required: type "${expected}" to approve a permanent-delete run`,
+        );
+      }
+    }
+
+    // Re-authorize gated actions at approval time.
+    await this.checkGatedActionPermissions(definition, user, run.circleId, settings);
+
+    if (hasHardDelete) {
+      await this.audit(user.id, 'workflow_run:hard_delete_approved', run.id, {
+        matchedCount: run.matchedCount,
+      });
+    }
+
+    // Exclusions: flip the selected still-matched items to 'excluded'.
     if (excluded.length > 0) {
       await this.prisma.workflowRunItem.updateMany({
         where: {
@@ -272,25 +297,6 @@ export class WorkflowRunService {
     const remainingMatched = await this.prisma.workflowRunItem.count({
       where: { runId: run.id, status: WORKFLOW_RUN_ITEM_STATUS.matched },
     });
-
-    // hard_delete safety confirmation — must match the count shown at preview.
-    const hasHardDelete = definition.actions.some(
-      (a) => (a as Record<string, unknown>)['type'] === 'hard_delete',
-    );
-    if (hasHardDelete) {
-      const expected = `DELETE ${run.matchedCount}`;
-      if (body.confirmation !== expected) {
-        throw new BadRequestException(
-          `Confirmation required: type "${expected}" to approve a permanent-delete run`,
-        );
-      }
-      await this.audit(user.id, 'workflow_run:hard_delete_approved', run.id, {
-        matchedCount: run.matchedCount,
-      });
-    }
-
-    // Re-authorize gated actions at approval time.
-    await this.checkGatedActionPermissions(definition, user, run.circleId, settings);
 
     const now = new Date();
     const updated = await this.prisma.workflowRun.update({
