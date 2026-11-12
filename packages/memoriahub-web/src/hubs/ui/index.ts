@@ -7,3 +7,4 @@ export * from './config/collections.js';
 export * from './hooks/useCollectionSummaries.js';
 export * from './components/CollectionsList.js';
 export { default as CollectionsHubPage } from './pages/CollectionsHubPage.js';
+export { default as SharedWithMePage } from './pages/SharedWithMePage.js';

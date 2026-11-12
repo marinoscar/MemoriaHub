@@ -180,7 +180,7 @@ const CollectionsHubPage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui
 const ReviewQueuePage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.ReviewQueuePage })));
 const ReviewInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.ReviewInsightsPage })));
 const ArchivePage = lazyMediaPage('ArchivePage');
-const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
+const SharedWithMePage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.SharedWithMePage })));
 const TrashPage = lazyMediaPage('TrashPage');
 const TrashEmptyRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.TrashEmptyRunPage })));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));

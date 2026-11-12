@@ -20,9 +20,9 @@ import { Alert, Box, Button, Card, CardActionArea, CardContent, CardMedia, Skele
 import FolderSharedIcon from '@mui/icons-material/FolderShared';
 import PhotoAlbumIcon from '@mui/icons-material/PhotoAlbum';
 
-import { MediaLightbox } from '@marinoscar/memoriahub-web/viewer/ui';
-import { listSharedAlbums, listSharedMedia } from '@marinoscar/memoriahub-web/media/headless';
-import type { Album, MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { MediaLightbox } from '../../../viewer/ui/index.js';
+import { listSharedAlbums, listSharedMedia } from '../../../media/headless/index.js';
+import type { Album, MediaItem } from '../../../media/headless/index.js';
 
 const ALBUMS_PAGE_SIZE = 50;
 const MEDIA_PAGE_SIZE = 60;
@@ -109,6 +109,11 @@ function AlbumCard({ album }: { album: Album }) {
   );
 }
 
+/**
+ * The Shared with me page: the albums and photos other people granted to the caller, across every library; read-only.
+ *
+ * @stability experimental
+ */
 export default function SharedWithMePage() {
   const albums = useSharedList<Album>(fetchAlbums);
   const media = useSharedList<MediaItem>(fetchMedia);
