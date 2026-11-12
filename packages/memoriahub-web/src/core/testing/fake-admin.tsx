@@ -25,7 +25,7 @@ import type {
 } from '../headless/admin.js';
 
 function FakeDataTable<Row>(props: MemoriahubDataTableProps<Row>): ReactNode {
-  const { columns, rows, rowId, ariaLabel, loading, emptyState, rowActions, pagination } = props;
+  const { columns, rows, rowId, ariaLabel, loading, emptyState, rowActions, pagination, error, selection, bulkActions } = props;
   const [confirming, setConfirming] = useState<{ actionId: string; row: Row } | null>(null);
   const cell = (col: (typeof columns)[number], row: Row): ReactNode => (col.render ? col.render(row) : (col.value?.(row) ?? ''));
   const pending = confirming ? rowActions?.find((a) => a.id === confirming.actionId) : undefined;
@@ -38,9 +38,21 @@ function FakeDataTable<Row>(props: MemoriahubDataTableProps<Row>): ReactNode {
       : undefined;
   return (
     <div>
+      {error ? <div role="alert">{error}</div> : null}
+      {selection && bulkActions?.length && selection.selectedIds.size > 0 ? (
+        <div role="toolbar" aria-label="Bulk actions">
+          <span>{selection.selectedIds.size} selected</span>
+          {bulkActions.map((a) => (
+            <button key={a.id} type="button" onClick={() => a.onClick(Array.from(selection.selectedIds))}>
+              {a.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <table aria-label={ariaLabel} aria-busy={loading ? 'true' : undefined}>
         <thead>
           <tr>
+            {selection ? <th /> : null}
             {columns.map((c) => (
               <th key={c.id}>{c.label}</th>
             ))}
@@ -50,11 +62,26 @@ function FakeDataTable<Row>(props: MemoriahubDataTableProps<Row>): ReactNode {
         <tbody>
           {rows.length === 0 && !loading ? (
             <tr>
-              <td colSpan={columns.length + 1}>{emptyState}</td>
+              <td colSpan={columns.length + 2}>{emptyState}</td>
             </tr>
           ) : null}
           {rows.map((row) => (
             <tr key={rowId(row)}>
+              {selection ? (
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${rowId(row)}`}
+                    checked={selection.selectedIds.has(rowId(row))}
+                    onChange={(e) => {
+                      const next = new Set(selection.selectedIds);
+                      if (e.target.checked) next.add(rowId(row));
+                      else next.delete(rowId(row));
+                      selection.onSelectionChange(next);
+                    }}
+                  />
+                </td>
+              ) : null}
               {columns.map((c) => (
                 <td key={c.id}>{cell(c, row)}</td>
               ))}

@@ -58,3 +58,33 @@ export async function rerunMediaMetadata(mediaId: string): Promise<MetadataRerun
 export async function getMediaMetadataStatus(mediaId: string): Promise<MediaMetadataStatusDto> {
   return api.get<MediaMetadataStatusDto>(`/media/${mediaId}/metadata/status`);
 }
+
+// ---------------------------------------------------------------------------
+// Global backfill (admin)
+// ---------------------------------------------------------------------------
+
+/**
+ * The answer of the global metadata backfill: jobs enqueued and circles covered.
+ *
+ * @stability experimental
+ */
+export interface GlobalBackfillResult {
+  enqueued: number;
+  circles: number;
+}
+
+/**
+ * Enqueues metadata extraction across every circle (`POST /admin/metadata/backfill`).
+ *
+ * @param body - an optional `capturedAt` range and `force`.
+ * @returns how many jobs were enqueued over how many circles.
+ *
+ * @stability experimental
+ */
+export async function runGlobalMetadataBackfill(body?: {
+  from?: string;
+  to?: string;
+  force?: boolean;
+}): Promise<GlobalBackfillResult> {
+  return api.post<GlobalBackfillResult>('/admin/metadata/backfill', body ?? {});
+}

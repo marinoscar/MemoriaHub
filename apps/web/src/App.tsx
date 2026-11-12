@@ -129,7 +129,7 @@ const JobInsightsPage = lazy(() =>
 );
 // RETRO-C2 (#581): the packaged Worker Nodes page (`nodes:read`), with the app's row action.
 const WorkersPage = lazy(() => import('@marinoscar/platform-web/nodes/ui').then((m) => ({ default: m.WorkersPage })));
-const NodeBackupPage = lazy(() => import('./pages/Admin/NodeBackupPage'));
+const NodeBackupPage = lazy(() => import('@marinoscar/memoriahub-web/node-backup/ui').then((m) => ({ default: m.NodeBackupPage })));
 const DoctorPage = lazy(() => import('./pages/Admin/DoctorPage'));
 // RETRO-B1 (#597): the platform host's two admin pages, packaged. Lazy like
 // every other admin page: nobody who never opens the Console needs them in the
@@ -189,7 +189,7 @@ const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirec
 const PublicLinkPage = lazy(() =>
   import('@marinoscar/platform-web/sharing/ui').then((module) => ({ default: module.PublicLinkPage })),
 );
-const PublicSharesPage = lazy(() => import('./pages/Admin/PublicSharesPage'));
+const PublicSharesPage = lazy(() => import('@marinoscar/memoriahub-web/shares/ui').then((m) => ({ default: m.PublicSharesPage })));
 // RETRO-J11: the workflow list and builder pages are the packaged slice's.
 const WorkflowListPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),

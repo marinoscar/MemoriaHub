@@ -4,8 +4,8 @@
  * The platform's page (RETRO-C1, #575): the queue summary, "Retry all failed", "Reset stuck", the
  * paginated job list with per-row retry and delete, and the link to Job Insights. This file is the
  * lazy-loaded binding: the one queue-wide action the platform page does not know,
- * "Repair missing thumbnails" (`POST /api/admin/media/thumbnails/repair`, an app endpoint that
- * enqueues the global `thumbnail_repair` job at priority 0), joins the page's toolbar slot.
+ * "Repair missing thumbnails" (`repairThumbnails` of the media slice: `POST /api/admin/media/thumbnails/repair`,
+ * which enqueues the global `thumbnail_repair` job at priority 0), joins the page's toolbar slot.
  * The registry card is spread from `jobsAdminSections` in `config/adminSections.tsx` and the route,
  * gated on the `jobs:read` the API enforces, is in `App.tsx`.
  */
@@ -15,7 +15,7 @@ import HealingIcon from '@mui/icons-material/Healing';
 import { JobsPage as PackagedJobsPage } from '@marinoscar/platform-web/jobs/ui';
 
 import { usePermissions } from '../../hooks/usePermissions';
-import { repairThumbnails } from '../../services/jobs';
+import { repairThumbnails } from '@marinoscar/memoriahub-web/media/headless';
 
 /** The extra toolbar button: queue a global thumbnail-repair sweep now instead of at the next hourly tick. */
 export function RepairThumbnailsButton() {

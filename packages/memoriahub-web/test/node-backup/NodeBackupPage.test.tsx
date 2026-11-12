@@ -12,30 +12,26 @@
  * BigInt-safe humanized bytes, lastError via the detail/expansion surface).
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
-import { render, mockAdminUser } from '../utils/test-utils';
-import {
-  installLayoutStubs,
-  resetContainerWidth,
-  setInitialContainerWidth,
-} from '@marinoscar/platform-web/datatable/testing';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { buildNodeBackupRunColumns } from '../../src/node-backup/ui/nodeBackupTable.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be declared BEFORE imports they affect
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
-}));
-
-vi.mock('../../hooks/useOwnerScope', () => ({
   useOwnerScope: vi.fn(),
+  useMemoriahubAdmin: () => createFakeAdminPort().port,
 }));
 
-vi.mock('../../services/nodeBackup', () => ({
+vi.mock('../../src/node-backup/headless/services/nodeBackup.js', () => ({
   getNodeBackupConfig: vi.fn(),
   updateNodeBackupConfig: vi.fn(),
   getNodeBackupRuns: vi.fn(),
@@ -49,18 +45,17 @@ import NodeBackupPage, {
   DAILY_CRON,
   WEEKLY_CRON,
   deriveSchedulePreset,
-} from '../../pages/Admin/NodeBackupPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
+} from '../../src/node-backup/ui/pages/NodeBackupPage.js';
+import { usePermissions, useOwnerScope } from '../../src/core/headless/index.js';
 import {
   getNodeBackupConfig,
   getNodeBackupRuns,
   updateNodeBackupConfig,
-} from '../../services/nodeBackup';
+} from '../../src/node-backup/headless/services/nodeBackup.js';
 import type {
   NodeBackupConfigDto,
   NodeBackupRunDto,
-} from '../../services/nodeBackup';
+} from '../../src/node-backup/headless/services/nodeBackup.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseCircles = vi.mocked(useOwnerScope);
@@ -173,13 +168,8 @@ function renderPage() {
 // ---------------------------------------------------------------------------
 
 describe('NodeBackupPage', () => {
-  beforeAll(() => {
-    installLayoutStubs();
-  });
-
   beforeEach(() => {
     vi.clearAllMocks();
-    resetContainerWidth(1400);
     mockUsePermissions.mockReturnValue(makePermissions(true));
     mockUseCircles.mockReturnValue(makeCirclesHook());
     mockGetConfig.mockResolvedValue({ config: makeConfig() });
@@ -425,7 +415,7 @@ describe('NodeBackupPage', () => {
 
       renderPage();
 
-      const grid = await screen.findByRole('grid', { name: /backup runs/i });
+      const grid = await screen.findByRole('table', { name: /backup runs/i });
       await waitFor(() => {
         expect(within(grid).getByText('incremental')).toBeInTheDocument();
       });
@@ -450,7 +440,7 @@ describe('NodeBackupPage', () => {
 
       renderPage();
 
-      const grid = await screen.findByRole('grid', { name: /backup runs/i });
+      const grid = await screen.findByRole('table', { name: /backup runs/i });
       await waitFor(() => {
         expect(within(grid).getByText('running')).toBeInTheDocument();
       });
@@ -458,35 +448,9 @@ describe('NodeBackupPage', () => {
       expect(within(grid).getAllByText('—').length).toBeGreaterThanOrEqual(1);
     });
 
-    it('reveals lastError through the row expansion (tablet width)', async () => {
-      setInitialContainerWidth(800);
-      mockGetRuns.mockResolvedValue({
-        runs: [
-          makeRun({
-            id: 'run-bad',
-            kind: 'reconcile',
-            status: 'failed',
-            errorCount: 1,
-            lastError: 'boom: download failed',
-          }),
-        ],
-      });
-      const user = userEvent.setup();
-
-      renderPage();
-
-      // `lastError` is a detail column — folded behind the expander at tablet
-      // width, so it must not be visible before expanding.
-      const expander = await screen.findByRole('button', {
-        name: /show details for reconcile/i,
-      });
-      expect(screen.queryByText('boom: download failed')).not.toBeInTheDocument();
-
-      await user.click(expander);
-
-      await waitFor(() => {
-        expect(screen.getByText('boom: download failed')).toBeInTheDocument();
-      });
+    it('declares lastError as a detail column (the host table folds it behind the row expander)', () => {
+      const columns = buildNodeBackupRunColumns();
+      expect(columns.find((c) => c.id === 'lastError')?.priority).toBe('detail');
     });
 
     it('shows the empty state when there are no runs yet', async () => {

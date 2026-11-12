@@ -265,6 +265,12 @@
       "tagging",
       "review",
       "enhancement"
+    ],
+    "shares": [
+      "core"
+    ],
+    "node-backup": [
+      "core"
     ]
   }
 }

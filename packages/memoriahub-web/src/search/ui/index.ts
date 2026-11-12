@@ -1,3 +1,4 @@
+export * from './components/SearchFieldsSettings.js';
 export * from './components/PageSearchBar.js';
 export * from './components/SearchPanel.js';
 export * from './components/TopbarSearch.js';

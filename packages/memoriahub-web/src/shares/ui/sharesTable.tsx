@@ -43,8 +43,8 @@ import { Avatar, Box, Chip, IconButton, Stack, Tooltip, Typography } from '@mui/
 import CopyIcon from '@mui/icons-material/ContentCopy';
 import ImageIcon from '@mui/icons-material/Image';
 import AlbumIcon from '@mui/icons-material/PhotoLibrary';
-import type { DataTableColumn, DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
-import type { MediaShare, ShareStatus, ShareTargetType } from '../../types/sharing';
+import type { MemoriahubDataTableColumn, MemoriahubDataTableFilterModel } from '../../core/headless/index.js';
+import type { MediaShare, ShareStatus, ShareTargetType } from '../headless/types.js';
 
 // ---------------------------------------------------------------------------
 // Identity
@@ -53,12 +53,23 @@ import type { MediaShare, ShareStatus, ShareTargetType } from '../../types/shari
 /**
  * Persistence key for the user's column/density choices
  * (`user_settings.dataTables['admin-shares']`).
+ *
+ * @stability experimental
  */
 export const SHARES_TABLE_ID = 'admin-shares';
 
-/** The status-tab values. `'all'` is the absence of a status filter. */
+/**
+ * The status-tab values. `'all'` is the absence of a status filter.
+ *
+ * @stability experimental
+ */
 export type ShareStatusFilter = 'all' | ShareStatus;
 
+/**
+ * The link states, in tab order.
+ *
+ * @stability experimental
+ */
 export const SHARE_STATUSES: ShareStatus[] = ['active', 'expired', 'revoked'];
 
 const STATUS_COLORS: Record<ShareStatus, 'success' | 'warning' | 'error'> = {
@@ -93,6 +104,14 @@ function ShareStatusChip({ status }: { status: ShareStatus }) {
   );
 }
 
+/**
+ * Formats a link date for the table (`Never` for a link that does not expire).
+ *
+ * @param iso - an ISO 8601 date, or `null`.
+ * @returns the locale date and time.
+ *
+ * @stability experimental
+ */
 export function formatShareDate(iso: string | null | undefined): string {
   if (!iso) return 'Never';
   return new Date(iso).toLocaleString();
@@ -103,7 +122,11 @@ function formatShareDateShort(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Clip a share URL for display. The full value is only ever reachable via copy. */
+/**
+ * Clip a share URL for display. The full value is only ever reachable via copy.
+ *
+ * @stability experimental
+ */
 export function truncateShareUrl(url: string, maxLen = 32): string {
   if (url.length <= maxLen) return url;
   return `${url.slice(0, maxLen)}…`;
@@ -113,12 +136,21 @@ export function truncateShareUrl(url: string, maxLen = 32): string {
 // Columns
 // ---------------------------------------------------------------------------
 
+/**
+ * The callbacks the share columns need from the page.
+ *
+ * @stability experimental
+ */
 export interface ShareColumnHandlers {
   /** Copies the share's public URL. Wired to the in-cell copy button. */
   onCopy: (share: MediaShare) => void;
 }
 
-/** The first 8 characters of a share's record id — its human handle. */
+/**
+ * The first 8 characters of a share's record id — its human handle.
+ *
+ * @stability experimental
+ */
 export function shortShareId(id: string): string {
   return id.slice(0, 8);
 }
@@ -137,10 +169,12 @@ export function shortShareId(id: string): string {
  * row-unique values — naming twenty checkboxes "Photo" would make the table
  * unnavigable by screen reader. It is the share RECORD id (what the bulk
  * endpoint takes), never the token.
+ *
+ * @stability experimental
  */
 export function buildShareColumns({
   onCopy,
-}: ShareColumnHandlers): DataTableColumn<MediaShare>[] {
+}: ShareColumnHandlers): MemoriahubDataTableColumn<MediaShare>[] {
   return [
     // --- primary ------------------------------------------------------------
     {
@@ -294,15 +328,23 @@ export function buildShareColumns({
   ];
 }
 
-/** The empty-state node, shared by the page and its tests. */
+/**
+ * The empty-state node, shared by the page and its tests.
+ *
+ * @stability experimental
+ */
 export const SHARES_EMPTY_STATE: ReactNode = <span>No shares found.</span>;
 
 // ---------------------------------------------------------------------------
 // Model ⇄ status tab
 // ---------------------------------------------------------------------------
 
-/** Read the active status tab back out of the filter model. */
-export function statusFromFilters(model: DataTableFilterModel): ShareStatusFilter {
+/**
+ * Read the active status tab back out of the filter model.
+ *
+ * @stability experimental
+ */
+export function statusFromFilters(model: MemoriahubDataTableFilterModel): ShareStatusFilter {
   for (let index = model.length - 1; index >= 0; index -= 1) {
     const filter = model[index];
     if (filter.columnId !== 'status' || filter.operator !== 'is') continue;
@@ -319,11 +361,13 @@ export function statusFromFilters(model: DataTableFilterModel): ShareStatusFilte
  * `'all'` REMOVES the status entry rather than encoding an "all" value — the
  * absence of the filter is what the endpoint means by "every status", exactly
  * as `processedWithin` handles it on the job queue (§18.1).
+ *
+ * @stability experimental
  */
 export function withStatusFilter(
-  model: DataTableFilterModel,
+  model: MemoriahubDataTableFilterModel,
   status: ShareStatusFilter,
-): DataTableFilterModel {
+): MemoriahubDataTableFilterModel {
   const withoutStatus = model.filter((filter) => filter.columnId !== 'status');
   if (status === 'all') return withoutStatus;
   return [...withoutStatus, { columnId: 'status', operator: 'is', value: status }];
@@ -333,7 +377,11 @@ export function withStatusFilter(
 // Model → query params
 // ---------------------------------------------------------------------------
 
-/** The subset of `useMediaShares` params the filter model produces. */
+/**
+ * The subset of `useMediaShares` params the filter model produces.
+ *
+ * @stability experimental
+ */
 export interface ShareFilterQuery {
   status?: ShareStatus;
   targetType?: ShareTargetType;
@@ -342,10 +390,12 @@ export interface ShareFilterQuery {
 /**
  * Reduce an emitted model to one this endpoint can answer: at most one filter
  * per column, last one wins (every param here is single-valued).
+ *
+ * @stability experimental
  */
-export function normalizeShareFilters(model: DataTableFilterModel): DataTableFilterModel {
+export function normalizeShareFilters(model: MemoriahubDataTableFilterModel): MemoriahubDataTableFilterModel {
   const claimed = new Set<string>();
-  const out: DataTableFilterModel = [];
+  const out: MemoriahubDataTableFilterModel = [];
   for (let index = model.length - 1; index >= 0; index -= 1) {
     const filter = model[index];
     if (claimed.has(filter.columnId)) continue;
@@ -360,8 +410,10 @@ export function normalizeShareFilters(model: DataTableFilterModel): DataTableFil
  *
  * Unknown columns, operators and enum values are ignored rather than forwarded:
  * a filter restored from a stale URL should drop, not produce a 400.
+ *
+ * @stability experimental
  */
-export function toShareQuery(model: DataTableFilterModel): ShareFilterQuery {
+export function toShareQuery(model: MemoriahubDataTableFilterModel): ShareFilterQuery {
   const query: ShareFilterQuery = {};
 
   for (const filter of model) {

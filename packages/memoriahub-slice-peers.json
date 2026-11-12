@@ -622,6 +622,32 @@
           "react-router-dom"
         ]
       }
+    },
+    "shares": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "node-backup": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

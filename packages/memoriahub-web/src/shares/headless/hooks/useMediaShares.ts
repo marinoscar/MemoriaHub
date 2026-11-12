@@ -5,35 +5,49 @@ import type {
   ShareTargetType,
   UpdateShareRequest,
   BulkShareRequest,
-} from '../types/sharing';
+} from '../types.js';
 import {
   listShares,
   updateShare as updateShareApi,
   revokeShare as revokeShareApi,
   bulkShares as bulkSharesApi,
   type ShareListMeta,
-} from '../services/shareService';
-import { useIsMounted } from './useIsMounted';
+} from '../services/shareService.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Hook params and return shape
 // ---------------------------------------------------------------------------
 
-interface UseMediaSharesParams {
+/**
+ * The filters and page of {@link useMediaShares}.
+ *
+ * @stability experimental
+ */
+export interface UseMediaSharesParams {
   status?: ShareStatus;
   targetType?: ShareTargetType;
   page?: number;
   pageSize?: number;
 }
 
-interface UseMediaSharesResult {
+/**
+ * What {@link useMediaShares} returns.
+ *
+ * @stability experimental
+ */
+export interface UseMediaSharesResult {
   shares: MediaShare[];
   meta: ShareListMeta | null;
   isLoading: boolean;
   error: string | null;
+  /** Reloads the current page. */
   refetch: () => Promise<void>;
+  /** Re-dates a link and reloads. */
   updateShare: (id: string, req: UpdateShareRequest) => Promise<void>;
+  /** Revokes a link and reloads. */
   revokeShare: (id: string) => Promise<void>;
+  /** Applies one action to several links and reloads; resolves with how many succeeded. */
   bulkAction: (req: BulkShareRequest) => Promise<{ affected: number }>;
 }
 
@@ -41,6 +55,14 @@ interface UseMediaSharesResult {
 // Hook implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Loads one page of public links and the mutations over them.
+ *
+ * @param params - the status and target filters and the one-based page.
+ * @returns the links, the paging block and the actions.
+ *
+ * @stability experimental
+ */
 export function useMediaShares(params?: UseMediaSharesParams): UseMediaSharesResult {
   const [shares, setShares] = useState<MediaShare[]>([]);
   const [meta, setMeta] = useState<ShareListMeta | null>(null);

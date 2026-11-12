@@ -29,23 +29,19 @@ import {
   resetContainerWidth,
   setInitialContainerWidth,
 } from '@marinoscar/platform-web/datatable/testing';
-import type { MediaShare } from '../../types/sharing';
+import type { MediaShare } from '@marinoscar/memoriahub-web/shares/headless';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks — declared before imports they affect
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
-  usePermissions: vi.fn(),
-}));
-
-vi.mock('../../hooks/useMediaShares', () => ({
+vi.mock('@marinoscar/memoriahub-web/shares/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useMediaShares: vi.fn(),
 }));
 
-import { usePermissions } from '../../hooks/usePermissions';
-import { useMediaShares } from '../../hooks/useMediaShares';
-import PublicSharesPage from '../../pages/Admin/PublicSharesPage';
+import { useMediaShares } from '@marinoscar/memoriahub-web/shares/headless';
+import { PublicSharesPage } from '@marinoscar/memoriahub-web/shares/ui';
 import {
   buildShareColumns,
   normalizeShareFilters,
@@ -53,29 +49,15 @@ import {
   toShareQuery,
   truncateShareUrl,
   withStatusFilter,
-} from '../../pages/Admin/sharesTable';
+} from '@marinoscar/memoriahub-web/shares/ui';
 import type { DataTableFilterModel } from '@marinoscar/platform-web/datatable/headless';
 import { api } from '../../services/api';
 
-const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseMediaShares = vi.mocked(useMediaShares);
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makePermissions(isAdmin: boolean) {
-  return {
-    permissions: new Set<string>(),
-    roles: new Set<string>(isAdmin ? ['admin'] : ['viewer']),
-    hasPermission: vi.fn().mockReturnValue(isAdmin),
-    hasAnyPermission: vi.fn().mockReturnValue(isAdmin),
-    hasAllPermissions: vi.fn().mockReturnValue(isAdmin),
-    hasRole: vi.fn().mockReturnValue(isAdmin),
-    hasAnyRole: vi.fn().mockReturnValue(isAdmin),
-    isAdmin,
-  };
-}
 
 function makeShare(overrides: Partial<MediaShare> = {}): MediaShare {
   const id = overrides.id ?? 'share-1';
@@ -153,7 +135,6 @@ describe('PublicSharesPage', () => {
     vi.clearAllMocks();
     resetContainerWidth(1400); // desktop layout unless a test says otherwise
 
-    mockUsePermissions.mockReturnValue(makePermissions(true));
     mockUseMediaShares.mockReturnValue(makeHook());
 
     // Re-installed per test: `userEvent.setup()` swaps in its own
@@ -178,10 +159,9 @@ describe('PublicSharesPage', () => {
 
   describe('Authorization', () => {
     it('redirects non-admin users — page content is not rendered', () => {
-      mockUsePermissions.mockReturnValue(makePermissions(false));
-
+      // The page reads the role from the host's principal (the signed-in user), not a mocked hook.
       render(<PublicSharesPage />, {
-        wrapperOptions: { user: mockAdminUser, route: '/admin/shares' },
+        wrapperOptions: { user: { ...mockAdminUser, roles: [{ name: 'viewer' }] }, route: '/admin/shares' },
       });
 
       expect(screen.queryByText(/public sharing/i)).not.toBeInTheDocument();

@@ -45,27 +45,38 @@ import {
 } from '@mui/material';
 import BackupIcon from '@mui/icons-material/SettingsBackupRestore';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useNodeBackup } from '../../hooks/useNodeBackup';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import type { NodeBackupRunDto } from '../../services/nodeBackup';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
+import { formatBytes, relativeTime, useMemoriahubAdmin, useOwnerScope, usePermissions } from '../../../core/headless/index.js';
+import { useNodeBackup } from '../../headless/index.js';
+import type { NodeBackupRunDto } from '../../headless/services/nodeBackup.js';
 import {
   NODE_BACKUP_RUNS_TABLE_ID,
   buildNodeBackupRunColumns,
-} from './nodeBackupTable';
-import { formatBytes, relativeTime } from '../../utils/formatBytes';
+} from '../nodeBackupTable.js';
 
 // ---------------------------------------------------------------------------
 // Schedule presets
 // ---------------------------------------------------------------------------
 
+/**
+ * The cron of the "Daily" schedule preset (03:00).
+ *
+ * @stability experimental
+ */
 export const DAILY_CRON = '0 3 * * *';
+/**
+ * The cron of the "Weekly" schedule preset (Sunday 03:00).
+ *
+ * @stability experimental
+ */
 export const WEEKLY_CRON = '0 3 * * 0';
 
 type SchedulePreset = 'none' | 'daily' | 'weekly' | 'custom';
 
-/** Map a stored cron back onto the preset select. */
+/**
+ * Map a stored cron back onto the preset select.
+ *
+ * @stability experimental
+ */
 export function deriveSchedulePreset(scheduleCron: string | null): SchedulePreset {
   if (scheduleCron === null || scheduleCron === '') return 'none';
   if (scheduleCron === DAILY_CRON) return 'daily';
@@ -79,6 +90,8 @@ export function deriveSchedulePreset(scheduleCron: string | null): SchedulePrese
  * Typed via a narrow cast because the app's tsconfig lib is ES2020 while
  * `supportedValuesOf` is ES2022 — every supported runtime has it, but a
  * fallback keeps the select usable if an ancient browser doesn't.
+ *
+ * @stability experimental
  */
 export function supportedTimezones(fallback: string): string[] {
   const intl = Intl as typeof Intl & {
@@ -116,6 +129,7 @@ function timestampOrNever(iso: string | null): string {
 // ---------------------------------------------------------------------------
 
 function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
+  const { DataTable } = useMemoriahubAdmin();
   const { config, configLoaded, runs, loading, saving, error, refresh, saveConfig } =
     useNodeBackup(nodeId, { autoRefresh: true });
   // RETRO-I6 (#588): the node owner's libraries are the owner scopes ("My library" + their groups).
@@ -485,6 +499,11 @@ function NodeBackupPageContent({ nodeId }: { nodeId: string }) {
 // Admin-gated export (mirrors WorkersPage pattern)
 // ---------------------------------------------------------------------------
 
+/**
+ * The Node Backup admin page: status, config and run history of one worker node's local media backup.
+ *
+ * @stability experimental
+ */
 export default function NodeBackupPage() {
   const { isAdmin } = usePermissions();
   const { id } = useParams<{ id: string }>();

@@ -31,13 +31,14 @@ vi.mock('../../hooks/usePermissions', () => ({
   usePermissions: vi.fn(),
 }));
 
-vi.mock('../../services/jobs', () => ({
+vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   repairThumbnails: vi.fn(),
 }));
 
 import JobsPage from '../../pages/Admin/JobsPage';
 import { usePermissions } from '../../hooks/usePermissions';
-import { repairThumbnails } from '../../services/jobs';
+import { repairThumbnails } from '@marinoscar/memoriahub-web/media/headless';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockRepair = vi.mocked(repairThumbnails);

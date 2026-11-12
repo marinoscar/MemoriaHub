@@ -13,16 +13,41 @@ import {
   Alert,
   Divider,
 } from '@mui/material';
-import { getSearchFields } from '@marinoscar/memoriahub-web/search/headless';
-import type { SearchField } from '@marinoscar/memoriahub-web/search/headless';
-import type { UserSettings } from '../../types';
+import { getSearchFields } from '../../headless/index.js';
+import type { SearchField } from '../../headless/index.js';
 
-interface SearchFieldsSettingsProps {
-  settings: UserSettings;
-  updateSettings: (updates: Partial<UserSettings>) => Promise<void>;
+/**
+ * The part of the user's settings document the search preferences card reads.
+ *
+ * @stability experimental
+ */
+export interface SearchFieldsSettingsDocument {
+  /** `search`: which fields the search panel offers; empty or absent means all. */
+  search?: { visibleFields?: string[] };
+}
+
+/**
+ * Props of {@link SearchFieldsSettings}.
+ *
+ * @stability experimental
+ */
+export interface SearchFieldsSettingsProps {
+  /** The user's settings document. */
+  settings: SearchFieldsSettingsDocument;
+  /** Saves the chosen field keys. */
+  updateSettings: (updates: { search: { visibleFields: string[] } }) => Promise<void>;
+  /** Disables the card's controls. */
   disabled?: boolean;
 }
 
+/**
+ * The search preferences card: choose which fields the search panel offers.
+ *
+ * @param props - the settings document, the save callback and the disabled flag.
+ * @returns the card.
+ *
+ * @stability experimental
+ */
 export function SearchFieldsSettings({
   settings,
   updateSettings,

@@ -10,6 +10,7 @@ import { MemoriahubWebHostProvider } from '../../src/core/headless/host.js';
 import type { MemoriahubWebHost } from '../../src/core/headless/host.js';
 import type { MemoriahubCircle, MemoriahubCircleRole, MemoriahubOwnerScopeValue } from '../../src/core/headless/owner-scope.js';
 import { createFakeMemoriahubWebHost } from '../../src/core/testing/fake-host.js';
+import type { FakeRoute } from '../../src/core/testing/fake-host.js';
 
 /** The user the wrapper signs in. */
 export interface MockUser {
@@ -67,6 +68,10 @@ export interface WrapperOptions {
   search?: MemoriahubWebHost['search'];
   /** The host's shell layout port. */
   shell?: MemoriahubWebHost['shell'];
+  /** Answers of the fake host's HTTP router (`'GET /memories': {...}`); a render that needs real requests instead of module mocks. */
+  routes?: Record<string, FakeRoute>;
+  /** The host's Android port (the Media Sync and Android pages need one). */
+  android?: MemoriahubWebHost['android'];
 }
 
 let hostDefaults: WrapperOptions = {};
@@ -104,6 +109,8 @@ export function buildTestHost(rawOptions: WrapperOptions = {}): MemoriahubWebHos
   const { host } = createFakeMemoriahubWebHost({
     principal: authenticated && user ? { id: user.id, permissions: user.permissions, roles: user.roles.map((r) => r.name), displayName: user.displayName, timeZone: user.timezone } : null,
     features: options.features,
+    routes: options.routes,
+    android: options.android,
     slots: options.slots,
     ownerScope: {
       scopes: scope ? [scope] : [],

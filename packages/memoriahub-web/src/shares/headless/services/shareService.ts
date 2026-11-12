@@ -7,9 +7,14 @@
  *
  * Creating a link is the sharing slice's (`MediaShareDialog`, `LinkSharePanel`).
  */
-import { api } from './api';
-import type { BulkShareRequest, MediaShare, ShareStatus, ShareTargetType, UpdateShareRequest } from '../types/sharing';
+import { api } from '../../../core/headless/index.js';
+import type { BulkShareRequest, MediaShare, ShareStatus, ShareTargetType, UpdateShareRequest } from '../types.js';
 
+/**
+ * The paging block of a link list.
+ *
+ * @stability experimental
+ */
 export interface ShareListMeta {
   page: number;
   pageSize: number;
@@ -17,13 +22,22 @@ export interface ShareListMeta {
   totalPages: number;
 }
 
+/**
+ * One page of links.
+ *
+ * @stability experimental
+ */
 export interface ShareListResponse {
   items: MediaShare[];
   meta: ShareListMeta;
 }
 
-/** One row of `GET /api/admin/links`. */
-interface AdminLinkDto {
+/**
+ * One row of `GET /api/admin/links`.
+ *
+ * @stability experimental
+ */
+export interface AdminLinkDto {
   id: string;
   resourceType: ShareTargetType;
   url: string | null;
@@ -35,6 +49,14 @@ interface AdminLinkDto {
   preview: { type: ShareTargetType; title: string | null; thumbnailUrl: string | null; itemCount?: number } | null;
 }
 
+/**
+ * Maps a `GET /api/admin/links` row onto {@link MediaShare}.
+ *
+ * @param link - the wire row.
+ * @returns the page's shape.
+ *
+ * @stability experimental
+ */
 export function toMediaShare(link: AdminLinkDto): MediaShare {
   return {
     id: link.id,
@@ -53,6 +75,14 @@ export function toMediaShare(link: AdminLinkDto): MediaShare {
   };
 }
 
+/**
+ * Lists public links (`GET /api/admin/links`, `sharing:admin`).
+ *
+ * @param params - status and target filters and the one-based page.
+ * @returns the page of links.
+ *
+ * @stability experimental
+ */
 export async function listShares(params?: {
   status?: ShareStatus;
   targetType?: ShareTargetType;
@@ -69,15 +99,37 @@ export async function listShares(params?: {
   return { items: page.items.map(toMediaShare), meta: page.meta };
 }
 
+/**
+ * Re-dates a link (`PATCH /api/grants/:id`).
+ *
+ * @param id - the link grant's id.
+ * @param req - the new expiry.
+ *
+ * @stability experimental
+ */
 export async function updateShare(id: string, req: UpdateShareRequest): Promise<void> {
   await api.patch<unknown>(`/grants/${id}`, { expiresAt: req.expiresAt });
 }
 
+/**
+ * Revokes a link (`DELETE /api/grants/:id`).
+ *
+ * @param id - the link grant's id.
+ *
+ * @stability experimental
+ */
 export async function revokeShare(id: string): Promise<void> {
   await api.delete<void>(`/grants/${id}`);
 }
 
-/** Applies one action to every selected link; returns how many succeeded. */
+/**
+ * Applies one action to every selected link.
+ *
+ * @param req - the ids and the action.
+ * @returns how many succeeded.
+ *
+ * @stability experimental
+ */
 export async function bulkShares(req: BulkShareRequest): Promise<{ affected: number }> {
   let affected = 0;
   for (const id of req.ids) {
