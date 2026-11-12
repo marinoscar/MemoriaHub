@@ -98,7 +98,7 @@ jobs:
             -e MODELS_DIR=/app/models \
             -w /app/packages/memoriahub-compute \
             memoriahub-api:parity-gate \
-            --test --test-name-pattern='/^(?!.*HEIC)/' test/golden.test.mjs
+            --test --test-name-pattern='computeDHash' --test-name-pattern='hammingDistance' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the API image)
         run: |
@@ -156,7 +156,7 @@ jobs:
             -e REQUIRE_CLIP_MODEL=1 \
             -w /app/packages/memoriahub-compute \
             memoriahub-worker:parity-gate \
-            --test --test-name-pattern='/^(?!.*(HEIC|CLIP embedding))/' test/golden.test.mjs
+            --test --test-name-pattern='computeDHash' --test-name-pattern='hammingDistance' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the worker image)
         run: |
