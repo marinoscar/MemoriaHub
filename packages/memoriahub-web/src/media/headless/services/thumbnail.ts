@@ -28,3 +28,25 @@ export interface ThumbnailRerunResult {
 export async function rerunThumbnail(mediaId: string): Promise<ThumbnailRerunResult> {
   return api.post<ThumbnailRerunResult>(`/media/${mediaId}/thumbnail/rerun`);
 }
+
+/**
+ * The answer of {@link repairThumbnails}: the queued job.
+ *
+ * @stability experimental
+ */
+export interface ThumbnailRepairResult {
+  jobId: string;
+  status: string;
+}
+
+/**
+ * Queues the global thumbnail-repair sweep now instead of at the next hourly tick
+ * (`POST /admin/media/thumbnails/repair`, `storage:delete_any`).
+ *
+ * @returns the queued job's id and status.
+ *
+ * @stability experimental
+ */
+export async function repairThumbnails(): Promise<ThumbnailRepairResult> {
+  return api.post<ThumbnailRepairResult>('/admin/media/thumbnails/repair', {});
+}
