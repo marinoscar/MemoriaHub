@@ -4,10 +4,11 @@
  *
  * `platform db drift` replays prisma/migrations into a shadow database, diffs
  * the result against the composed schema (prisma/schema/), and asserts the
- * raw-SQL indexes and RLS policies against the live database. It is clean on its
- * own today (platform.lock records the deviations), so prisma/drift-allowlist.json
- * does not exist and excuses nothing; a statement that ever needs excusing is
- * listed there with a reason and the issue that removes it.
+ * raw-SQL indexes and RLS policies against the live database. The legacy tables
+ * carry pre-existing drift (UUID defaults, foreign-key names, the pgvector
+ * objects), so the plain check is never clean; prisma/drift-allowlist.json lists
+ * each such statement once, with the reason it is excused and what removes it,
+ * and CI (the API DB tier) fails on any statement that is not listed.
  *
  * This script runs the platform check (through scripts/platform-env.js, which
  * builds DATABASE_URL from POSTGRES_*), removes the allowlisted SCHEMA_DRIFT
@@ -84,7 +85,7 @@ export function parseDriftOutput(text) {
 }
 
 export function loadAllowlist(file) {
-  // MemoriaHub has no excused drift today: a missing allowlist file is an empty one.
+  // A missing allowlist file is an empty one: every statement is then unexplained.
   if (!existsSync(file)) return [];
   const parsed = JSON.parse(readFileSync(file, 'utf8'));
   const entries = Array.isArray(parsed) ? parsed : parsed.entries;

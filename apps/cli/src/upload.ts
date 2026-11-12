@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { UPLOAD_ERROR_REASONS } from '@marinoscar/memoriahub-contract/errors';
 import { ApiClient, ApiError } from './api.js';
 import { STALE_SESSION_MESSAGE_RE } from './http/retry.js';
 
@@ -41,8 +42,8 @@ interface PartTarget {
 }
 
 /** `details.reason` values the storage API attaches to upload errors. */
-const REASON_UPLOAD_PARTS_MISSING = 'UPLOAD_PARTS_MISSING';
-const REASON_UPLOAD_SESSION_INVALID = 'UPLOAD_SESSION_INVALID';
+const REASON_UPLOAD_PARTS_MISSING = UPLOAD_ERROR_REASONS.UPLOAD_PARTS_MISSING;
+const REASON_UPLOAD_SESSION_INVALID = UPLOAD_ERROR_REASONS.UPLOAD_SESSION_INVALID;
 
 /**
  * How many times one upload re-sends parts the server reported missing before

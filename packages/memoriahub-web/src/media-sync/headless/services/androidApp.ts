@@ -14,6 +14,7 @@
  * callers key off `errorReason(err)`, never `err.code`.
  */
 
+import { ANDROID_APP_ERROR_REASONS } from '@marinoscar/memoriahub-contract/errors';
 import { api, MemoriahubApiError as ApiError } from '../../../core/headless/index.js';
 import type { MemoriahubDownloadLink, MemoriahubPublicRelease } from '../../../core/headless/index.js';
 
@@ -36,7 +37,7 @@ export type DownloadLink = MemoriahubDownloadLink;
  *
  * @stability experimental
  */
-export const NO_RELEASE_REASON = 'NO_RELEASE';
+export const NO_RELEASE_REASON = ANDROID_APP_ERROR_REASONS.NO_RELEASE;
 
 /**
  * `details.reason` of an API error, or null.

@@ -133,12 +133,25 @@ test('primitives: bbox, time zones and the lenient date', async () => {
 });
 
 test('error reasons are frozen and unique strings keyed by themselves', async () => {
-  const { MEDIA_SYNC_ERROR_REASONS, SHARE_ERROR_REASONS } = await import('@marinoscar/memoriahub-contract/errors');
-  for (const map of [MEDIA_SYNC_ERROR_REASONS, SHARE_ERROR_REASONS]) {
+  const { MEDIA_SYNC_ERROR_REASONS, SHARE_ERROR_REASONS, UPLOAD_ERROR_REASONS, ANDROID_APP_ERROR_REASONS } = await import(
+    '@marinoscar/memoriahub-contract/errors'
+  );
+  for (const map of [MEDIA_SYNC_ERROR_REASONS, SHARE_ERROR_REASONS, UPLOAD_ERROR_REASONS, ANDROID_APP_ERROR_REASONS]) {
     assert.ok(Object.isFrozen(map));
     for (const [key, value] of Object.entries(map)) assert.equal(key, value);
   }
   assert.equal(MEDIA_SYNC_ERROR_REASONS.TARGET_OWNER_FORBIDDEN, 'TARGET_OWNER_FORBIDDEN');
+});
+
+test('upload and Android refusal reasons keep their wire strings and schemas', async () => {
+  const c = await import('@marinoscar/memoriahub-contract/errors');
+  assert.equal(c.UPLOAD_ERROR_REASONS.UPLOAD_PARTS_MISSING, 'UPLOAD_PARTS_MISSING');
+  assert.equal(c.UPLOAD_ERROR_REASONS.UPLOAD_SESSION_INVALID, 'UPLOAD_SESSION_INVALID');
+  assert.equal(c.ANDROID_APP_ERROR_REASONS.NO_RELEASE, 'NO_RELEASE');
+  assert.deepEqual(c.uploadPartsMissingDetailsSchema.parse({ reason: 'UPLOAD_PARTS_MISSING', partNumbers: [2, 5] }).partNumbers, [2, 5]);
+  assert.equal(c.uploadPartsMissingDetailsSchema.safeParse({ reason: 'UPLOAD_PARTS_MISSING', partNumbers: [0] }).success, false);
+  assert.equal(c.uploadPartsMissingDetailsSchema.safeParse({ reason: 'UPLOAD_SESSION_INVALID', partNumbers: [1] }).success, false);
+  assert.equal(c.errorReasonDetailsSchema.parse({ reason: 'NO_RELEASE', extra: 1 }).reason, 'NO_RELEASE');
 });
 
 test('media-sync limits keep their documented values', async () => {

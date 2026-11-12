@@ -60,9 +60,8 @@ const MODEL_PATH = path.join(MODELS_DIR, 'clip-vit-b32-vision-quantized.onnx');
 // match EXACTLY on every run/platform — no tolerance.
 const GOLDEN_DHASH = '18446742974197923839';
 
-// TODO(maintainer): pin from an IN-IMAGE decode (production HEIF-enabled
-// libvips) — the CI gate prints the computed value; see fixtures/README.md
-const GOLDEN_HEIC_DHASH = null;
+// Pinned from the in-image decode in CI (identical in the API and worker images, every run, RETRO-J).
+const GOLDEN_HEIC_DHASH = '18446742974197923839';
 
 // REQUIRE_HEIC_DECODE=1 turns "sharp could not decode HEIC natively" from a
 // skip into a hard failure. Set by the CI golden-vector parity gate

@@ -9,11 +9,10 @@
 // job-history purge, the provider throttle and `/api/admin/jobs/*`. It also
 // mounts the platform Doctor checks `jobs.worker` and `jobs.backlog`.
 //
-// What stays is the LEGACY FACE (`enrichment/`): the 38 `EnrichmentHandler`
-// classes, wrapped by `platform/jobs/legacy-handlers.adapter.ts`, and
-// `EnrichmentJobService.enqueue`, now a facade over `JobsService`
-// (`platform/jobs/enrichment-job.facade.ts`). C3 to C8 convert the handlers to
-// native `JobHandler`s.
+// What stays is the LEGACY FACE (`enrichment/`): `EnrichmentJobService.enqueue`,
+// now a facade over `JobsService` (`platform/jobs/enrichment-job.facade.ts`).
+// Every handler is a native `JobHandler` (the `EnrichmentHandler` adapter and
+// registry were deleted).
 //
 // ORDER. `forRoot` registers the `jobs` and `retention` system-settings
 // namespaces the slice owns unless the settings manifest already did (it lists

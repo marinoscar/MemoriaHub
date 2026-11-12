@@ -1,0 +1,101 @@
+name: MemoriaHub packages version PR
+
+# The Changesets version flow of the @marinoscar/memoriahub-* packages, run by hand.
+# READ docs/runbooks/release-memoriahub-packages.md ("Versioning").
+#
+# SAFETY CONTRACT (nothing here may open a pull request, publish or use a secret on its own):
+#
+#   - the ONLY trigger is workflow_dispatch: no push, no tag, no pull_request, no schedule;
+#   - the default run is a DRY RUN: it runs `changeset version` and the lockfile refresh in the
+#     runner's checkout, uploads the resulting diff as an artifact and writes it to the job summary.
+#     It pushes nothing and opens nothing;
+#   - a pull request is opened only when the dispatch sets `open_pr` to true AND `confirm` to the
+#     word `version`. It pushes the branch `changeset-release/memoriahub` and opens the pull request
+#     with the workflow's own GITHUB_TOKEN (no repository secret is defined or read here);
+#   - it never publishes: publishing is memoriahub-release.yml, which is also manual and gated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      open_pr:
+        description: 'Open the version pull request (default false = dry run: show the diff only)'
+        type: boolean
+        default: false
+      confirm:
+        description: 'Type the word version to confirm opening the pull request (ignored for a dry run)'
+        type: string
+        default: ''
+
+concurrency:
+  group: memoriahub-version
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version the packages (dry run unless confirmed)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      OPEN_PR: ${{ inputs.open_pr == true && inputs.confirm == 'version' }}
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Pending changesets
+        run: npx changeset status --verbose
+
+      - name: Version the packages and refresh the lockfile
+        run: npm run version-packages
+
+      - name: Diff
+        run: |
+          git add -A
+          git diff --cached --stat | tee "$RUNNER_TEMP/version.stat"
+          git diff --cached > "$RUNNER_TEMP/version.diff"
+          {
+            echo '### Version diff (not pushed unless a pull request was confirmed)'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/version.stat"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memoriahub-version-diff
+          path: ${{ runner.temp }}/version.diff
+          if-no-files-found: error
+
+      - name: Open the version pull request (only when confirmed)
+        if: ${{ env.OPEN_PR == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
+            echo "No pending changesets: nothing to version, no pull request opened."
+            exit 0
+          fi
+          branch="changeset-release/memoriahub"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git commit -m "chore(core): version the memoriahub packages"
+          git push --force origin "$branch"
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+            --title "chore(core): version the memoriahub packages" \
+            --body "Produced by memoriahub-version.yml (changeset version and the lockfile refresh). Review that all package versions are equal and the lockfile diff is limited to workspace entries. Nothing is published by merging this."

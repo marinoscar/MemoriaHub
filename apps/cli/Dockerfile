@@ -29,6 +29,18 @@
 # prebuilt binaries which do not exist on Alpine/musl (GitHub issue #110). The
 # worker runs the SAME CLIP visual-embedding + face compute as the server, so it
 # needs the identical native stack.
+# -----------------------------------------------------------------------------
+# libvips stage: libvips 8.18.3 compiled WITH libheif/libde265 (RETRO-J, #593/#616)
+# -----------------------------------------------------------------------------
+# sharp 0.35.x only builds against a system libvips >= 8.18.3 and Debian trixie
+# ships 8.16, so the distro package cannot be used; sharp's bundled libvips has no
+# HEVC decoder. Compile it once here (scripts/docker/build-libvips.sh, shared by
+# apps/api and apps/cli so both executors link the IDENTICAL build: embedding
+# parity) and copy /opt/vips into `base`.
+FROM node:26-slim AS vips
+COPY scripts/docker/build-libvips.sh /tmp/build-libvips.sh
+RUN /tmp/build-libvips.sh
+
 FROM node:26-slim AS base
 WORKDIR /app
 # ffmpeg/ffprobe: video probe, frame extraction, and the HEIC transcode fallback
@@ -51,8 +63,17 @@ WORKDIR /app
 #   the identical libvips build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg perl wget ca-certificates \
-      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
+      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 libhwy1t64 \
     && rm -rf /var/lib/apt/lists/*
+
+# The source-built libvips 8.18.3 (HEIF/HEVC enabled). The apt libvips42t64
+# above stays only to pull in the shared-library dependency closure; the
+# LD_LIBRARY_PATH entry makes the dynamic loader prefer /opt/vips for libvips
+# itself, which is what the sharp addon (built against it below) links.
+COPY --from=vips /opt/vips /opt/vips
+ENV LD_LIBRARY_PATH=/opt/vips/lib \
+    PKG_CONFIG_PATH=/opt/vips/lib/pkgconfig \
+    CPATH=/opt/vips/include
 
 # -----------------------------------------------------------------------------
 # Dependencies stage
@@ -61,12 +82,12 @@ FROM base AS deps
 # Build toolchain for native modules that may fall back to source compilation
 # (better-sqlite3 via node-gyp when no prebuild matches the target arch). Kept
 # in this stage only so the final image stays lean.
-# pkg-config + libvips-dev: build-only deps for sharp's from-source addon build
+# pkg-config + the dev headers libvips.pc requires (the distro libvips-dev is deliberately NOT installed: its 8.16 headers must not shadow /opt/vips): build-only deps for sharp's from-source addon build
 # against the global HEIF-enabled libvips (see SHARP_FORCE_GLOBAL_LIBVIPS below).
 # sharp locates libvips via `pkg-config --modversion vips-cpp`; libheif-dev is not
 # needed here (libvips dlopens libheif internally).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ pkg-config libvips-dev \
+      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev libheif-dev libexif-dev liblcms2-dev librsvg2-dev libhwy-dev libcgif-dev libspng-dev libimagequant-dev libfftw3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Force sharp to build its native addon FROM SOURCE against the global
@@ -89,12 +110,35 @@ COPY packages/memoriahub-contract ./packages/memoriahub-contract/
 # The compute package's build ends with write-dist-stubs.mjs, which lives in the
 # shared package tooling folder (../../scripts/memoriahub-packages).
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
+# The root package.json `postinstall` runs this; `npm install` below (scripts enabled) fails
+# without it. It is a no-op when react-transition-group is not installed, as here. Found by the
+# PR-time image build (images.yml).
+COPY scripts/patch-react-transition-group.js ./scripts/patch-react-transition-group.js
 # Scripts ENABLED (unlike the API image): the worker needs the native binaries
 # actually built/downloaded — better-sqlite3 (node-gyp/prebuild), onnxruntime-node
 # (postinstall binary fetch, the CLIP runtime), sharp/tesseract.
 # Under buildx the install runs on the target platform, so per-arch (amd64/arm64)
 # native binaries resolve automatically.
 RUN npm install
+
+# Build sharp's native addon from source against the HEIF-enabled libvips in
+# /opt/vips (RETRO-J, #593/#616). sharp 0.35 has NO install script, so neither
+# `npm install` nor `npm rebuild sharp --build-from-source` builds anything: the
+# build is its own `install/build.js` (= `npm run build`), which needs
+# node-addon-api and node-gyp, both only devDependencies of sharp. They are
+# installed in a scratch dir and exposed through PATH/NODE_PATH so nothing leaks
+# into node_modules or the lockfile. The build fails loudly if pkg-config reports
+# a libvips below sharp's minimum, and the final check proves the addon really
+# links the source-built libvips with HEIF support (not the bundled one).
+RUN mkdir /tmp/sharp-tools && cd /tmp/sharp-tools \
+ && npm init -y >/dev/null \
+ && npm install --no-audit --no-fund node-addon-api@8.9.0 node-gyp@12.4.0 \
+ && pkg-config --cflags vips-cpp && pkg-config --libs vips-cpp \
+ && cd /app/node_modules/sharp \
+ && PATH=/tmp/sharp-tools/node_modules/.bin:$PATH NODE_PATH=/tmp/sharp-tools/node_modules \
+    SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \
+ && rm -rf /tmp/sharp-tools \
+ && node -e "require('/app/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node');const s=require('/app/node_modules/sharp');const v=s.versions.vips;console.log('sharp libvips',v,'heif',JSON.stringify(s.versions.heif));if(!/^8\\.18\\./.test(v)||!s.format.heif.input.buffer){process.exit(1)}"
 
 # Build the shared memoriahub-compute workspace package so its dist/ exists
 # before apps/cli (which imports it) is compiled.

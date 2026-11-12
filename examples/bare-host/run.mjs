@@ -17,13 +17,19 @@
 //   6. check-single-instance: one copy of every guarded package
 //   7. builds and runs the host's tests (node --test)
 //
-// memoriahub-db and memoriahub-web are not installed: a headless host with no database and
-// no UI has no use for them (the schema package is proven by the `db-apply` CI job and
-// `check:memoriahub-pack`; the web package is proven by the web app). See README.md.
+// memoriahub-web is never installed (a headless host has no UI; the web app proves it).
+// memoriahub-db is installed only with `--db postgres`. See README.md.
 //
-// Usage: node examples/bare-host/run.mjs [--from pack|workspace] [--keep]
+// Usage: node examples/bare-host/run.mjs [--from pack|workspace] [--db none|postgres] [--keep]
 //   --from pack       install packed tarballs (default; what a consumer gets)
 //   --from workspace  install copies of the workspace package folders
+//   --db none         the slices run on the in-memory ports only (default)
+//   --db postgres     ALSO install the packed @marinoscar/memoriahub-db and run its
+//                     `check --database` (extensions, raw-SQL indexes, generated columns, CHECK
+//                     constraints, function, triggers) against the PostgreSQL named by the
+//                     BARE_HOST_DATABASE_URL environment variable, which must already hold the
+//                     platform and domain migrations (CI: the API DB tier's database). The slices
+//                     still run on the fake prisma client; PGlite is not used.
 //   --keep            keep the temporary folder and print its path
 // Needs: `npm run build:memoriahub-packages` first (at least compute, contract and api).
 // Environment: ONNXRUNTIME_NODE_INSTALL=skip is set for the install (the host never loads onnx).
@@ -83,22 +89,31 @@ function run(command, args, cwd, extraEnv = {}, quiet = false) {
 }
 
 function parseArgs(argv) {
-  const options = { from: 'pack', keep: false };
+  const options = { from: 'pack', db: 'none', keep: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--keep') options.keep = true;
     else if (arg === '--from') {
       options.from = argv[i + 1];
       i += 1;
-    } else fail(`unknown argument '${arg}'\nUsage: node examples/bare-host/run.mjs [--from pack|workspace] [--keep]`, 2);
+    } else if (arg === '--db') {
+      options.db = argv[i + 1];
+      i += 1;
+    } else fail(`unknown argument '${arg}'\nUsage: node examples/bare-host/run.mjs [--from pack|workspace] [--db none|postgres] [--keep]`, 2);
   }
   if (!['pack', 'workspace'].includes(options.from)) fail(`--from must be pack or workspace, got '${options.from}'`, 2);
+  if (!['none', 'postgres'].includes(options.db)) fail(`--db must be none or postgres, got '${options.db}'`, 2);
+  if (options.db === 'postgres') {
+    const url = process.env.BARE_HOST_DATABASE_URL ?? '';
+    if (!/^postgres(ql)?:\/\//.test(url)) fail('--db postgres needs BARE_HOST_DATABASE_URL set to a postgresql:// URL of a migrated database', 2);
+  }
   return options;
 }
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  for (const name of INSTALLED) {
+  const installed = options.db === 'postgres' ? [...INSTALLED, 'memoriahub-db'] : INSTALLED;
+  for (const name of installed) {
     if (!existsSync(join(REPO, 'packages', name, 'dist'))) {
       fail(`packages/${name}/dist is missing. Build first: npm run build:memoriahub-packages`, 2);
     }
@@ -112,7 +127,7 @@ function main() {
   try {
     // 1. the packages
     const spec = {};
-    for (const name of INSTALLED) {
+    for (const name of installed) {
       if (options.from === 'pack') {
         const out = run(NPM, ['pack', '-w', `@marinoscar/${name}`, '--pack-destination', tarballs, '--json'], REPO, {}, true);
         const filename = JSON.parse(out.stdout)[0].filename.replace(/^.*\//, '');
@@ -143,6 +158,18 @@ function main() {
     run(NPM, ['test'], project);
     run(process.execPath, ['dist/src/main.js'], project);
 
+    // 8. the database contract, from the packed memoriahub-db (--db postgres only)
+    if (options.db === 'postgres') {
+      // The installed copies live in the repository's API app (the database host of this repository), so
+      // the check is the packed command over those copies and the live database; `pg` resolves from there.
+      run(
+        process.execPath,
+        [join(project, 'node_modules', '@marinoscar', 'memoriahub-db', 'bin', 'memoriahub-db.js'), 'check', '--database', '--root', join(REPO, 'apps', 'api')],
+        REPO,
+        { DATABASE_URL: process.env.BARE_HOST_DATABASE_URL },
+      );
+    }
+
     // 5 and 6. the repository's own checks, pointed at the temporary project
     run(process.execPath, [join(REPO, 'scripts/memoriahub-packages/check-slice-peers.mjs'), '--root', REPO, '--app', project, '--without', 'local-reverse-geocoder'], REPO);
     // (--without: the bare host never selects the offline geocoder, so it leaves its optional peer out and
@@ -152,7 +179,7 @@ function main() {
     if (options.keep) console.log(`bare-host: kept ${relative(process.cwd(), work) || work}`);
     else rmSync(work, { recursive: true, force: true });
   }
-  console.log(`bare-host: passed (--from ${options.from}).`);
+  console.log(`bare-host: passed (--from ${options.from}, --db ${options.db}).`);
 }
 
 try {

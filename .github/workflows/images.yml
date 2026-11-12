@@ -1,0 +1,247 @@
+name: Images
+
+# PR-time proof that the two production images still build and still pass the
+# gates deploy.yml runs on a release (RETRO-J, #593/#616): the HEIC decode gate
+# (REQUIRE_HEIC_DECODE=1 over the committed golden-fixture.heic) and the
+# golden-vector parity test, each run INSIDE the built image, plus the
+# Postgres-client floor and the worker engine smoke.
+#
+# Build only. The images are loaded into the runner's Docker daemon and never
+# pushed: there is no registry login, no secret and no `packages: write` here.
+# deploy.yml stays the only workflow that publishes.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/cli/**'
+      - 'scripts/docker/**'
+      - 'packages/memoriahub-*/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/images.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/Dockerfile'
+      - 'apps/cli/Dockerfile'
+      - 'scripts/docker/**'
+      - '.github/workflows/images.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-image:
+    name: API image gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: production
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-api:parity-gate
+          # Read the cache deploy.yml writes; never write one from a PR.
+          cache-from: type=gha,scope=api
+          build-args: |
+            VERSION=ci
+
+      - name: Postgres client version gate (inside the API image)
+        # Same floor as deploy.yml and MIN_PG_CLIENT_MAJOR in
+        # apps/api/src/db-backup/pg-version.util.ts.
+        env:
+          MIN_PG_CLIENT_MAJOR: '17'
+        run: |
+          set -euo pipefail
+          for bin in pg_dump pg_restore; do
+            version="$(docker run --rm --entrypoint "$bin" memoriahub-api:parity-gate --version)"
+            echo "$version"
+            major="$(printf '%s' "$version" | sed -nE 's/.*\(PostgreSQL\) ([0-9]+).*/\1/p')"
+            if [ -z "$major" ] || [ "$major" -lt "$MIN_PG_CLIENT_MAJOR" ]; then
+              echo "FATAL: $bin major '${major:-unparsed}' is below the PostgreSQL $MIN_PG_CLIENT_MAJOR floor."
+              exit 1
+            fi
+          done
+
+      - name: sharp build info (inside the API image)
+        run: |
+          docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-api:parity-gate \
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif));const fs=require('fs');s(fs.readFileSync('test/fixtures/golden-fixture.heic')).metadata().then(m=>console.log('heic metadata',m.format,m.width,m.height)).catch(e=>console.log('heic metadata ERROR',e.message)).then(()=>s(fs.readFileSync('test/fixtures/golden-fixture.heic')).raw().toBuffer().then(b=>console.log('heic decode ok',b.length)).catch(e=>console.log('heic decode ERROR',e.message))).then(()=>console.log([...new Set(fs.readFileSync('/proc/self/maps','utf8').split(String.fromCharCode(10)).filter(l=>/vips|heif|de265|sharp-/.test(l)).map(l=>l.split(/\s+/).pop()))].join(String.fromCharCode(10))))"
+
+      - name: Built sharp addon diagnostics (inside the API image)
+        run: |
+          docker run --rm --entrypoint sh memoriahub-api:parity-gate -c 'ls -l /app/node_modules/sharp/src/build/Release/ || true; ldd /app/node_modules/sharp/src/build/Release/sharp-linux-x64-*.node | grep -E "vips|heif|not found" || true; env | grep -E "LD_LIBRARY|CPATH|SHARP"; node -e "try{require(\"/app/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node\");console.log(\"built addon loads\")}catch(e){console.log(\"built addon ERROR\",e.message)}"'
+
+      - name: Golden-vector parity gate (inside the API image)
+        # REQUIRE_CLIP_MODEL is not set: the API image does not bake the CLIP
+        # model, so that assertion skips while the dHash ones run. The HEIC case
+        # is its own step below.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-api:parity-gate \
+            --test --test-name-pattern='computeDHash' --test-name-pattern='hammingDistance' test/golden.test.mjs
+
+      - name: HEIC native decode gate (inside the API image)
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_HEIC_DECODE=1 \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-api:parity-gate \
+            --test --test-name-pattern='HEIC' test/golden.test.mjs
+
+
+  worker-image:
+    name: Worker image gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build Worker image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-worker:parity-gate
+          cache-from: type=gha,scope=worker
+
+      - name: sharp build info (inside the worker image)
+        run: |
+          docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-worker:parity-gate \
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif));const fs=require('fs');s(fs.readFileSync('test/fixtures/golden-fixture.heic')).metadata().then(m=>console.log('heic metadata',m.format,m.width,m.height)).catch(e=>console.log('heic metadata ERROR',e.message)).then(()=>s(fs.readFileSync('test/fixtures/golden-fixture.heic')).raw().toBuffer().then(b=>console.log('heic decode ok',b.length)).catch(e=>console.log('heic decode ERROR',e.message))).then(()=>console.log([...new Set(fs.readFileSync('/proc/self/maps','utf8').split(String.fromCharCode(10)).filter(l=>/vips|heif|de265|sharp-/.test(l)).map(l=>l.split(/\s+/).pop()))].join(String.fromCharCode(10))))"
+
+      - name: Built sharp addon diagnostics (inside the worker image)
+        run: |
+          docker run --rm --entrypoint sh memoriahub-worker:parity-gate -c 'ls -l /app/node_modules/sharp/src/build/Release/ || true; ldd /app/node_modules/sharp/src/build/Release/sharp-linux-x64-*.node | grep -E "vips|heif|not found" || true; env | grep -E "LD_LIBRARY|CPATH|SHARP"; node -e "try{require(\"/app/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node\");console.log(\"built addon loads\")}catch(e){console.log(\"built addon ERROR\",e.message)}"'
+
+      - name: Runner CPU (the quantized CLIP model is CPU-feature dependent)
+        run: grep -m1 'model name' /proc/cpuinfo; grep -m1 -o -E 'avx512_vnni|avx_vnni|avx512f' /proc/cpuinfo | sort -u || true
+
+      - name: Golden-vector parity gate (inside the worker image)
+        # The committed CLIP golden vector is compared in the executor-parity job
+        # (CPU-class gated, see packages/memoriahub-compute/scripts/golden-report.mjs),
+        # so the CLIP case is excluded here. REQUIRE_CLIP_MODEL stays set for the
+        # remaining cases.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_CLIP_MODEL=1 \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-worker:parity-gate \
+            --test --test-name-pattern='computeDHash' --test-name-pattern='hammingDistance' test/golden.test.mjs
+
+      - name: HEIC native decode gate (inside the worker image)
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_HEIC_DECODE=1 \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-worker:parity-gate \
+            --test --test-name-pattern='HEIC' test/golden.test.mjs
+
+
+      - name: Worker engine smoke (inside the worker image)
+        run: |
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node models status
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node config
+
+  executor-parity:
+    name: Cross-executor parity (API vs worker, same runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: production
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-api:parity-gate
+          build-args: |
+            VERSION=ci
+
+      - name: Build Worker image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-worker:parity-gate
+
+      - name: Emit fixture results from both images (same runner, same CLIP model file)
+        # The API image does not bake the CLIP model, so the sha256-pinned model
+        # is taken from the worker image and mounted read-only into both runs.
+        run: |
+          set -euo pipefail
+          mkdir -p out models && chmod 777 out
+          docker create --name modelsrc memoriahub-worker:parity-gate
+          docker cp modelsrc:/app/models/. models/
+          docker rm modelsrc
+          sha256sum models/clip-vit-b32-vision-quantized.onnx
+          for kind in api worker; do
+            docker run --rm \
+              -v "$PWD/models:/app/models:ro" -v "$PWD/out:/out" \
+              -e MODELS_DIR=/app/models \
+              --entrypoint node -w /app/packages/memoriahub-compute \
+              "memoriahub-$kind:parity-gate" scripts/emit-parity.mjs "/out/$kind.json"
+          done
+
+      - name: Cross-executor parity (BLOCKING)
+        # The invariant that matters: the server and a worker node produce the
+        # same embedding / dHash / pixels for the same fixture on the same CPU,
+        # whatever the runner CPU class.
+        run: node packages/memoriahub-compute/scripts/compare-parity.mjs out/api.json out/worker.json
+
+      - name: CLIP committed golden vector (blocking only on the blessed CPU class)
+        # See golden-report.mjs: the result is always printed; only a CPU model
+        # matching GOLDEN_BLESSED_CPU (the class the vector was derived on) fails.
+        env:
+          GOLDEN_BLESSED_CPU: 'EPYC 7763'
+        run: node packages/memoriahub-compute/scripts/golden-report.mjs out/api.json out/worker.json

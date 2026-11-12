@@ -1,16 +1,16 @@
 # errors
 
-Machine-readable `details.reason` codes of the domain: the Media Sync refusals and the retired public-share route. The error `code` is derived from the HTTP status; clients key off `details.reason`. Platform reasons (storage upload, identity) come from `@marinoscar/platform-contract`.
+Machine-readable `details.reason` codes of the domain: the Media Sync refusals, the retired public-share route and the upload (`UPLOAD_PARTS_MISSING`, `UPLOAD_SESSION_INVALID`) and Android (`NO_RELEASE`) reasons a client recovers from. The error `code` is derived from the HTTP status; clients key off `details.reason`. Platform reasons (storage upload, identity) come from `@marinoscar/platform-contract`.
 
 ## Purpose and scope
 
-Machine-readable `details.reason` codes of the domain: the Media Sync refusals and the retired public-share route. The error `code` is derived from the HTTP status; clients key off `details.reason`. Platform reasons (storage upload, identity) come from `@marinoscar/platform-contract`.
+Machine-readable `details.reason` codes of the domain: the Media Sync refusals, the retired public-share route and the upload (`UPLOAD_PARTS_MISSING`, `UPLOAD_SESSION_INVALID`) and Android (`NO_RELEASE`) reasons a client recovers from. The error `code` is derived from the HTTP status; clients key off `details.reason`. Platform reasons (storage upload, identity) come from `@marinoscar/platform-contract`.
 
 Wire shapes only: no framework import, no environment read, no behaviour beyond parsing. The schemas are permanent: add fields, never rename or remove one, and change a limit only with the API in the same release. Status: experimental until the first published release.
 
 ## Entry point
 
-`@marinoscar/memoriahub-contract/errors`. `errors/index.ts` exports `MEDIA_SYNC_ERROR_REASONS`, `SHARE_ERROR_REASONS` and their union types. Other slices are imported only through their `index.ts`.
+`@marinoscar/memoriahub-contract/errors`. `errors/index.ts` exports `MEDIA_SYNC_ERROR_REASONS`, `SHARE_ERROR_REASONS`, `UPLOAD_ERROR_REASONS`, `ANDROID_APP_ERROR_REASONS`, `uploadPartsMissingDetailsSchema`, `errorReasonDetailsSchema` and their types. Other slices are imported only through their `index.ts`.
 
 ## Peer dependencies
 

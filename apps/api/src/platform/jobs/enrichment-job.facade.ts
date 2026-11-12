@@ -14,7 +14,7 @@ import {
   ENRICHMENT_JOB_SETTLED_EVENT,
   EnrichmentJobSettledEvent,
 } from '../../enrichment/events/enrichment-job-settled.event';
-import { toEnrichmentJob } from './legacy-handlers.adapter';
+import { toEnrichmentJob } from './enrichment-job.mapping';
 
 // =============================================================================
 // EnrichmentJobService: the enqueue facade over the platform queue (RETRO-C1, #575)

@@ -99,6 +99,7 @@ Only `duplicate_detection` needs a model file: the CLIP ViT-B/32 vision model (`
 |---|---|---|
 | `Cannot run job type "video_face_detection": required capability "binary:ffmpeg" is missing` | ffmpeg or ffprobe not on `PATH` | `node install-deps`, or install ffmpeg; restart the worker |
 | `required capability "module:sharp" is installed but not operational` | the native binary did not load (wrong platform build, missing libvips) | reinstall the CLI with scripts enabled; in a container use the published image |
+| HEIC/HEIF photos decode through the ffmpeg fallback instead of natively | sharp's bundled libvips has no HEVC decoder; only the published image links the source-built libvips 8.18.3 with libheif and the libde265 plugin (`scripts/docker/build-libvips.sh`), identical to the API image | a native (non-container) install gets HEIC only through ffmpeg, which is correct but slower and not guaranteed to give the same embedding as the server; use the published image on a fleet |
 | `required capability "service:compreface" is missing` | the sidecar does not answer `/status` | start it (`node install-deps` or the compose overlay); check `MEMORIAHUB_COMPREFACE_URL`; `docker logs memoriahub-compreface-core` |
 | `duplicate_detection` not offered, doctor says a model is withheld | CLIP file missing or sha mismatch | `node models pull`, then restart |
 | `--face-provider ... is not supported` / `MEMORIAHUB_FACE_PROVIDER` warning | only `compreface` exists | remove the setting |

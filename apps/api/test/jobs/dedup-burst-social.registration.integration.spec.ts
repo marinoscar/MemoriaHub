@@ -15,7 +15,6 @@ import { BurstDetectionHandler } from '@marinoscar/memoriahub-api/burst';
 import { DuplicateConfidenceBackfillHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionBatchHandler } from '@marinoscar/memoriahub-api/dedup';
 import { DuplicateDetectionHandler } from '@marinoscar/memoriahub-api/dedup';
-import { EnrichmentHandlerRegistry } from '../../src/enrichment/enrichment-handler.registry';
 import { SocialMediaDetectionHandler } from '@marinoscar/memoriahub-api/social-media';
 import { closeTestApp, createTestApp, type TestContext } from '../helpers/test-app.helper';
 
@@ -55,11 +54,6 @@ describe('dedup/burst/social job handlers on the booted app (RETRO-C5)', () => {
     } else {
       expect(registry.get(type)).toBeInstanceOf(HandlerClass);
     }
-  });
-
-  it('none of the five goes through the legacy adapter', () => {
-    const legacy = context.app.get(EnrichmentHandlerRegistry).types();
-    for (const [type] of NATIVE) expect(legacy).not.toContain(type);
   });
 
   it('derives the batch, the confidence backfill and burst detection as server-only, not the two node types', () => {
