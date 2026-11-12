@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { CircleRole } from '../helpers/circle-role';
 import { createMockPrismaService, MockPrismaService } from '../mocks/prisma.mock';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '@marinoscar/memoriahub-api/media';
 import { PERMISSIONS } from '../../src/common/constants/roles.constants';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '@marinoscar/memoriahub-api/media';
 import { randomUUID } from 'crypto';
@@ -161,6 +161,7 @@ describe('Circle Authorization Matrix (MediaService unit)', () => {
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: ReviewQueueCounterRegistry, useValue: new ReviewQueueCounterRegistry() },
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, {
             getProviderFor: jest.fn().mockResolvedValue({
               getSignedDownloadUrl: jest.fn().mockResolvedValue('https://cdn.example.com/download'),

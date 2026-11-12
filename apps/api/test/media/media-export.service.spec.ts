@@ -20,7 +20,7 @@
 import { PassThrough } from 'stream';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
-import { MediaMetadataSyncService } from '@marinoscar/memoriahub-api/media';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '@marinoscar/memoriahub-api/media';
 import {
   createMockPrismaService,
   MockPrismaService,
@@ -188,6 +188,7 @@ describe('MediaService.streamExport', () => {
         // provider stub above is never exercised through this service.
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: ReviewQueueCounterRegistry, useValue: new ReviewQueueCounterRegistry() },
         csvStringifierProvider,
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, { getProviderFor: jest.fn() }) },
         // MediaService constructor index [2]: syncFromStorageObject is not
