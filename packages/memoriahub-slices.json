@@ -228,6 +228,11 @@
       "core",
       "media",
       "review-runs"
+    ],
+    "enhancement": [
+      "core",
+      "media",
+      "review-runs"
     ]
   }
 }

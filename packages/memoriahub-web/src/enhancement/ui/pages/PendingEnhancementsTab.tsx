@@ -28,22 +28,19 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { useEnhancements } from '../../hooks/useEnhancements';
-import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
-import { applyEnhancement, discardEnhancement } from '../../services/enhance';
+import { useEnhancements } from '../../headless/hooks/useEnhancements.js';
+import { useFeatureFlags } from '../../../core/headless/index.js';
+import { getMedia } from '../../../media/headless/index.js';
+import { applyEnhancement, discardEnhancement } from '../../headless/services/enhance.js';
 import type {
   EnhancementListItem,
   EnhancementSortOrder,
   EnhancementStatusFilter,
-} from '../../services/enhance';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import { MediaEnhancementDrawer } from '../../components/media/MediaEnhancementDrawer';
-import {
-  ReplaceDownscaleNotice,
-  describeResolutionLoss,
-} from '../../components/media/ReplaceDownscaleNotice';
-import { RecentBatchesCard } from './RecentBatchesCard';
+} from '../../headless/services/enhance.js';
+import type { MediaItem } from '../../../media/headless/index.js';
+import { MediaEnhancementDrawer } from '../components/MediaEnhancementDrawer.js';
+import { ReplaceDownscaleNotice, describeResolutionLoss } from '../components/ReplaceDownscaleNotice.js';
+import { RecentBatchesCard } from './RecentBatchesCard.js';
 
 const PAGE_SIZE = 24;
 
@@ -51,8 +48,18 @@ const PAGE_SIZE = 24;
 // Expiry countdown
 // ---------------------------------------------------------------------------
 
+/**
+ * How urgent the expiry of an enhancement is.
+ *
+ * @stability experimental
+ */
 export type ExpirySeverity = 'info' | 'warning' | 'error';
 
+/**
+ * The expiry text and severity of one enhancement.
+ *
+ * @stability experimental
+ */
 export interface ExpiryInfo {
   label: string;
   severity: ExpirySeverity;
@@ -72,6 +79,8 @@ const ERROR_THRESHOLD_MS = 6 * HOUR_MS;
  * derive this from its own copy of `pictureEnhancement.retentionHours`, since
  * the setting can change after a row was created and the server has already
  * resolved the real deadline.
+ *
+ * @stability experimental
  */
 export function formatExpiresIn(
   expiresAt: string | null,
@@ -105,7 +114,11 @@ export function formatExpiresIn(
   return { label: `Expires in ${minutes}m`, severity };
 }
 
-/** "3m 20s" elapsed since a job was queued. */
+/**
+ * "3m 20s" elapsed since a job was queued.
+ *
+ * @stability experimental
+ */
 export function formatElapsedSince(from: string, now: number = Date.now()): string {
   const started = new Date(from).getTime();
   if (!Number.isFinite(started)) return '';
@@ -115,7 +128,11 @@ export function formatElapsedSince(from: string, now: number = Date.now()): stri
   return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
-/** Human summary of the params a run was launched with. */
+/**
+ * Human summary of the params a run was launched with.
+ *
+ * @stability experimental
+ */
 export function describeParams(item: EnhancementListItem): string {
   const p = item.params ?? {};
   const bits: string[] = [];
@@ -146,15 +163,24 @@ const STATUS_FILTERS: { value: 'all' | EnhancementStatusFilter; label: string }[
 // Card
 // ---------------------------------------------------------------------------
 
-interface CardProps {
+/**
+ * The props of {@link EnhancementCard}.
+ *
+ * @stability experimental
+ */
+export interface CardProps {
   item: EnhancementListItem;
   now: number;
   allowReplace: boolean;
   blockReplaceOnDownscale: boolean;
   busy: boolean;
+  /** Opens the compare review for the enhancement. */
   onReview: (item: EnhancementListItem) => void;
+  /** Keeps both the original and the enhanced copy. */
   onKeepBoth: (item: EnhancementListItem) => void;
+  /** Replaces the original with the enhanced result. */
   onReplace: (item: EnhancementListItem) => void;
+  /** Discards the enhanced result. */
   onDiscard: (item: EnhancementListItem) => void;
 }
 
@@ -190,6 +216,11 @@ function Thumb({ url, alt }: { url: string | null; alt: string }) {
   );
 }
 
+/**
+ * One enhancement of the hub: its thumbnails, status and the review actions.
+ *
+ * @stability experimental
+ */
 export function EnhancementCard({
   item,
   now,
@@ -452,7 +483,12 @@ export function EnhancementCard({
 // Tab
 // ---------------------------------------------------------------------------
 
-interface PendingEnhancementsTabProps {
+/**
+ * The props of {@link PendingEnhancementsTab}.
+ *
+ * @stability experimental
+ */
+export interface PendingEnhancementsTabProps {
   circleId: string;
   /**
    * Narrow the inbox to one bulk-enhance batch (epic #420, issue #423). Set
@@ -469,6 +505,8 @@ interface PendingEnhancementsTabProps {
  * and is still queued, running, waiting on a decision, or failed.
  *
  * Multi-select and bulk actions are deliberately absent — they land in PR2.
+ *
+ * @stability experimental
  */
 export function PendingEnhancementsTab({
   circleId,

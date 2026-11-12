@@ -10,14 +10,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useEnhancementBatch } from '../../hooks/useEnhancementBatch';
-import type { EnhancementBatch } from '../../services/enhance';
+import { useEnhancementBatch } from '../../src/enhancement/headless/hooks/useEnhancementBatch.js';
+import type { EnhancementBatch } from '../../src/enhancement/headless/services/enhance.js';
 
-vi.mock('../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   getEnhancementBatch: vi.fn(),
 }));
 
-import { getEnhancementBatch } from '../../services/enhance';
+import { getEnhancementBatch } from '../../src/enhancement/headless/services/enhance.js';
 
 const mockGetBatch = vi.mocked(getEnhancementBatch);
 

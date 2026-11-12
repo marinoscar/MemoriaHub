@@ -26,7 +26,7 @@ import type {
   EnhancePreset,
   EnhanceQuality,
   EnhanceStrength,
-} from '../../services/enhance';
+} from '../../headless/services/enhance.js';
 
 /**
  * Shared AI-Enhance parameter vocabulary — presets, the customize panel, and
@@ -44,6 +44,11 @@ import type {
 // Adjustments
 // ---------------------------------------------------------------------------
 
+/**
+ * The adjustment switches of the enhance form.
+ *
+ * @stability experimental
+ */
 export interface AdjustmentsState {
   color: boolean;
   tone: boolean;
@@ -53,6 +58,11 @@ export interface AdjustmentsState {
   straighten: boolean;
 }
 
+/**
+ * The adjustment switches in the order the form shows them.
+ *
+ * @stability experimental
+ */
 export const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[] = [
   { key: 'color', label: 'Correct color & white balance' },
   { key: 'tone', label: 'Balance exposure & tone' },
@@ -62,7 +72,11 @@ export const ADJUSTMENT_FIELDS: { key: keyof AdjustmentsState; label: string }[]
   { key: 'straighten', label: 'Straighten horizon' },
 ];
 
-/** Mirrors the server-side defaults in `enhance-prompt.builder.ts`. */
+/**
+ * Mirrors the server-side defaults in `enhance-prompt.builder.ts`.
+ *
+ * @stability experimental
+ */
 export const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
   color: true,
   tone: true,
@@ -72,6 +86,11 @@ export const DEFAULT_ADJUSTMENTS: AdjustmentsState = {
   straighten: false,
 };
 
+/**
+ * Whether two adjustment states are identical.
+ *
+ * @stability experimental
+ */
 export function adjustmentsEqual(a: AdjustmentsState, b: AdjustmentsState): boolean {
   return (ADJUSTMENT_FIELDS as { key: keyof AdjustmentsState }[]).every(
     ({ key }) => a[key] === b[key],
@@ -85,9 +104,16 @@ export function adjustmentsEqual(a: AdjustmentsState, b: AdjustmentsState): bool
 /**
  * `auto` and `custom` are UI-only choices — neither sends a `preset` to the
  * API. The four real values map 1:1 onto the server's preset enum.
+ *
+ * @stability experimental
  */
 export type PresetKey = 'auto' | EnhancePreset | 'custom';
 
+/**
+ * One enhancement preset: its label, intent and the adjustments it pre-fills.
+ *
+ * @stability experimental
+ */
 export interface PresetDef {
   key: PresetKey;
   label: string;
@@ -103,6 +129,11 @@ export interface PresetDef {
   };
 }
 
+/**
+ * The presets the preset picker offers, in display order.
+ *
+ * @stability experimental
+ */
 export const PRESETS: PresetDef[] = [
   {
     key: 'auto',
@@ -179,6 +210,11 @@ export const PRESETS: PresetDef[] = [
   },
 ];
 
+/**
+ * The presets by key.
+ *
+ * @stability experimental
+ */
 export const PRESET_BY_KEY = new Map(PRESETS.map((p) => [p.key, p]));
 
 // ---------------------------------------------------------------------------
@@ -189,6 +225,8 @@ export const PRESET_BY_KEY = new Map(PRESETS.map((p) => [p.key, p]));
  * Everything the params mapping reads. Both call sites hold these as individual
  * `useState`s and assemble this object on submit, so neither has to keep a
  * parallel "form model" in sync.
+ *
+ * @stability experimental
  */
 export interface EnhanceFormState {
   presetKey: PresetKey;
@@ -205,6 +243,8 @@ export interface EnhanceFormState {
  * (or typed free-text guidance) — NOT merely because the Customize panel is
  * expanded. This drives `intent`, which changes the prompt's opening sentence
  * server-side and is the only thing that makes `instructions` count.
+ *
+ * @stability experimental
  */
 export function isFormCustomized(state: EnhanceFormState): boolean {
   const preset = PRESET_BY_KEY.get(state.presetKey) ?? PRESETS[0];
@@ -229,6 +269,8 @@ export function isFormCustomized(state: EnhanceFormState): boolean {
  *
  * One `params` object applies to every photo in a batch — a bulk enhance is a
  * single intent applied across a selection, not per-photo tuning.
+ *
+ * @stability experimental
  */
 export function buildEnhanceParams(state: EnhanceFormState): EnhanceParams {
   const params: EnhanceParams = {};
@@ -259,6 +301,11 @@ export function buildEnhanceParams(state: EnhanceFormState): EnhanceParams {
 // Preset card
 // ---------------------------------------------------------------------------
 
+/**
+ * One selectable preset card.
+ *
+ * @stability experimental
+ */
 export function PresetCard({
   def,
   selected,
@@ -322,6 +369,11 @@ export function PresetCard({
 // Preset picker
 // ---------------------------------------------------------------------------
 
+/**
+ * The preset picker: Auto, the named presets and Custom.
+ *
+ * @stability experimental
+ */
 export function PresetPicker({
   presetKey,
   onSelect,
@@ -362,6 +414,8 @@ export function PresetPicker({
  * quality, face preservation and 500-char free-text guidance. Rendered
  * identically by the drawer and the batch dialog — one panel, so a knob added
  * to one surface can never be missing from the other.
+ *
+ * @stability experimental
  */
 export function EnhanceCustomizePanel({
   open,

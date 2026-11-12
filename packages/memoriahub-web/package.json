@@ -52,6 +52,14 @@
       "types": "./dist/shell/index.d.ts",
       "default": "./dist/shell/index.js"
     },
+    "./enhancement/headless": {
+      "types": "./dist/enhancement/headless/index.d.ts",
+      "default": "./dist/enhancement/headless/index.js"
+    },
+    "./enhancement/ui": {
+      "types": "./dist/enhancement/ui/index.d.ts",
+      "default": "./dist/enhancement/ui/index.js"
+    },
     "./face/headless": {
       "types": "./dist/face/headless/index.d.ts",
       "default": "./dist/face/headless/index.js"

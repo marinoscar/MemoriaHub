@@ -16,19 +16,22 @@ import {
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import type { AddAlbumItemsByFilterDto, MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import { bulkEnhance, bulkEnhanceByFilter } from '@marinoscar/memoriahub-web/media/headless';
-import type { BulkEnhanceResult } from '@marinoscar/memoriahub-web/media/headless';
-import { ApiError } from '../../services/api';
-import type { EnhanceQuality, EnhanceStrength } from '../../services/enhance';
+import type {
+  AddAlbumItemsByFilterDto,
+  MediaItem,
+  BulkEnhanceResult,
+} from '../../../media/headless/index.js';
+import { bulkEnhance, bulkEnhanceByFilter } from '../../../media/headless/index.js';
+import { MemoriahubApiError as ApiError } from '../../../core/headless/index.js';
+import type { EnhanceQuality, EnhanceStrength } from '../../headless/services/enhance.js';
 import {
   DEFAULT_ADJUSTMENTS,
   PRESET_BY_KEY,
   PresetPicker,
   EnhanceCustomizePanel,
   buildEnhanceParams,
-} from './enhancePresets';
-import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePresets';
+} from './enhancePresets.js';
+import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePresets.js';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,6 +43,8 @@ import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePre
  * The distinguishing property is that the user did NOT enumerate the photos:
  * the match set is resolved server-side and includes items they have never
  * scrolled to. Every copy difference below exists to say that out loud.
+ *
+ * @stability experimental
  */
 export interface BatchEnhanceFilterMode {
   /**
@@ -62,8 +67,14 @@ export interface BatchEnhanceFilterMode {
   matchPhrase?: string;
 }
 
-interface BatchEnhanceDialogProps {
+/**
+ * The props of {@link BatchEnhanceDialog}.
+ *
+ * @stability experimental
+ */
+export interface BatchEnhanceDialogProps {
   open: boolean;
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
   circleId: string;
   /**
@@ -159,6 +170,8 @@ function readCapRefusal(err: unknown): CapRefusal | null {
  * does not apply. Each queued enhancement is still reviewed one at a time later
  * (gallery selection, lightbox, or the Enhancements hub) — nothing this dialog
  * starts can change a photo on its own.
+ *
+ * @stability experimental
  */
 export function BatchEnhanceDialog({
   open,

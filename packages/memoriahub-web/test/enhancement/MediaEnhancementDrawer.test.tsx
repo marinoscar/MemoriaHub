@@ -16,19 +16,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { MediaEnhancementDrawer } from '../../../components/media/MediaEnhancementDrawer';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import type { EnhancementDto } from '../../../services/enhance';
+import { render } from '../utils/test-utils';
+import { MediaEnhancementDrawer } from '../../src/enhancement/ui/components/MediaEnhancementDrawer.js';
+import type { MediaItem } from '../../src/media/headless/index.js';
+import type { EnhancementDto } from '../../src/enhancement/headless/services/enhance.js';
 
 // ---------------------------------------------------------------------------
 // Mock the polling hook
 // ---------------------------------------------------------------------------
-vi.mock('../../../hooks/useMediaEnhance', () => ({
+vi.mock('../../src/enhancement/headless/hooks/useMediaEnhance.js', () => ({
   useMediaEnhance: vi.fn(),
 }));
 
-import { useMediaEnhance } from '../../../hooks/useMediaEnhance';
+import { useMediaEnhance } from '../../src/enhancement/headless/hooks/useMediaEnhance.js';
 
 const mockUseMediaEnhance = vi.mocked(useMediaEnhance);
 

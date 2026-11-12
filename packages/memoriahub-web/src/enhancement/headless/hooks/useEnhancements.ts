@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { listEnhancements } from '../services/enhance';
-import { useIsMounted } from './useIsMounted';
+import { listEnhancements } from '../services/enhance.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 import type {
   EnhancementListItem,
   EnhancementListMeta,
   ListEnhancementsParams,
-} from '../services/enhance';
+} from '../services/enhance.js';
 
 /**
  * Poll cadence for the enhancements hub. Deliberately slower than the
  * per-item drawer's 2s (`useMediaEnhance`): this is a background inbox a user
  * leaves open, not a modal they are actively staring at, and each tick is a
  * paginated query rather than a single-row read.
+ *
+ * @stability experimental
  */
 export const ENHANCEMENTS_POLL_MS = 5000;
 
@@ -22,6 +24,11 @@ function isLive(item: EnhancementListItem): boolean {
   return (LIVE_STATUSES as readonly string[]).includes(item.status);
 }
 
+/**
+ * The state {@link useEnhancements} returns.
+ *
+ * @stability experimental
+ */
 export interface UseEnhancementsResult {
   items: EnhancementListItem[];
   meta: EnhancementListMeta | null;
@@ -48,6 +55,8 @@ export interface UseEnhancementsResult {
  *  - Poll ticks are SILENT (`isLoading` stays false), so a 5s refresh never
  *    flashes the list into a skeleton under the user's cursor. Only the
  *    initial load and an explicit `refresh()` show the loading state.
+ *
+ * @stability experimental
  */
 export function useEnhancements(
   params: ListEnhancementsParams | null,

@@ -8,6 +8,8 @@
     "./src/core/testing/index.ts",
     "./src/brand/index.ts",
     "./src/shell/index.ts",
+    "./src/enhancement/headless/index.ts",
+    "./src/enhancement/ui/index.ts",
     "./src/face/headless/index.ts",
     "./src/face/ui/index.ts",
     "./src/media/headless/index.ts",

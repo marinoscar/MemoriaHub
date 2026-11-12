@@ -15,8 +15,8 @@
 import { describe, it, expect } from 'vitest';
 import { screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { BeforeAfterSlider } from '../../../components/media/BeforeAfterSlider';
+import { render } from '../utils/test-utils';
+import { BeforeAfterSlider } from '../../src/enhancement/ui/components/BeforeAfterSlider.js';
 
 const defaultProps = {
   beforeUrl: 'https://cdn.example.com/before.jpg',

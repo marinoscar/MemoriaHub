@@ -15,36 +15,38 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import RateReviewIcon from '@mui/icons-material/RateReview';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useEnhancementBatch } from '../../hooks/useEnhancementBatch';
-import { useRunPolling } from '@marinoscar/memoriahub-web/review-runs/headless';
 import {
-  cancelEnhancementBatch,
-  listEnhancements,
-  type EnhancementBatch,
-  type EnhancementListItem,
-} from '../../services/enhance';
-import { RunProgressPanel } from '@marinoscar/memoriahub-web/review-runs/ui';
-import type { RunTerminalSummary } from '@marinoscar/memoriahub-web/review-runs/ui';
-import {
-  RUN_ITEMS_EMPTY_STATE,
-  RUN_ITEMS_PAGE_SIZE,
-  buildRunItemColumns,
-} from '@marinoscar/memoriahub-web/review-runs/ui';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { BaseRunItem } from '@marinoscar/memoriahub-web/review-runs/headless';
-import {
+  useOwnerScope,
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
-} from '../../utils/runFormat';
+  useMemoriahubAdmin,
+} from '../../../core/headless/index.js';
+import { useEnhancementBatch } from '../../headless/hooks/useEnhancementBatch.js';
+import { useRunPolling } from '../../../review-runs/headless/index.js';
+import {
+  cancelEnhancementBatch,
+  listEnhancements,
+  type EnhancementBatch,
+  type EnhancementListItem,
+} from '../../headless/services/enhance.js';
+import {
+  RunProgressPanel,
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../../../review-runs/ui/index.js';
+import type { RunTerminalSummary } from '../../../review-runs/ui/index.js';
+import type { BaseRunItem } from '../../../review-runs/headless/index.js';
 
 /**
  * Persistence key for the failed-items table's column/density choices
  * (`user_settings.dataTables['enhancement-batch-items']`,
  * docs/specs/datatable.md §15).
+ *
+ * @stability experimental
  */
 export const ENHANCEMENT_BATCH_ITEMS_TABLE_ID = 'enhancement-batch-items';
 
@@ -157,10 +159,16 @@ function describeSkipped(batch: EnhancementBatch): string | null {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * The page of one bulk enhancement batch: live progress, the failed items and a link to the results ready to review.
+ *
+ * @stability experimental
+ */
 export default function EnhancementBatchPage() {
   const { id: batchId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { activeCircleRole } = useOwnerScope();
+  const { DataTable } = useMemoriahubAdmin();
 
   const { batch, isLoading, error, fetchBatch } = useEnhancementBatch();
 

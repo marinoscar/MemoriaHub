@@ -1,23 +1,14 @@
 import { useEffect, useState } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Link,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { Box, Card, CardContent, Chip, Divider, Link, Stack, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { listEnhancementBatches, type EnhancementBatch } from '../../services/enhance';
+import { listEnhancementBatches, type EnhancementBatch } from '../../headless/services/enhance.js';
 import {
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
-} from '../../utils/runFormat';
+} from '../../../core/headless/index.js';
 
 /** How many batches the hub surfaces. Enough to find one, not a history page. */
 const RECENT_LIMIT = 3;
@@ -35,7 +26,12 @@ const RECENT_LIMIT = 3;
 // batch produces results. A second badge would count the same photos twice.
 // ---------------------------------------------------------------------------
 
-interface RecentBatchesCardProps {
+/**
+ * The props of {@link RecentBatchesCard}.
+ *
+ * @stability experimental
+ */
+export interface RecentBatchesCardProps {
   circleId: string;
 }
 
@@ -74,6 +70,11 @@ function BatchRow({ batch }: { batch: EnhancementBatch }) {
   );
 }
 
+/**
+ * The card listing the recent bulk enhancement batches of a circle.
+ *
+ * @stability experimental
+ */
 export function RecentBatchesCard({ circleId }: RecentBatchesCardProps) {
   const [batches, setBatches] = useState<EnhancementBatch[]>([]);
 

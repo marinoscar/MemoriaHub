@@ -1,11 +1,11 @@
 /**
  * The components the packaged media slice asks its host for (`slots` of
  * `MemoriahubWebHost`): the ones that belong to slices that have not moved into
- * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer, the AI
- * enhancement drawer and dialog, the location-merge dialog), the platform's share
- * dialog, and the two people pickers of the album and library pages, which stay
- * slots for good: the people slice imports the media slice, so the media pages
- * cannot import the people components. Those two are bound straight to the
+ * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer, the
+ * location-merge dialog), the platform's share dialog, and four components of
+ * packaged slices that stay slots for good because those slices import the media
+ * slice, so the media pages cannot import them: the two people pickers and the
+ * AI enhancement drawer and batch dialog. Those four are bound straight to the
  * packaged components. Each is lazy, so the page that needs it keeps it out of
  * the main chunk exactly as before. A slot is deleted when its component moves
  * into the package and the slice that owns it can import it.
@@ -56,10 +56,10 @@ const MediaDetailDrawerSlot = lazySlot<MediaDetailDrawerSlotProps>(() =>
   import('../components/media/MediaDetailDrawer').then((m) => ({ default: m.MediaDetailDrawer })),
 );
 const MediaEnhancementDrawerSlot = lazySlot<MediaEnhancementDrawerSlotProps>(() =>
-  import('../components/media/MediaEnhancementDrawer').then((m) => ({ default: m.MediaEnhancementDrawer })),
+  import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.MediaEnhancementDrawer })),
 );
 const BatchEnhanceDialogSlot = lazySlot<BatchEnhanceDialogSlotProps>(() =>
-  import('../components/media/BatchEnhanceDialog').then((m) => ({ default: m.BatchEnhanceDialog })),
+  import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.BatchEnhanceDialog })),
 );
 const MediaShareDialogSlot = lazySlot<MediaShareDialogSlotProps>(() =>
   import('../platform/sharing/MediaShareDialog').then((m) => ({ default: m.MediaShareDialog })),

@@ -21,25 +21,25 @@
  * calls.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { installLayoutStubs, resetContainerWidth } from '@marinoscar/platform-web/datatable/testing';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useEnhancementBatch', () => ({
+vi.mock('../../src/enhancement/headless/hooks/useEnhancementBatch.js', () => ({
   useEnhancementBatch: vi.fn(),
 }));
 
-vi.mock('../../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   cancelEnhancementBatch: vi.fn(),
   listEnhancements: vi.fn().mockResolvedValue({
     items: [],
@@ -61,11 +61,12 @@ vi.mock('react-router-dom', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import EnhancementBatchPage from '../../../pages/Enhancements/EnhancementBatchPage';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { useEnhancementBatch } from '../../../hooks/useEnhancementBatch';
-import { cancelEnhancementBatch, listEnhancements } from '../../../services/enhance';
-import type { EnhancementBatch } from '../../../services/enhance';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import EnhancementBatchPage from '../../src/enhancement/ui/pages/EnhancementBatchPage.js';
+import { useEnhancementBatch } from '../../src/enhancement/headless/hooks/useEnhancementBatch.js';
+import { cancelEnhancementBatch, listEnhancements } from '../../src/enhancement/headless/services/enhance.js';
+import type { EnhancementBatch } from '../../src/enhancement/headless/services/enhance.js';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseEnhancementBatch = vi.mocked(useEnhancementBatch);
@@ -134,16 +135,9 @@ function makeBatchHook(overrides: Partial<BatchHookReturn> = {}): BatchHookRetur
   } as BatchHookReturn;
 }
 
-beforeAll(() => {
-  // The failed-items table is a DataTable; jsdom performs no layout, so both
-  // the container-width hook and MUI X measure 0x0 without these.
-  installLayoutStubs();
-});
-
 describe('EnhancementBatchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetContainerWidth(1400);
     mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockCancel.mockResolvedValue({ batchId: 'batch-1', status: 'running', cancelled: 3 });
     mockListEnhancements.mockResolvedValue({

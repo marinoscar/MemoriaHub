@@ -19,17 +19,13 @@ vi.mock('../../hooks/useReviewQueues', () => ({
   useReviewQueues: vi.fn(),
 }));
 
-vi.mock('../../pages/Bursts/BurstsPage', () => ({
-  default: () => <div>BurstsPageStub</div>,
+vi.mock('@marinoscar/memoriahub-web/review/ui', () => ({
+  BurstsPage: () => <div>BurstsPageStub</div>,
+  DuplicatesPage: () => <div>DuplicatesPageStub</div>,
+  LocationSuggestionsPage: () => <div>LocationSuggestionsPageStub</div>,
 }));
-vi.mock('../../pages/Duplicates/DuplicatesPage', () => ({
-  default: () => <div>DuplicatesPageStub</div>,
-}));
-vi.mock('../../pages/LocationSuggestions/LocationSuggestionsPage', () => ({
-  default: () => <div>LocationSuggestionsPageStub</div>,
-}));
-vi.mock('../../pages/Enhancements/EnhancementsPage', () => ({
-  default: () => <div>EnhancementsPageStub</div>,
+vi.mock('@marinoscar/memoriahub-web/enhancement/ui', () => ({
+  EnhancementsPage: () => <div>EnhancementsPageStub</div>,
 }));
 vi.mock('../../pages/Insights/ReviewInsightsPage', () => ({
   default: () => <div>ReviewInsightsPageStub</div>,

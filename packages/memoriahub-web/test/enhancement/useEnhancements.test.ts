@@ -16,14 +16,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useEnhancements, ENHANCEMENTS_POLL_MS } from '../../hooks/useEnhancements';
-import type { EnhancementListItem, EnhancementListResponse } from '../../services/enhance';
+import { useEnhancements, ENHANCEMENTS_POLL_MS } from '../../src/enhancement/headless/hooks/useEnhancements.js';
+import type { EnhancementListItem, EnhancementListResponse } from '../../src/enhancement/headless/services/enhance.js';
 
-vi.mock('../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   listEnhancements: vi.fn(),
 }));
 
-import { listEnhancements } from '../../services/enhance';
+import { listEnhancements } from '../../src/enhancement/headless/services/enhance.js';
 
 const mockList = vi.mocked(listEnhancements);
 

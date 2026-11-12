@@ -31,7 +31,7 @@ const DuplicatesPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui')
 const LocationSuggestionsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })),
 );
-const EnhancementsPage = lazy(() => import('../Enhancements/EnhancementsPage'));
+const EnhancementsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementsPage })));
 const ReviewInsightsPage = lazy(() => import('../Insights/ReviewInsightsPage'));
 const WorkflowListPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),

@@ -21,21 +21,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   getEnhancerAdminStatus: vi.fn(),
 }));
 
@@ -43,14 +41,16 @@ vi.mock('../../services/enhance', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import EnhancerSettingsPage from '../../pages/Admin/EnhancerSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { getEnhancerAdminStatus } from '../../services/enhance';
-import type { EnhancerAdminStatus } from '../../services/enhance';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import EnhancerSettingsPage from '../../src/enhancement/ui/pages/EnhancerSettingsPage.js';
+import { getEnhancerAdminStatus } from '../../src/enhancement/headless/services/enhance.js';
+import type { EnhancerAdminStatus } from '../../src/enhancement/headless/services/enhance.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 const mockGetEnhancerAdminStatus = vi.mocked(getEnhancerAdminStatus);
 
 // ---------------------------------------------------------------------------
@@ -136,6 +136,10 @@ function makeAdminStatus(overrides: Partial<EnhancerAdminStatus> = {}): Enhancer
 describe('EnhancerSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(adminPermissions() as any);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(false) as any);
     mockGetEnhancerAdminStatus.mockResolvedValue(makeAdminStatus());

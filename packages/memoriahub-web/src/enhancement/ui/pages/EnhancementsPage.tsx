@@ -2,16 +2,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Box, Alert, Tabs, Tab, Typography, Stack } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { PendingEnhancementsTab } from './PendingEnhancementsTab';
-import { scrollableTabsProps } from '../../components/common/tabs';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { scrollableTabsProps } from '../../../core/ui/index.js';
+import { PendingEnhancementsTab } from './PendingEnhancementsTab.js';
 
 /**
  * Tab keys. These are the `?tab=` values on the wire, so they are part of the
  * page's URL contract — renaming one breaks bookmarks.
  */
 const TABS = ['pending', 'enhanced', 'history'] as const;
-export type EnhancementsTab = (typeof TABS)[number];
+/**
+ * The tab of the Enhancements hub.
+ *
+ * @stability experimental
+ */
+export type EnhancementsTab = 'pending' | 'enhanced' | 'history';
 
 const DEFAULT_TAB: EnhancementsTab = 'pending';
 
@@ -27,6 +32,8 @@ function parseTab(raw: string | null): EnhancementsTab {
  * Three tabs — Pending review / Enhanced photos / History. Only the first is
  * implemented in PR1; the other two land in PR3 and render a placeholder here
  * so the shell's tab contract (and its `?tab=` URL keys) is settled up front.
+ *
+ * @stability experimental
  */
 export default function EnhancementsPage() {
   const { activeCircle } = useOwnerScope();

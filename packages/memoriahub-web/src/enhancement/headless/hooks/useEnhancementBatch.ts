@@ -1,12 +1,18 @@
 import { useState, useCallback } from 'react';
-import type { EnhancementBatch } from '../services/enhance';
-import { getEnhancementBatch as getEnhancementBatchApi } from '../services/enhance';
-import { useIsMounted } from './useIsMounted';
+import type { EnhancementBatch } from '../services/enhance.js';
+import { getEnhancementBatch as getEnhancementBatchApi } from '../services/enhance.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
-interface UseEnhancementBatchResult {
+/**
+ * The state and loader {@link useEnhancementBatch} returns.
+ *
+ * @stability experimental
+ */
+export interface UseEnhancementBatchResult {
   batch: EnhancementBatch | null;
   isLoading: boolean;
   error: string | null;
+  /** Loads (or reloads) the batch; poll it with `useRunPolling`. */
   fetchBatch: (batchId: string) => Promise<void>;
 }
 
@@ -17,6 +23,8 @@ interface UseEnhancementBatchResult {
  * endpoint serializes the shared `BaseRun` field set, so the caller pairs this
  * with `useRunPolling` + `RunProgressPanel` and no batch-specific progress
  * machinery exists anywhere.
+ *
+ * @stability experimental
  */
 export function useEnhancementBatch(): UseEnhancementBatchResult {
   const [batch, setBatch] = useState<EnhancementBatch | null>(null);

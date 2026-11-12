@@ -18,24 +18,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
 import {
   PendingEnhancementsTab,
   formatExpiresIn,
   formatElapsedSince,
   describeParams,
-} from '../../../pages/Enhancements/PendingEnhancementsTab';
-import type { EnhancementListItem } from '../../../services/enhance';
+} from '../../src/enhancement/ui/pages/PendingEnhancementsTab.js';
+import type { EnhancementListItem } from '../../src/enhancement/headless/services/enhance.js';
 
-vi.mock('../../../hooks/useEnhancements', () => ({
-  useEnhancements: vi.fn(),
-}));
-
-vi.mock('../../../hooks/useFeatureFlags', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useFeatureFlags: vi.fn(),
 }));
 
-vi.mock('../../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/hooks/useEnhancements.js', () => ({
+  useEnhancements: vi.fn(),
+}));
+
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   applyEnhancement: vi.fn().mockResolvedValue({}),
   discardEnhancement: vi.fn().mockResolvedValue(undefined),
   // The tab renders the "Recent batches" card (issue #423), which fetches on
@@ -46,7 +47,7 @@ vi.mock('../../../services/enhance', () => ({
   }),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMedia: vi.fn(),
 
@@ -54,16 +55,17 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 
 // The drawer has its own suite; stub it so opening it here is observable
 // without pulling in its polling hook.
-vi.mock('../../../components/media/MediaEnhancementDrawer', () => ({
+vi.mock('../../src/enhancement/ui/components/MediaEnhancementDrawer.js', () => ({
   MediaEnhancementDrawer: ({ enhancementId }: { enhancementId?: string }) => (
     <div data-testid="enhancement-drawer">{enhancementId}</div>
   ),
 }));
 
-import { useEnhancements } from '../../../hooks/useEnhancements';
-import { useFeatureFlags } from '../../../hooks/useFeatureFlags';
-import { applyEnhancement, discardEnhancement } from '../../../services/enhance';
-import { getMedia } from '@marinoscar/memoriahub-web/media/headless';
+import { useFeatureFlags } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import { useEnhancements } from '../../src/enhancement/headless/hooks/useEnhancements.js';
+import { applyEnhancement, discardEnhancement } from '../../src/enhancement/headless/services/enhance.js';
+import { getMedia } from '../../src/media/headless/index.js';
 
 const mockUseEnhancements = vi.mocked(useEnhancements);
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);

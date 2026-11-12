@@ -23,17 +23,17 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import { useMediaEnhance } from '../../hooks/useMediaEnhance';
-import type { EnhanceUiStatus } from '../../hooks/useMediaEnhance';
-import { BeforeAfterSlider } from './BeforeAfterSlider';
-import { ReplaceDownscaleNotice, describeResolutionLoss } from './ReplaceDownscaleNotice';
+import type { MediaItem } from '../../../media/headless/index.js';
+import { useMediaEnhance } from '../../headless/hooks/useMediaEnhance.js';
+import type { EnhanceUiStatus } from '../../headless/hooks/useMediaEnhance.js';
+import { BeforeAfterSlider } from './BeforeAfterSlider.js';
+import { ReplaceDownscaleNotice, describeResolutionLoss } from './ReplaceDownscaleNotice.js';
 import type {
   EnhanceQuality,
   EnhanceStrength,
   EnhanceImageInfo,
   ApplyDecision,
-} from '../../services/enhance';
+} from '../../headless/services/enhance.js';
 // Presets, the customize panel and the params mapping are SHARED with
 // BatchEnhanceDialog (issue #422) so the two surfaces cannot drift.
 import {
@@ -42,16 +42,22 @@ import {
   PresetPicker,
   EnhanceCustomizePanel,
   buildEnhanceParams,
-} from './enhancePresets';
-import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePresets';
+} from './enhancePresets.js';
+import type { AdjustmentsState, EnhanceFormState, PresetKey } from './enhancePresets.js';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
-interface MediaEnhancementDrawerProps {
+/**
+ * The props of {@link MediaEnhancementDrawer}.
+ *
+ * @stability experimental
+ */
+export interface MediaEnhancementDrawerProps {
   item: MediaItem;
   open: boolean;
+  /** Called when the drawer is dismissed. */
   onClose: () => void;
   /**
    * Open directly onto a KNOWN enhancement instead of the item's latest one.
@@ -139,6 +145,8 @@ function formatElapsed(ms: number): string {
  * Right-side drawer that walks the user through the enhance → poll → review →
  * decide flow. Structurally modeled on MediaOrientationEditor (right Drawer,
  * zIndex above the lightbox, busy/error states).
+ *
+ * @stability experimental
  */
 export function MediaEnhancementDrawer({
   item,

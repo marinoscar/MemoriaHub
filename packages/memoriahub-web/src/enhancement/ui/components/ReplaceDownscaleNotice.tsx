@@ -1,7 +1,7 @@
 import { Alert, AlertTitle, Link, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { usePermissions } from '../../hooks/usePermissions';
+import { usePermissions } from '../../../core/headless/index.js';
 
 /**
  * The always-visible explanation of the AI Picture Enhancer's replace policy
@@ -30,6 +30,8 @@ function megapixels(width: number | null, height: number | null): string | null 
 /**
  * "3168×3928 (12.4 MP) → 1024×1536 (1.6 MP)", degrading gracefully to just the
  * dimensions (or null) when the server did not report them.
+ *
+ * @stability experimental
  */
 export function describeResolutionLoss(
   originalWidth: number | null,
@@ -52,7 +54,12 @@ export function describeResolutionLoss(
   return `${fromLabel} → ${toLabel}`;
 }
 
-interface ReplaceDownscaleNoticeProps {
+/**
+ * The props of {@link ReplaceDownscaleNotice}.
+ *
+ * @stability experimental
+ */
+export interface ReplaceDownscaleNoticeProps {
   /**
    * True when `pictureEnhancement.blockReplaceOnDownscale` is on AND this
    * result is downscaled — i.e. replacing needs an explicit acknowledgement.
@@ -65,6 +72,11 @@ interface ReplaceDownscaleNoticeProps {
   dense?: boolean;
 }
 
+/**
+ * The always-visible notice that replacing the original with a lower-resolution result loses resolution.
+ *
+ * @stability experimental
+ */
 export function ReplaceDownscaleNotice({
   policyBlocked,
   resolutionLoss,

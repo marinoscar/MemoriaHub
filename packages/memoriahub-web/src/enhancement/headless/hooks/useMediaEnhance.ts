@@ -5,15 +5,15 @@ import {
   getLatestEnhancement,
   applyEnhancement,
   discardEnhancement,
-} from '../services/enhance';
-import { useIsMounted } from './useIsMounted';
+} from '../services/enhance.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 import type {
   EnhanceParams,
   EnhancementDto,
   EnhancementStatus,
   ApplyDecision,
   ApplyEnhancementResult,
-} from '../services/enhance';
+} from '../services/enhance.js';
 
 // Poll every 2s (matches useMediaMetadata) until the job reaches a terminal
 // state. Image generation can legitimately take 10–60s, so allow a generous
@@ -24,11 +24,18 @@ const MAX_POLLS = 120; // 120 * 2s = 4 min ceiling
 // would otherwise run to the timeout and report a bogus "timed out" error.
 const TERMINAL_STATUSES: EnhancementStatus[] = ['ready', 'failed', 'cancelled'];
 
+/**
+ * The status the enhancement drawer shows, derived from the enhancement and the local request state.
+ *
+ * @stability experimental
+ */
 export type EnhanceUiStatus = EnhancementStatus | 'idle';
 
 /**
  * Drives the enhance → poll → review lifecycle for a single media item.
  * Mirrors useMediaMetadata's polling model (2s interval, capped).
+ *
+ * @stability experimental
  */
 export function useMediaEnhance(mediaId: string) {
   const [data, setData] = useState<EnhancementDto | null>(null);

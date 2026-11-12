@@ -12,8 +12,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useSearchParams } from 'react-router-dom';
-import { render } from '../../utils/test-utils';
-import EnhancementsPage from '../../../pages/Enhancements/EnhancementsPage';
+import { render } from '../utils/test-utils';
+import EnhancementsPage from '../../src/enhancement/ui/pages/EnhancementsPage.js';
 
 /**
  * The suite renders under MemoryRouter, so `window.location` never changes.
@@ -27,7 +27,7 @@ function SearchParamsProbe() {
 // The tab has its own suite; stub it so the shell's behaviour is isolated and
 // no list request is made from here.
 const pendingTabSpy = vi.fn();
-vi.mock('../../../pages/Enhancements/PendingEnhancementsTab', () => ({
+vi.mock('../../src/enhancement/ui/pages/PendingEnhancementsTab.js', () => ({
   PendingEnhancementsTab: (props: { circleId: string }) => {
     pendingTabSpy(props);
     return <div data-testid="pending-tab">pending tab for {props.circleId}</div>;

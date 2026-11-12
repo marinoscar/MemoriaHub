@@ -149,7 +149,7 @@ const TaggingSettingsPage = lazy(() =>
 const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
 const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
-const EnhancerSettingsPage = lazy(() => import('./pages/Admin/EnhancerSettingsPage'));
+const EnhancerSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancerSettingsPage })));
 const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
 );
@@ -198,8 +198,8 @@ const WorkflowBuilderPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowBuilderPage })),
 );
 const WorkflowRunPage = lazy(() => import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowRunPage })));
-const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
-const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));
+const EnhancementsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementsPage })));
+const EnhancementBatchPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementBatchPage })));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
 // RETRO-J11: the memories pages are the packaged slice's.
 type MemoriesUiModule = typeof import('@marinoscar/memoriahub-web/memories/ui');

@@ -331,6 +331,25 @@ export interface MemoriahubReviewSettings {
 }
 
 /**
+ * The picture-enhancement half of the deployment settings (`pictureEnhancement.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubEnhancementSettings {
+  /** `pictureEnhancement`: the defaults and the replace policy; every key is absent until first saved. */
+  pictureEnhancement?: {
+    defaultQuality?: 'low' | 'medium' | 'high';
+    defaultStrength?: 'subtle' | 'balanced' | 'strong';
+    stampExif?: boolean;
+    allowReplace?: boolean;
+    blockReplaceOnDownscale?: boolean;
+    maxInputMegapixels?: number;
+    retentionHours?: number;
+    maxBatchSize?: number;
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -341,7 +360,8 @@ export interface MemoriahubSystemSettings
     MemoriahubWorkflowsSettings,
     MemoriahubMemoriesSettings,
     MemoriahubFaceSettings,
-    MemoriahubReviewSettings {
+    MemoriahubReviewSettings,
+    MemoriahubEnhancementSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */

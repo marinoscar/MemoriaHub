@@ -28,20 +28,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import { BatchEnhanceDialog } from '../../../components/media/BatchEnhanceDialog';
-import type { BulkEnhanceResult } from '@marinoscar/memoriahub-web/media/headless';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
-import { ApiError } from '../../../services/api';
+import { render } from '../utils/test-utils.js';
+import { MemoriahubApiError as ApiError } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import { BatchEnhanceDialog } from '../../src/enhancement/ui/components/BatchEnhanceDialog.js';
+import type { BulkEnhanceResult } from '../../src/media/headless/index.js';
+import type { MediaItem } from '../../src/media/headless/index.js';
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   bulkEnhance: vi.fn(),
   bulkEnhanceByFilter: vi.fn(),
 
 }));
 
-import { bulkEnhance, bulkEnhanceByFilter } from '@marinoscar/memoriahub-web/media/headless';
+import { bulkEnhance, bulkEnhanceByFilter } from '../../src/media/headless/index.js';
 
 const mockBulkEnhance = vi.mocked(bulkEnhance);
 const mockBulkEnhanceByFilter = vi.mocked(bulkEnhanceByFilter);

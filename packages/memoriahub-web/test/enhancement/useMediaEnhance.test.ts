@@ -19,12 +19,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useMediaEnhance } from '../../hooks/useMediaEnhance';
+import { useMediaEnhance } from '../../src/enhancement/headless/hooks/useMediaEnhance.js';
 
 // ---------------------------------------------------------------------------
 // Mock the enhance service module
 // ---------------------------------------------------------------------------
-vi.mock('../../services/enhance', () => ({
+vi.mock('../../src/enhancement/headless/services/enhance.js', () => ({
   startEnhance: vi.fn(),
   getEnhancement: vi.fn(),
   getLatestEnhancement: vi.fn(),
@@ -38,8 +38,8 @@ import {
   getLatestEnhancement,
   applyEnhancement,
   discardEnhancement,
-} from '../../services/enhance';
-import type { EnhancementDto, EnhancementStatus } from '../../services/enhance';
+} from '../../src/enhancement/headless/services/enhance.js';
+import type { EnhancementDto, EnhancementStatus } from '../../src/enhancement/headless/services/enhance.js';
 
 const mockStartEnhance = vi.mocked(startEnhance);
 const mockGetEnhancement = vi.mocked(getEnhancement);

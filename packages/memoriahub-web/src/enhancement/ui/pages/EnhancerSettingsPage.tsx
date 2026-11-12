@@ -24,11 +24,9 @@ import {
 } from '@mui/material';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { getEnhancerAdminStatus } from '../../services/enhance';
-import type { EnhancerAdminStatus } from '../../services/enhance';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { getEnhancerAdminStatus } from '../../headless/services/enhance.js';
+import type { EnhancerAdminStatus } from '../../headless/services/enhance.js';
 
 type Quality = 'low' | 'medium' | 'high';
 type Strength = 'subtle' | 'balanced' | 'strong';
@@ -40,6 +38,7 @@ const RETENTION_MIN = 1;
 const RETENTION_MAX = 720;
 
 function EnhancerSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
   const { hasPermission } = usePermissions();
   const canManage = hasPermission('system_settings:write');
@@ -499,6 +498,11 @@ function EnhancerSettingsContent() {
   );
 }
 
+/**
+ * The admin AI Picture Enhancer page: the global switch, the readiness panel and the defaults and replace policy.
+ *
+ * @stability experimental
+ */
 export default function EnhancerSettingsPage() {
   const { isAdmin, hasPermission } = usePermissions();
 

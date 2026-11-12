@@ -19,8 +19,18 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 // Props
 // ---------------------------------------------------------------------------
 
+/**
+ * How the before and after images are compared: a draggable slider or side by side.
+ *
+ * @stability experimental
+ */
 export type CompareMode = 'slider' | 'side-by-side';
 
+/**
+ * The props of {@link BeforeAfterSlider}.
+ *
+ * @stability experimental
+ */
 export interface BeforeAfterSliderProps {
   /** URL of the "before" (original) image. `null` renders a spinner. */
   beforeUrl: string | null;
@@ -137,6 +147,8 @@ function Layer({ url, alt }: { url: string | null; alt: string }) {
  *    ends — exposed as `role="slider"` with aria-valuemin/max/now/text,
  *  - a short, near-stationary press on the frame is treated as a tap and opens
  *    the full-screen view; a press that moves is a drag and does not.
+ *
+ * @stability experimental
  */
 export function BeforeAfterSlider({
   beforeUrl,

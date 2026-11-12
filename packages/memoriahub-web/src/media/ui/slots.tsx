@@ -21,14 +21,15 @@ import type { AddAlbumItemsByFilterDto, MediaItem } from '../headless/types.js';
 // names below (`slots` of `MemoriahubWebHost`); a host that registers none
 // renders the page without them.
 //
-// - The people pickers (`AlbumPeopleDialog`, `PersonMultiSelect`) are the
-//   `people` slice's, and stay slots permanently: `people` imports `media` (the
-//   media clients), so `media` cannot import `people` back. The web edition binds
-//   them to the packaged components.
-// - The lightbox and detail drawer (tagging, location-suggestion and enhancement
-//   hooks), the enhancement drawer and dialog, the location-merge dialog and the
-//   platform's share dialog are the app's until their slices move; each of those
-//   slots is deleted when its component moves into the package.
+// - The people pickers (`AlbumPeopleDialog`, `PersonMultiSelect`) and the AI
+//   enhancement drawer and batch dialog are the `people` and `enhancement`
+//   slices', and stay slots permanently: those slices import `media` (the media
+//   clients), so `media` cannot import them back. The web edition binds them to
+//   the packaged components.
+// - The lightbox and detail drawer (tagging and location-suggestion hooks), the
+//   location-merge dialog and the platform's share dialog are the app's until
+//   their slices move; each of those slots is deleted when its component moves
+//   into the package.
 // =============================================================================
 
 /**
