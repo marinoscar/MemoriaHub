@@ -89,6 +89,7 @@ const host: MemoriahubWebHost = {
 | `MemoriahubAdminPort` | host | what an admin page needs from the platform: the data table, the admin page header and the deployment settings hook |
 | `MemoriahubDataTableComponent` | host | the responsive data table (columns, pagination, row actions, CSV export) of `MemoriahubAdminPort` |
 | `MemoriahubAdminPageHeaderComponent` | host | the admin console page header (back link, title, description) of `MemoriahubAdminPort` |
+| `MemoriahubSecretFieldComponent` | host | the write-only secret input (a masked hint of the stored secret; an empty value keeps it) of `MemoriahubAdminPort` |
 | `SearchPeopleExploreSlot` | slot | the people carousel of the Search page's explore view |
 | `WorkflowPersonSelectSlot` | slot | the single-person picker of the `assign_person` and `remove_person` workflow actions |
 | `MemoriahubWebSlots` | host | components of slices that have not moved into the package yet, by name |
