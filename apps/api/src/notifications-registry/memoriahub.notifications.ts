@@ -54,6 +54,11 @@ import {
   type NotificationRegistration,
 } from '@marinoscar/platform-api/notifications';
 
+// PLATFORM-ADOPTION-SHIM(EnterpriseAppBase#1149): the event declarations below (keys, labels, channels, folding and
+// the browser renderers) belong to the slices that raise the events, but the platform freezes its notification
+// registries before the Nest container starts, so a provider cannot declare them. The keys the producers raise
+// are the slices' constants (imported above); the declarations stay here until the seam ships.
+
 /** MemoriaHub's own event keys. PERMANENT: add, never rename. */
 export const MEMORIAHUB_EVENT_KEYS = {
   // The four review-queue STATE events are the media slice's, which reconciles them.
