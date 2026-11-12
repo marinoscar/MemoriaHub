@@ -5,7 +5,7 @@
  * Covers: rerunMediaMetadata, getMediaMetadataStatus.
  *
  * Note: runMetadataBackfill was removed in the settings refactor — per-circle
- * backfill is now a global admin operation via services/adminBackfill.ts.
+ * backfill is now a global admin operation via `runGlobalMetadataBackfill` of the media slice.
  *
  * Note: runs with Vitest + MSW (container-only deps). If Vitest is not
  * available locally these tests pass inside the container.
