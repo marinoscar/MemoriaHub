@@ -145,7 +145,10 @@ jobs:
         run: grep -m1 'model name' /proc/cpuinfo; grep -m1 -o -E 'avx512_vnni|avx_vnni|avx512f' /proc/cpuinfo | sort -u || true
 
       - name: Golden-vector parity gate (inside the worker image)
-        # The worker image bakes the CLIP model, so a missing one is a failure.
+        # The committed CLIP golden vector is compared in the executor-parity job
+        # (CPU-class gated, see packages/memoriahub-compute/test/golden-report.mjs),
+        # so the CLIP case is excluded here. REQUIRE_CLIP_MODEL stays set for the
+        # remaining cases.
         run: |
           docker run --rm \
             --entrypoint node \
@@ -153,7 +156,7 @@ jobs:
             -e REQUIRE_CLIP_MODEL=1 \
             -w /app/packages/memoriahub-compute \
             memoriahub-worker:parity-gate \
-            --test --test-name-pattern='^(?!.*HEIC)' test/golden.test.mjs
+            --test --test-name-pattern='^(?!.*(HEIC|CLIP embedding))' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the worker image)
         run: |
@@ -178,3 +181,67 @@ jobs:
             -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
             memoriahub-worker:parity-gate \
             /app/apps/cli/dist/cli.js node config
+
+  executor-parity:
+    name: Cross-executor parity (API vs worker, same runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: production
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-api:parity-gate
+          build-args: |
+            VERSION=ci
+
+      - name: Build Worker image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-worker:parity-gate
+
+      - name: Emit fixture results from both images (same runner, same CLIP model file)
+        # The API image does not bake the CLIP model, so the sha256-pinned model
+        # is taken from the worker image and mounted read-only into both runs.
+        run: |
+          set -euo pipefail
+          mkdir -p out models
+          docker create --name modelsrc memoriahub-worker:parity-gate
+          docker cp modelsrc:/app/models/. models/
+          docker rm modelsrc
+          sha256sum models/clip-vit-b32-vision-quantized.onnx
+          for kind in api worker; do
+            docker run --rm \
+              -v "$PWD/models:/app/models:ro" -v "$PWD/out:/out" \
+              -e MODELS_DIR=/app/models \
+              --entrypoint node -w /app/packages/memoriahub-compute \
+              "memoriahub-$kind:parity-gate" test/emit-parity.mjs "/out/$kind.json"
+          done
+
+      - name: Cross-executor parity (BLOCKING)
+        # The invariant that matters: the server and a worker node produce the
+        # same embedding / dHash / pixels for the same fixture on the same CPU,
+        # whatever the runner CPU class.
+        run: node packages/memoriahub-compute/test/compare-parity.mjs out/api.json out/worker.json
+
+      - name: CLIP committed golden vector (blocking only on the blessed CPU class)
+        # See golden-report.mjs: the result is always printed; only a CPU model
+        # matching GOLDEN_BLESSED_CPU (the class the vector was derived on) fails.
+        env:
+          GOLDEN_BLESSED_CPU: 'EPYC 7763'
+        run: node packages/memoriahub-compute/test/golden-report.mjs out/api.json out/worker.json
