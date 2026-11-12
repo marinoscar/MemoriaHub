@@ -1,0 +1,136 @@
+name: Images
+
+# PR-time proof that the two production images still build and still pass the
+# gates deploy.yml runs on a release (RETRO-J, #593/#616): the HEIC decode gate
+# (REQUIRE_HEIC_DECODE=1 over the committed golden-fixture.heic) and the
+# golden-vector parity test, each run INSIDE the built image, plus the
+# Postgres-client floor and the worker engine smoke.
+#
+# Build only. The images are loaded into the runner's Docker daemon and never
+# pushed: there is no registry login, no secret and no `packages: write` here.
+# deploy.yml stays the only workflow that publishes.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/cli/**'
+      - 'packages/memoriahub-*/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/images.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/Dockerfile'
+      - 'apps/cli/Dockerfile'
+      - '.github/workflows/images.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-image:
+    name: API image gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build API image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: production
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-api:parity-gate
+          # Read the cache deploy.yml writes; never write one from a PR.
+          cache-from: type=gha,scope=api
+          build-args: |
+            VERSION=ci
+
+      - name: Postgres client version gate (inside the API image)
+        # Same floor as deploy.yml and MIN_PG_CLIENT_MAJOR in
+        # apps/api/src/db-backup/pg-version.util.ts.
+        env:
+          MIN_PG_CLIENT_MAJOR: '17'
+        run: |
+          set -euo pipefail
+          for bin in pg_dump pg_restore; do
+            version="$(docker run --rm --entrypoint "$bin" memoriahub-api:parity-gate --version)"
+            echo "$version"
+            major="$(printf '%s' "$version" | sed -nE 's/.*\(PostgreSQL\) ([0-9]+).*/\1/p')"
+            if [ -z "$major" ] || [ "$major" -lt "$MIN_PG_CLIENT_MAJOR" ]; then
+              echo "FATAL: $bin major '${major:-unparsed}' is below the PostgreSQL $MIN_PG_CLIENT_MAJOR floor."
+              exit 1
+            fi
+          done
+
+      - name: Golden-vector parity and HEIC decode gate (inside the API image)
+        # REQUIRE_CLIP_MODEL is not set: the API image does not bake the CLIP
+        # model, so that assertion skips while the HEIC and JPEG dHash ones run.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_HEIC_DECODE=1 \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-api:parity-gate \
+            --test test/golden.test.mjs
+
+  worker-image:
+    name: Worker image gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build Worker image (amd64, load only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/cli/Dockerfile
+          target: worker
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memoriahub-worker:parity-gate
+          cache-from: type=gha,scope=worker
+
+      - name: Golden-vector parity and HEIC decode gate (inside the worker image)
+        # The worker image bakes the CLIP model, so a missing one is a failure.
+        run: |
+          docker run --rm \
+            --entrypoint node \
+            -e MODELS_DIR=/app/models \
+            -e REQUIRE_CLIP_MODEL=1 \
+            -e REQUIRE_HEIC_DECODE=1 \
+            -w /app/packages/memoriahub-compute \
+            memoriahub-worker:parity-gate \
+            --test test/golden.test.mjs
+
+      - name: Worker engine smoke (inside the worker image)
+        run: |
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node models status
+          docker run --rm --entrypoint node \
+            -e MEMORIAHUB_SERVER_URL=http://api.example.test \
+            -e MEMORIAHUB_TOKEN=nod_smoke_placeholder \
+            memoriahub-worker:parity-gate \
+            /app/apps/cli/dist/cli.js node config
