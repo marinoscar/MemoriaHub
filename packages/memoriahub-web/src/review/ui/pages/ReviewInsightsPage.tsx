@@ -14,13 +14,11 @@ import PendingIcon from '@mui/icons-material/HourglassEmpty';
 import ResolvedIcon from '@mui/icons-material/CheckCircle';
 import DismissedIcon from '@mui/icons-material/Cancel';
 import IdentifiedIcon from '@mui/icons-material/PhotoLibrary';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useReviewInsights } from '../../hooks/useReviewInsights';
-import { KpiCard, KpiSkeleton } from '@marinoscar/memoriahub-web/core/ui';
-import { CompositionDonut } from '../../components/insights/CompositionDonut';
-import { ProportionBar } from '../../components/insights/ProportionBar';
-import { formatCompactNumber, percent } from '../../utils/formatBytes';
-import type { ReviewQueueMetrics } from '../../services/reviewInsights';
+import { formatCompactNumber, percent, useOwnerScope } from '../../../core/headless/index.js';
+import { KpiCard, KpiSkeleton } from '../../../core/ui/index.js';
+import { CompositionDonut, ProportionBar } from '../../../insights/ui/index.js';
+import { useReviewInsights } from '../../headless/hooks/useReviewInsights.js';
+import type { ReviewQueueMetrics } from '../../headless/services/reviewInsights.js';
 
 // Outcome accent palette
 const KEPT_COLOR = '#10b981'; // green
@@ -168,6 +166,11 @@ function QueueSection({ title, icon, accentColor, metrics }: QueueSectionProps) 
   );
 }
 
+/**
+ * The Review Insights page: the burst and duplicate review queues of the active circle, with their resolution outcomes.
+ *
+ * @stability experimental
+ */
 export default function ReviewInsightsPage() {
   const { activeCircle, activeCircleId } = useOwnerScope();
   const { data, loading, error } = useReviewInsights(activeCircleId ?? null);

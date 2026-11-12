@@ -22,14 +22,19 @@ import TagIcon from '@mui/icons-material/LocalOffer';
 import QueuedIcon from '@mui/icons-material/HourglassEmpty';
 import ComputingIcon from '@mui/icons-material/QueryStats';
 import { Navigate } from 'react-router-dom';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useInsights } from '../../hooks/useInsights';
-import { KpiCard, KpiSkeleton } from '@marinoscar/memoriahub-web/core/ui';
-import { CompositionDonut } from '../../components/insights/CompositionDonut';
-import { ProportionBar } from '../../components/insights/ProportionBar';
-import { FreshnessPill } from '../../components/insights/FreshnessPill';
-import { formatBytes, formatCompactNumber, percent, bytesToNumber } from '../../utils/formatBytes';
-import { AdminBackLink } from '../../components/admin/AdminPageHeader';
+import {
+  bytesToNumber,
+  formatBytes,
+  formatCompactNumber,
+  percent,
+  useMemoriahubAdmin,
+  usePermissions,
+} from '../../../core/headless/index.js';
+import { KpiCard, KpiSkeleton } from '../../../core/ui/index.js';
+import { useInsights } from '../../headless/index.js';
+import { CompositionDonut } from '../components/CompositionDonut.js';
+import { ProportionBar } from '../components/ProportionBar.js';
+import { FreshnessPill } from '../components/FreshnessPill.js';
 
 // Suppress unused import warning — VideoIcon is available for future use
 void VideoIcon;
@@ -97,6 +102,7 @@ function InFlightChip({ jobState, refreshing }: InFlightChipProps) {
 // ---------------------------------------------------------------------------
 
 function StorageInsightsPageContent() {
+  const { AdminBackLink } = useMemoriahubAdmin();
   const { data, loading, refreshing, jobState, error, refresh } = useInsights();
   const theme = useTheme();
 
@@ -406,6 +412,11 @@ function StorageInsightsPageContent() {
 // Admin-gated export
 // ---------------------------------------------------------------------------
 
+/**
+ * The admin Storage Insights page: the precomputed storage metrics, their composition and the refresh. Admin only.
+ *
+ * @stability experimental
+ */
 export default function StorageInsightsPage() {
   const { isAdmin } = usePermissions();
 

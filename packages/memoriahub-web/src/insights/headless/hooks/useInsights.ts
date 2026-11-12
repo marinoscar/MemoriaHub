@@ -1,13 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getInsights, refreshInsights } from '../services/insights';
-import { useIsMounted } from './useIsMounted';
-import type { InsightsSnapshot, InsightsRefreshState } from '../services/insights';
+import { getInsights, refreshInsights } from '../services/insights.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { InsightsSnapshot, InsightsRefreshState } from '../services/insights.js';
 
 // Poll every 2.5 s while a job is pending/running
 const POLL_INTERVAL_MS = 2500;
 // Stop polling automatically after 2 minutes as a safety guard
 const POLL_TIMEOUT_MS = 2 * 60 * 1000;
 
+/**
+ * What {@link useInsights} returns.
+ *
+ * @stability experimental
+ */
 export interface UseInsightsResult {
   data: InsightsSnapshot | null;
   loading: boolean;
@@ -16,10 +21,18 @@ export interface UseInsightsResult {
   /** Derived from data.refresh.state — 'idle' when no data yet. */
   jobState: InsightsRefreshState;
   error: string | null;
+  /** Loads the snapshot. */
   load: () => Promise<void>;
+  /** Enqueues a refresh job and follows it to its end. */
   refresh: () => Promise<void>;
 }
 
+/**
+ * Loads the storage insights snapshot and follows a refresh job to its end (it polls every 2.5 seconds, for at most two minutes).
+ *
+ * @returns the snapshot, the loading, refreshing and job state, and the load and refresh actions
+ * @stability experimental
+ */
 export function useInsights(): UseInsightsResult {
   const [data, setData] = useState<InsightsSnapshot | null>(null);
   const [loading, setLoading] = useState(false);

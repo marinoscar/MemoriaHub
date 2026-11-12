@@ -18,7 +18,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { render } from '../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks (must be hoisted before component imports)
@@ -28,17 +28,19 @@ vi.mock('@mui/x-charts/PieChart', () => ({
   PieChart: () => null,
 }));
 
-vi.mock('../../components/insights/CompositionDonut', () => ({
+vi.mock('../../src/insights/ui/components/CompositionDonut.js', () => ({
   CompositionDonut: ({ title }: { title: string }) => (
     <div data-testid={`donut-${title.replace(/\s+/g, '-').toLowerCase()}`}>{title}</div>
   ),
 }));
 
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../hooks/useReviewInsights', () => ({
+
+vi.mock('../../src/review/headless/hooks/useReviewInsights.js', () => ({
   useReviewInsights: vi.fn(),
 }));
 
@@ -46,10 +48,10 @@ vi.mock('../../hooks/useReviewInsights', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import ReviewInsightsPage from '../../pages/Insights/ReviewInsightsPage';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useReviewInsights } from '../../hooks/useReviewInsights';
-import type { ReviewInsights } from '../../services/reviewInsights';
+import ReviewInsightsPage from '../../src/review/ui/pages/ReviewInsightsPage.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { useReviewInsights } from '../../src/review/headless/hooks/useReviewInsights.js';
+import type { ReviewInsights } from '../../src/review/headless/services/reviewInsights.js';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseReviewInsights = vi.mocked(useReviewInsights);

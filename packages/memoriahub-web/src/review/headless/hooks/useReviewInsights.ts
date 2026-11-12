@@ -1,18 +1,26 @@
 import { useState, useCallback, useEffect } from 'react';
-import { getReviewInsights } from '../services/reviewInsights';
-import { useIsMounted } from './useIsMounted';
-import type { ReviewInsights } from '../services/reviewInsights';
+import { getReviewInsights } from '../services/reviewInsights.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { ReviewInsights } from '../services/reviewInsights.js';
 
+/**
+ * What {@link useReviewInsights} returns.
+ *
+ * @stability experimental
+ */
 export interface UseReviewInsightsResult {
   data: ReviewInsights | null;
   loading: boolean;
   error: string | null;
+  /** Reloads the insights. */
   reload: () => Promise<void>;
 }
 
 /**
  * Hand-rolled fetch hook for the per-circle burst/duplicate review insights.
  * The endpoint is synchronous (computed on read), so there is no polling.
+ *
+ * @stability experimental
  */
 export function useReviewInsights(circleId: string | null): UseReviewInsightsResult {
   const [data, setData] = useState<ReviewInsights | null>(null);

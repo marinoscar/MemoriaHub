@@ -23,12 +23,10 @@ vi.mock('@marinoscar/memoriahub-web/review/ui', () => ({
   BurstsPage: () => <div>BurstsPageStub</div>,
   DuplicatesPage: () => <div>DuplicatesPageStub</div>,
   LocationSuggestionsPage: () => <div>LocationSuggestionsPageStub</div>,
+  ReviewInsightsPage: () => <div>ReviewInsightsPageStub</div>,
 }));
 vi.mock('@marinoscar/memoriahub-web/enhancement/ui', () => ({
   EnhancementsPage: () => <div>EnhancementsPageStub</div>,
-}));
-vi.mock('../../pages/Insights/ReviewInsightsPage', () => ({
-  default: () => <div>ReviewInsightsPageStub</div>,
 }));
 vi.mock('@marinoscar/memoriahub-web/workflows/ui', () => ({
   WorkflowListPage: () => <div>WorkflowListPageStub</div>,

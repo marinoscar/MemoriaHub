@@ -1,10 +1,14 @@
-import { api } from './api';
+import { api } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Per-queue review metrics (identical shape for bursts and duplicates). */
+/**
+ * Per-queue review metrics (identical shape for bursts and duplicates).
+ *
+ * @stability experimental
+ */
 export interface ReviewQueueMetrics {
   identified: number;
   pending: number;
@@ -17,6 +21,11 @@ export interface ReviewQueueMetrics {
   itemsDeleted: number;
 }
 
+/**
+ * The review insights of one circle: the burst and duplicate queues.
+ *
+ * @stability experimental
+ */
 export interface ReviewInsights {
   bursts: ReviewQueueMetrics;
   duplicates: ReviewQueueMetrics;
@@ -26,7 +35,13 @@ export interface ReviewInsights {
 // API functions
 // ---------------------------------------------------------------------------
 
-/** GET /api/media/review-insights — synchronous, precomputed on read. */
+/**
+ * Reads the review insights of one circle (computed live on every call).
+ *
+ * @param circleId - the circle (the active owner scope's id)
+ * @returns the burst and duplicate queue metrics
+ * @stability experimental
+ */
 export async function getReviewInsights(circleId: string): Promise<ReviewInsights> {
   const p = new URLSearchParams({ circleId });
   return api.get<ReviewInsights>(`/media/review-insights?${p.toString()}`);

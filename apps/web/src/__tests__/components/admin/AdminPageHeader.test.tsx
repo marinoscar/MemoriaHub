@@ -205,6 +205,9 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // 4 since RETRO-J11 (#626, location): the admin Geo and Location Groups pages are the packaged
     // GeoSettingsPage and LocationGroupsSettingsPage, which render the host's AdminPageHeader
     // (the adopters moved with them).
-    expect(adopters.length).toBeGreaterThanOrEqual(4);
+    // 2 since RETRO-J11 (#626, insights and archiving): the admin Storage Insights and Archiving &
+    // Deletion pages are the packaged StorageInsightsPage (the back link) and ArchivingSettingsPage
+    // (the header), both reached through the host's admin port (the adopters moved with them).
+    expect(adopters.length).toBeGreaterThanOrEqual(2);
   });
 });

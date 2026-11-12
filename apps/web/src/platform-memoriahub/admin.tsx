@@ -3,8 +3,8 @@
  * three platform-owned things the packaged admin pages of the domain slices ask
  * their host for. The data table is the platform's `DataTable` (loaded lazily, so
  * the grid stays out of the entry chunk exactly as it did when each admin page
- * imported it), the page header is the console's `AdminPageHeader` (one
- * declaration, so the "Back to Settings" rule stays in one place), and the
+ * imported it), the page header is the console's `AdminPageHeader` and the back link alone
+ * its `AdminBackLink` (one declaration, so the "Back to Settings" rule stays in one place), and the
  * settings hook is the app's `useSystemSettings` over the platform settings slice.
  */
 import { Suspense, lazy } from 'react';
@@ -18,7 +18,7 @@ import type {
   MemoriahubSecretFieldComponent,
 } from '@marinoscar/memoriahub-web/core/headless';
 
-import { AdminPageHeader } from '../components/admin/AdminPageHeader';
+import { AdminBackLink, AdminPageHeader } from '../components/admin/AdminPageHeader';
 import { useAiSettings } from '../hooks/useAiSettings';
 import { useSystemSettings } from '../hooks/useSystemSettings';
 import { getEmailSettings } from '../services/email';
@@ -47,6 +47,7 @@ function AppDataTable<Row>(props: MemoriahubDataTableProps<Row>): ReactNode {
 export const appMemoriahubAdmin: MemoriahubAdminPort = {
   DataTable: AppDataTable,
   AdminPageHeader,
+  AdminBackLink,
   // The platform's field takes MUI's `sx`; the port types it as a plain object so a headless entry imports no MUI.
   SecretField: SecretField as unknown as MemoriahubSecretFieldComponent,
   useSystemSettings,

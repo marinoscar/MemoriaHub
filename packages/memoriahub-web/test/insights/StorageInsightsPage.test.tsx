@@ -15,7 +15,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { render, mockAdminUser, mockUser } from '../utils/test-utils';
+import { render, mockAdminUser, mockUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks (must be hoisted before component imports)
@@ -27,29 +28,33 @@ vi.mock('@mui/x-charts/PieChart', () => ({
 }));
 
 // Mock CompositionDonut (uses @mui/x-charts)
-vi.mock('../../components/insights/CompositionDonut', () => ({
+vi.mock('../../src/insights/ui/components/CompositionDonut.js', () => ({
   CompositionDonut: ({ title }: { title: string }) => (
     <div data-testid={`donut-${title.replace(/\s+/g, '-').toLowerCase()}`}>{title}</div>
   ),
 }));
 
 // Mock the useInsights hook so we control what state the page sees
-vi.mock('../../hooks/useInsights', () => ({
+vi.mock('../../src/insights/headless/hooks/useInsights.js', () => ({
   useInsights: vi.fn(),
 }));
 
 // Mock usePermissions so we can control admin gate
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-import { useInsights } from '../../hooks/useInsights';
-import { usePermissions } from '../../hooks/usePermissions';
-import StorageInsightsPage from '../../pages/Admin/StorageInsightsPage';
-import type { InsightsSnapshot } from '../../services/insights';
+
+import { useInsights } from '../../src/insights/headless/hooks/useInsights.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import StorageInsightsPage from '../../src/insights/ui/pages/StorageInsightsPage.js';
+import type { InsightsSnapshot } from '../../src/insights/headless/services/insights.js';
 
 const mockUseInsights = vi.mocked(useInsights);
 const mockUsePermissions = vi.mocked(usePermissions);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -128,6 +133,7 @@ function makeHookReturn(overrides: Partial<ReturnType<typeof useInsights>> = {})
 describe('StorageInsightsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue(createFakeAdminPort().port as never);
 
     // Default: admin, ready data, not loading
     mockUsePermissions.mockReturnValue(makeAdminPermissions());

@@ -566,6 +566,20 @@
           "react-router-dom"
         ]
       }
+    },
+    "insights": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "@mui/x-charts",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

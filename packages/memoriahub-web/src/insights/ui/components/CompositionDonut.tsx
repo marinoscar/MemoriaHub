@@ -1,7 +1,12 @@
 import { PieChart } from '@mui/x-charts/PieChart';
 import { Box, Typography } from '@mui/material';
 
-interface DonutSegment {
+/**
+ * One slice of a {@link CompositionDonut}.
+ *
+ * @stability experimental
+ */
+export interface DonutSegment {
   label: string;
   value: number;       // numeric — raw bytes or count; used for proportions only
   color: string;
@@ -9,12 +14,24 @@ interface DonutSegment {
   percentage: number;    // 0-100
 }
 
-interface CompositionDonutProps {
+/**
+ * The props of {@link CompositionDonut}.
+ *
+ * @stability experimental
+ */
+export interface CompositionDonutProps {
   title: string;
   segments: DonutSegment[];
   centerLabel: string;
 }
 
+/**
+ * A donut chart of a composition (media type shares, queue outcomes) with a centred label and a legend; an all-zero composition renders a placeholder ring.
+ *
+ * @param props - see {@link CompositionDonutProps}
+ * @returns the chart
+ * @stability experimental
+ */
 export function CompositionDonut({ title, segments, centerLabel }: CompositionDonutProps) {
   // Guard: if all segments are zero the chart would be empty — render a
   // placeholder ring so the layout never collapses.

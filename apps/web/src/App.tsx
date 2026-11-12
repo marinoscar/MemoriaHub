@@ -139,7 +139,7 @@ const AboutPage = lazy(() => import('./pages/Admin/AboutPage'));
 const WorkflowsSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowsSettingsPage })),
 );
-const StorageInsightsPage = lazy(() => import('./pages/Admin/StorageInsightsPage'));
+const StorageInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/insights/ui').then((m) => ({ default: m.StorageInsightsPage })));
 const StorageConfigPage = lazy(() => import('./platform/storage/StorageConfigPage'));
 const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 // RETRO-J11 (#626): the packaged Tagging settings page (vocabulary included); the host supplies its table, header and settings hook.
@@ -155,7 +155,7 @@ const MemoriesSettingsPage = lazy(() =>
 );
 const LocationInferenceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationInferenceSettingsPage })));
 const LocationGroupsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/location/ui').then((m) => ({ default: m.LocationGroupsSettingsPage })));
-const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
+const ArchivingSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/media/ui').then((m) => ({ default: m.ArchivingSettingsPage })));
 const SearchPage = lazy(() =>
   import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),
 );
@@ -178,7 +178,7 @@ const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/
 const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
-const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPage'));
+const ReviewInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.ReviewInsightsPage })));
 const ArchivePage = lazyMediaPage('ArchivePage');
 const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
 const TrashPage = lazyMediaPage('TrashPage');

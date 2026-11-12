@@ -1,17 +1,34 @@
 import { Box, Typography } from '@mui/material';
 
-interface Segment {
+/**
+ * One segment of a {@link ProportionBar}.
+ *
+ * @stability experimental
+ */
+export interface ProportionSegment {
   label: string;
   value: number;   // percentage 0-100
   color: string;
   // displayValue intentionally omitted — MB values are shown in the donut legend
 }
 
-interface ProportionBarProps {
-  segments: Segment[];
+/**
+ * The props of {@link ProportionBar}.
+ *
+ * @stability experimental
+ */
+export interface ProportionBarProps {
+  segments: ProportionSegment[];
   caption?: string;
 }
 
+/**
+ * A single stacked bar of proportions with an optional caption; renders nothing when every segment is zero.
+ *
+ * @param props - see {@link ProportionBarProps}
+ * @returns the bar, or `null`
+ * @stability experimental
+ */
 export function ProportionBar({ segments, caption }: ProportionBarProps) {
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   if (total === 0) return null;

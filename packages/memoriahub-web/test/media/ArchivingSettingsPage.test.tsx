@@ -14,30 +14,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import ArchivingSettingsPage from '../../pages/Admin/ArchivingSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
+import ArchivingSettingsPage from '../../src/media/ui/admin/ArchivingSettingsPage.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,6 +110,10 @@ function makeSystemSettingsMock(retentionDays = 30) {
 describe('ArchivingSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(adminPermissions() as any);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock(30) as any);
   });

@@ -10,12 +10,10 @@ import {
   Stack,
   Alert,
   Snackbar,
+  CircularProgress,
 } from '@mui/material';
 import ArchiveIcon from '@mui/icons-material/Archive';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
 
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 1;
@@ -23,6 +21,7 @@ const MAX_RETENTION_DAYS = 365;
 
 function ArchivingSettingsContent() {
   const { hasPermission } = usePermissions();
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isLoading, isSaving, error, updateSettings } = useSystemSettings();
 
   const canWrite = hasPermission('system_settings:write');
@@ -62,7 +61,11 @@ function ArchivingSettingsContent() {
   };
 
   if (isLoading) {
-    return <LoadingSpinner />;
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+        <CircularProgress size={40} />
+      </Box>
+    );
   }
 
   return (
@@ -152,6 +155,11 @@ function ArchivingSettingsContent() {
   );
 }
 
+/**
+ * The admin Archiving & Deletion page: the trash retention period and where archive and trash work. Needs `system_settings:read`; saving needs `system_settings:write`.
+ *
+ * @stability experimental
+ */
 export default function ArchivingSettingsPage() {
   const { hasPermission } = usePermissions();
 

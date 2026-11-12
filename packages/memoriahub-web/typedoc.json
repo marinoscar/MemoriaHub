@@ -12,6 +12,8 @@
     "./src/enhancement/ui/index.ts",
     "./src/face/headless/index.ts",
     "./src/face/ui/index.ts",
+    "./src/insights/headless/index.ts",
+    "./src/insights/ui/index.ts",
     "./src/location/headless/index.ts",
     "./src/location/ui/index.ts",
     "./src/social/headless/index.ts",

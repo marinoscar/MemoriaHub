@@ -1,7 +1,12 @@
 import { Box, Chip, Typography } from '@mui/material';
-import { relativeTime } from '../../utils/formatBytes';
+import { relativeTime } from '../../../core/headless/index.js';
 
-interface FreshnessPillProps {
+/**
+ * The props of {@link FreshnessPill}.
+ *
+ * @stability experimental
+ */
+export interface FreshnessPillProps {
   computedAt: string | null;
   durationMs: number | null;
 }
@@ -9,6 +14,13 @@ interface FreshnessPillProps {
 // Treat snapshots older than 4 hours as stale (matches default refresh interval)
 const STALE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 
+/**
+ * A chip saying how old a precomputed snapshot is (stale past four hours) and how long it took to compute.
+ *
+ * @param props - see {@link FreshnessPillProps}
+ * @returns the pill
+ * @stability experimental
+ */
 export function FreshnessPill({ computedAt, durationMs }: FreshnessPillProps) {
   if (!computedAt) {
     return (

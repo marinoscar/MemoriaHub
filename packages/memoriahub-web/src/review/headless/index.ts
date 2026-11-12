@@ -7,3 +7,5 @@ export * from './hooks/useLocationSuggestions.js';
 export * from './services/adminBursts.js';
 export * from './services/adminDuplicates.js';
 export * from './services/adminLocationInference.js';
+export * from './services/reviewInsights.js';
+export * from './hooks/useReviewInsights.js';

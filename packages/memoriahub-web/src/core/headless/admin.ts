@@ -179,6 +179,24 @@ export interface MemoriahubAdminPageHeaderProps {
 export type MemoriahubAdminPageHeaderComponent = (props: MemoriahubAdminPageHeaderProps) => ReactNode;
 
 /**
+ * Props of the host's back link to the settings hub.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubAdminBackLinkProps {
+  /** Where the link points; defaults to the settings hub. */
+  to?: string;
+}
+
+/**
+ * The host's "Back to Settings" link, for an admin page whose own header is a deliberate design (hidden below the small breakpoint, like the page header's).
+ *
+ * @stability experimental
+ * @extensionPoint host
+ */
+export type MemoriahubAdminBackLinkComponent = (props: MemoriahubAdminBackLinkProps) => ReactNode;
+
+/**
  * The stored-secret presentation a {@link MemoriahubSecretFieldProps} shows.
  *
  * @stability experimental
@@ -401,6 +419,18 @@ export interface MemoriahubGeoSettings {
 }
 
 /**
+ * The storage half of the deployment settings the domain admin pages edit (`storage.trash.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubStorageSettings {
+  /** `storage`: the trash retention; every key is absent until first saved. */
+  storage?: {
+    trash?: { retentionDays?: number };
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -414,7 +444,8 @@ export interface MemoriahubSystemSettings
     MemoriahubReviewSettings,
     MemoriahubEnhancementSettings,
     MemoriahubSocialSettings,
-    MemoriahubGeoSettings {
+    MemoriahubGeoSettings,
+    MemoriahubStorageSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */
@@ -508,6 +539,8 @@ export interface MemoriahubAdminPort {
   DataTable: MemoriahubDataTableComponent;
   /** The admin console page header. */
   AdminPageHeader: MemoriahubAdminPageHeaderComponent;
+  /** The back link alone, for a page with its own header. */
+  AdminBackLink: MemoriahubAdminBackLinkComponent;
   /** The write-only secret input (provider API keys). */
   SecretField: MemoriahubSecretFieldComponent;
   /**

@@ -14,3 +14,4 @@ export { default as LocationSuggestionRunRedirect } from './pages/LocationSugges
 export { default as BurstsSettingsPage } from './admin/BurstsSettingsPage.js';
 export { default as DuplicatesSettingsPage } from './admin/DuplicatesSettingsPage.js';
 export { default as LocationInferenceSettingsPage } from './admin/LocationInferenceSettingsPage.js';
+export { default as ReviewInsightsPage } from './pages/ReviewInsightsPage.js';

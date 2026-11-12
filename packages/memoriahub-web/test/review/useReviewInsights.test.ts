@@ -18,13 +18,13 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // Mock the reviewInsights service — must be hoisted before hook import
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/reviewInsights', () => ({
+vi.mock('../../src/review/headless/services/reviewInsights.js', () => ({
   getReviewInsights: vi.fn(),
 }));
 
-import { useReviewInsights } from '../../hooks/useReviewInsights';
-import * as reviewInsightsService from '../../services/reviewInsights';
-import type { ReviewInsights } from '../../services/reviewInsights';
+import { useReviewInsights } from '../../src/review/headless/hooks/useReviewInsights.js';
+import * as reviewInsightsService from '../../src/review/headless/services/reviewInsights.js';
+import type { ReviewInsights } from '../../src/review/headless/services/reviewInsights.js';
 
 const mockGetReviewInsights = vi.mocked(reviewInsightsService.getReviewInsights);
 

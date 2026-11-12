@@ -227,7 +227,8 @@
     "review": [
       "core",
       "media",
-      "review-runs"
+      "review-runs",
+      "insights"
     ],
     "enhancement": [
       "core",
@@ -240,6 +241,9 @@
     "location": [
       "core",
       "media"
+    ],
+    "insights": [
+      "core"
     ]
   }
 }
