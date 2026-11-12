@@ -168,8 +168,12 @@ describeMaybeDb('Review-queue reconcile over the real inbox (DB_GATED: real Post
     expect(read.readAt).not.toBeNull();
     expect((read.data as { countAtRead?: number }).countAtRead).toBe(5);
 
-    // An equal count and a smaller count never re-nag.
+    // An equal count and a smaller count never re-nag. The sweep's writes are detached, so wait for the equal-count
+    // refresh to land (it still touches the row) before the next sweep, or the two writes race.
+    const before = (await rows(key))[0]!.updatedAt.getTime();
     await sweep();
+    await eventually(() => rows(key), (r) => r[0]!.updatedAt.getTime() > before, 'the equal-count refresh');
+    expect((await rows(key))[0]!.readAt).not.toBeNull();
     pending = { ...pending, pendingBurstGroups: 3 };
     await sweep();
     await eventually(() => rows(key), (r) => (r[0]!.data as { count: number }).count === 3, 'refreshed down to 3');
