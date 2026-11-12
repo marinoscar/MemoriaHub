@@ -87,7 +87,7 @@ interface MediaGateway {
 
     /**
      * The bytes `[offset, offset + length)` of [uri] (the upload engine's part source). Uses the
-     * same URI form as [openStream] (D24: `setRequireOriginal` for photos when `ACCESS_MEDIA_LOCATION`
+     * same URI form as [openStream] (D24: `setRequireOriginal` for photos and videos when `ACCESS_MEDIA_LOCATION`
      * is granted, the plain URI when that throws), so the hash and the upload read identical bytes.
      */
     fun openRange(uri: String, offset: Long, length: Long): InputStream

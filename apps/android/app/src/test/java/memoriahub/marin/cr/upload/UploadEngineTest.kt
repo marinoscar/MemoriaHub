@@ -223,6 +223,34 @@ class UploadEngineTest {
         assertEquals("all three parts re-sent into the new session", 3, server.partPuts.values.sum())
     }
 
+    // Issue #545: LedgerMigrations.MIGRATION_1_2 leaves a stale video row with its objectId but no
+    // hash, parts or part geometry. The engine must re-hash the bytes it now reads, abort the old
+    // session on the server and upload into a fresh one, registering under the new hash.
+    private fun assertMigratedVideoRestarts(state: SyncFileState) = runBlocking {
+        val original = FakeContentSource.bytes(25, seed = 545)
+        server.seedObject("old-1", 25)
+        val file = FakeUploadLedger.file(1, 25, state = state, name = "VID_1.mp4", isVideo = true, objectId = "old-1", attempts = 1)
+        ledger.add(file)
+        source.put(file.uri, original)
+
+        val result = engine().run(target)
+
+        assertEquals(1, result.uploaded)
+        assertTrue("the stale session is aborted", "api.abort:204" in events)
+        assertFalse("old-1" in server.objects)
+        assertEquals("a fresh session", 1, server.inits)
+        val objectId = server.objects.keys.single()
+        assertArrayEquals(original, server.assembled(objectId))
+        assertEquals(sha(original), server.registrations.single()["contentHash"]!!.jsonPrimitive.content)
+        assertEquals(SyncFileState.UPLOADED, ledger.state(1))
+    }
+
+    @Test fun `a migrated UPLOADING video re-hashes, aborts its old session and uploads fresh`() =
+        assertMigratedVideoRestarts(SyncFileState.UPLOADING)
+
+    @Test fun `a migrated FAILED video re-hashes, aborts its old session and uploads fresh`() =
+        assertMigratedVideoRestarts(SyncFileState.FAILED)
+
     @Test fun `a completed upload that died before registering goes straight to registration`() = runBlocking {
         val bytes = FakeContentSource.bytes(25)
         val obj = server.seedObject("done-1", 25, status = "processing")

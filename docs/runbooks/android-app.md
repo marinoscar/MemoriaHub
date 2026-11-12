@@ -73,9 +73,9 @@ Pairing links this phone to your account with a long-lived token that only works
 2. Tap **Connect**, then **Pair with MemoriaHub**. The app shows a code and opens the sign-in page in a browser tab.
 3. Sign in if asked, check that the code matches and approve. The app comes back on its own (`memoriahub://media-sync/paired`).
 4. You should see **Paired. Token expires <date>.** and, under **Settings, then Media sync** on the web, a card for the phone with status active. The token lasts `DEVICE_PAT_TTL_DAYS` (default 90 days).
-5. On the Connect screen, **allow access to photos and videos**, **allow photo location** and **allow notifications** (Android 13 and later):
+5. On the Connect screen, **allow access to photos and videos**, **allow photo and video location** and **allow notifications** (Android 13 and later):
    - **Full access** (all photos and videos) is what you want. Choosing "Select photos and videos" on Android 14 and later gives *partial* access: only the items you picked sync, and the app says so. Use **Allow access to all photos** to widen it.
-   - **Photo location** (`ACCESS_MEDIA_LOCATION`): without it Android strips GPS from the bytes the app uploads. Allow it if you want locations in the library.
+   - **Photo and video location** (`ACCESS_MEDIA_LOCATION`): without it Android strips the location from the bytes the app uploads (the GPS in photos and the location tag in videos). Allow it if you want locations in the library.
    - **Notifications** show upload progress and tell you when something needs attention.
 
 If registration fails after approval, the Connect screen says "Signed in, but this phone is not registered yet" and offers **Retry registration**: the token is already stored, so you do not approve again.
@@ -162,7 +162,7 @@ Other makers have similar switches; the community list at dontkillmyapp.com trac
 | `TARGET_CIRCLE_FORBIDDEN` (check `upload.target`, run error code, files blocked) | The target circle was changed to one where the account is no longer a collaborator, or the account lost `media:write` | On the web, Settings, then Media sync, choose a circle where you are a collaborator or admin. Then **Retry failed** |
 | Files show **Blocked** | A file failed five times, or the server refused it permanently (for example a 4xx other than a retryable one). Blocked files wait for a manual retry | Read the error on the row (Hub, then **Files**, then **Blocked**), fix the cause, then **Retry** that row or **Retry blocked**. The web's **Retry failed** also re-queues blocked files |
 | Files show **Failed** | A retryable error (network, server 5xx). The app retries by itself: after 30 seconds, then 2 minutes, 10 minutes and 1 hour; the fifth failure blocks the file | Wait, or tap **Retry all failed** to try again immediately |
-| Photos upload without location | `ACCESS_MEDIA_LOCATION` is not granted, so Android removed the GPS before upload | Grant it ([section 5](#5-pair-the-phone)). Files already uploaded keep no location; re-upload is not automatic |
+| Photos or videos upload without location | `ACCESS_MEDIA_LOCATION` is not granted, so Android removed the location before upload. Or the video was synced by an app build from before issue #545, which read videos without their location even with the permission granted (such a video also does not de-duplicate against the same file imported from the original, for example by the CLI) | Grant it ([section 5](#5-pair-the-phone)). After updating the app, videos not yet uploaded are re-read with their location and uploaded fresh on their own. Files already uploaded keep no location; re-upload is not automatic. To replace location-less videos: delete them on the web, then Diagnostics, **Reset local sync state** (photos de-duplicate by hash and are not uploaded again; those videos upload again with their location) |
 | Nothing uploads from a folder | The folder is not selected, the type is excluded, or "upload existing: only new" excludes older items | Check Folders and Upload existing on the phone or the web |
 | The same photo appears once | By design: the server de-duplicates by file hash within a circle | Nothing to fix |
 
@@ -191,7 +191,7 @@ Each row is one self-test check on the Diagnostics screen. **Warn** and **fail**
 | `auth.valid` | Fails | The server answered 401 (token expired or revoked) or 404/409 (the device was removed or revoked) | **Re-pair** |
 | `api.connection` | Warns (the phone has never checked in) or fails (the last successful check-in is 24 hours old or older) | The server has not heard from this phone: no network, an expired token, or background work blocked | Fix `server.reachable` or `auth.valid` first, then check `battery.optimization` and `work.periodic`, then **Sync now** (every sync starts with a check-in) |
 | `media.permission` | Passes (full), warns (partial: "only selected photos sync") or fails (denied) | Access to photos and videos was narrowed or refused | **Grant media access** from the check, or Android Settings, then Apps, then MemoriaHub, then Permissions. Pick "Allow all" |
-| `media.location` | Warns | `ACCESS_MEDIA_LOCATION` not granted, so GPS is stripped from uploads | **Grant media access**; allow photo location |
+| `media.location` | Warns | `ACCESS_MEDIA_LOCATION` not granted, so the location is stripped from uploaded photos and videos | **Grant media access**; allow photo and video location |
 | `media.folders` | Fails (none selected) or warns (a selected folder no longer exists on the phone) | No folders chosen, or a folder was deleted or renamed | **Choose folders** ([section 6](#6-choose-what-to-back-up)) |
 | `media.trigger` | Fails. `skip` while paused or not paired | The new-photo trigger is not armed (the app was force-stopped, or its work was cancelled), so new photos wait for the 6-hour catch-up | **Sync now** re-arms it; open the app |
 | `work.periodic` | Fails. `skip` while paused or not paired | The 6-hour background run is not scheduled | **Sync now** re-schedules it; if it keeps disappearing see `battery.optimization` |
@@ -245,7 +245,7 @@ Admin, then Settings, then **Doctor** (`/admin/settings/doctor`) has an **Androi
 
 ## 13. Privacy
 
-What leaves the phone: the **file bytes**, each file's **path** (as the source path on the item), its **capture date**, the **device name**, and, when photo location access is granted, the **GPS embedded in the file**. Nothing is read or uploaded from folders that are not selected. The pairing token is stored encrypted on the phone and never written to the log. Android backups of the app are disabled.
+What leaves the phone: the **file bytes**, each file's **path** (as the source path on the item), its **capture date**, the **device name**, and, when photo and video location access is granted, the **location embedded in the file**. Nothing is read or uploaded from folders that are not selected. The pairing token is stored encrypted on the phone and never written to the log. Android backups of the app are disabled.
 
 ## 14. Summary checklist
 
@@ -254,7 +254,7 @@ What leaves the phone: the **file bytes**, each file's **path** (as the source p
 - [ ] APK installed from `/settings/android-app`; server address entered
 - [ ] Phone paired (long-press, Media sync, Connect)
 - [ ] Build trusted (automatic for releases); `assetlinks.json` lists it
-- [ ] Photo and video access granted (full), plus photo location and notifications
+- [ ] Photo and video access granted (full), plus photo and video location and notifications
 - [ ] Folders and network policy chosen; target circle correct
 - [ ] Battery optimization exempted
 - [ ] **Sync now** shows a run with status ok; the web card counts move

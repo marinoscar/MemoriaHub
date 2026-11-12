@@ -11,10 +11,10 @@ import memoriahub.marin.cr.BuildConfig
 /**
  * The Media Sync file ledger (`<prefix>_sync.db`, docs/specs/android-media-sync.md §8). Built once
  * per process by `MobileApplication.mediaSyncDatabase`. The schema is exported to `app/schemas`;
- * bump [version] with a Room migration (never a destructive fallback: losing the ledger loses
- * in-flight multipart sessions and every count).
+ * bump [version] with a Room migration in [LedgerMigrations] (never a destructive fallback: losing
+ * the ledger loses in-flight multipart sessions and every count).
  */
-@Database(entities = [SyncFileEntity::class, SyncRunEntity::class], version = 1, exportSchema = true)
+@Database(entities = [SyncFileEntity::class, SyncRunEntity::class], version = 2, exportSchema = true)
 @TypeConverters(LedgerConverters::class)
 abstract class MediaSyncDatabase : RoomDatabase() {
     abstract fun syncFiles(): SyncFileDao
@@ -29,7 +29,9 @@ abstract class MediaSyncDatabase : RoomDatabase() {
         const val NAME = BuildConfig.STORAGE_PREFIX + "_sync.db"
 
         fun create(context: Context): MediaSyncDatabase =
-            Room.databaseBuilder(context.applicationContext, MediaSyncDatabase::class.java, NAME).build()
+            Room.databaseBuilder(context.applicationContext, MediaSyncDatabase::class.java, NAME)
+                .addMigrations(*LedgerMigrations.ALL)
+                .build()
     }
 }
 

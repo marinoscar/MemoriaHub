@@ -14,7 +14,7 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- Without it EXIF GPS is redacted from the bytes read through MediaStore. -->
+    <!-- Without it location metadata (photo EXIF GPS, video location) is redacted from the bytes read through MediaStore. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <!-- #512 background sync: long uploads run as a WorkManager foreground service of type dataSync
          (Android 14+ requires the typed permission; docs/specs/android-media-sync.md §10.3, §11.1). -->

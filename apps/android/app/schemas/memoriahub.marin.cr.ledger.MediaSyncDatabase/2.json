@@ -1,0 +1,300 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "592fc297e3809ffd6478ceb841352459",
+    "entities": [
+      {
+        "tableName": "sync_files",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `mediaStoreId` INTEGER NOT NULL, `volume` TEXT NOT NULL, `uri` TEXT NOT NULL, `bucketId` TEXT, `bucketName` TEXT, `relativePath` TEXT, `displayName` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `isVideo` INTEGER NOT NULL, `sizeBytes` INTEGER NOT NULL, `dateModified` INTEGER NOT NULL, `dateTaken` INTEGER, `generationModified` INTEGER, `state` TEXT NOT NULL, `contentHash` TEXT, `objectId` TEXT, `uploadId` TEXT, `partSize` INTEGER, `totalParts` INTEGER, `completedPartsJson` TEXT, `partUploadAuth` TEXT, `mediaItemId` TEXT, `attempts` INTEGER NOT NULL, `nextAttemptAt` INTEGER, `lastError` TEXT, `lastErrorCode` TEXT, `uploadedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mediaStoreId",
+            "columnName": "mediaStoreId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "volume",
+            "columnName": "volume",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uri",
+            "columnName": "uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketId",
+            "columnName": "bucketId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bucketName",
+            "columnName": "bucketName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relativePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isVideo",
+            "columnName": "isVideo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateModified",
+            "columnName": "dateModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateTaken",
+            "columnName": "dateTaken",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "generationModified",
+            "columnName": "generationModified",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "objectId",
+            "columnName": "objectId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uploadId",
+            "columnName": "uploadId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "partSize",
+            "columnName": "partSize",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "totalParts",
+            "columnName": "totalParts",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedPartsJson",
+            "columnName": "completedPartsJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "partUploadAuth",
+            "columnName": "partUploadAuth",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "mediaItemId",
+            "columnName": "mediaItemId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uploadedAt",
+            "columnName": "uploadedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_files_mediaStoreId_volume",
+            "unique": true,
+            "columnNames": [
+              "mediaStoreId",
+              "volume"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sync_files_mediaStoreId_volume` ON `${TABLE_NAME}` (`mediaStoreId`, `volume`)"
+          },
+          {
+            "name": "index_sync_files_state_nextAttemptAt",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "nextAttemptAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_files_state_nextAttemptAt` ON `${TABLE_NAME}` (`state`, `nextAttemptAt`)"
+          },
+          {
+            "name": "index_sync_files_bucketId",
+            "unique": false,
+            "columnNames": [
+              "bucketId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_files_bucketId` ON `${TABLE_NAME}` (`bucketId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_runs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trigger` TEXT NOT NULL, `status` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `finishedAt` INTEGER, `filesUploaded` INTEGER NOT NULL, `filesDeduplicated` INTEGER NOT NULL, `filesFailed` INTEGER NOT NULL, `bytesUploaded` INTEGER NOT NULL, `errorCode` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trigger",
+            "columnName": "trigger",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finishedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "filesUploaded",
+            "columnName": "filesUploaded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filesDeduplicated",
+            "columnName": "filesDeduplicated",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filesFailed",
+            "columnName": "filesFailed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesUploaded",
+            "columnName": "bytesUploaded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorCode",
+            "columnName": "errorCode",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_runs_startedAt",
+            "unique": false,
+            "columnNames": [
+              "startedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_runs_startedAt` ON `${TABLE_NAME}` (`startedAt`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '592fc297e3809ffd6478ceb841352459')"
+    ]
+  }
+}

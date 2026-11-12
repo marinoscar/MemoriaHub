@@ -152,9 +152,10 @@ class AndroidMediaGateway(
     }
 
     /**
-     * D24: photos are read through `setRequireOriginal` when `ACCESS_MEDIA_LOCATION` is granted (the
-     * plain URI returns GPS-redacted bytes); when that form throws, the plain URI is used. Both
-     * [openStream] and [openRange] go through here, so the hash and the upload always agree.
+     * D24: photos and videos are read through `setRequireOriginal` when `ACCESS_MEDIA_LOCATION` is
+     * granted (the plain URI returns location-redacted bytes: EXIF GPS in photos, the location atom
+     * in videos); when that form throws, the plain URI is used. Both [openStream] and [openRange] go
+     * through here, so the hash and the upload always agree.
      */
     private fun <T> withReadableUri(uri: String, open: (Uri) -> T): T {
         val plain = Uri.parse(uri)
@@ -170,9 +171,13 @@ class AndroidMediaGateway(
     }
 
     private fun wantsOriginal(uri: Uri): Boolean =
-        sdkInt >= 29 &&
-            uri.pathSegments.contains("images") &&
-            ContextCompat.checkSelfPermission(appContext, MediaPermissions.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+        OriginalReads.wantsOriginal(
+            sdkInt = sdkInt,
+            authority = uri.authority,
+            pathSegments = uri.pathSegments,
+            locationGranted = sdkInt >= OriginalReads.MIN_SDK &&
+                ContextCompat.checkSelfPermission(appContext, MediaPermissions.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED,
+        )
 
     private fun collection(volume: String, isVideo: Boolean): Uri = when {
         sdkInt >= 29 && isVideo -> MediaStore.Video.Media.getContentUri(volume)

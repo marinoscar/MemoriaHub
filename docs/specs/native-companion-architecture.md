@@ -268,7 +268,7 @@ Work through the layers in this order. Each step names where Media Sync does the
 
 | Layer | Design (details in the feature spec) |
 |---|---|
-| Permission | `READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO` on Android 13+ (`READ_EXTERNAL_STORAGE` up to 12). Android 14 partial access ("Select photos and videos") is a degraded grant reported as `permission: 'partial'`; the app must work with a subset. `ACCESS_MEDIA_LOCATION` keeps EXIF GPS in the uploaded bytes. |
+| Permission | `READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO` on Android 13+ (`READ_EXTERNAL_STORAGE` up to 12). Android 14 partial access ("Select photos and videos") is a degraded grant reported as `permission: 'partial'`; the app must work with a subset. `ACCESS_MEDIA_LOCATION` keeps the embedded location (EXIF GPS in photos, the location tag in videos) in the uploaded bytes, read through `MediaStore.setRequireOriginal`. |
 | Discovery | A WorkManager content-URI trigger on `MediaStore.Images` and `MediaStore.Video` for new items, plus a periodic 6-hour catch-up that queries MediaStore by generation (`GENERATION_MODIFIED`, API 30+) because triggers can be missed. A Room ledger remembers every file. |
 | Constraints | `UNMETERED` ("Wi-Fi only", the default) or `CONNECTED` ("Wi-Fi and mobile data"), plus optional "only while charging". Cellular upload is an explicit opt-in and is re-checked between parts. |
 | Transfer | The existing resumable S3 multipart endpoints with presigned URLs minted per part, streamed straight to object storage and never buffered by the API or the phone; a part route proxied by the API for the `local` provider. The phone stores the upload id and the confirmed parts so a retry resumes. |
