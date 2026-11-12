@@ -26,12 +26,12 @@ import { useReviewQueues } from '../../hooks/useReviewQueues';
 // Lazily imported HERE rather than in `App.tsx` so opening `/review` does not
 // pull six unrelated page chunks in with it — only the queue actually opened is
 // fetched. Each is a zero-prop default export.
-const BurstsPage = lazy(() => import('../Bursts/BurstsPage'));
-const DuplicatesPage = lazy(() => import('../Duplicates/DuplicatesPage'));
-const LocationSuggestionsPage = lazy(
-  () => import('../LocationSuggestions/LocationSuggestionsPage'),
+const BurstsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsPage })));
+const DuplicatesPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesPage })));
+const LocationSuggestionsPage = lazy(() =>
+  import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })),
 );
-const EnhancementsPage = lazy(() => import('../Enhancements/EnhancementsPage'));
+const EnhancementsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementsPage })));
 const ReviewInsightsPage = lazy(() => import('../Insights/ReviewInsightsPage'));
 const WorkflowListPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),

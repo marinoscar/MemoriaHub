@@ -484,6 +484,61 @@
           "react-router-dom"
         ]
       }
+    },
+    "review-runs": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "face": {
+      "peers": [
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "review": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
+    },
+    "enhancement": {
+      "peers": [
+        "@marinoscar/memoriahub-contract",
+        "react",
+        "react-dom"
+      ],
+      "entries": {
+        "ui": [
+          "@mui/icons-material",
+          "@mui/material",
+          "react-router-dom"
+        ]
+      }
     }
   }
 }

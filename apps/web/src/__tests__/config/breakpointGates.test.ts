@@ -60,7 +60,7 @@ const ALLOWED_READS: Readonly<Record<string, string>> = {
   'memoriahub-web/memories/ui/components/MemoryCard.tsx': WHY.media,
   'memoriahub-web/memories/ui/components/MemoryStoryPlayer.tsx': WHY.media,
 
-  'components/review/MemberComparison.tsx': WHY.panel,
+  'memoriahub-web/review/ui/components/MemberComparison.tsx': WHY.panel,
   'components/settings/mediaSync/DiagnosticsSection.tsx': WHY.panel,
   'components/settings/mediaSync/SyncHistory.tsx': WHY.panel,
   'memoriahub-web/workflows/ui/components/builder/WorkflowPreviewPanel.tsx': WHY.panel,

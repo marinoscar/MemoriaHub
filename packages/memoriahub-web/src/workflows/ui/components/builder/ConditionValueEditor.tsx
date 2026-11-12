@@ -13,7 +13,7 @@ import {
   Slider,
   Typography,
 } from '@mui/material';
-import { PersonMultiSelectSlot as PersonMultiSelect } from '../../../../media/ui/index.js';
+import { PersonMultiSelect } from '../../../../people/ui/index.js';
 import { LocationPickerMap } from '../../../../media/ui/index.js';
 import { getExploreTags, listAlbums } from '../../../../media/headless/index.js';
 import type { ExploreItem } from '../../../../media/headless/index.js';

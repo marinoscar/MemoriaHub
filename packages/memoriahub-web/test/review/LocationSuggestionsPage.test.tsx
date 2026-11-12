@@ -1,0 +1,1034 @@
+/**
+ * Unit tests for LocationSuggestionsPage.
+ *
+ * Mocking strategy:
+ *   - useOwnerScope, usePermissions, useSystemSettings, and useLocationSuggestions
+ *     are module-mocked directly (mirrors BurstsPage.test.tsx / DuplicatesPage.test.tsx
+ *     — reaching one level above the service layer rather than mocking
+ *     services/locationSuggestions here).
+ *   - the review-runs slice's startLocationAcceptRun /
+ *     startLocationRejectRun are mocked directly since the bulk accept/reject
+ *     flow now starts an async run (issue mirrors trash-empty-at-scale) rather
+ *     than calling a synchronous bulkAccept on the hook.
+ *   - react-router-dom's useNavigate is mocked so the post-start navigation to
+ *     /review-runs/:runId can be asserted (issue #190 folded location runs into
+ *     the shared review-run model; /location-suggestion-runs/:runId survives
+ *     only as a redirect).
+ *   - LocationMiniMap and LocationPickerMap are mocked to lightweight stubs
+ *     (avoids react-leaflet dependency), matching the pattern used in
+ *     MediaDetailDrawer.test.tsx / BulkLocationDialog.test.tsx.
+ *   - services/media's searchPlaces/reverseGeocode are mocked so the Adjust
+ *     dialog (which renders inline on this page) never hits the network.
+ *   - services/locationSuggestions's acceptLocationSuggestion is mocked
+ *     directly since AdjustLocationDialog calls it without going through
+ *     the useLocationSuggestions hook.
+ *
+ * Covers:
+ *  - Guard: "Select a circle" alert when no active circle
+ *  - Loading spinner / empty state / error alert
+ *  - Confidence chip color and label (>=0.8 success, >=0.5 warning, else default)
+ *  - Anchor summary text (two-anchor interpolated vs single-anchor estimate)
+ *  - Speed warning: only when impliedSpeedKmh != null && >= 60
+ *  - LocationMiniMap rendered per row with the suggestion's lat/lng
+ *  - Confirm button calls accept(id) with no lat/lng args
+ *  - Reject button calls reject(id)
+ *  - Adjust dialog opens seeded at the suggestion's coords; accept-with-
+ *    adjusted-coords path via the LocationPickerMap stub
+ *  - Threshold: reads default from useSystemSettings' locationInference.bulkAcceptThreshold
+ *    (falls back to 80 when unset), inline TextField overrides it, clamped 0-100
+ *  - Admin-only gear icon linking to /admin/settings/location-inference
+ *  - Bulk "Accept all >= N%" flow: confirm dialog, startLocationAcceptRun call,
+ *    navigation to the new run page, toolbar button disabled states
+ *  - Bulk "Reject all < N%" flow: confirm dialog, startLocationRejectRun call,
+ *    navigation to the new run page
+ *  - Error from starting a bulk run surfaces an action-error alert
+ *  - Empty state text when items is empty
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { render } from '../utils/test-utils.js';
+
+// ---------------------------------------------------------------------------
+// Module-level mocks
+// ---------------------------------------------------------------------------
+
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePermissions: vi.fn(),
+  useOwnerScope: vi.fn(),
+  useFeatureFlags: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
+}));
+
+vi.mock('../../src/review/headless/hooks/useLocationSuggestions.js', () => ({
+  useLocationSuggestions: vi.fn(),
+}));
+
+vi.mock('../../src/review-runs/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startLocationAcceptRun: vi.fn(),
+  startLocationRejectRun: vi.fn(),
+}));
+
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  LocationMiniMap: ({ lat, lng }: { lat: number; lng: number }) => (
+    <div data-testid="location-mini-map" data-lat={lat} data-lng={lng} />
+  ),
+
+}));
+
+
+
+// `LocationPickerMap` lives inside the packaged `LocationSearchPicker`, so it cannot be stubbed
+// from here; its Leaflet layer is stood in for instead. The pin renders as the
+// `location-picker-map` element, and clicking it fires the map's click handler.
+const mapHandlers: { click?: (e: { latlng: { lat: number; lng: number } }) => void } = {};
+vi.mock('react-leaflet', () => ({
+  MapContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TileLayer: () => null,
+  Circle: () => null,
+  Marker: ({ position, opacity }: { position: [number, number]; opacity?: number }) =>
+    opacity === undefined || opacity === 1 ? (
+      <div
+        data-testid="location-picker-map"
+        data-lat={position[0]}
+        data-lng={position[1]}
+        onClick={() => mapHandlers.click?.({ latlng: { lat: 40.7128, lng: -74.006 } })}
+      />
+    ) : null,
+  useMapEvents: (handlers: typeof mapHandlers) => {
+    Object.assign(mapHandlers, handlers);
+    return {};
+  },
+  useMap: () => ({ setView: vi.fn(), getZoom: () => 13 }),
+}));
+
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  searchPlaces: vi.fn(),
+  reverseGeocode: vi.fn(),
+
+}));
+
+vi.mock('../../src/review/headless/services/locationSuggestions.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/review/headless/services/locationSuggestions.js')>(
+    '../../src/review/headless/services/locationSuggestions.js',
+  );
+  return {
+    ...actual,
+    acceptLocationSuggestion: vi.fn(),
+  };
+});
+
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Imports after mocks
+// ---------------------------------------------------------------------------
+
+import { usePermissions, useOwnerScope, useFeatureFlags, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
+import LocationSuggestionsPage from '../../src/review/ui/pages/LocationSuggestionsPage.js';
+import { useLocationSuggestions } from '../../src/review/headless/hooks/useLocationSuggestions.js';
+import { startLocationAcceptRun, startLocationRejectRun } from '../../src/review-runs/headless/index.js';
+import { searchPlaces, reverseGeocode } from '../../src/media/headless/index.js';
+import { acceptLocationSuggestion } from '../../src/review/headless/services/locationSuggestions.js';
+import type { LocationSuggestionSummary } from '../../src/review/headless/services/locationSuggestions.js';
+
+const mockUseOwnerScope = vi.mocked(useOwnerScope);
+const mockUsePermissions = vi.mocked(usePermissions);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
+const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
+const mockUseLocationSuggestions = vi.mocked(useLocationSuggestions);
+const mockStartLocationAcceptRun = vi.mocked(startLocationAcceptRun);
+const mockStartLocationRejectRun = vi.mocked(startLocationRejectRun);
+const mockSearchPlaces = vi.mocked(searchPlaces);
+const mockReverseGeocode = vi.mocked(reverseGeocode);
+const mockAcceptLocationSuggestion = vi.mocked(acceptLocationSuggestion);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const CIRCLE_ID = 'circle-1';
+
+function makeCircle(id = CIRCLE_ID) {
+  return {
+    id,
+    name: 'Test Circle',
+    description: null,
+    ownerId: 'user-1',
+    isPersonal: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function makeCircleContext(overrides: Partial<ReturnType<typeof useOwnerScope>> = {}): ReturnType<typeof useOwnerScope> {
+  return {
+    activeCircle: makeCircle(),
+    activeCircleId: CIRCLE_ID,
+    activeCircleRole: 'collaborator',
+    circles: [makeCircle()],
+    loading: false,
+    setActiveCircle: vi.fn().mockResolvedValue(undefined),
+    refreshCircles: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as ReturnType<typeof useOwnerScope>;
+}
+
+function makePermissions(isAdmin = false) {
+  return {
+    permissions: new Set<string>(['media:read', 'media:write']),
+    roles: new Set<string>(isAdmin ? ['admin'] : ['viewer']),
+    hasPermission: vi.fn().mockReturnValue(true),
+    hasAnyPermission: vi.fn().mockReturnValue(true),
+    hasAllPermissions: vi.fn().mockReturnValue(true),
+    hasRole: vi.fn().mockReturnValue(isAdmin),
+    hasAnyRole: vi.fn().mockReturnValue(isAdmin),
+    isAdmin,
+  } as unknown as ReturnType<typeof usePermissions>;
+}
+
+function makeSystemSettingsHook(
+  bulkAcceptThreshold: number | undefined = 80,
+): any {
+  return {
+    settings: {
+      ui: { allowUserThemeOverride: true },
+      features: {},
+      locationInference:
+        bulkAcceptThreshold === undefined ? undefined : { bulkAcceptThreshold },
+      updatedAt: new Date().toISOString(),
+      updatedBy: null,
+      version: 1,
+    } as any,
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateSettings: vi.fn().mockResolvedValue(undefined),
+    replaceSettings: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeLocationSuggestionsHook(
+  overrides: Partial<ReturnType<typeof useLocationSuggestions>> = {},
+): ReturnType<typeof useLocationSuggestions> {
+  return {
+    items: [],
+    meta: null,
+    isLoading: false,
+    error: null,
+    fetchSuggestions: vi.fn().mockResolvedValue(undefined),
+    accept: vi.fn().mockResolvedValue({ id: 's-1', status: 'accepted', lat: 0, lng: 0, coordSource: 'inferred' }),
+    reject: vi.fn().mockResolvedValue({ id: 's-1', status: 'rejected' }),
+    revert: vi.fn().mockResolvedValue({ id: 's-1', status: 'reverted' }),
+    actingIds: new Set<string>(),
+    ...overrides,
+  } as unknown as ReturnType<typeof useLocationSuggestions>;
+}
+
+/**
+ * Default matches the real MSW `GET /api/features` handler's response
+ * (`{ features: {} }`) so tests that don't care about the flag keep behaving
+ * exactly as they did before `useFeatureFlags` was mocked directly here —
+ * `locationInference` is absent, so the feature-off banner (issue #404)
+ * shows by default just as it did under the real network round trip.
+ */
+function makeFeatureFlagsHook(
+  overrides: Partial<ReturnType<typeof useFeatureFlags>> = {},
+): ReturnType<typeof useFeatureFlags> {
+  return {
+    flags: {},
+    pictureEnhancement: null,
+    isLoading: false,
+    error: null,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function makeSuggestion(overrides: Partial<LocationSuggestionSummary> = {}): LocationSuggestionSummary {
+  return {
+    id: 'suggestion-1',
+    mediaItemId: 'media-1',
+    status: 'pending',
+    lat: 9.9281,
+    lng: -84.0907,
+    confidence: 0.85,
+    method: 'interpolated',
+    anchorBeforeId: 'anchor-before',
+    anchorAfterId: 'anchor-after',
+    gapBeforeSeconds: 300,
+    gapAfterSeconds: 400,
+    anchorDistanceKm: 0.5,
+    impliedSpeedKmh: 10,
+    capturedAt: '2026-06-15T14:32:00.000Z',
+    cameraMake: 'Apple',
+    cameraModel: 'iPhone 14',
+    thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('LocationSuggestionsPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
+    mockUseOwnerScope.mockReturnValue(makeCircleContext());
+    mockUsePermissions.mockReturnValue(makePermissions(false));
+    mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook());
+    mockUseFeatureFlags.mockReturnValue(makeFeatureFlagsHook());
+    mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
+    mockSearchPlaces.mockResolvedValue([]);
+    mockReverseGeocode.mockResolvedValue({
+      country: 'Costa Rica',
+      countryCode: 'CR',
+      admin1: 'Alajuela',
+      admin2: null,
+      locality: 'La Fortuna',
+      placeName: 'Arenal',
+    });
+    mockAcceptLocationSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      status: 'accepted',
+      lat: 9.9281,
+      lng: -84.0907,
+      coordSource: 'manual',
+    });
+    mockStartLocationAcceptRun.mockResolvedValue({
+      runId: 'run-1',
+      status: 'evaluating',
+      matchedCount: 0,
+    });
+    mockStartLocationRejectRun.mockResolvedValue({
+      runId: 'run-2',
+      status: 'evaluating',
+      matchedCount: 0,
+    });
+  });
+
+  describe('no active circle', () => {
+    it('shows a select-a-circle alert', () => {
+      mockUseOwnerScope.mockReturnValue(makeCircleContext({ activeCircle: null, activeCircleId: null }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText(/select a circle to review location suggestions/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('with active circle', () => {
+    it('renders the "Location Suggestions" heading', () => {
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText('Location Suggestions')).toBeInTheDocument();
+    });
+
+    it('shows a loading spinner while fetching', () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ isLoading: true }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('shows the empty state message when no suggestions are returned', () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ items: [] }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText(/no location suggestions to review/i)).toBeInTheDocument();
+    });
+
+    it('renders an error message when fetch fails', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ error: 'Network error loading suggestions' }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText('Network error loading suggestions')).toBeInTheDocument();
+    });
+
+    it('calls fetchSuggestions with status=pending on mount', () => {
+      const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ fetchSuggestions }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(fetchSuggestions).toHaveBeenCalledWith(
+        expect.objectContaining({ circleId: CIRCLE_ID, status: 'pending', page: 1 }),
+      );
+    });
+  });
+
+  describe('confidence chip', () => {
+    it('renders a success-colored chip with rounded percentage for confidence >= 0.8', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ confidence: 0.85 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      const chip = screen.getByText('85% confidence');
+      expect(chip).toBeInTheDocument();
+      expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorSuccess');
+    });
+
+    it('renders a warning-colored chip for confidence in [0.5, 0.8)', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ confidence: 0.6 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      const chip = screen.getByText('60% confidence');
+      expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorWarning');
+    });
+
+    it('renders a default-colored chip for confidence below 0.5', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ confidence: 0.3 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      const chip = screen.getByText('30% confidence');
+      expect(chip.closest('.MuiChip-root')).toHaveClass('MuiChip-colorDefault');
+    });
+  });
+
+  describe('anchor summary', () => {
+    it('shows "Interpolated between 2 nearby photos" when both anchors are present', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [
+            makeSuggestion({
+              anchorBeforeId: 'a-before',
+              anchorAfterId: 'a-after',
+              gapBeforeSeconds: 300,
+              gapAfterSeconds: 400,
+              anchorDistanceKm: 0.42,
+            }),
+          ],
+        }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText(/interpolated between 2 nearby photos/i)).toBeInTheDocument();
+      expect(screen.getByText(/anchors 0\.42 km apart/i)).toBeInTheDocument();
+    });
+
+    it('shows "Estimated from a single nearby photo" when only one anchor is present', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [
+            makeSuggestion({
+              anchorBeforeId: 'a-before',
+              anchorAfterId: null,
+              gapBeforeSeconds: 300,
+              gapAfterSeconds: null,
+              anchorDistanceKm: null,
+              method: 'nearest',
+            }),
+          ],
+        }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText(/estimated from a single nearby photo/i)).toBeInTheDocument();
+      expect(screen.getByText(/before/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('speed warning', () => {
+    it('renders the speed warning when impliedSpeedKmh >= 60', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ impliedSpeedKmh: 85 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByText(/anchors imply ~85 km\/h/i)).toBeInTheDocument();
+      expect(screen.getByText(/subject may have been traveling/i)).toBeInTheDocument();
+    });
+
+    it('does NOT render the speed warning when impliedSpeedKmh is below 60', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ impliedSpeedKmh: 45 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.queryByText(/km\/h/i)).not.toBeInTheDocument();
+    });
+
+    it('does NOT render the speed warning when impliedSpeedKmh is null', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ impliedSpeedKmh: null })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.queryByText(/km\/h/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('LocationMiniMap', () => {
+    it('renders a mini-map per row with the suggestion lat/lng', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ lat: 48.8566, lng: 2.3522 })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      const map = screen.getByTestId('location-mini-map');
+      expect(map.getAttribute('data-lat')).toBe('48.8566');
+      expect(map.getAttribute('data-lng')).toBe('2.3522');
+    });
+  });
+
+  describe('Confirm action', () => {
+    it('calls accept(id) with no lat/lng arguments when Confirm is clicked', async () => {
+      const accept = vi.fn().mockResolvedValue({ id: 's-1', status: 'accepted', lat: 0, lng: 0, coordSource: 'inferred' });
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 'suggestion-1' })], accept }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+      await waitFor(() => {
+        expect(accept).toHaveBeenCalledWith('suggestion-1');
+      });
+    });
+
+    it('shows a success snackbar after a successful confirm', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Location confirmed')).toBeInTheDocument();
+      });
+    });
+
+    it('shows an error alert when accept rejects', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [makeSuggestion()],
+          accept: vi.fn().mockRejectedValue(new Error('Accept failed')),
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Accept failed')).toBeInTheDocument();
+      });
+    });
+
+    it('disables the Confirm button for the row while it is in actingIds', () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [makeSuggestion({ id: 'suggestion-1' })],
+          actingIds: new Set(['suggestion-1']),
+        }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /confirm/i })).toBeDisabled();
+    });
+  });
+
+  describe('Reject action', () => {
+    it('calls reject(id) when Reject is clicked', async () => {
+      const reject = vi.fn().mockResolvedValue({ id: 's-1', status: 'rejected' });
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 'suggestion-1' })], reject }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /^reject$/i }));
+
+      await waitFor(() => {
+        expect(reject).toHaveBeenCalledWith('suggestion-1');
+      });
+    });
+
+    it('shows a success snackbar after a successful reject', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /^reject$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Suggestion rejected')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Adjust dialog', () => {
+    it('opens the adjust dialog seeded at the suggestion coordinates', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ lat: 9.9281, lng: -84.0907 })] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /adjust/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Adjust suggested location')).toBeInTheDocument();
+      });
+
+      const map = screen.getByTestId('location-picker-map');
+      expect(map.getAttribute('data-lat')).toBe('9.9281');
+      expect(map.getAttribute('data-lng')).toBe('-84.0907');
+    });
+
+    it('confirms unmodified coordinates with "Location confirmed" message', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 'suggestion-1', lat: 9.9281, lng: -84.0907 })] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /adjust/i }));
+      const dialog = await screen.findByRole('dialog');
+
+      await user.click(within(dialog).getByRole('button', { name: /confirm location/i }));
+
+      await waitFor(() => {
+        expect(mockAcceptLocationSuggestion).toHaveBeenCalledWith('suggestion-1', 9.9281, -84.0907);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Location confirmed')).toBeInTheDocument();
+      });
+    });
+
+    it('moving the pin then confirming sends the adjusted coordinates and "with your adjustment" message', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 'suggestion-1', lat: 9.9281, lng: -84.0907 })] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /adjust/i }));
+      const dialog = await screen.findByRole('dialog');
+
+      // Simulate a pin move via the mocked LocationPickerMap stub's onClick
+      await user.click(within(dialog).getByTestId('location-picker-map'));
+
+      await user.click(within(dialog).getByRole('button', { name: /confirm location/i }));
+
+      await waitFor(() => {
+        expect(mockAcceptLocationSuggestion).toHaveBeenCalledWith('suggestion-1', 40.7128, -74.006);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('Location confirmed with your adjustment')).toBeInTheDocument();
+      });
+    });
+
+    it('closes the dialog when Cancel is clicked without calling acceptLocationSuggestion', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /adjust/i }));
+      const dialog = await screen.findByRole('dialog');
+
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Adjust suggested location')).not.toBeInTheDocument();
+      });
+      expect(mockAcceptLocationSuggestion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('threshold default from system settings', () => {
+    it('uses locationInference.bulkAcceptThreshold from system settings for both toolbar buttons', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(65));
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /accept all.*65%/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /reject all.*65%/i })).toBeInTheDocument();
+    });
+
+    it('falls back to a threshold of 80 when locationInference.bulkAcceptThreshold is unset', () => {
+      mockUseSystemSettings.mockReturnValue(makeSystemSettingsHook(undefined));
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /accept all.*80%/i })).toBeInTheDocument();
+    });
+
+    it('the inline Threshold % field overrides the confirm-dialog wording', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      const field = screen.getByLabelText(/threshold %/i);
+      await user.clear(field);
+      await user.type(field, '55');
+
+      expect(screen.getByRole('button', { name: /accept all.*55%/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('admin-only location inference settings gear icon', () => {
+    it('renders the gear icon linking to /admin/settings/location-inference for an admin', () => {
+      mockUsePermissions.mockReturnValue(makePermissions(true));
+
+      render(<LocationSuggestionsPage />);
+
+      const gear = screen.getByRole('link', { name: /location inference settings/i });
+      expect(gear).toBeInTheDocument();
+      expect(gear).toHaveAttribute('href', '/admin/settings/location-inference');
+    });
+
+    it('does not render the gear icon for a non-admin', () => {
+      mockUsePermissions.mockReturnValue(makePermissions(false));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.queryByRole('link', { name: /location inference settings/i })).toBeNull();
+    });
+  });
+
+  describe('bulk accept run flow', () => {
+    it('the "Accept all" toolbar button is disabled when there are no items', () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ items: [] }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /accept all.*80%/i })).toBeDisabled();
+    });
+
+    it('the "Reject all" toolbar button is disabled when there are no items', () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ items: [] }));
+
+      render(<LocationSuggestionsPage />);
+
+      expect(screen.getByRole('button', { name: /reject all.*80%/i })).toBeDisabled();
+    });
+
+    it('opens a confirm dialog when "Accept all" is clicked', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Accept suggestions ≥ 80%?')).toBeInTheDocument();
+      });
+    });
+
+    it('confirming "Accept all" calls startLocationAcceptRun({ circleId, threshold }) and navigates to the run page', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationAcceptRun.mockResolvedValue({
+        runId: 'run-accept-1',
+        status: 'evaluating',
+        matchedCount: 0,
+      });
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+
+      await waitFor(() => {
+        expect(mockStartLocationAcceptRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-accept-1');
+      });
+    });
+
+    it('opens a confirm dialog when "Reject all" is clicked', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Reject suggestions below 80%?')).toBeInTheDocument();
+      });
+    });
+
+    it('confirming "Reject all" calls startLocationRejectRun({ circleId, threshold }) and navigates to the run page', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationRejectRun.mockResolvedValue({
+        runId: 'run-reject-1',
+        status: 'evaluating',
+        matchedCount: 0,
+      });
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^reject all$/i }));
+
+      await waitFor(() => {
+        expect(mockStartLocationRejectRun).toHaveBeenCalledWith({ circleId: CIRCLE_ID, threshold: 80 });
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/review-runs/run-reject-1');
+      });
+    });
+
+    it('shows an action-error alert and does not navigate when startLocationAcceptRun rejects (e.g. 409 already in progress)', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationAcceptRun.mockRejectedValue(
+        new Error('A location-suggestion run is already in progress for this circle'),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^accept all$/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('A location-suggestion run is already in progress for this circle'),
+        ).toBeInTheDocument();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('shows an action-error alert when startLocationRejectRun rejects', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      mockStartLocationRejectRun.mockRejectedValue(new Error('Failed to start run'));
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /reject all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^reject all$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to start run')).toBeInTheDocument();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('closing the confirm dialog without confirming does not start a run', async () => {
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+      const user = userEvent.setup();
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(screen.getByRole('button', { name: /accept all.*80%/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Accept suggestions ≥ 80%?')).not.toBeInTheDocument();
+      });
+      expect(mockStartLocationAcceptRun).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sort control (issue #189)', () => {
+    it('renders with the page default ("Newest first") selected', async () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('review-sort-select')).toBeInTheDocument();
+      });
+      expect(
+        within(screen.getByTestId('review-sort-select')).getByText(/newest first/i),
+      ).toBeInTheDocument();
+    });
+
+    it('changing the sort refetches with the new sortBy/sortOrder and resets to page 1', async () => {
+      const user = userEvent.setup();
+      const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({
+          items: [makeSuggestion()],
+          meta: { total: 100, page: 2, pageSize: 1 },
+          fetchSuggestions,
+        }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await user.click(await screen.findByRole('button', { name: /go to page 2/i }));
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+      });
+      fetchSuggestions.mockClear();
+
+      const combobox = within(screen.getByTestId('review-sort-select')).getByRole('combobox');
+      fireEvent.mouseDown(combobox);
+      // "Lowest" (confidence:asc) is chosen deliberately: this page's default
+      // sortOrder is already 'desc', so picking "Highest" (confidence:desc)
+      // would leave sortOrder at its default and omit it from the request —
+      // picking 'asc' forces both fields onto the wire for a clean assertion.
+      await user.click(await screen.findByRole('option', { name: /confidence.*lowest/i }));
+
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalledWith(
+          expect.objectContaining({ page: 1, sortBy: 'confidence', sortOrder: 'asc' }),
+        );
+      });
+    });
+
+    it('seeds the control from an initial ?sortBy=confidence&sortOrder=asc URL', async () => {
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook());
+
+      render(<LocationSuggestionsPage />, {
+        wrapperOptions: { route: '/location-suggestions?sortBy=confidence&sortOrder=asc' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/confidence.*lowest/i),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('falls back to the default sort and does not forward it to the API when the URL has an invalid sortBy', async () => {
+      const fetchSuggestions = vi.fn().mockResolvedValue(undefined);
+      mockUseLocationSuggestions.mockReturnValue(makeLocationSuggestionsHook({ fetchSuggestions }));
+
+      render(<LocationSuggestionsPage />, {
+        wrapperOptions: { route: '/location-suggestions?sortBy=bogus' },
+      });
+
+      await waitFor(() => {
+        expect(
+          within(screen.getByTestId('review-sort-select')).getByText(/newest first/i),
+        ).toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(fetchSuggestions).toHaveBeenCalled();
+      });
+      const call = fetchSuggestions.mock.calls[0][0];
+      expect(call).not.toHaveProperty('sortBy');
+      expect(call).not.toHaveProperty('sortOrder');
+    });
+  });
+
+  describe('feature-disabled banner (issue #404)', () => {
+    it('renders the banner above the existing suggestions when the flag is off — the suggestions still render', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ flags: { locationInference: false } }),
+      );
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion({ id: 's-1' }), makeSuggestion({ id: 's-2' })] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/location inference is turned off/i)).toBeInTheDocument();
+      });
+      // Above the content, never instead of it — the suggestions are still
+      // real and still acceptable, which is exactly why the page has to stay
+      // reachable with the flag off.
+      expect(screen.getAllByTestId('location-mini-map')).toHaveLength(2);
+    });
+
+    it('does not render the banner when the flag is on', async () => {
+      mockUseFeatureFlags.mockReturnValue(
+        makeFeatureFlagsHook({ flags: { locationInference: true } }),
+      );
+      mockUseLocationSuggestions.mockReturnValue(
+        makeLocationSuggestionsHook({ items: [makeSuggestion()] }),
+      );
+
+      render(<LocationSuggestionsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Location Suggestions')).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/location inference is turned off/i)).not.toBeInTheDocument();
+    });
+  });
+});

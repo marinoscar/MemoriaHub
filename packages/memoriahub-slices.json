@@ -200,7 +200,8 @@
     ],
     "search": [
       "core",
-      "media"
+      "media",
+      "people"
     ],
     "tagging": [
       "core",
@@ -208,11 +209,30 @@
     ],
     "workflows": [
       "core",
-      "media"
+      "media",
+      "review-runs",
+      "people"
     ],
     "people": [
       "core",
       "media"
+    ],
+    "review-runs": [
+      "core",
+      "media"
+    ],
+    "face": [
+      "core"
+    ],
+    "review": [
+      "core",
+      "media",
+      "review-runs"
+    ],
+    "enhancement": [
+      "core",
+      "media",
+      "review-runs"
     ]
   }
 }

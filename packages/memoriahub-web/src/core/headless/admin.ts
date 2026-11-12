@@ -41,6 +41,8 @@ export interface MemoriahubDataTableColumn<Row> {
   align?: 'left' | 'center' | 'right';
   /** Which layouts show the column. */
   priority: MemoriahubDataTableColumnPriority;
+  /** Long values are clipped with an ellipsis and reveal the full text on hover or focus. */
+  truncate?: boolean;
   /** A fixed width in pixels. */
   width?: number;
   /** The narrowest width in pixels. */
@@ -177,6 +179,57 @@ export interface MemoriahubAdminPageHeaderProps {
 export type MemoriahubAdminPageHeaderComponent = (props: MemoriahubAdminPageHeaderProps) => ReactNode;
 
 /**
+ * The stored-secret presentation a {@link MemoriahubSecretFieldProps} shows.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubSavedSecret {
+  /** A masked hint of the stored secret (for example its last four characters). */
+  hint: string;
+  /** When the secret was last changed (ISO 8601). */
+  updatedAt?: string | null;
+}
+
+/**
+ * The props of the host's write-only secret input.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubSecretFieldProps {
+  /** The field's label. */
+  label: string;
+  /** The typed replacement; the empty string keeps the stored secret. */
+  value: string;
+  /** Receives the new value on every keystroke. */
+  onChange: (value: string) => void;
+  /** The stored secret's presentation, or `null` when nothing is stored. */
+  saved?: MemoriahubSavedSecret | null;
+  /** The helper text when nothing is stored. */
+  emptyHelp?: string;
+  /** What the secret is called in the helper text. */
+  noun?: string;
+  /** Disables the input. */
+  disabled?: boolean;
+  /** An error message shown instead of the helper text. */
+  error?: string | null;
+  /** The input's `name`. */
+  name?: string;
+  /** The element id. */
+  id?: string;
+  /** Styles for the field's root, as an MUI `sx` object (the host passes them on). */
+  sx?: Record<string, unknown>;
+}
+
+/**
+ * The host's write-only secret input: it never shows the stored secret, only a
+ * masked hint, and an empty value keeps what is stored.
+ *
+ * @stability experimental
+ * @extensionPoint host
+ */
+export type MemoriahubSecretFieldComponent = (props: MemoriahubSecretFieldProps) => ReactNode;
+
+/**
  * The tagging half of the deployment settings (`autoTagging.video.*`,
  * `ai.features.transcription`).
  *
@@ -250,6 +303,62 @@ export interface MemoriahubMemoriesSettings {
 }
 
 /**
+ * The face half of the deployment settings (`face.video.*`, `face.autoArchive.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubFaceSettings {
+  /** `face`: the video sub-feature and the auto-archive match threshold. */
+  face?: {
+    video?: { enabled?: boolean; sampleIntervalSeconds?: number; maxFramesPerVideo?: number };
+    autoArchive?: { matchThreshold?: number };
+  };
+}
+
+/**
+ * The review-queue half of the deployment settings: the detection parameters the
+ * admin pages of the burst, duplicate and location features edit, and the confidence
+ * floors the review pages preselect for their bulk actions.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubReviewSettings {
+  /** `burst`: the detection parameters and the auto-resolve threshold (percent). */
+  burst?: { timeGapSeconds?: number; hashDistance?: number; minGroupSize?: number; autoResolveThreshold?: number };
+  /** `dedup`: the matching thresholds and the auto-resolve threshold (percent). */
+  dedup?: { similarityThreshold?: number; hashMaxDistance?: number; knnCandidates?: number; autoResolveThreshold?: number };
+  /** `locationInference`: the inference parameters and the bulk-accept threshold (percent). */
+  locationInference?: {
+    maxGapMinutes?: number;
+    maxExtrapolationGapMinutes?: number;
+    autoApplyMaxGapMinutes?: number;
+    requireSameDevice?: boolean;
+    maxAnchorDistanceKm?: number;
+    maxImpliedSpeedKmh?: number;
+    bulkAcceptThreshold?: number;
+  };
+}
+
+/**
+ * The picture-enhancement half of the deployment settings (`pictureEnhancement.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubEnhancementSettings {
+  /** `pictureEnhancement`: the defaults and the replace policy; every key is absent until first saved. */
+  pictureEnhancement?: {
+    defaultQuality?: 'low' | 'medium' | 'high';
+    defaultStrength?: 'subtle' | 'balanced' | 'strong';
+    stampExif?: boolean;
+    allowReplace?: boolean;
+    blockReplaceOnDownscale?: boolean;
+    maxInputMegapixels?: number;
+    retentionHours?: number;
+    maxBatchSize?: number;
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -258,7 +367,10 @@ export interface MemoriahubMemoriesSettings {
 export interface MemoriahubSystemSettings
   extends MemoriahubTaggingSettings,
     MemoriahubWorkflowsSettings,
-    MemoriahubMemoriesSettings {
+    MemoriahubMemoriesSettings,
+    MemoriahubFaceSettings,
+    MemoriahubReviewSettings,
+    MemoriahubEnhancementSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */
@@ -352,6 +464,8 @@ export interface MemoriahubAdminPort {
   DataTable: MemoriahubDataTableComponent;
   /** The admin console page header. */
   AdminPageHeader: MemoriahubAdminPageHeaderComponent;
+  /** The write-only secret input (provider API keys). */
+  SecretField: MemoriahubSecretFieldComponent;
   /**
    * A React hook (the same function for the life of the host, following the
    * rules of hooks) over the deployment settings document.

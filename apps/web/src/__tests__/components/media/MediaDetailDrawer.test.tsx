@@ -199,13 +199,11 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 // — location inference behavior added in commit eba3e6b.
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useLocationSuggestions', () => ({
+vi.mock('@marinoscar/memoriahub-web/review/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useSuggestLocation: vi.fn(),
   useItemAutoAppliedSuggestion: vi.fn(),
   useItemLocationCandidate: vi.fn(),
-}));
-
-vi.mock('../../../services/locationSuggestions', () => ({
   revertLocationSuggestion: vi.fn(),
 }));
 
@@ -213,8 +211,8 @@ import {
   useSuggestLocation,
   useItemAutoAppliedSuggestion,
   useItemLocationCandidate,
-} from '../../../hooks/useLocationSuggestions';
-import { revertLocationSuggestion } from '../../../services/locationSuggestions';
+  revertLocationSuggestion,
+} from '@marinoscar/memoriahub-web/review/headless';
 
 const mockUseSuggestLocation = vi.mocked(useSuggestLocation);
 const mockUseItemAutoAppliedSuggestion = vi.mocked(useItemAutoAppliedSuggestion);

@@ -1,0 +1,141 @@
+// ---------------------------------------------------------------------------
+// Shared async-run domain types (issue #190).
+//
+// Four backends now expose the same "async run" shape — workflow runs,
+// trash-empty runs, location-suggestion runs and the generic review runs —
+// each with a `run` record carrying five counters, a status, and timestamps.
+// `types/trashEmptyRuns.ts` and the since-deleted
+// `types/locationSuggestionRuns.ts` were acknowledged clones of one another;
+// this module is the single definition they (and every future run backend)
+// narrow from.
+//
+// All date-ish fields are typed as `string` because JSON transports ISO 8601.
+// ---------------------------------------------------------------------------
+
+/**
+ * Superset of every run status across all four backends. It lives with the packaged
+ * run formatters (`@marinoscar/memoriahub-web/core/headless`); re-exported so the app's
+ * imports stay unchanged.
+ *
+ * @stability experimental
+ */
+export type { RunStatus } from '../../core/headless/index.js';
+import type { RunStatus } from '../../core/headless/index.js';
+
+/**
+ * Superset of every run-item status across all four backends.
+ *
+ * - `matched` / `failed` / `skipped` are universal.
+ * - `processing` is the crash-safe claim marker used wherever executing an item
+ *   does not delete its row (location suggestions, review runs).
+ * - `deleted` is trash-empty's terminal success state (the media row, and with
+ *   it the run-item row, cascades away).
+ * - `applied` / `partially_applied` / `excluded` come from workflows and the
+ *   review runs.
+ *
+ * @stability experimental
+ */
+export type RunItemStatus =
+  | 'matched'
+  | 'processing'
+  | 'excluded'
+  | 'applied'
+  | 'partially_applied'
+  | 'deleted'
+  | 'failed'
+  | 'skipped';
+
+/**
+ * The run fields every backend serializes identically.
+ *
+ * Per-backend run types extend this and add their own discriminators
+ * (`action`, `threshold`, `subjectType`, `workflowId`, …).
+ *
+ * @stability experimental
+ */
+export interface BaseRun {
+  id: string;
+  circleId: string;
+  status: RunStatus;
+  /** Subjects discovered during evaluation. */
+  matchedCount: number;
+  /**
+   * Subjects the executor has reached a terminal decision on.
+   *
+   * NOTE: a TERMINAL run may legitimately finish with
+   * `processedCount < matchedCount`. Subjects can be cascade-deleted mid-run
+   * (a duplicate group dropping below the member floor, a suggestion vanishing
+   * with its media item), which shrinks the work set. Finalization keys off
+   * "no rows remain in matched/processing", never on
+   * `processedCount === matchedCount`, so that gap is SUCCESS, not a stall.
+   */
+  processedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  skippedCount: number;
+  startedById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastError: string | null;
+}
+
+/**
+ * Run detail adds the live per-item status tally.
+ *
+ * @stability experimental
+ */
+export interface BaseRunDetail extends BaseRun {
+  itemStatusCounts: Record<string, number>;
+}
+
+/**
+ * Pagination envelope shared by every run-items listing.
+ *
+ * @stability experimental
+ */
+export interface RunListMeta {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+/**
+ * The media summary run-item listings hydrate for display.
+ *
+ * @stability experimental
+ */
+export interface RunItemMedia {
+  type: string;
+  capturedAt: string | null;
+  filename: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+/**
+ * Fields every run-item row carries, regardless of subject.
+ *
+ * @stability experimental
+ */
+export interface BaseRunItem {
+  id: string;
+  status: RunItemStatus;
+  error: string | null;
+  updatedAt: string;
+  media: RunItemMedia | null;
+  thumbnailUrl: string | null;
+}
+
+/**
+ * Query params accepted by every run-items listing endpoint.
+ *
+ * @stability experimental
+ */
+export interface RunItemsQueryParams {
+  status?: RunItemStatus;
+  page?: number;
+  pageSize?: number;
+}
