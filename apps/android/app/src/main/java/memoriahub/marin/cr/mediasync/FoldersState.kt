@@ -55,7 +55,11 @@ data class FoldersUiState(
     val message: String? = null,
     val error: String? = null,
 ) {
-    val visibleRows: List<FolderRow> get() = FolderSelection.filter(rows, query)
+    /** The search field only shows on a long list (a hidden field filters nothing). */
+    val showSearch: Boolean get() = FoldersPresentation.showSearch(rows.size)
+    val visibleRows: List<FolderRow> get() = FolderSelection.filter(rows, if (showSearch) query else "")
+    val showSelectButtons: Boolean get() = FoldersPresentation.showSelectButtons(rows.size)
+    val emptyMessage: String get() = FoldersPresentation.emptyMessage(permission)
     val diff: FolderDiff get() = FolderSelection.diff(savedSelection, selected)
     val dirty: Boolean get() = !diff.isEmpty || includePhotos != savedIncludePhotos || includeVideos != savedIncludeVideos
     val canSave: Boolean get() = paired && dirty && !saving
@@ -69,6 +73,27 @@ data class FoldersUiState(
             includeVideos = includeVideos.takeIf { it != savedIncludeVideos },
         )
     }
+}
+
+/**
+ * What the Folders screen shows, as pure functions (JVM-tested). The screen is a checklist of the
+ * phone's MediaStore buckets, so nothing invites typing until the list is long, and an empty list
+ * says why when the cause is a missing permission (issue #543).
+ */
+object FoldersPresentation {
+    /** The search field shows only with more than this many folders. */
+    const val SEARCH_THRESHOLD = 8
+
+    const val EMPTY_NO_PERMISSION = "Allow photo access to see the folders on this phone."
+    const val EMPTY_NO_FOLDERS = "No photo or video folders found on this phone."
+
+    fun showSearch(rowCount: Int): Boolean = rowCount > SEARCH_THRESHOLD
+
+    /** Select all / None only make sense with something to select. */
+    fun showSelectButtons(rowCount: Int): Boolean = rowCount > 0
+
+    fun emptyMessage(permission: MediaPermissionState): String =
+        if (permission == MediaPermissionState.DENIED) EMPTY_NO_PERMISSION else EMPTY_NO_FOLDERS
 }
 
 /** Pure folder-selection helpers (JVM-tested). */
@@ -141,7 +166,11 @@ class FoldersController(
     private val _state = MutableStateFlow(FoldersUiState())
     val state: StateFlow<FoldersUiState> = _state.asStateFlow()
 
-    /** (Re)loads the inventory and the saved config; keeps unsaved edits when [keepEdits]. */
+    /**
+     * (Re)loads the inventory and the saved config; keeps unsaved edits when [keepEdits]. The
+     * inventory is the phone's own MediaStore, so it is listed whether or not the phone is paired;
+     * only Save needs pairing.
+     */
     fun load(keepEdits: Boolean = false) {
         scope.launch {
             val config = control.currentConfig()

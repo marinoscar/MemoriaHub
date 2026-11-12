@@ -90,13 +90,16 @@ class FoldersControllerTest {
         Bucket("wa", "WhatsApp Images", "Pictures/WhatsApp/", 3, 0, 1),
     )
 
+    private var permission = MediaPermissionState.FULL
+    private var phoneInventory: List<Bucket> = inventory
+
     private fun TestScope.controller(control: RecordingSyncControl, paired: Boolean = true): FoldersController {
         val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         return FoldersController(
             control = control,
             paired = { paired },
-            permission = { MediaPermissionState.FULL },
-            inventory = { inventory },
+            permission = { permission },
+            inventory = { phoneInventory },
             stats = { SyncStats() },
             scope = scope,
         )
@@ -177,5 +180,70 @@ class FoldersControllerTest {
         assertEquals(setOf("camera", "wa"), c.state.value.selected)
         c.load(keepEdits = false); advanceUntilIdle()
         assertEquals(setOf("camera"), c.state.value.selected)
+    }
+
+    @Test fun `unpaired phones still list the folders on the phone`() = runTest {
+        val c = controller(RecordingSyncControl(null), paired = false)
+        c.load(); advanceUntilIdle()
+        val s = c.state.value
+        assertFalse(s.paired)
+        assertFalse(s.hasConfig)
+        assertEquals(listOf("camera", "wa"), s.rows.map { it.bucketId })
+        assertTrue(s.showSelectButtons)
+    }
+
+    @Test fun `granting access then reloading lists the folders and keeps edits`() = runTest {
+        permission = MediaPermissionState.DENIED
+        phoneInventory = emptyList()
+        val control = RecordingSyncControl(syncConfigView(folderIds = emptyList()))
+        val c = controller(control)
+        c.load(); advanceUntilIdle()
+        assertTrue(c.state.value.rows.isEmpty())
+        assertEquals(FoldersPresentation.EMPTY_NO_PERMISSION, c.state.value.emptyMessage)
+        c.setIncludeVideos(false)
+
+        // What the permission card's callback does after the system dialog grants access.
+        permission = MediaPermissionState.FULL
+        phoneInventory = inventory
+        c.load(keepEdits = true); advanceUntilIdle()
+        val s = c.state.value
+        assertEquals(MediaPermissionState.FULL, s.permission)
+        assertEquals(listOf("camera", "wa"), s.rows.map { it.bucketId })
+        assertFalse("the unsaved edit survives the reload", s.includeVideos)
+    }
+}
+
+class FoldersPresentationTest {
+    private fun rows(n: Int) = (1..n).map {
+        FolderRow(bucketId = "b$it", name = "Folder $it", relativePath = "DCIM/F$it/", photoCount = 1, videoCount = 0, synced = 0, total = 1)
+    }
+
+    @Test fun `search shows only on a long list`() {
+        assertEquals(8, FoldersPresentation.SEARCH_THRESHOLD)
+        assertFalse(FoldersPresentation.showSearch(0))
+        assertFalse(FoldersPresentation.showSearch(FoldersPresentation.SEARCH_THRESHOLD))
+        assertTrue(FoldersPresentation.showSearch(FoldersPresentation.SEARCH_THRESHOLD + 1))
+        assertFalse(FoldersUiState(rows = rows(8)).showSearch)
+        assertTrue(FoldersUiState(rows = rows(9)).showSearch)
+    }
+
+    @Test fun `a hidden search field filters nothing`() {
+        val short = FoldersUiState(rows = rows(3), query = "zzz")
+        assertEquals(3, short.visibleRows.size)
+        val long = FoldersUiState(rows = rows(9), query = "Folder 9")
+        assertEquals(listOf("b9"), long.visibleRows.map { it.bucketId })
+    }
+
+    @Test fun `select all and none show only with folders`() {
+        assertFalse(FoldersPresentation.showSelectButtons(0))
+        assertTrue(FoldersPresentation.showSelectButtons(1))
+        assertFalse(FoldersUiState(rows = emptyList()).showSelectButtons)
+    }
+
+    @Test fun `the empty state names the missing permission`() {
+        assertEquals("Allow photo access to see the folders on this phone.", FoldersPresentation.emptyMessage(MediaPermissionState.DENIED))
+        assertEquals("No photo or video folders found on this phone.", FoldersPresentation.emptyMessage(MediaPermissionState.FULL))
+        assertEquals("No photo or video folders found on this phone.", FoldersPresentation.emptyMessage(MediaPermissionState.PARTIAL))
+        assertEquals(FoldersPresentation.EMPTY_NO_PERMISSION, FoldersUiState(permission = MediaPermissionState.DENIED).emptyMessage)
     }
 }

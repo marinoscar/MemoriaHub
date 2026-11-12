@@ -66,7 +66,9 @@ import memoriahub.marin.cr.MobileApplication
 import memoriahub.marin.cr.deeplink.MediaSyncLinks
 import memoriahub.marin.cr.deeplink.MediaSyncPath
 import memoriahub.marin.cr.ledger.SyncRunEntity
-import memoriahub.marin.cr.permissions.MediaPermissionState
+import memoriahub.marin.cr.mediasync.findActivity
+import memoriahub.marin.cr.permissions.MediaPermissionAction
+import memoriahub.marin.cr.permissions.MediaPermissionPrompts
 import memoriahub.marin.cr.permissions.MediaPermissions
 import memoriahub.marin.cr.util.Brand
 import java.time.Instant
@@ -109,13 +111,24 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Same decision as the shared MediaPermissionCard (Connect, Folders): request in place, and go
+    // to app settings only once Android no longer shows the dialog (permanently denied).
+    val prompts = remember(context) { MediaPermissionPrompts.create(context) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        if (MediaPermissions.state(context) == MediaPermissionState.DENIED) {
-            // Permanently denied: the system shows nothing; the user must flip it in app settings.
+        prompts.markAsked()
+        health.runSelfTest()
+    }
+
+    fun grantMedia() {
+        val state = MediaPermissions.state(context)
+        prompts.observe(state)
+        val rationale = MediaPermissions.shouldShowRationale(context.findActivity())
+        if (prompts.nextAction(state, rationale) == MediaPermissionAction.OPEN_SETTINGS) {
             rerunOnResume = true
             DiagnosticsIntents.openAppDetails(context)
         } else {
-            health.runSelfTest()
+            // Also covers media.location with full access: the dialog asks for photo locations.
+            permissionLauncher.launch(MediaPermissions.requestSet().toTypedArray())
         }
     }
 
@@ -124,7 +137,7 @@ fun DiagnosticsScreen(onBack: () -> Unit) {
         when (action) {
             CheckAction.SET_SERVER -> onBack()
             CheckAction.REPAIR -> DiagnosticsIntents.openMediaSync(context, MediaSyncPath.CONNECT)
-            CheckAction.GRANT_MEDIA -> permissionLauncher.launch(MediaPermissions.requestSet().toTypedArray())
+            CheckAction.GRANT_MEDIA -> grantMedia()
             CheckAction.CHOOSE_FOLDERS -> DiagnosticsIntents.openMediaSync(context, MediaSyncPath.FOLDERS)
             CheckAction.NETWORK_SETTINGS -> DiagnosticsIntents.openMediaSync(context, MediaSyncPath.NETWORK)
             CheckAction.RESUME -> health.resume()

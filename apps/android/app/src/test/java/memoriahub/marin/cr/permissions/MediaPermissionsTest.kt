@@ -39,4 +39,27 @@ class MediaPermissionsTest {
     @Test fun `wire values match the check-in enum`() {
         assertEquals(listOf("full", "partial", "denied"), MediaPermissionState.entries.map { it.wire })
     }
+
+    @Test fun `rationale is judged on the visual permissions only`() {
+        assertEquals(listOf(READ_MEDIA_IMAGES, READ_MEDIA_VIDEO), MediaPermissions.rationaleSet(34))
+        assertEquals(listOf(READ_MEDIA_IMAGES, READ_MEDIA_VIDEO), MediaPermissions.rationaleSet(33))
+        assertEquals(listOf(READ_EXTERNAL_STORAGE), MediaPermissions.rationaleSet(32))
+    }
+
+    @Test fun `next action requests in place until Android stops showing the dialog`() {
+        val full = MediaPermissionState.FULL
+        val partial = MediaPermissionState.PARTIAL
+        val denied = MediaPermissionState.DENIED
+        // Full access: nothing to do, whatever the flags say.
+        assertEquals(MediaPermissionAction.NONE, MediaPermissions.nextAction(full, askedBefore = true, rationale = false))
+        // Never asked: rationale is false too, but the dialog will show.
+        assertEquals(MediaPermissionAction.REQUEST, MediaPermissions.nextAction(denied, askedBefore = false, rationale = false))
+        // Denied once: Android wants a rationale and still shows the dialog.
+        assertEquals(MediaPermissionAction.REQUEST, MediaPermissions.nextAction(denied, askedBefore = true, rationale = true))
+        // Denied again (or "Don't ask again"): the dialog no longer appears, so go to settings.
+        assertEquals(MediaPermissionAction.OPEN_SETTINGS, MediaPermissions.nextAction(denied, askedBefore = true, rationale = false))
+        // Partial: Android 14+ re-shows the picker, so request (the card also offers settings).
+        assertEquals(MediaPermissionAction.REQUEST, MediaPermissions.nextAction(partial, askedBefore = true, rationale = false))
+        assertEquals(MediaPermissionAction.REQUEST, MediaPermissions.nextAction(partial, askedBefore = false, rationale = true))
+    }
 }
