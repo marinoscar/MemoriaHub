@@ -24,6 +24,8 @@
     "./src/location/ui/index.ts",
     "./src/social/headless/index.ts",
     "./src/social/ui/index.ts",
+    "./src/node-backup/headless/index.ts",
+    "./src/node-backup/ui/index.ts",
     "./src/shares/headless/index.ts",
     "./src/shares/ui/index.ts",
     "./src/media/headless/index.ts",

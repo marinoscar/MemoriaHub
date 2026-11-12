@@ -3,13 +3,13 @@ import {
   getNodeBackupConfig,
   getNodeBackupRuns,
   updateNodeBackupConfig,
-} from '../services/nodeBackup';
+} from '../services/nodeBackup.js';
 import type {
   NodeBackupConfigDto,
   NodeBackupRunDto,
   UpdateNodeBackupConfigDto,
-} from '../services/nodeBackup';
-import { useIsMounted } from './useIsMounted';
+} from '../services/nodeBackup.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
 /**
  * Poll interval for the backup status/runs while the page is mounted.
@@ -18,10 +18,20 @@ import { useIsMounted } from './useIsMounted';
  */
 const POLL_INTERVAL_MS = 15000;
 
-interface UseNodeBackupOptions {
+/**
+ * Options of {@link useNodeBackup}.
+ *
+ * @stability experimental
+ */
+export interface UseNodeBackupOptions {
   autoRefresh?: boolean;
 }
 
+/**
+ * What {@link useNodeBackup} returns.
+ *
+ * @stability experimental
+ */
 export interface UseNodeBackupResult {
   /** null = backup never configured for this node (or not yet loaded). */
   config: NodeBackupConfigDto | null;
@@ -45,6 +55,8 @@ export interface UseNodeBackupResult {
 /**
  * Config + run history for one worker node's backup, with a 15s silent poll
  * while mounted (silent-refresh vs. spinner pattern copied from useWorkers).
+ *
+ * @stability experimental
  */
 export function useNodeBackup(
   nodeId: string | undefined,

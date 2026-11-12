@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Types — mirror the API's node backup control plane exactly (issue #312/#319).
@@ -9,10 +9,18 @@ import { api } from './api';
 // (`formatBytes` in utils/formatBytes.ts).
 // ---------------------------------------------------------------------------
 
-/** Backup run kind (mirrors the API's NodeBackupRunKind enum). */
+/**
+ * Backup run kind (mirrors the API's NodeBackupRunKind enum).
+ *
+ * @stability experimental
+ */
 export type NodeBackupRunKind = 'incremental' | 'reconcile';
 
-/** Backup run lifecycle status (mirrors NodeBackupRunStatus). */
+/**
+ * Backup run lifecycle status (mirrors NodeBackupRunStatus).
+ *
+ * @stability experimental
+ */
 export type NodeBackupRunStatus =
   | 'running'
   | 'completed'
@@ -20,16 +28,28 @@ export type NodeBackupRunStatus =
   | 'aborted'
   | 'stale';
 
-/** How a run was started. */
+/**
+ * How a run was started.
+ *
+ * @stability experimental
+ */
 export type NodeBackupRunTrigger = 'manual' | 'scheduled';
 
-/** The config's monotonic change-feed checkpoint. */
+/**
+ * The config's monotonic change-feed checkpoint.
+ *
+ * @stability experimental
+ */
 export interface NodeBackupCheckpointDto {
   updatedAt: string;
   id: string;
 }
 
-/** Live pending-lag computation: items/bytes not yet acked past the checkpoint. */
+/**
+ * Live pending-lag computation: items/bytes not yet acked past the checkpoint.
+ *
+ * @stability experimental
+ */
 export interface NodeBackupPendingDto {
   items: number;
   /** BigInt-safe decimal string. */
@@ -40,6 +60,8 @@ export interface NodeBackupPendingDto {
  * A node's backup configuration as returned by
  * `GET /api/nodes/:id/backup/config` (and by the PUT, whose response matches
  * the GET shape).
+ *
+ * @stability experimental
  */
 export interface NodeBackupConfigDto {
   nodeId: string;
@@ -63,12 +85,20 @@ export interface NodeBackupConfigDto {
   activeRunId: string | null;
 }
 
-/** Envelope of `GET /api/nodes/:id/backup/config` — null when never configured. */
+/**
+ * Envelope of `GET /api/nodes/:id/backup/config` — null when never configured.
+ *
+ * @stability experimental
+ */
 export interface NodeBackupConfigResponse {
   config: NodeBackupConfigDto | null;
 }
 
-/** Partial body for `PUT /api/nodes/:id/backup/config` — only provided keys change. */
+/**
+ * Partial body for `PUT /api/nodes/:id/backup/config` — only provided keys change.
+ *
+ * @stability experimental
+ */
 export interface UpdateNodeBackupConfigDto {
   enabled?: boolean;
   /** null clears the schedule (and nextRunAt). */
@@ -79,7 +109,11 @@ export interface UpdateNodeBackupConfigDto {
   circleIds?: string[];
 }
 
-/** One backup run row from `GET /api/nodes/:id/backup/runs`. */
+/**
+ * One backup run row from `GET /api/nodes/:id/backup/runs`.
+ *
+ * @stability experimental
+ */
 export interface NodeBackupRunDto {
   id: string;
   kind: NodeBackupRunKind;
@@ -98,7 +132,11 @@ export interface NodeBackupRunDto {
   cliVersion: string | null;
 }
 
-/** Envelope of `GET /api/nodes/:id/backup/runs`. */
+/**
+ * Envelope of `GET /api/nodes/:id/backup/runs`.
+ *
+ * @stability experimental
+ */
 export interface NodeBackupRunsResponse {
   runs: NodeBackupRunDto[];
 }
@@ -107,14 +145,22 @@ export interface NodeBackupRunsResponse {
 // API functions
 // ---------------------------------------------------------------------------
 
-/** Get a node's backup config with live pending lag; `{ config: null }` when unset. */
+/**
+ * Get a node's backup config with live pending lag; `{ config: null }` when unset.
+ *
+ * @stability experimental
+ */
 export async function getNodeBackupConfig(
   nodeId: string,
 ): Promise<NodeBackupConfigResponse> {
   return api.get<NodeBackupConfigResponse>(`/nodes/${nodeId}/backup/config`);
 }
 
-/** Create or update a node's backup config (partial upsert). Response matches GET. */
+/**
+ * Create or update a node's backup config (partial upsert). Response matches GET.
+ *
+ * @stability experimental
+ */
 export async function updateNodeBackupConfig(
   nodeId: string,
   dto: UpdateNodeBackupConfigDto,
@@ -122,7 +168,11 @@ export async function updateNodeBackupConfig(
   return api.put<NodeBackupConfigResponse>(`/nodes/${nodeId}/backup/config`, dto);
 }
 
-/** List recent backup runs for a node, newest first. */
+/**
+ * List recent backup runs for a node, newest first.
+ *
+ * @stability experimental
+ */
 export async function getNodeBackupRuns(
   nodeId: string,
   limit = 20,

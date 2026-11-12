@@ -16,17 +16,22 @@
  */
 
 import { Chip, Typography } from '@mui/material';
-import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
+import type { MemoriahubDataTableColumn } from '../../core/headless/index.js';
 import type {
   NodeBackupRunDto,
   NodeBackupRunStatus,
-} from '../../services/nodeBackup';
-import { formatBytes, formatDuration, relativeTime } from '../../utils/formatBytes';
+} from '../headless/services/nodeBackup.js';
+import { formatBytes, formatDuration, relativeTime } from '../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
 
+/**
+ * Persistence key for the user's column and density choices (`user_settings.dataTables['admin-node-backup-runs']`).
+ *
+ * @stability experimental
+ */
 export const NODE_BACKUP_RUNS_TABLE_ID = 'admin-node-backup-runs';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +60,11 @@ function RunStatusChip({ status }: { status: NodeBackupRunStatus }) {
   );
 }
 
-/** finishedAt - startedAt in ms; null while the run is still going. */
+/**
+ * finishedAt - startedAt in ms; null while the run is still going.
+ *
+ * @stability experimental
+ */
 export function runDurationMs(run: NodeBackupRunDto): number | null {
   if (!run.finishedAt) return null;
   return new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime();
@@ -72,8 +81,10 @@ export function runDurationMs(run: NodeBackupRunDto): number | null {
  *   - primary   — Kind, Status
  *   - secondary — Trigger, Started, Duration, Items downloaded, Bytes, Errors
  *   - detail    — Items skipped, Last error
+ *
+ * @stability experimental
  */
-export function buildNodeBackupRunColumns(): DataTableColumn<NodeBackupRunDto>[] {
+export function buildNodeBackupRunColumns(): MemoriahubDataTableColumn<NodeBackupRunDto>[] {
   return [
     // --- primary ------------------------------------------------------------
     {
