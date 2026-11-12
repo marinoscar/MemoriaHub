@@ -12,6 +12,7 @@
  * guard declares: an invented string would hide the card from everyone, or show it to all.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -133,32 +134,43 @@ describe('settings registry card equality', () => {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../../../..');
+const requireFromHere = createRequire(import.meta.url);
 
-/** Every source file under `dir`, skipping tests and build output the API's guards do not live in. */
-function sourceFiles(dir: string, out: string[] = []): string[] {
-  let entries: string[] = [];
+/** The installed package's directory, resolved the way the app resolves it (never a build-output path of this repository). */
+function installedPackageDir(name: string): string {
   try {
-    entries = readdirSync(dir);
+    return dirname(requireFromHere.resolve(`${name}/package.json`));
   } catch {
-    return out;
+    throw new Error(
+      `${name} is not installed where apps/web can resolve it. It carries the permission catalog this test reads ` +
+        '(a devDependency of apps/web, pinned to the version apps/api runs); run `npm ci` at the repository root.',
+    );
   }
-  for (const name of entries) {
+}
+
+/** Every source file under `dir`, skipping tests and nested installs. */
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
     if (name === 'node_modules' || name === 'test' || name === '__tests__') continue;
     const full = join(dir, name);
     const stat = statSync(full);
     if (stat.isDirectory()) sourceFiles(full, out);
-    else if (/\.(ts|js)$/.test(name) && !/\.(spec|test)\./.test(name) && !name.endsWith('.map')) out.push(full);
+    else if (/\.(ts|js)$/.test(name) && !/\.(spec|test)\./.test(name)) out.push(full);
   }
   return out;
 }
 
 describe('settings registry permissions', () => {
   it('every permission a card names is declared by the API (a controller, a guard or the permission catalog)', () => {
+    // The app's own and the domain's sources, plus the INSTALLED platform packages: platform-api declares the
+    // platform's permissions (telemetry, groups, organizations, ...) and platform-contract their names.
     const roots = [
       join(repoRoot, 'apps/api/src'),
       join(repoRoot, 'packages/memoriahub-api/src'),
-      join(repoRoot, 'node_modules/@marinoscar/platform-api/dist'),
+      installedPackageDir('@marinoscar/platform-api'),
+      installedPackageDir('@marinoscar/platform-contract'),
     ];
+    for (const root of roots) expect(statSync(root).isDirectory()).toBe(true);
     const haystack = roots.flatMap((root) => sourceFiles(root)).map((file) => readFileSync(file, 'utf8')).join('\n');
     // Not vacuous: the three roots hold the API's sources.
     expect(haystack.length).toBeGreaterThan(100_000);
