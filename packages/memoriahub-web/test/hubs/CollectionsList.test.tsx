@@ -9,40 +9,33 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
-import { render } from '../../utils/test-utils';
-import { CollectionsList } from '../../../components/collections/CollectionsList';
-import CollectionsHubPage from '../../../pages/Collections/CollectionsHubPage';
-import { COLLECTIONS } from '../../../config/collections';
-import { formatCollectionCount, collectionAccessibleName } from '../../../components/collections/CollectionsList';
-import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListResponse } from '@marinoscar/memoriahub-web/people/headless';
-import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import type { MemoryCard, MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
+import { render } from '../utils/test-utils.js';
+import { CollectionsList, formatCollectionCount, collectionAccessibleName } from '../../src/hubs/ui/components/CollectionsList.js';
+import CollectionsHubPage from '../../src/hubs/ui/pages/CollectionsHubPage.js';
+import { COLLECTIONS } from '../../src/hubs/ui/config/collections.js';
+import type { Album, AlbumListResponse } from '../../src/media/headless/index.js';
+import type { PersonListResponse } from '../../src/people/headless/index.js';
+import type { ExploreLocations } from '../../src/media/headless/index.js';
+import type { MemoryCard, MemoryListResponse } from '../../src/memories/headless/index.js';
 
-// The packaged rail's collapse preference (RETRO-F1, #571), read by the hub
-// page this file also renders.
-vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
-  useShellRailPreference: () => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }),
-}));
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/media/headless/index.js')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   listPeople: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+vi.mock('../../src/memories/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/memories/headless/index.js')>()),
   listMemories: vi.fn(),
   useMemoriesEnabled: vi.fn(),
 }));
 
-import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
-import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
+import { listAlbums, getExploreLocations } from '../../src/media/headless/index.js';
+import { listPeople } from '../../src/people/headless/index.js';
+import { listMemories, useMemoriesEnabled } from '../../src/memories/headless/index.js';
 
 const mockListAlbums = vi.mocked(listAlbums);
 const mockListPeople = vi.mocked(listPeople);

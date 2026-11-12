@@ -14,15 +14,13 @@ import {
   ReviewContextPane,
 } from '../../../components/navigation/NavContextPane';
 
-vi.mock('../../../components/collections/CollectionsList', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   CollectionsList: ({ activeKey, variant }: { activeKey: string | null; variant: string }) => (
     <div data-testid="collections-list" data-variant={variant}>
       {String(activeKey)}
     </div>
   ),
-}));
-vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
   ReviewQueueList: ({ activeKey, variant }: { activeKey: string | null; variant: string }) => (
     <div data-testid="review-list" data-variant={variant}>
       {String(activeKey)}

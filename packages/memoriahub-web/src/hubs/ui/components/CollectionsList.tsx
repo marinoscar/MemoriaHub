@@ -15,10 +15,15 @@
 
 import { Box, Divider, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Typography } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import type { CollectionDef, CollectionKey } from '../../config/collections';
-import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
-import type { CollectionCount, CollectionSummary } from '../../hooks/useCollectionSummaries';
+import type { CollectionDef, CollectionKey } from '../config/collections.js';
+import { useCollectionSummaries } from '../hooks/useCollectionSummaries.js';
+import type { CollectionCount, CollectionSummary } from '../hooks/useCollectionSummaries.js';
 
+/**
+ * The props of {@link CollectionsList}.
+ *
+ * @stability experimental
+ */
 export interface CollectionsListProps {
   /**
    * `hub` is the full-width list; `pane` is the denser treatment #392 will
@@ -43,6 +48,8 @@ export interface CollectionsListProps {
  * and the list render the SAME number and the SAME accessible name from the
  * SAME value. Two surfaces formatting one count independently is exactly how
  * they would come to disagree.
+ *
+ * @stability experimental
  */
 export function collectionCount(
   entry: CollectionDef,
@@ -54,7 +61,11 @@ export function collectionCount(
   return summary.count;
 }
 
-/** The visible label. An approximate count is a floor, so it reads "50+". */
+/**
+ * The visible label. An approximate count is a floor, so it reads "50+".
+ *
+ * @stability experimental
+ */
 export function formatCollectionCount(count: CollectionCount): string {
   return count.approximate ? `${count.value}+` : String(count.value);
 }
@@ -66,6 +77,8 @@ export function formatCollectionCount(count: CollectionCount): string {
  * An approximate count must stay truthful here too: "50 or more items", never
  * the "50 items" a naive read of the numeral would produce. The visible "+" is
  * not something a screen reader can be relied on to announce.
+ *
+ * @stability experimental
  */
 export function collectionAccessibleName(
   entry: CollectionDef,
@@ -143,6 +156,14 @@ function CollectionRow({
   );
 }
 
+/**
+ * The Collections as a list, for the context pane and the hub's compact form.
+ *
+ * @param props - see {@link CollectionsListProps}
+ * @returns the list
+ *
+ * @stability experimental
+ */
 export function CollectionsList({
   variant = 'hub',
   onNavigate,

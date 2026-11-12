@@ -83,7 +83,6 @@ const CHROME = [
   'contexts/ThemeContext.tsx',
   'pages/UserSettingsHubPage.tsx',
   'pages/Admin/SettingsHubPage.tsx',
-  'pages/Collections/CollectionsHubPage.tsx',
   'platform/platformHost.tsx',
   'platform/shellProviders.tsx',
   'theme/index.ts',

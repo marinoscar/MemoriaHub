@@ -37,7 +37,11 @@ import ArchiveIcon from '@mui/icons-material/Archive';
 import DeleteIcon from '@mui/icons-material/Delete';
 import FolderSharedIcon from '@mui/icons-material/FolderShared';
 
-/** Stable identifiers. These are also the `pinned` keys in `user_settings.navigation`. */
+/**
+ * Stable identifiers. These are also the `pinned` keys in `user_settings.navigation`.
+ *
+ * @stability experimental
+ */
 export type CollectionKey =
   | 'albums'
   | 'people'
@@ -49,11 +53,25 @@ export type CollectionKey =
   | 'trash'
   | 'shared';
 
-/** Which cover/count source a card draws on, or `null` for an icon-only entry. */
+/**
+ * Which cover/count source a card draws on, or `null` for an icon-only entry.
+ *
+ * @stability experimental
+ */
 export type CollectionSource = 'albums' | 'people' | 'places' | 'memories' | null;
 
+/**
+ * The feature flag a collection is gated on (`memories`), or `null` for none.
+ *
+ * @stability experimental
+ */
 export type CollectionFlag = 'memories' | null;
 
+/**
+ * One entry of the Collections hub registry: its label, icon, route, source of the live count and feature gate.
+ *
+ * @stability experimental
+ */
 export interface CollectionDef {
   key: CollectionKey;
   label: string;
@@ -73,6 +91,11 @@ export interface CollectionDef {
   group: 'primary' | 'secondary';
 }
 
+/**
+ * The Collections registry in its fixed order: the five primary entries (albums, people, places, memories, map), then favorites, shared, archive and trash.
+ *
+ * @stability experimental
+ */
 export const COLLECTIONS: readonly CollectionDef[] = [
   {
     key: 'albums',

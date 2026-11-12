@@ -24,17 +24,20 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getExploreLocations, listAlbums } from '@marinoscar/memoriahub-web/media/headless';
-import type { ExploreLocationItem } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
-import type { PersonListItem } from '@marinoscar/memoriahub-web/people/headless';
-import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
-import { COLLECTIONS } from '../config/collections';
-import type { CollectionDef, CollectionFlag, CollectionSource } from '../config/collections';
-import { useOwnerScope } from './useOwnerScope';
-import { useIsMounted } from './useIsMounted';
+import { getExploreLocations, listAlbums } from '../../../media/headless/index.js';
+import type { ExploreLocationItem } from '../../../media/headless/index.js';
+import { listPeople } from '../../../people/headless/index.js';
+import type { PersonListItem } from '../../../people/headless/index.js';
+import { listMemories, useMemoriesEnabled } from '../../../memories/headless/index.js';
+import { useIsMounted, useOwnerScope } from '../../../core/headless/index.js';
+import { COLLECTIONS } from '../config/collections.js';
+import type { CollectionDef, CollectionFlag, CollectionSource } from '../config/collections.js';
 
-/** The four sources that actually fetch. `null`-source entries (Map, Favorites, Archive, Trash) never appear here. */
+/**
+ * The four sources that actually fetch. `null`-source entries (Map, Favorites, Archive, Trash) never appear here.
+ *
+ * @stability experimental
+ */
 export type CollectionSummarySource = Exclude<CollectionSource, null>;
 
 /** How many covers a card wants. Four fills a 2x2 mosaic exactly. */
@@ -57,6 +60,8 @@ const MEMORIES_PAGE_SIZE = 50;
  * — keeps every consumer able to render the visible label AND the accessible
  * name ("50 or more items") from the same value, which is what stops the two
  * from drifting apart.
+ *
+ * @stability experimental
  */
 export interface CollectionCount {
   value: number;
@@ -64,6 +69,11 @@ export interface CollectionCount {
   approximate: boolean;
 }
 
+/**
+ * The cover and count of one collection source.
+ *
+ * @stability experimental
+ */
 export interface CollectionSummary {
   /**
    * `loading` → render the card's skeleton cover, no count.
@@ -86,6 +96,11 @@ export interface CollectionSummary {
   count: CollectionCount | null;
 }
 
+/**
+ * What {@link useCollectionSummaries} returns.
+ *
+ * @stability experimental
+ */
 export interface UseCollectionSummariesResult {
   /**
    * The flag-filtered collection registry, in `COLLECTIONS` order.
@@ -235,6 +250,13 @@ const LOADERS: Record<CollectionSummarySource, (circleId: string) => Promise<Col
   memories: loadMemories,
 };
 
+/**
+ * Cover imagery and live counts for the Collections hub, loaded per source so the layout is on screen before any source answers.
+ *
+ * @returns the summaries by source and the loading state
+ *
+ * @stability experimental
+ */
 export function useCollectionSummaries(): UseCollectionSummariesResult {
   const { activeCircleId } = useOwnerScope();
   const memoriesEnabled = useMemoriesEnabled();

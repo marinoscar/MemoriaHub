@@ -36,9 +36,9 @@
  */
 
 import { Box, Divider, Skeleton, Stack, Typography } from '@mui/material';
-import { useContextPaneVisible } from '../../hooks/useContextPaneVisible';
 import { Link as RouterLink, Navigate } from 'react-router-dom';
-import type { CollectionDef } from '../../config/collections';
+import { useMemoriahubHost, useScrollRestoration } from '../../../core/headless/index.js';
+import type { CollectionDef } from '../config/collections.js';
 // The count, its visible label and its accessible name all come from
 // `CollectionsList`'s helpers rather than being re-derived here, so the grid and
 // the list (and #392's pane) cannot render one collection two different ways.
@@ -46,11 +46,10 @@ import {
   collectionAccessibleName,
   collectionCount,
   formatCollectionCount,
-} from '../../components/collections/CollectionsList';
-import { PersonAvatar } from '@marinoscar/memoriahub-web/people/ui';
-import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
-import type { CollectionCount, CollectionSummary } from '../../hooks/useCollectionSummaries';
-import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+} from '../components/CollectionsList.js';
+import { PersonAvatar } from '../../../people/ui/index.js';
+import { useCollectionSummaries } from '../hooks/useCollectionSummaries.js';
+import type { CollectionCount, CollectionSummary } from '../hooks/useCollectionSummaries.js';
 
 /** Where a desktop visit to `/collections` actually lands. First primary entry. */
 const DESKTOP_LANDING_PATH = '/albums';
@@ -305,9 +304,15 @@ function SecondaryLink({ entry }: { entry: CollectionDef }) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The Collections hub: the card grid on a phone or tablet, and a redirect to Albums where the context pane shows the list.
+ *
+ * @stability experimental
+ */
 export default function CollectionsHubPage() {
   // The context pane is showing (expanded rail): this hub is redundant there.
-  const isDesktop = useContextPaneVisible();
+  const { shell } = useMemoriahubHost();
+  const isDesktop = shell?.useContextPaneVisible() ?? false;
 
   // Hooks run unconditionally, above the redirect branch. Restoration is a
   // no-op on desktop, where this page never paints a scrollable grid.

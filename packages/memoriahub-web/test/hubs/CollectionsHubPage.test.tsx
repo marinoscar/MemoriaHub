@@ -10,41 +10,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
-import { render } from '../utils/test-utils';
-import CollectionsHubPage from '../../pages/Collections/CollectionsHubPage';
-import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListResponse } from '@marinoscar/memoriahub-web/people/headless';
-import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import type { MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
+import { render, setTestHostDefaults, resetTestHostDefaults } from '../utils/test-utils.js';
+import CollectionsHubPage from '../../src/hubs/ui/pages/CollectionsHubPage.js';
+import type { Album, AlbumListResponse } from '../../src/media/headless/index.js';
+import type { PersonListResponse } from '../../src/people/headless/index.js';
+import type { ExploreLocations } from '../../src/media/headless/index.js';
+import type { MemoryListResponse } from '../../src/memories/headless/index.js';
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/media/headless/index.js')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   listPeople: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+vi.mock('../../src/memories/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/memories/headless/index.js')>()),
   listMemories: vi.fn(),
   useMemoriesEnabled: vi.fn(),
 }));
-// The packaged rail's collapse preference (RETRO-F1, #571): the hub redirects
-// only while the context pane is showing, i.e. at lg AND with the rail expanded.
-const railPreference = vi.hoisted(() => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }));
-vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
-  useShellRailPreference: () => railPreference,
-}));
-vi.mock('../../hooks/useScrollRestoration', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useScrollRestoration: vi.fn(),
 }));
+// The shell port's context-pane answer, which is the host's rule: lg (1200px) and up AND the rail not collapsed.
+const pane = vi.hoisted(() => ({ widthPx: 0, railCollapsed: false }));
+const shellPort = { useMainVariant: () => undefined, useContextPaneVisible: () => pane.widthPx >= 1200 && !pane.railCollapsed };
 
-import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
-import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
+import { listAlbums, getExploreLocations } from '../../src/media/headless/index.js';
+import { listPeople } from '../../src/people/headless/index.js';
+import { listMemories, useMemoriesEnabled } from '../../src/memories/headless/index.js';
 
 const mockListAlbums = vi.mocked(listAlbums);
 const mockListPeople = vi.mocked(listPeople);
@@ -59,44 +56,12 @@ const mockUseMemoriesEnabled = vi.mocked(useMemoriesEnabled);
 // ---------------------------------------------------------------------------
 
 function setViewportWidth(px: number) {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => {
-      const min = query.match(/min-width:\s*([\d.]+)px/);
-      const max = query.match(/max-width:\s*([\d.]+)px/);
-      let matches = true;
-      if (min) matches = matches && px >= parseFloat(min[1]);
-      if (max) matches = matches && px <= parseFloat(max[1]);
-      return {
-        matches,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      };
-    }),
-  });
+  pane.widthPx = px;
 }
 
 function restoreDefaultViewport() {
-  // Matches setup.ts's baseline: every query reports `matches: false`, i.e.
-  // "not desktop" — the phone/tablet default every other test relies on.
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  });
+  pane.widthPx = 0;
+  pane.railCollapsed = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +119,7 @@ describe('CollectionsHubPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     restoreDefaultViewport();
+    setTestHostDefaults({ shell: shellPort });
     mockUseMemoriesEnabled.mockReturnValue(true);
     mockListAlbums.mockResolvedValue(albumsResponse());
     mockListPeople.mockResolvedValue(peopleResponse());
@@ -163,6 +129,7 @@ describe('CollectionsHubPage', () => {
 
   afterEach(() => {
     restoreDefaultViewport();
+    resetTestHostDefaults();
   });
 
   // =========================================================================
@@ -218,7 +185,7 @@ describe('CollectionsHubPage', () => {
 
   it('desktop with the rail COLLAPSED keeps the grid: no context pane is showing to replace it', async () => {
     setViewportWidth(1300);
-    railPreference.railCollapsed = true;
+    pane.railCollapsed = true;
     try {
       render(
         <Routes>
@@ -230,7 +197,7 @@ describe('CollectionsHubPage', () => {
       expect(await screen.findByRole('heading', { name: 'Collections' })).toBeInTheDocument();
       expect(screen.queryByText('Albums Page Marker')).not.toBeInTheDocument();
     } finally {
-      railPreference.railCollapsed = false;
+      pane.railCollapsed = false;
     }
   });
 

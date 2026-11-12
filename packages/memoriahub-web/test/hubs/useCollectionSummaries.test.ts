@@ -17,35 +17,36 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useCollectionSummaries } from '../../hooks/useCollectionSummaries';
-import type { Album, AlbumListResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PersonListResponse } from '@marinoscar/memoriahub-web/people/headless';
-import type { ExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import type { MemoryCard, MemoryListResponse } from '@marinoscar/memoriahub-web/memories/headless';
-import type { Circle } from '../../types/circles';
+import { useCollectionSummaries } from '../../src/hubs/ui/hooks/useCollectionSummaries.js';
+import type { Album, AlbumListResponse } from '../../src/media/headless/index.js';
+import type { PersonListResponse } from '../../src/people/headless/index.js';
+import type { ExploreLocations } from '../../src/media/headless/index.js';
+import type { MemoryCard, MemoryListResponse } from '../../src/memories/headless/index.js';
+type Circle = Record<string, unknown>;
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/media/headless/index.js')>()),
   listAlbums: vi.fn(),
   getExploreLocations: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/people/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/people/headless')>()),
+vi.mock('../../src/people/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/people/headless/index.js')>()),
   listPeople: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/memories/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/memories/headless')>()),
+vi.mock('../../src/memories/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/memories/headless/index.js')>()),
   listMemories: vi.fn(),
   useMemoriesEnabled: vi.fn(),
 }));
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-import { listAlbums, getExploreLocations } from '@marinoscar/memoriahub-web/media/headless';
-import { listPeople } from '@marinoscar/memoriahub-web/people/headless';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { listMemories, useMemoriesEnabled } from '@marinoscar/memoriahub-web/memories/headless';
+import { listAlbums, getExploreLocations } from '../../src/media/headless/index.js';
+import { listPeople } from '../../src/people/headless/index.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { listMemories, useMemoriesEnabled } from '../../src/memories/headless/index.js';
 
 const mockListAlbums = vi.mocked(listAlbums);
 const mockListPeople = vi.mocked(listPeople);

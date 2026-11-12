@@ -13,13 +13,11 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { NavigationRail } from '../../../components/navigation/NavigationRail';
 import { renderShell } from '../../utils/shell-harness';
 
-vi.mock('../../../components/collections/CollectionsList', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   CollectionsList: ({ activeKey }: { activeKey: string | null }) => (
     <div data-testid="collections-list">{String(activeKey)}</div>
   ),
-}));
-vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
   useReviewQueues: vi.fn(),
   ReviewQueueList: ({ activeKey }: { activeKey: string | null }) => (
     <div data-testid="review-list">{String(activeKey)}</div>
