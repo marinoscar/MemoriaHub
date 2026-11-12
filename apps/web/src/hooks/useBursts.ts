@@ -21,7 +21,7 @@ import type {
   GroupResolveAction,
   GroupBulkResolveResult,
 } from '../services/bursts';
-import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import type { CreateReviewRunResponse } from '@marinoscar/memoriahub-web/review-runs/headless';
 
 export interface FetchBurstGroupsParams {
   circleId: string;

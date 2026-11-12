@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import type { CreateReviewRunResponse } from '@marinoscar/memoriahub-web/review-runs/headless';
 import type { BulkResolveBurst, BurstQuery } from '@marinoscar/memoriahub-contract/burst';
 import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 

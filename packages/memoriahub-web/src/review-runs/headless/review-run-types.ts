@@ -16,15 +16,24 @@ import type {
   RunItemsQueryParams,
   RunListMeta,
   RunStatus,
-} from './runs';
+} from './run-types.js';
 
 // Which queue a run belongs to and the bulk action it performs come from
 // `@marinoscar/memoriahub-contract/review-runs`, shared with the API.
 export type { ReviewRunAction, ReviewRunSubject };
 
+/**
+ * The status of a review run (the shared run status union).
+ *
+ * @stability experimental
+ */
 export type ReviewRunStatus = RunStatus;
 
-/** Serialized run row returned by GET /review-runs/:id. */
+/**
+ * Serialized run row returned by GET /review-runs/:id.
+ *
+ * @stability experimental
+ */
 export interface ReviewRun extends BaseRun {
   subjectType: ReviewRunSubject;
   action: ReviewRunAction;
@@ -32,12 +41,18 @@ export interface ReviewRun extends BaseRun {
   threshold: number;
 }
 
-/** Run detail adds the per-item status tally. */
+/**
+ * Run detail adds the per-item status tally.
+ *
+ * @stability experimental
+ */
 export interface ReviewRunDetail extends ReviewRun, BaseRunDetail {}
 
 /**
  * Response of the six threshold endpoints that start a review run: burst
  * resolve/dismiss, duplicate resolve/dismiss, location accept/reject.
+ *
+ * @stability experimental
  */
 export interface CreateReviewRunResponse {
   runId: string;
@@ -45,7 +60,11 @@ export interface CreateReviewRunResponse {
   matchedCount: number;
 }
 
-/** Response of POST /review-runs/:id/cancel. */
+/**
+ * Response of POST /review-runs/:id/cancel.
+ *
+ * @stability experimental
+ */
 export interface CancelReviewRunResponse {
   runId: string;
   status: ReviewRunStatus;
@@ -59,17 +78,34 @@ export interface CancelReviewRunResponse {
  * populated, matching the run's `subjectType`. That is a DATABASE-level
  * integrity concern; the API flattens it to a single `subjectId` before
  * serializing, so the client never sees the three columns.
+ *
+ * @stability experimental
  */
 export interface ReviewRunItem extends BaseRunItem {
   subjectType: ReviewRunSubject;
   subjectId: string;
 }
 
+/**
+ * The pagination envelope of a review run's item listing.
+ *
+ * @stability experimental
+ */
 export type ReviewRunListMeta = RunListMeta;
 
+/**
+ * One page of a review run's items.
+ *
+ * @stability experimental
+ */
 export interface ReviewRunItemsResponse {
   items: ReviewRunItem[];
   meta: ReviewRunListMeta;
 }
 
+/**
+ * The query parameters of a review run's item listing.
+ *
+ * @stability experimental
+ */
 export type ReviewRunItemsQueryParams = RunItemsQueryParams;

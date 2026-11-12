@@ -23,7 +23,7 @@ import type {
   DuplicateDismissResult,
 } from '../services/duplicates';
 import type { GroupBulkResolveResult } from '../services/bursts';
-import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import type { CreateReviewRunResponse } from '@marinoscar/memoriahub-web/review-runs/headless';
 
 export interface FetchDuplicateGroupsParams {
   circleId: string;

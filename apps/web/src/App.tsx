@@ -174,7 +174,7 @@ const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
 const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
 const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
 const LocationSuggestionRunRedirect = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionRunRedirect'));
-const ReviewRunPage = lazy(() => import('./pages/Reviews/ReviewRunPage'));
+const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.ReviewRunPage })));
 const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
@@ -182,7 +182,7 @@ const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPag
 const ArchivePage = lazyMediaPage('ArchivePage');
 const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
 const TrashPage = lazyMediaPage('TrashPage');
-const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
+const TrashEmptyRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.TrashEmptyRunPage })));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));
 // RETRO-I4 (#578): public links are the sharing slice's; the page resolves `/s#lnk_...` and
 // renders the `media_item` / `album` renderers registered in `platform/linkRenderers`.
@@ -197,7 +197,7 @@ const WorkflowListPage = lazy(() =>
 const WorkflowBuilderPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowBuilderPage })),
 );
-const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
+const WorkflowRunPage = lazy(() => import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowRunPage })));
 const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
 const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));

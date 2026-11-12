@@ -16,9 +16,11 @@
  * Superset of every run status across all four backends. It lives with the packaged
  * run formatters (`@marinoscar/memoriahub-web/core/headless`); re-exported so the app's
  * imports stay unchanged.
+ *
+ * @stability experimental
  */
-export type { RunStatus } from '@marinoscar/memoriahub-web/core/headless';
-import type { RunStatus } from '@marinoscar/memoriahub-web/core/headless';
+export type { RunStatus } from '../../core/headless/index.js';
+import type { RunStatus } from '../../core/headless/index.js';
 
 /**
  * Superset of every run-item status across all four backends.
@@ -30,6 +32,8 @@ import type { RunStatus } from '@marinoscar/memoriahub-web/core/headless';
  *   it the run-item row, cascades away).
  * - `applied` / `partially_applied` / `excluded` come from workflows and the
  *   review runs.
+ *
+ * @stability experimental
  */
 export type RunItemStatus =
   | 'matched'
@@ -46,6 +50,8 @@ export type RunItemStatus =
  *
  * Per-backend run types extend this and add their own discriminators
  * (`action`, `threshold`, `subjectType`, `workflowId`, …).
+ *
+ * @stability experimental
  */
 export interface BaseRun {
   id: string;
@@ -75,12 +81,20 @@ export interface BaseRun {
   lastError: string | null;
 }
 
-/** Run detail adds the live per-item status tally. */
+/**
+ * Run detail adds the live per-item status tally.
+ *
+ * @stability experimental
+ */
 export interface BaseRunDetail extends BaseRun {
   itemStatusCounts: Record<string, number>;
 }
 
-/** Pagination envelope shared by every run-items listing. */
+/**
+ * Pagination envelope shared by every run-items listing.
+ *
+ * @stability experimental
+ */
 export interface RunListMeta {
   page: number;
   pageSize: number;
@@ -88,7 +102,11 @@ export interface RunListMeta {
   totalPages: number;
 }
 
-/** The media summary run-item listings hydrate for display. */
+/**
+ * The media summary run-item listings hydrate for display.
+ *
+ * @stability experimental
+ */
 export interface RunItemMedia {
   type: string;
   capturedAt: string | null;
@@ -97,7 +115,11 @@ export interface RunItemMedia {
   height: number | null;
 }
 
-/** Fields every run-item row carries, regardless of subject. */
+/**
+ * Fields every run-item row carries, regardless of subject.
+ *
+ * @stability experimental
+ */
 export interface BaseRunItem {
   id: string;
   status: RunItemStatus;
@@ -107,7 +129,11 @@ export interface BaseRunItem {
   thumbnailUrl: string | null;
 }
 
-/** Query params accepted by every run-items listing endpoint. */
+/**
+ * Query params accepted by every run-items listing endpoint.
+ *
+ * @stability experimental
+ */
 export interface RunItemsQueryParams {
   status?: RunItemStatus;
   page?: number;

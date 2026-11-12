@@ -13,33 +13,33 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useReviewRun } from '../../hooks/useReviewRun';
-import { useReviewRunItems } from '../../hooks/useReviewRunItems';
-import { useRunPolling } from '../../hooks/useRunPolling';
-import { cancelReviewRun } from '../../services/reviewRuns';
-import RunProgressPanel from '../../components/runs/RunProgressPanel';
-import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
-import {
-  RUN_ITEMS_EMPTY_STATE,
-  RUN_ITEMS_PAGE_SIZE,
-  buildRunItemColumns,
-} from '../../components/runs/runItemsTable';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
-} from '../../utils/runFormat';
+  useMemoriahubAdmin,
+  useOwnerScope,
+} from '../../../core/headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
+import { useReviewRun } from '../../headless/hooks/useReviewRun.js';
+import { useReviewRunItems } from '../../headless/hooks/useReviewRunItems.js';
+import { useRunPolling } from '../../headless/hooks/useRunPolling.js';
+import { cancelReviewRun } from '../../headless/services/reviewRuns.js';
+import RunProgressPanel from '../components/RunProgressPanel.js';
+import type { RunTerminalSummary } from '../components/RunProgressPanel.js';
+import {
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../components/runItemsTable.js';
 import type {
   ReviewRunAction,
   ReviewRunDetail,
   ReviewRunItem,
   ReviewRunSubject,
-} from '../../types/reviewRuns';
+} from '../../headless/review-run-types.js';
 
 /**
  * Persistence key for the failed-items table's column/density choices
@@ -47,6 +47,8 @@ import type {
  * §15). ONE id across all three review queues: the table is the same table with
  * the same columns whichever queue produced the run, so a user who widens the
  * Error column while reviewing bursts should find it widened for duplicates.
+ *
+ * @stability experimental
  */
 export const REVIEW_RUN_ITEMS_TABLE_ID = 'review-run-items';
 
@@ -206,10 +208,16 @@ function itemLabel(item: ReviewRunItem): string {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * The run page of a bulk review action (burst, duplicate or location suggestion), titled from the run's subject and action.
+ *
+ * @stability experimental
+ */
 export default function ReviewRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const { activeCircleRole } = useOwnerScope();
+  const { DataTable } = useMemoriahubAdmin();
 
   const { run, isLoading, error, fetchRun } = useReviewRun();
   const {
@@ -291,7 +299,7 @@ export default function ReviewRunPage() {
     [],
   );
 
-  const failedItemActions = useMemo<DataTableRowAction<ReviewRunItem>[]>(() => {
+  const failedItemActions = useMemo<MemoriahubDataTableRowAction<ReviewRunItem>[]>(() => {
     if (!subjectType || !action) return [];
     const { subjectLink, backPath } = describeReviewRun(subjectType, action);
     return [

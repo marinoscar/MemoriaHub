@@ -3,18 +3,29 @@ import type {
   ReviewRunItem,
   ReviewRunItemsQueryParams,
   ReviewRunListMeta,
-} from '../types/reviewRuns';
-import { listReviewRunItems as listReviewRunItemsApi } from '../services/reviewRuns';
-import { useIsMounted } from './useIsMounted';
+} from '../review-run-types.js';
+import { listReviewRunItems as listReviewRunItemsApi } from '../services/reviewRuns.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
-interface UseReviewRunItemsResult {
+/**
+ * The state and loader {@link useReviewRunItems} returns.
+ *
+ * @stability experimental
+ */
+export interface UseReviewRunItemsResult {
   items: ReviewRunItem[];
   meta: ReviewRunListMeta | null;
   isLoading: boolean;
   error: string | null;
+  /** Loads one page of the run's items. */
   fetchItems: (runId: string, params?: ReviewRunItemsQueryParams) => Promise<void>;
 }
 
+/**
+ * Loads one page of a review run's items on demand (the failed-items table).
+ *
+ * @stability experimental
+ */
 export function useReviewRunItems(): UseReviewRunItemsResult {
   const [items, setItems] = useState<ReviewRunItem[]>([]);
   const [meta, setMeta] = useState<ReviewRunListMeta | null>(null);

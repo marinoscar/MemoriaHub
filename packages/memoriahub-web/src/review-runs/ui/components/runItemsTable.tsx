@@ -48,9 +48,9 @@
 import type { ReactNode } from 'react';
 import { Avatar, Box, Chip, Stack, Typography } from '@mui/material';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
-import type { DataTableColumn } from '@marinoscar/platform-web/datatable/headless';
-import type { BaseRunItem, RunItemStatus } from '../../types/runs';
-import { formatCaptureDate } from '../../utils/runFormat';
+import type { MemoriahubDataTableColumn } from '../../../core/headless/index.js';
+import type { BaseRunItem, RunItemStatus } from '../../headless/run-types.js';
+import { formatCaptureDate } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Status presentation
@@ -70,7 +70,11 @@ const ITEM_STATUS_COLORS: Record<
   skipped: 'default',
 };
 
-/** Title-cased, space-separated label for a run-item status. */
+/**
+ * Title-cased, space-separated label for a run-item status.
+ *
+ * @stability experimental
+ */
 export function runItemStatusLabel(status: RunItemStatus): string {
   const words = status.split('_');
   return words
@@ -95,6 +99,11 @@ function RunItemStatusChip({ status }: { status: RunItemStatus }) {
 // Columns
 // ---------------------------------------------------------------------------
 
+/**
+ * What {@link buildRunItemColumns} needs to render one run item's subject.
+ *
+ * @stability experimental
+ */
 export interface RunItemColumnOptions<Item extends BaseRunItem> {
   /**
    * Header/field label for the leading column — "File" for media-backed runs,
@@ -109,10 +118,15 @@ export interface RunItemColumnOptions<Item extends BaseRunItem> {
   itemLabel: (item: Item) => string;
 }
 
+/**
+ * The column declarations of the failed-items table every run page shares.
+ *
+ * @stability experimental
+ */
 export function buildRunItemColumns<Item extends BaseRunItem>({
   subjectLabel,
   itemLabel,
-}: RunItemColumnOptions<Item>): DataTableColumn<Item>[] {
+}: RunItemColumnOptions<Item>): MemoriahubDataTableColumn<Item>[] {
   return [
     // --- primary ------------------------------------------------------------
     {
@@ -200,8 +214,16 @@ export function buildRunItemColumns<Item extends BaseRunItem>({
   ];
 }
 
-/** Default page size for every run-item table. */
+/**
+ * Default page size for every run-item table.
+ *
+ * @stability experimental
+ */
 export const RUN_ITEMS_PAGE_SIZE = 25;
 
-/** The empty-state node, shared by all three run-item tables. */
+/**
+ * The empty-state node, shared by all three run-item tables.
+ *
+ * @stability experimental
+ */
 export const RUN_ITEMS_EMPTY_STATE: ReactNode = <span>No items to show.</span>;

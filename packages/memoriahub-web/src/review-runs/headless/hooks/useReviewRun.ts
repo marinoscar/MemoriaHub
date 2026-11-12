@@ -1,18 +1,26 @@
 import { useState, useCallback } from 'react';
-import type { ReviewRunDetail } from '../types/reviewRuns';
-import { getReviewRun as getReviewRunApi } from '../services/reviewRuns';
-import { useIsMounted } from './useIsMounted';
+import type { ReviewRunDetail } from '../review-run-types.js';
+import { getReviewRun as getReviewRunApi } from '../services/reviewRuns.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
-interface UseReviewRunResult {
+/**
+ * The state and loader {@link useReviewRun} returns.
+ *
+ * @stability experimental
+ */
+export interface UseReviewRunResult {
   run: ReviewRunDetail | null;
   isLoading: boolean;
   error: string | null;
+  /** Loads (or reloads) the run; poll it with `useRunPolling`. */
   fetchRun: (runId: string) => Promise<void>;
 }
 
 /**
  * Fetch a single review run's detail. Live progress comes from polling
  * `fetchRun` via `useRunPolling` (mirrors `useTrashEmptyRun`).
+ *
+ * @stability experimental
  */
 export function useReviewRun(): UseReviewRunResult {
   const [run, setRun] = useState<ReviewRunDetail | null>(null);

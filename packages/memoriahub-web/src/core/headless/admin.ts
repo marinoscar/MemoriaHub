@@ -41,6 +41,8 @@ export interface MemoriahubDataTableColumn<Row> {
   align?: 'left' | 'center' | 'right';
   /** Which layouts show the column. */
   priority: MemoriahubDataTableColumnPriority;
+  /** Long values are clipped with an ellipsis and reveal the full text on hover or focus. */
+  truncate?: boolean;
   /** A fixed width in pixels. */
   width?: number;
   /** The narrowest width in pixels. */

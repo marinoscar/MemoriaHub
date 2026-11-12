@@ -4,7 +4,7 @@ import type {
   EnhancementStatus as ContractEnhancementStatus,
 } from '@marinoscar/memoriahub-contract/enhancement';
 import { api, ApiError } from './api';
-import type { BaseRun } from '../types/runs';
+import type { BaseRun } from '@marinoscar/memoriahub-web/review-runs/headless';
 import type { BulkEnhanceSkipped } from '@marinoscar/memoriahub-web/media/headless';
 
 // ---------------------------------------------------------------------------

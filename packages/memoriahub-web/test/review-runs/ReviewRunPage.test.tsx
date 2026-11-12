@@ -27,34 +27,29 @@
  * real network.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import {
-  installLayoutStubs,
-  resetContainerWidth,
-  setInitialContainerWidth,
-} from '@marinoscar/platform-web/datatable/testing';
-import { api } from '../../../services/api';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useReviewRun', () => ({
+vi.mock('../../src/review-runs/headless/hooks/useReviewRun.js', () => ({
   useReviewRun: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useReviewRunItems', () => ({
+vi.mock('../../src/review-runs/headless/hooks/useReviewRunItems.js', () => ({
   useReviewRunItems: vi.fn(),
 }));
 
-vi.mock('../../../services/reviewRuns', () => ({
+vi.mock('../../src/review-runs/headless/services/reviewRuns.js', () => ({
   cancelReviewRun: vi.fn().mockResolvedValue({ runId: 'run-1', status: 'cancelled' }),
 }));
 
@@ -72,11 +67,11 @@ vi.mock('react-router-dom', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import ReviewRunPage from '../../../pages/Reviews/ReviewRunPage';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { useReviewRun } from '../../../hooks/useReviewRun';
-import { useReviewRunItems } from '../../../hooks/useReviewRunItems';
-import type { ReviewRunDetail } from '../../../types/reviewRuns';
+import ReviewRunPage from '../../src/review-runs/ui/pages/ReviewRunPage.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { useReviewRun } from '../../src/review-runs/headless/hooks/useReviewRun.js';
+import { useReviewRunItems } from '../../src/review-runs/headless/hooks/useReviewRunItems.js';
+import type { ReviewRunDetail } from '../../src/review-runs/headless/review-run-types.js';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseReviewRun = vi.mocked(useReviewRun);
@@ -154,21 +149,11 @@ function makeItemsHook(overrides: Partial<ItemsHookReturn> = {}): ItemsHookRetur
   } as ItemsHookReturn;
 }
 
-beforeAll(() => {
-  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
-  // both the container-width hook and MUI X measure 0×0 without these.
-  installLayoutStubs();
-});
-
 describe('ReviewRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseReviewRunItems.mockReturnValue(makeItemsHook());
-    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
-    vi.spyOn(api, 'get').mockResolvedValue({} as never);
-    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -534,8 +519,7 @@ describe('ReviewRunPage', () => {
 
       // With no media row, the subject id is the label (truncated).
       expect(await screen.findByText('bg-42')).toBeInTheDocument();
-      // One row action, so it is a bare icon button named after its row (§17.6).
-      await userEvent.setup().click(screen.getByRole('button', { name: 'View for bg-42' }));
+      await userEvent.setup().click(screen.getByRole('button', { name: 'View' }));
       expect(mockNavigate).toHaveBeenCalledWith('/bursts/bg-42');
     });
 
@@ -665,7 +649,7 @@ describe('ReviewRunPage', () => {
   //
   // Every run page polls its detail endpoint, so `run` — and, on a refetch,
   // `items` — are BRAND NEW OBJECTS on every tick. The failure mode this guards
-  // is the one docs/specs/datatable.md §18.4 names: gating the table on
+  // is the one docs/specs/datatable.md §18.4 names (the platform table's own mechanics, the card expansion and the loading overlay, are asserted through the web edition's real table in apps/web): gating the table on
   // `loading` (`{!loading && <TableContainer>…}`, which is exactly what these
   // three pages did before #261) remounts the renderer on every tick and takes
   // card/row expansion state and the page's scroll offset with it.
@@ -720,35 +704,21 @@ describe('ReviewRunPage', () => {
       ];
     }
 
-    it('preserves an expanded card and the table itself across a poll tick', async () => {
-      const user = userEvent.setup();
-      // A phone-width CONTAINER, so the card layout (and therefore its
-      // "More details" region) is what is on screen.
-      setInitialContainerWidth(400);
+    it('keeps the table itself mounted across a poll tick', async () => {
       mockUseReviewRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseReviewRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
 
       const { rerender } = render(<ReviewRunPage />);
 
-      const table = await screen.findByTestId('datatable');
-      await user.click(
-        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
-      );
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      const table = await screen.findByRole('table');
 
       // One poll tick: a new run object and new item objects, same ids.
       mockUseReviewRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseReviewRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
       rerender(<ReviewRunPage />);
 
-      // The renderer was never unmounted…
-      expect(screen.getByTestId('datatable')).toBe(table);
-      // …so the expansion the user opened is still open…
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
-      ).toBeInTheDocument();
-      // …and both rows are still on screen.
+      // The renderer was never unmounted, and both rows are still on screen.
+      expect(screen.getByRole('table')).toBe(table);
       expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
       expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
     });
@@ -764,7 +734,7 @@ describe('ReviewRunPage', () => {
       // `loading` is a PROP — an overlay over live rows, never a replacement
       // for the table.
       expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
-      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
     });
   });
 });

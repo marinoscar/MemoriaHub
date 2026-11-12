@@ -1,10 +1,10 @@
-import { api, ApiError } from './api';
+import { api, MemoriahubApiError as ApiError } from '../../../core/headless/index.js';
 import type {
   CancelReviewRunResponse,
   ReviewRunDetail,
   ReviewRunItemsQueryParams,
   ReviewRunItemsResponse,
-} from '../types/reviewRuns';
+} from '../review-run-types.js';
 
 // ---------------------------------------------------------------------------
 // Review-queue runs — API client (issue #190).
@@ -21,12 +21,20 @@ import type {
 // below is the INNER object.
 // ---------------------------------------------------------------------------
 
-/** Get a single run's detail (counters + item status tally). */
+/**
+ * Get a single run's detail (counters + item status tally).
+ *
+ * @stability experimental
+ */
 export async function getReviewRun(runId: string): Promise<ReviewRunDetail> {
   return api.get<ReviewRunDetail>(`/review-runs/${runId}`);
 }
 
-/** List a run's items (paginated, signed thumbnails). */
+/**
+ * List a run's items (paginated, signed thumbnails).
+ *
+ * @stability experimental
+ */
 export async function listReviewRunItems(
   runId: string,
   params?: ReviewRunItemsQueryParams,
@@ -39,7 +47,11 @@ export async function listReviewRunItems(
   return api.get<ReviewRunItemsResponse>(`/review-runs/${runId}/items${qs ? `?${qs}` : ''}`);
 }
 
-/** Cancel a non-terminal run (circle collaborator). */
+/**
+ * Cancel a non-terminal run (circle collaborator).
+ *
+ * @stability experimental
+ */
 export async function cancelReviewRun(runId: string): Promise<CancelReviewRunResponse> {
   return api.post<CancelReviewRunResponse>(`/review-runs/${runId}/cancel`);
 }
@@ -49,6 +61,8 @@ export async function cancelReviewRun(runId: string): Promise<CancelReviewRunRes
  * active run in this circle. The guard is per `(circle, subjectType)`, so a
  * burst run and a location run may overlap — only two runs of the SAME queue
  * collide, which is what this wording says.
+ *
+ * @stability experimental
  */
 export const RUN_IN_PROGRESS_MESSAGE =
   'A bulk run is already in progress for this queue. Wait for it to finish before starting another.';
@@ -60,6 +74,8 @@ export const RUN_IN_PROGRESS_MESSAGE =
  * message does not say what to do about it — every queue that starts a run
  * needs the same translation, so it lives here rather than being re-derived
  * per page.
+ *
+ * @stability experimental
  */
 export function startRunErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.status === 409) return RUN_IN_PROGRESS_MESSAGE;

@@ -17,22 +17,22 @@ import RateReviewIcon from '@mui/icons-material/RateReview';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom';
 import { useOwnerScope } from '../../hooks/useOwnerScope';
 import { useEnhancementBatch } from '../../hooks/useEnhancementBatch';
-import { useRunPolling } from '../../hooks/useRunPolling';
+import { useRunPolling } from '@marinoscar/memoriahub-web/review-runs/headless';
 import {
   cancelEnhancementBatch,
   listEnhancements,
   type EnhancementBatch,
   type EnhancementListItem,
 } from '../../services/enhance';
-import RunProgressPanel from '../../components/runs/RunProgressPanel';
-import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
+import { RunProgressPanel } from '@marinoscar/memoriahub-web/review-runs/ui';
+import type { RunTerminalSummary } from '@marinoscar/memoriahub-web/review-runs/ui';
 import {
   RUN_ITEMS_EMPTY_STATE,
   RUN_ITEMS_PAGE_SIZE,
   buildRunItemColumns,
-} from '../../components/runs/runItemsTable';
+} from '@marinoscar/memoriahub-web/review-runs/ui';
 import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { BaseRunItem } from '../../types/runs';
+import type { BaseRunItem } from '@marinoscar/memoriahub-web/review-runs/headless';
 import {
   formatCount,
   formatRelativeTime,

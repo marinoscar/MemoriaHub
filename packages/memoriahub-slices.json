@@ -208,9 +208,14 @@
     ],
     "workflows": [
       "core",
-      "media"
+      "media",
+      "review-runs"
     ],
     "people": [
+      "core",
+      "media"
+    ],
+    "review-runs": [
       "core",
       "media"
     ]

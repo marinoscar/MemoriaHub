@@ -36,7 +36,7 @@ import { FeatureDisabledNotice } from '../../components/review/FeatureDisabledNo
 import {
   startLocationAcceptRun,
   startLocationRejectRun,
-} from '../../services/locationSuggestionRuns';
+} from '@marinoscar/memoriahub-web/review-runs/headless';
 import { LocationMiniMap } from '@marinoscar/memoriahub-web/media/ui';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import { AdjustLocationDialog } from './AdjustLocationDialog';

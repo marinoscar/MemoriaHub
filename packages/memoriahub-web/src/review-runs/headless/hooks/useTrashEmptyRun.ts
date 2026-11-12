@@ -1,18 +1,26 @@
 import { useState, useCallback } from 'react';
-import type { TrashEmptyRunDetail } from '@marinoscar/memoriahub-web/media/headless';
-import { getTrashEmptyRun as getTrashEmptyRunApi } from '@marinoscar/memoriahub-web/media/headless';
-import { useIsMounted } from './useIsMounted';
+import type { TrashEmptyRunDetail } from '../../../media/headless/index.js';
+import { getTrashEmptyRun as getTrashEmptyRunApi } from '../../../media/headless/index.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
-interface UseTrashEmptyRunResult {
+/**
+ * The state and loader {@link useTrashEmptyRun} returns.
+ *
+ * @stability experimental
+ */
+export interface UseTrashEmptyRunResult {
   run: TrashEmptyRunDetail | null;
   isLoading: boolean;
   error: string | null;
+  /** Loads (or reloads) the run; poll it with `useRunPolling`. */
   fetchRun: (runId: string) => Promise<void>;
 }
 
 /**
  * Fetch a single empty-trash run's detail. The caller can poll live progress by
  * invoking `fetchRun` on an interval (mirrors `useWorkflowRun`).
+ *
+ * @stability experimental
  */
 export function useTrashEmptyRun(): UseTrashEmptyRunResult {
   const [run, setRun] = useState<TrashEmptyRunDetail | null>(null);

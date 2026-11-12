@@ -22,30 +22,22 @@
  * not disturb it.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import {
-  installLayoutStubs,
-  resetContainerWidth,
-  setInitialContainerWidth,
-} from '@marinoscar/platform-web/datatable/testing';
-import { api } from '../../../services/api';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
-}));
-
-vi.mock('../../../hooks/useOwnerScope', () => ({
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+vi.mock('../../src/workflows/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowRun: vi.fn(),
   useWorkflowRunItems: vi.fn(),
@@ -66,13 +58,10 @@ vi.mock('react-router-dom', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import WorkflowRunPage from '../../../pages/Workflows/WorkflowRunPage';
-import { usePermissions } from '../../../hooks/usePermissions';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { useWorkflowRun } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useWorkflowRunItems } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useWorkflowMutations } from '@marinoscar/memoriahub-web/workflows/headless';
-import type { WorkflowRunDetail, WorkflowRunItem } from '@marinoscar/memoriahub-web/workflows/headless';
+import WorkflowRunPage from '../../src/workflows/ui/pages/WorkflowRunPage.js';
+import { usePermissions, useOwnerScope } from '../../src/core/headless/index.js';
+import { useWorkflowRun, useWorkflowRunItems, useWorkflowMutations } from '../../src/workflows/headless/index.js';
+import type { WorkflowRunDetail, WorkflowRunItem } from '../../src/workflows/headless/index.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
@@ -198,23 +187,13 @@ function makeMutationsHook(overrides: Partial<MutationsHookReturn> = {}): Mutati
   } as MutationsHookReturn;
 }
 
-beforeAll(() => {
-  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
-  // both the container-width hook and MUI X measure 0×0 without these.
-  installLayoutStubs();
-});
-
 describe('WorkflowRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUsePermissions.mockReturnValue(makePermissions());
     mockUseWorkflowRunItems.mockReturnValue(makeItemsHook());
     mockUseWorkflowMutations.mockReturnValue(makeMutationsHook());
-    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
-    vi.spyOn(api, 'get').mockResolvedValue({} as never);
-    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -449,29 +428,19 @@ describe('WorkflowRunPage', () => {
       ];
     }
 
-    it('preserves an expanded card and the table itself across a poll tick', async () => {
-      const user = userEvent.setup();
-      setInitialContainerWidth(400); // card layout, so "More details" exists
+    it('keeps the table itself mounted across a poll tick', async () => {
       mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseWorkflowRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
 
       const { rerender } = render(<WorkflowRunPage />);
 
-      const table = await screen.findByTestId('datatable');
-      await user.click(
-        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
-      );
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      const table = await screen.findByRole('table');
 
       mockUseWorkflowRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseWorkflowRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
       rerender(<WorkflowRunPage />);
 
-      expect(screen.getByTestId('datatable')).toBe(table);
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('table')).toBe(table);
       expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
       expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
     });
@@ -485,7 +454,7 @@ describe('WorkflowRunPage', () => {
       render(<WorkflowRunPage />);
 
       expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
-      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
     });
 
     it('links a failed item to its media, from a row-named action', async () => {
@@ -494,10 +463,8 @@ describe('WorkflowRunPage', () => {
 
       render(<WorkflowRunPage />);
 
-      // One row action → a bare icon button named after its row (§17.6).
-      await userEvent
-        .setup()
-        .click(await screen.findByRole('button', { name: 'View for broken-one.jpg' }));
+      // The first row is broken-one.jpg (the fake table names every row's action "View").
+      await userEvent.setup().click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
       expect(mockNavigate).toHaveBeenCalledWith('/media?item=broken-one');
     });

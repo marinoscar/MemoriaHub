@@ -39,21 +39,19 @@ import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useWorkflowRun } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useWorkflowRunItems } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useWorkflowMutations } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useRunPolling } from '../../hooks/useRunPolling';
-import RunProgressPanel from '../../components/runs/RunProgressPanel';
-import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
+import { useMemoriahubAdmin, useOwnerScope, usePermissions } from '../../../core/headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
+import { useWorkflowRun } from '../../headless/index.js';
+import { useWorkflowRunItems } from '../../headless/index.js';
+import { useWorkflowMutations } from '../../headless/index.js';
+import { useRunPolling } from '../../../review-runs/headless/index.js';
+import { RunProgressPanel } from '../../../review-runs/ui/index.js';
+import type { RunTerminalSummary } from '../../../review-runs/ui/index.js';
 import {
   RUN_ITEMS_EMPTY_STATE,
   RUN_ITEMS_PAGE_SIZE,
   buildRunItemColumns,
-} from '../../components/runs/runItemsTable';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
+} from '../../../review-runs/ui/index.js';
 import {
   runStatusColor,
   runStatusLabel,
@@ -64,8 +62,8 @@ import {
   deriveActionImpacts,
   definitionHasHardDelete,
   hardDeleteConfirmationText,
-} from '@marinoscar/memoriahub-web/workflows/headless';
-import type { WorkflowRunDetail, WorkflowRunItem } from '@marinoscar/memoriahub-web/workflows/headless';
+} from '../../headless/index.js';
+import type { WorkflowRunDetail, WorkflowRunItem } from '../../headless/index.js';
 
 const ITEMS_PAGE_SIZE = 24;
 const MAX_EXCLUSIONS = 500;
@@ -74,6 +72,8 @@ const MAX_EXCLUSIONS = 500;
  * Persistence key for the failed-items table's column/density choices
  * (`user_settings.dataTables['workflow-run-items']`, docs/specs/datatable.md
  * §15). Chosen here and never derived from the route.
+ *
+ * @stability experimental
  */
 export const WORKFLOW_RUN_ITEMS_TABLE_ID = 'workflow-run-items';
 
@@ -187,11 +187,17 @@ function terminalSummary(run: WorkflowRunDetail): RunTerminalSummary {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * The run page of one workflow run: approval preview, live progress and failed items.
+ *
+ * @stability experimental
+ */
 export default function WorkflowRunPage() {
   const { id: workflowId, runId } = useParams<{ id: string; runId: string }>();
   const navigate = useNavigate();
   const { activeCircleRole } = useOwnerScope();
   const { hasPermission } = usePermissions();
+  const { DataTable } = useMemoriahubAdmin();
 
   const { run, isLoading, error, fetchRun } = useWorkflowRun();
   const {
@@ -331,7 +337,7 @@ export default function WorkflowRunPage() {
     [],
   );
 
-  const failedItemActions = useMemo<DataTableRowAction<WorkflowRunItem>[]>(
+  const failedItemActions = useMemo<MemoriahubDataTableRowAction<WorkflowRunItem>[]>(
     () => [
       {
         id: 'view',

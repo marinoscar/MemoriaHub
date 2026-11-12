@@ -2,7 +2,7 @@ import type { BulkResolveDuplicate, DuplicateQuery } from '@marinoscar/memoriahu
 import { api } from './api';
 import { BULK_RESOLVE_CHUNK_SIZE } from './bursts';
 import type { GroupBulkResolveResult } from './bursts';
-import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import type { CreateReviewRunResponse } from '@marinoscar/memoriahub-web/review-runs/headless';
 import type { SortOrder } from '@marinoscar/memoriahub-web/media/headless';
 
 /** Max page size the list endpoint accepts; used when collecting all ids. */

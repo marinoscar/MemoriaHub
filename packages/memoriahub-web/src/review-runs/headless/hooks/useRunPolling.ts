@@ -1,10 +1,19 @@
 import { useEffect, useRef } from 'react';
-import type { RunStatus } from '../types/runs';
-import { isTerminalRunStatus } from '../utils/runFormat';
+import type { RunStatus } from '../run-types.js';
+import { isTerminalRunStatus } from '../../../core/headless/index.js';
 
-/** Poll cadence shared by every run page. */
+/**
+ * Poll cadence shared by every run page.
+ *
+ * @stability experimental
+ */
 export const POLL_MS = 2000;
 
+/**
+ * The options of {@link useRunPolling}.
+ *
+ * @stability experimental
+ */
 export interface UseRunPollingOptions {
   /** The run being watched. Polling is inert until this is defined. */
   runId: string | undefined | null;
@@ -32,6 +41,8 @@ export interface UseRunPollingOptions {
  * `onPoll` is held in a ref, so passing an inline arrow function does not
  * restart the interval on every render — only `runId`, `status`, `intervalMs`
  * and `enabled` do.
+ *
+ * @stability experimental
  */
 export function useRunPolling({
   runId,

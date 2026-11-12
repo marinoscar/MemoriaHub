@@ -1,5 +1,5 @@
-import { api } from './api';
-import type { CreateReviewRunResponse } from '../types/reviewRuns';
+import { api } from '../../../core/headless/index.js';
+import type { CreateReviewRunResponse } from '../review-run-types.js';
 
 // ---------------------------------------------------------------------------
 // Location-Suggestion bulk accept/reject — run START endpoints.
@@ -15,7 +15,11 @@ import type { CreateReviewRunResponse } from '../types/reviewRuns';
 // below is the INNER object.
 // ---------------------------------------------------------------------------
 
-/** Start an async ACCEPT run: accept every pending suggestion at/above `threshold`. */
+/**
+ * Start an async ACCEPT run: accept every pending suggestion at/above `threshold`.
+ *
+ * @stability experimental
+ */
 export async function startLocationAcceptRun(body: {
   circleId: string;
   threshold: number;
@@ -23,7 +27,11 @@ export async function startLocationAcceptRun(body: {
   return api.post<CreateReviewRunResponse>('/media/location-suggestions/bulk-accept', body);
 }
 
-/** Start an async REJECT run: reject every pending suggestion BELOW `threshold`. */
+/**
+ * Start an async REJECT run: reject every pending suggestion BELOW `threshold`.
+ *
+ * @stability experimental
+ */
 export async function startLocationRejectRun(body: {
   circleId: string;
   threshold: number;

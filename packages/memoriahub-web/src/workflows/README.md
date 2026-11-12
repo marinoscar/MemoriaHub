@@ -8,11 +8,11 @@ Media workflow automation on the web: the workflow list, the builder (subject, t
 
 Components of slices that have not moved are reached through host slots: the people picker of a condition is the media slice's `PersonMultiSelectSlot`, and the single-person picker of the `assign_person` and `remove_person` actions is this slice's `WorkflowPersonSelectSlot`.
 
-Staying in the app: the run page (`WorkflowRunPage`, built on the shared run progress panel, run polling hook and item table, which the review and trash runs also use; it moves with the review-runs web slice).
+`workflows/ui` also carries `WorkflowRunPage` (approval preview, live progress and failed items), built on the `review-runs` slice's run progress panel, run polling hook and item table, which the review-queue and trash runs also use.
 
 ## Entry point
 
-`@marinoscar/memoriahub-web/workflows/headless` and `@marinoscar/memoriahub-web/workflows/ui`. The slice imports `core` and `media` through their entries.
+`@marinoscar/memoriahub-web/workflows/headless` and `@marinoscar/memoriahub-web/workflows/ui`. The slice imports `core`, `media` and `review-runs` through their entries.
 
 ## Peer dependencies
 

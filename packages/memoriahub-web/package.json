@@ -76,6 +76,14 @@
       "types": "./dist/people/ui/index.d.ts",
       "default": "./dist/people/ui/index.js"
     },
+    "./review-runs/headless": {
+      "types": "./dist/review-runs/headless/index.d.ts",
+      "default": "./dist/review-runs/headless/index.js"
+    },
+    "./review-runs/ui": {
+      "types": "./dist/review-runs/ui/index.d.ts",
+      "default": "./dist/review-runs/ui/index.js"
+    },
     "./search/headless": {
       "types": "./dist/search/headless/index.d.ts",
       "default": "./dist/search/headless/index.js"

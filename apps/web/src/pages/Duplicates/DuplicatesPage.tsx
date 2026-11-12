@@ -36,7 +36,7 @@ import { FeatureDisabledNotice } from '../../components/review/FeatureDisabledNo
 import { GroupBulkResolveToolbar } from '../../components/review/GroupBulkResolveToolbar';
 import { SelectionCheckboxOverlay } from '../../components/review/SelectionCheckboxOverlay';
 import { ConfidenceMeter } from '../../components/review/ConfidenceMeter';
-import { startRunErrorMessage } from '../../services/reviewRuns';
+import { startRunErrorMessage } from '@marinoscar/memoriahub-web/review-runs/headless';
 import { ReviewSortSelect } from '../../components/review/ReviewSortSelect';
 import type {
   DuplicateGroupKind,

@@ -13,33 +13,35 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { useTrashEmptyRun } from '../../hooks/useTrashEmptyRun';
-import { useTrashEmptyRunItems } from '../../hooks/useTrashEmptyRunItems';
-import { useRunPolling } from '../../hooks/useRunPolling';
-import { cancelTrashEmptyRun } from '@marinoscar/memoriahub-web/media/headless';
-import RunProgressPanel from '../../components/runs/RunProgressPanel';
-import type { RunTerminalSummary } from '../../components/runs/RunProgressPanel';
-import {
-  RUN_ITEMS_EMPTY_STATE,
-  RUN_ITEMS_PAGE_SIZE,
-  buildRunItemColumns,
-} from '../../components/runs/runItemsTable';
-import { DataTable } from '@marinoscar/platform-web/datatable/ui';
-import type { DataTableRowAction } from '@marinoscar/platform-web/datatable/headless';
 import {
   formatCount,
   formatRelativeTime,
   isTerminalRunStatus,
   runStatusColor,
   runStatusLabel,
-} from '../../utils/runFormat';
-import type { TrashEmptyRunDetail, TrashEmptyRunItem } from '@marinoscar/memoriahub-web/media/headless';
+  useMemoriahubAdmin,
+  useOwnerScope,
+} from '../../../core/headless/index.js';
+import type { MemoriahubDataTableRowAction } from '../../../core/headless/index.js';
+import { useTrashEmptyRun } from '../../headless/hooks/useTrashEmptyRun.js';
+import { useTrashEmptyRunItems } from '../../headless/hooks/useTrashEmptyRunItems.js';
+import { useRunPolling } from '../../headless/hooks/useRunPolling.js';
+import { cancelTrashEmptyRun } from '../../../media/headless/index.js';
+import RunProgressPanel from '../components/RunProgressPanel.js';
+import type { RunTerminalSummary } from '../components/RunProgressPanel.js';
+import {
+  RUN_ITEMS_EMPTY_STATE,
+  RUN_ITEMS_PAGE_SIZE,
+  buildRunItemColumns,
+} from '../components/runItemsTable.js';
+import type { TrashEmptyRunDetail, TrashEmptyRunItem } from '../../../media/headless/index.js';
 
 /**
  * Persistence key for the failed-items table's column/density choices
  * (`user_settings.dataTables['trash-empty-run-items']`,
  * docs/specs/datatable.md §15).
+ *
+ * @stability experimental
  */
 export const TRASH_EMPTY_RUN_ITEMS_TABLE_ID = 'trash-empty-run-items';
 
@@ -90,10 +92,16 @@ function terminalSummary(run: TrashEmptyRunDetail): RunTerminalSummary {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * The run page of an asynchronous empty-trash run.
+ *
+ * @stability experimental
+ */
 export default function TrashEmptyRunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const { activeCircleRole } = useOwnerScope();
+  const { DataTable } = useMemoriahubAdmin();
 
   const { run, isLoading, error, fetchRun } = useTrashEmptyRun();
   const {
@@ -155,7 +163,7 @@ export default function TrashEmptyRunPage() {
     [],
   );
 
-  const failedItemActions = useMemo<DataTableRowAction<TrashEmptyRunItem>[]>(
+  const failedItemActions = useMemo<MemoriahubDataTableRowAction<TrashEmptyRunItem>[]>(
     () => [
       {
         id: 'view',

@@ -11,13 +11,13 @@ import {
   LinearProgress,
   Typography,
 } from '@mui/material';
-import type { BaseRun } from '../../types/runs';
+import type { BaseRun } from '../../headless/run-types.js';
 import {
   formatCount,
   isTerminalRunStatus,
   runProgressPercent,
   runStatusLabel,
-} from '../../utils/runFormat';
+} from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Shared async-run progress panel (issue #190).
@@ -31,7 +31,11 @@ import {
 // does (`onCancel`), so each queue keeps its own permission rules.
 // ---------------------------------------------------------------------------
 
-/** Per-tile labels, so callers can say "Deleted" vs "Applied" vs "Resolved". */
+/**
+ * Per-tile labels, so callers can say "Deleted" vs "Applied" vs "Resolved".
+ *
+ * @stability experimental
+ */
 export interface RunCountLabels {
   total?: string;
   processed?: string;
@@ -49,7 +53,11 @@ const DEFAULT_COUNT_LABELS: Required<RunCountLabels> = {
   skipped: 'Skipped',
 };
 
-/** Terminal alert content. Hosts supply domain wording; a default is derived. */
+/**
+ * Terminal alert content. Hosts supply domain wording; a default is derived.
+ *
+ * @stability experimental
+ */
 export interface RunTerminalSummary {
   severity: 'success' | 'warning' | 'error' | 'info';
   message: string;
@@ -62,6 +70,8 @@ export interface RunTerminalSummary {
  * against `matchedCount`. A completed run may legitimately process fewer
  * subjects than it matched — subjects cascade-deleted mid-run shrink the work
  * set — and surfacing that gap as a stall or a failure would be wrong.
+ *
+ * @stability experimental
  */
 export function defaultTerminalSummary(
   run: BaseRun,
@@ -94,6 +104,11 @@ export function defaultTerminalSummary(
   }
 }
 
+/**
+ * The props of {@link RunProgressPanel}.
+ *
+ * @stability experimental
+ */
 export interface RunProgressPanelProps {
   /** The run to render. Only the shared `BaseRun` fields are read. */
   run: BaseRun;
@@ -120,8 +135,11 @@ export interface RunProgressPanelProps {
 
   /** Whether to render the cancel action. The host owns the RBAC decision. */
   canCancel?: boolean;
+  /** Called when the user confirms the cancel action. */
   onCancel?: () => void;
+  /** True while the cancel call is in flight (disables the button). */
   isCancelling?: boolean;
+  /** The cancel button's label. */
   cancelLabel?: string;
 
   /**
@@ -178,6 +196,11 @@ function RunCountsSummary({
 // Panel
 // ---------------------------------------------------------------------------
 
+/**
+ * The shared progress panel of every async run: the status header, the progress bar, the count tiles and the terminal alert.
+ *
+ * @stability experimental
+ */
 export default function RunProgressPanel({
   run,
   subjectNoun = 'item',

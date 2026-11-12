@@ -23,3 +23,4 @@ export * from './admin/workflowRunsColumns.js';
 export * from './admin/workflowsOversightColumns.js';
 export * from './slots.js';
 export * from './workflowTemplates.js';
+export { default as WorkflowRunPage } from './pages/WorkflowRunPage.js';

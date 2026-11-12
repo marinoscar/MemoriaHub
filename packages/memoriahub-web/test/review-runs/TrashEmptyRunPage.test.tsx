@@ -22,34 +22,29 @@
  * including its stricter circle_admin cancel gate.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
-import {
-  installLayoutStubs,
-  resetContainerWidth,
-  setInitialContainerWidth,
-} from '@marinoscar/platform-web/datatable/testing';
-import { api } from '../../../services/api';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module-level mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useTrashEmptyRun', () => ({
+vi.mock('../../src/review-runs/headless/hooks/useTrashEmptyRun.js', () => ({
   useTrashEmptyRun: vi.fn(),
 }));
 
-vi.mock('../../../hooks/useTrashEmptyRunItems', () => ({
+vi.mock('../../src/review-runs/headless/hooks/useTrashEmptyRunItems.js', () => ({
   useTrashEmptyRunItems: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   cancelTrashEmptyRun: vi.fn().mockResolvedValue({ runId: 'run-1', status: 'cancelled' }),
 
@@ -69,11 +64,11 @@ vi.mock('react-router-dom', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import TrashEmptyRunPage from '../../../pages/Trash/TrashEmptyRunPage';
-import { useOwnerScope } from '../../../hooks/useOwnerScope';
-import { useTrashEmptyRun } from '../../../hooks/useTrashEmptyRun';
-import { useTrashEmptyRunItems } from '../../../hooks/useTrashEmptyRunItems';
-import type { TrashEmptyRunDetail } from '@marinoscar/memoriahub-web/media/headless';
+import TrashEmptyRunPage from '../../src/review-runs/ui/pages/TrashEmptyRunPage.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
+import { useTrashEmptyRun } from '../../src/review-runs/headless/hooks/useTrashEmptyRun.js';
+import { useTrashEmptyRunItems } from '../../src/review-runs/headless/hooks/useTrashEmptyRunItems.js';
+import type { TrashEmptyRunDetail } from '../../src/media/headless/index.js';
 
 const mockUseOwnerScope = vi.mocked(useOwnerScope);
 const mockUseTrashEmptyRun = vi.mocked(useTrashEmptyRun);
@@ -148,21 +143,11 @@ function makeItemsHook(overrides: Partial<ItemsHookReturn> = {}): ItemsHookRetur
   } as ItemsHookReturn;
 }
 
-beforeAll(() => {
-  // The failed-items table is a DataTable (#261); jsdom performs no layout, so
-  // both the container-width hook and MUI X measure 0×0 without these.
-  installLayoutStubs();
-});
-
 describe('TrashEmptyRunPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetContainerWidth(1400); // desktop layout unless a test says otherwise
     mockUseOwnerScope.mockReturnValue(makeCircleContext());
     mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook());
-    // The table's layout-persistence hook reads/writes `/user-settings` (§15).
-    vi.spyOn(api, 'get').mockResolvedValue({} as never);
-    vi.spyOn(api, 'patch').mockResolvedValue({} as never);
   });
 
   afterEach(() => {
@@ -458,29 +443,19 @@ describe('TrashEmptyRunPage', () => {
       ];
     }
 
-    it('preserves an expanded card and the table itself across a poll tick', async () => {
-      const user = userEvent.setup();
-      setInitialContainerWidth(400); // card layout, so "More details" exists
+    it('keeps the table itself mounted across a poll tick', async () => {
       mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
 
       const { rerender } = render(<TrashEmptyRunPage />);
 
-      const table = await screen.findByTestId('datatable');
-      await user.click(
-        await screen.findByRole('button', { name: 'More details for broken-one.jpg' }),
-      );
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
+      const table = await screen.findByRole('table');
 
       mockUseTrashEmptyRun.mockReturnValue(makeRunHook({ run: terminalRunWithFailures() }));
       mockUseTrashEmptyRunItems.mockReturnValue(makeItemsHook({ items: failedItems() }));
       rerender(<TrashEmptyRunPage />);
 
-      expect(screen.getByTestId('datatable')).toBe(table);
-      expect(screen.getByTestId('datatable-card-detail-region')).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Hide details for broken-one.jpg' }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('table')).toBe(table);
       expect(screen.getByText('broken-one.jpg')).toBeInTheDocument();
       expect(screen.getByText('broken-two.jpg')).toBeInTheDocument();
     });
@@ -494,7 +469,7 @@ describe('TrashEmptyRunPage', () => {
       render(<TrashEmptyRunPage />);
 
       expect(await screen.findByText('broken-one.jpg')).toBeInTheDocument();
-      expect(screen.getByTestId('datatable-loading-overlay')).toBeInTheDocument();
+      expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true');
     });
 
     it('links a failed item to its media, from a row-named action', async () => {
@@ -503,10 +478,8 @@ describe('TrashEmptyRunPage', () => {
 
       render(<TrashEmptyRunPage />);
 
-      // One row action → a bare icon button named after its row (§17.6).
-      await userEvent
-        .setup()
-        .click(await screen.findByRole('button', { name: 'View for broken-one.jpg' }));
+      // The first row is broken-one.jpg (the fake table names every row's action "View").
+      await userEvent.setup().click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
       expect(mockNavigate).toHaveBeenCalledWith('/media?item=m-1');
     });

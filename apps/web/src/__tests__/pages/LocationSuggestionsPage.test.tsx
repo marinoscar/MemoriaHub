@@ -6,7 +6,7 @@
  *     are module-mocked directly (mirrors BurstsPage.test.tsx / DuplicatesPage.test.tsx
  *     — reaching one level above the service layer rather than mocking
  *     services/locationSuggestions here).
- *   - services/locationSuggestionRuns's startLocationAcceptRun /
+ *   - the review-runs slice's startLocationAcceptRun /
  *     startLocationRejectRun are mocked directly since the bulk accept/reject
  *     flow now starts an async run (issue mirrors trash-empty-at-scale) rather
  *     than calling a synchronous bulkAccept on the hook.
@@ -74,7 +74,8 @@ vi.mock('../../hooks/useLocationSuggestions', () => ({
   useLocationSuggestions: vi.fn(),
 }));
 
-vi.mock('../../services/locationSuggestionRuns', () => ({
+vi.mock('@marinoscar/memoriahub-web/review-runs/headless', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   startLocationAcceptRun: vi.fn(),
   startLocationRejectRun: vi.fn(),
 }));
@@ -149,7 +150,7 @@ import { usePermissions } from '../../hooks/usePermissions';
 import { useSystemSettings } from '../../hooks/useSystemSettings';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 import { useLocationSuggestions } from '../../hooks/useLocationSuggestions';
-import { startLocationAcceptRun, startLocationRejectRun } from '../../services/locationSuggestionRuns';
+import { startLocationAcceptRun, startLocationRejectRun } from '@marinoscar/memoriahub-web/review-runs/headless';
 import { searchPlaces, reverseGeocode } from '@marinoscar/memoriahub-web/media/headless';
 import { acceptLocationSuggestion } from '../../services/locationSuggestions';
 import type { LocationSuggestionSummary } from '../../services/locationSuggestions';
