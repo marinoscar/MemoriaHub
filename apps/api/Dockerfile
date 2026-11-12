@@ -107,6 +107,9 @@ COPY package*.json ./
 COPY tsconfig.base.json ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma/
+# Prisma 7 reads the schema folder (prisma/schema) and the migrations path from this file; without
+# it `prisma generate` finds no schema. Found by the PR-time image build (images.yml).
+COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 COPY apps/api/scripts ./apps/api/scripts/
 COPY packages/memoriahub-compute ./packages/memoriahub-compute/
 # The wire-schema package (zod only) both the API and the CLI import by subpath.
@@ -195,6 +198,7 @@ COPY --from=deps /app/models /app/models
 COPY --from=deps /app/tsconfig.base.json /app/tsconfig.base.json
 COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/prisma ./apps/api/prisma/
+COPY apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 COPY apps/api/scripts ./apps/api/scripts/
 WORKDIR /app/apps/api
 EXPOSE 3000

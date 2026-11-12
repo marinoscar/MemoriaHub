@@ -89,6 +89,10 @@ COPY packages/memoriahub-contract ./packages/memoriahub-contract/
 # The compute package's build ends with write-dist-stubs.mjs, which lives in the
 # shared package tooling folder (../../scripts/memoriahub-packages).
 COPY scripts/memoriahub-packages/write-dist-stubs.mjs ./scripts/memoriahub-packages/write-dist-stubs.mjs
+# The root package.json `postinstall` runs this; `npm install` below (scripts enabled) fails
+# without it. It is a no-op when react-transition-group is not installed, as here. Found by the
+# PR-time image build (images.yml).
+COPY scripts/patch-react-transition-group.js ./scripts/patch-react-transition-group.js
 # Scripts ENABLED (unlike the API image): the worker needs the native binaries
 # actually built/downloaded — better-sqlite3 (node-gyp/prebuild), onnxruntime-node
 # (postinstall binary fetch, the CLIP runtime), sharp/tesseract.

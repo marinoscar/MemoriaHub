@@ -252,7 +252,16 @@ jobs:
       # pg_indexes, never hidden: any other statement fails this job.
       - run: npm run db:check --workspace=api
       - run: npm run db:check:database --workspace=api
-      - run: npm run db:drift --workspace=api
+      # `prisma migrate diff` resets its shadow database before replaying, which drops the `vector`
+      # extension the migrations then have to CREATE, a superuser-only statement. So the replay (and
+      # only the replay: this step runs no application code) connects as the service container's
+      # bootstrap superuser. The ordinary-role guarantees of the suites below are untouched.
+      - name: Schema drift (replay in a shadow database)
+        run: npm run db:drift --workspace=api
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-throwaway
+          DATABASE_URL: postgresql://postgres:ci-throwaway@localhost:5432/memoriahub_test
 
       - run: npm run test:db --workspace=api
 
