@@ -19,7 +19,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates wget xz-utils build-essential pkg-config meson ninja-build \
   libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev \
-  libheif-dev libexif-dev liblcms2-dev librsvg2-dev liborc-0.4-dev \
+  libheif-dev libexif-dev liblcms2-dev librsvg2-dev libhwy-dev \
   libcgif-dev libspng-dev libimagequant-dev libfftw3-dev
 rm -rf /var/lib/apt/lists/*
 
@@ -31,7 +31,7 @@ cd "vips-${VIPS_VERSION}"
 
 meson setup build --prefix="${PREFIX}" --libdir=lib --buildtype=release \
   -Dheif=enabled -Djpeg=enabled -Dpng=enabled -Dwebp=enabled -Dtiff=enabled \
-  -Dexif=enabled -Dlcms=enabled -Dcplusplus=true \
+  -Dexif=enabled -Dlcms=enabled -Dhighway=enabled -Dorc=disabled -Dcplusplus=true \
   -Dmodules=disabled -Dintrospection=disabled -Dvapi=false -Dexamples=false \
   -Ddeprecated=false
 meson compile -C build

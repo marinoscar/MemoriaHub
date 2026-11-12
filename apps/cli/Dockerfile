@@ -63,7 +63,7 @@ WORKDIR /app
 #   the identical libvips build (cross-executor embedding parity — see #128/#108).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg perl wget ca-certificates \
-      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 liborc-0.4-0t64 \
+      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 libhwy1t64 \
     && rm -rf /var/lib/apt/lists/*
 
 # The source-built libvips 8.18.3 (HEIF/HEVC enabled). The apt libvips42t64
@@ -87,7 +87,7 @@ FROM base AS deps
 # sharp locates libvips via `pkg-config --modversion vips-cpp`; libheif-dev is not
 # needed here (libvips dlopens libheif internally).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev libheif-dev libexif-dev liblcms2-dev librsvg2-dev liborc-0.4-dev libcgif-dev libspng-dev libimagequant-dev libfftw3-dev \
+      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev libheif-dev libexif-dev liblcms2-dev librsvg2-dev libhwy-dev libcgif-dev libspng-dev libimagequant-dev libfftw3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Force sharp to build its native addon FROM SOURCE against the global
