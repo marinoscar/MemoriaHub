@@ -9,3 +9,5 @@ export * from './search.controller.js';
 export * from './agent/search-agent.service.js';
 export * from './agent/search-agent.controller.js';
 export * from './agent/search-tool-schema.js';
+export * from './doctor/ai-embedding.doctor-check.js';
+export * from './doctor/ai-search.doctor-check.js';

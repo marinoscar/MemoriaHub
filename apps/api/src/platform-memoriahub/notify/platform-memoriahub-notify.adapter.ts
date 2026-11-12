@@ -133,6 +133,27 @@ export class PlatformMemoriahubNotifyAdapter implements MemoriahubNotifyPort {
     });
   }
 
+  /**
+   * Whether the user has a row of the event, live OR dismissed, whose `data` carries every `match` value (the
+   * platform inbox keeps the stamp a producer wrote in `data`; a scalar path-equals filter is the JSONB
+   * containment of those scalars). Deliberately no `dismissedAt` predicate.
+   */
+  async hasNotified(
+    eventKey: string,
+    userId: string,
+    match: Readonly<Record<string, string | number | boolean>>,
+  ): Promise<boolean> {
+    const row = await this.prisma.notification.findFirst({
+      where: {
+        userId,
+        eventKey,
+        AND: Object.entries(match).map(([key, value]) => ({ data: { path: [key], equals: value } })),
+      },
+      select: { id: true },
+    });
+    return row !== null;
+  }
+
   async notifyNow(
     eventKey: string,
     userId: string,

@@ -102,7 +102,7 @@ export class ExifCarryoverService implements OnModuleDestroy {
   /**
    * Loads ExifTool once; `null` when the optional peer (or its perl runtime) is unavailable.
    *
-   * @internal
+   * @hidden
    */
   protected loadExiftool(): Promise<ExiftoolModule | null> {
     if (!this.modPromise) {

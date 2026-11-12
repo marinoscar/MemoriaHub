@@ -43,4 +43,5 @@ export * from './http/location-suggestion-runs.controller.js';
 export * from './http/geo-settings.controller.js';
 export * from './http/geocode-admin.controller.js';
 export * from './http/geocode-media.controller.js';
+export * from './location-review-queue.counter.js';
 export * from './doctor/reverse-provider.doctor-check.js';

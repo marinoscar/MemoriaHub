@@ -12,6 +12,7 @@ import {
 import {
   MEMORIAHUB_ACCESS,
   MEMORIAHUB_AI,
+  MEMORIAHUB_AI_ADMIN,
   MEMORIAHUB_AUDIT,
   MEMORIAHUB_EVENTS,
   MEMORIAHUB_IDENTITY,
@@ -23,8 +24,10 @@ import {
   MEMORIAHUB_PRISMA,
   MEMORIAHUB_SECRETS,
   MEMORIAHUB_SETTINGS,
+  MEMORIAHUB_SHARING,
   MEMORIAHUB_WEBHOOKS,
   type MemoriahubAccessPort,
+  type MemoriahubAiAdminPort,
   type MemoriahubAiPort,
   type MemoriahubAuditPort,
   type MemoriahubDoctorPort,
@@ -37,6 +40,7 @@ import {
   type MemoriahubPrismaClientLike,
   type MemoriahubSecretsPort,
   type MemoriahubSettingsPort,
+  type MemoriahubSharingPort,
   type MemoriahubWebhooksPort,
 } from '../../ports/index.js';
 import { InProcessMemoriahubEvents } from '../events/in-process-events.js';
@@ -96,8 +100,8 @@ export type MemoriahubPortBinding<T> =
   | MemoriahubFactoryBinding<T>;
 
 /**
- * The bindings of every port. The first nine are required; `events`, `audit`, `webhooks`, `metrics` and
- * `doctor` are optional and default to an in-process emitter and four no-ops.
+ * The bindings of every port. The first nine are required; `events`, `audit`, `webhooks`, `metrics`,
+ * `doctor` and `sharing` are optional and default to an in-process emitter and five no-ops.
  *
  * @extensionPoint token
  * @stability experimental
@@ -131,6 +135,13 @@ export interface MemoriahubPortBindings {
   metrics?: MemoriahubPortBinding<MemoriahubMetricsPort>;
   /** The diagnostics port, bound to `MEMORIAHUB_DOCTOR`. Optional; defaults to a no-op. */
   doctor?: MemoriahubPortBinding<MemoriahubDoctorPort>;
+  /** The link-sharing port, bound to `MEMORIAHUB_SHARING`. Optional; defaults to a no-op that lists nothing. */
+  sharing?: MemoriahubPortBinding<MemoriahubSharingPort>;
+  /**
+   * The AI administration probe port, bound to `MEMORIAHUB_AI_ADMIN`. Optional, with NO default: an unbound
+   * port is simply absent and the diagnostics that need it are skipped.
+   */
+  aiAdmin?: MemoriahubPortBinding<MemoriahubAiAdminPort>;
   /** Modules the bindings' providers need (a binding by `useClass` resolves its dependencies from them). */
   imports?: ModuleMetadata['imports'];
 }
@@ -192,7 +203,21 @@ export const NOOP_MEMORIAHUB_DOCTOR: MemoriahubDoctorPort = Object.freeze({
   },
 });
 
-type RequiredPort = Exclude<keyof MemoriahubPortBindings, 'events' | 'audit' | 'webhooks' | 'metrics' | 'doctor' | 'imports'>;
+/**
+ * A link-sharing port that lists no link: the default when a host binds none.
+ *
+ * @stability experimental
+ */
+export const NOOP_MEMORIAHUB_SHARING: MemoriahubSharingPort = Object.freeze({
+  async listExpiringLinks() {
+    return { items: [], nextCursor: null };
+  },
+});
+
+type RequiredPort = Exclude<
+  keyof MemoriahubPortBindings,
+  'events' | 'audit' | 'webhooks' | 'metrics' | 'doctor' | 'sharing' | 'aiAdmin' | 'imports'
+>;
 
 /** Required ports in the order they are reported, with their tokens. */
 const REQUIRED: ReadonlyArray<readonly [RequiredPort, symbol, string]> = [
@@ -286,14 +311,20 @@ export class MemoriahubPortsModule {
       isBinding(bindings.doctor)
         ? provider(MEMORIAHUB_DOCTOR, bindings.doctor as MemoriahubPortBinding<unknown>)
         : { provide: MEMORIAHUB_DOCTOR, useValue: NOOP_MEMORIAHUB_DOCTOR },
+      isBinding(bindings.sharing)
+        ? provider(MEMORIAHUB_SHARING, bindings.sharing as MemoriahubPortBinding<unknown>)
+        : { provide: MEMORIAHUB_SHARING, useValue: NOOP_MEMORIAHUB_SHARING },
     );
+    // No default: a host that binds no AI administration port has none, and what needs it is skipped.
+    const aiAdmin = isBinding(bindings.aiAdmin);
+    if (aiAdmin) providers.push(provider(MEMORIAHUB_AI_ADMIN, bindings.aiAdmin as MemoriahubPortBinding<unknown>));
 
     return {
       module: MemoriahubPortsModule,
       global: true,
       imports: bindings.imports ?? [],
       providers,
-      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS, MEMORIAHUB_DOCTOR],
+      exports: [...REQUIRED.map(([, token]) => token), MEMORIAHUB_EVENTS, MEMORIAHUB_AUDIT, MEMORIAHUB_WEBHOOKS, MEMORIAHUB_METRICS, MEMORIAHUB_DOCTOR, MEMORIAHUB_SHARING, ...(aiAdmin ? [MEMORIAHUB_AI_ADMIN] : [])],
     };
   }
 }

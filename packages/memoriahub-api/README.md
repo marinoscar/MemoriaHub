@@ -108,7 +108,10 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_WEBHOOKS`, `MemoriahubWebhooksPort` | token | outbound webhook events |
 | `MEMORIAHUB_METRICS`, `MemoriahubMetricsPort` | token | counters and histograms by registered name |
 | `MEMORIAHUB_DOCTOR`, `MemoriahubDoctorPort` | token | optional: the diagnostics checks a slice registers (`MemoriahubDoctorCheck`; read-only, permanent ids `memoriahub.<section>.<name>`); the default registers nothing |
+| `MEMORIAHUB_AI_ADMIN`, `MemoriahubAiAdminPort` | token | optional, no default: the live model probes (`testModel`, `testEmbedding`), the key status and a provider's capabilities the AI diagnostics read; unbound, those checks are skipped |
+| `MEMORIAHUB_SHARING`, `MemoriahubSharingPort` | token | optional: the public links about to expire (`listExpiringLinks`); the default lists none |
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
+| `ReviewQueueCounterRegistry` | registry | the media slice's review-queue counts: the burst, dedup, location and enhancement slices each register their counter (`registerReviewQueueCounter`: wire key, notification event, flag gate, count of one library) |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver`, `WorkflowTriggerService` | registry, token, service | the workflows slice's catalog, action implementation, run side channels (`WorkflowRunObserver`) and settlement entry point (`WorkflowTriggerService.evaluateSettlement`) a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |
 | `DUPLICATE_OBSERVER`, `DuplicateObserver` | token, interface | the dedup slice's optional side channel: the `media.item.trashed` webhook after a trash resolve commits |

@@ -18,7 +18,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { MediaService } from '../../src/media/gallery/media.service.js';
-import { MediaMetadataSyncService } from '../../src/media/index.js';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '../../src/media/index.js';
 import { MediaTouchService, UploadNotificationService } from '../../src/media/index.js';
 import { buildMediaWhere } from '../../src/media/index.js';
 import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
@@ -101,6 +101,7 @@ describe('MediaService — Location Grouping read paths (issue #374)', () => {
         MediaService,
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: prisma },
+        { provide: ReviewQueueCounterRegistry, useValue: new ReviewQueueCounterRegistry() },
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver({
             getSignedDownloadUrl: jest.fn().mockResolvedValue(null),
             getBucket: jest.fn().mockReturnValue('bucket'),

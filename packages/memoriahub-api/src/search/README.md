@@ -23,3 +23,5 @@ A search never trusts an id from the client alone: `MEMORIAHUB_ACCESS.requireOwn
 ## Extension-point catalog
 
 `SEARCHABLE_FIELDS` is the extension point: one `SearchableField` entry (`key`, `label`, `type`, `description`, `buildWhere`) adds a filter dimension to the route, the field listing and the agent's tool at once. Add to the array; never rename or remove a key a client sends.
+
+**Diagnostics (RETRO-J10, #624).** The slice registers `memoriahub.ai.search` (`AiSearchDoctorCheck`, a live `testModel` probe of `ai.features.search`) and `memoriahub.ai.embedding` (`AiEmbeddingDoctorCheck`, a live `testEmbedding` probe that warns when the vectors do not fit the 1536-d storage), both through the optional `MEMORIAHUB_AI_ADMIN` port; a host that binds none skips them. Ids, statuses and remedies are unchanged.

@@ -5,6 +5,7 @@ import type {
   MemoriahubKeyPrefixDef,
   MemoriahubObjectProcessor,
   MemoriahubObjectStore,
+  MemoriahubObjectStoreCapabilities,
   MemoriahubObjectStorePort,
   MemoriahubUploadOptions,
   MemoriahubUploadResult,
@@ -35,6 +36,9 @@ export class InMemoryMemoriahubObjectStore implements MemoriahubObjectStore {
     readonly kind = 'memory',
     private readonly bucket = 'memory-bucket',
   ) {}
+
+  /** Presigned-style, with no part body accepted: set `capabilities` to change it. */
+  capabilities: MemoriahubObjectStoreCapabilities = { partUploadMode: 'presigned', acceptsPartBytes: false };
 
   /** The bucket. */
   getBucket(): string {

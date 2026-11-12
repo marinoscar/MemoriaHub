@@ -1,5 +1,6 @@
 export * from './conformance.js';
 export * from './fake-access.js';
+export * from './fake-ai-admin.js';
 export * from './fake-ai.js';
 export * from './fake-identity.js';
 export * from './fake-jobs.js';
@@ -8,6 +9,7 @@ export * from './fake-ports.js';
 export * from './fake-prisma.js';
 export * from './fake-secrets.js';
 export * from './fake-settings.js';
+export * from './fake-sharing.js';
 export * from './in-memory-object-store.js';
 export * from './recording-ports.js';
 export * from './auth-guard-conformance.js';

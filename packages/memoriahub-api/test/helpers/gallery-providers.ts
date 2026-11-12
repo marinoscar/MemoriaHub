@@ -16,6 +16,7 @@ import {
   MediaThumbnailService,
   MediaMetadataSyncService,
   MediaTouchService,
+  ReviewQueueCounterRegistry,
   UploadNotificationService,
 } from '../../src/media/index.js';
 
@@ -60,6 +61,26 @@ export function accessOver<T extends { requireOwnerRole: jest.Mock }>(ownerAcces
   return ownerAccess;
 }
 
+/**
+ * The review-queue counters the owning slices register, as stubs over the mocked models: the media slice only
+ * aggregates them (each slice's own spec proves the query it runs), so the dashboard and badge specs stay in
+ * this slice.
+ */
+export function reviewQueueRegistryOver(prisma: any): ReviewQueueCounterRegistry {
+  const registry = new ReviewQueueCounterRegistry();
+  const counter = (
+    countKey: 'pendingBurstGroups' | 'pendingDuplicateGroups' | 'pendingLocationSuggestions' | 'pendingEnhancements',
+    count: (libraryId: string) => Promise<number>,
+  ) => registry.registerReviewQueueCounter({ countKey, eventKey: countKey, isEnabled: () => true, count });
+  counter('pendingBurstGroups', (circleId) =>
+    prisma.burstGroup.count({ where: { circleId, status: 'pending', mediaCount: { gte: 3 } } }),
+  );
+  counter('pendingDuplicateGroups', (circleId) => prisma.duplicateGroup.count({ where: { circleId, status: 'pending' } }));
+  counter('pendingLocationSuggestions', (circleId) => prisma.locationSuggestion.count({ where: { circleId, status: 'pending' } }));
+  counter('pendingEnhancements', (circleId) => prisma.mediaEnhancement.count({ where: { circleId, status: 'ready' } }));
+  return registry;
+}
+
 /** The real `MediaThumbnailService` over the mocks, so batched and legacy signing stay faithful. */
 export const thumbnailServiceOverMocks = {
   provide: MediaThumbnailService,
@@ -73,6 +94,7 @@ export function galleryProviders(m: GalleryMocks): any[] {
   return [
     thumbnailServiceOverMocks,
     { provide: MEMORIAHUB_PRISMA, useValue: m.prisma },
+    { provide: ReviewQueueCounterRegistry, useValue: reviewQueueRegistryOver(m.prisma) },
     { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStore },
     { provide: MEMORIAHUB_ACCESS, useValue: accessOver(m.ownerAccess) },
     { provide: MEDIA_GEO_LOCATION_PROVIDER, useValue: m.geo },

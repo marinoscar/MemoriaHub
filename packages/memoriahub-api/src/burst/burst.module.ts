@@ -8,6 +8,7 @@ import { BurstDetectionService } from './burst-detection.service.js';
 import { BurstGroupReviewStrategy } from './burst-group.strategy.js';
 import { BurstUploadEnrichment } from './burst-upload-enrichment.js';
 import { BurstService } from './burst.service.js';
+import { BurstReviewQueueCounter } from './burst-review-queue.counter.js';
 import { BurstConfigDoctorCheck } from './doctor/burst-config.doctor-check.js';
 
 /**
@@ -58,6 +59,7 @@ export class BurstModule {
         BurstDetectionHandler,
         BurstGroupReviewStrategy,
         BurstConfigDoctorCheck,
+        BurstReviewQueueCounter,
       ],
       exports: [BurstService, BurstDetectionService],
     };

@@ -54,4 +54,9 @@ export class FakeMemoriahubIdentity implements MemoriahubIdentityPort {
   async permissionsOf(userId: string): Promise<readonly string[]> {
     return [...(this.users.get(userId)?.permissions ?? [])];
   }
+
+  /** Ids of the registered users holding the `admin` role. */
+  async adminUserIds(): Promise<readonly string[]> {
+    return [...this.users.values()].filter((u) => u.roles.includes('admin')).map((u) => u.userId);
+  }
 }

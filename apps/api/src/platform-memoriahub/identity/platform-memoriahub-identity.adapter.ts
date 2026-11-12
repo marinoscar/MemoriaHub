@@ -13,6 +13,7 @@ import { Trace } from '@marinoscar/platform-api/otel-core';
 import { MEMORIAHUB_AUTH_FAILURE_PROPERTY } from '@marinoscar/memoriahub-api/core';
 import type { MemoriahubIdentityPort, MemoriahubPrincipal } from '@marinoscar/memoriahub-api/ports';
 
+import { ROLES } from '../../common/constants/roles.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // =============================================================================
@@ -81,5 +82,14 @@ export class PlatformMemoriahubIdentityAdapter implements MemoriahubIdentityPort
     if (!user || !user.isActive) return [];
 
     return principalFactory.access(user).permissions;
+  }
+
+  @Trace()
+  async adminUserIds(): Promise<readonly string[]> {
+    const admins = await this.prisma.user.findMany({
+      where: { isActive: true, userRoles: { some: { role: { name: ROLES.ADMIN } } } },
+      select: { id: true },
+    });
+    return admins.map((a) => a.id);
   }
 }

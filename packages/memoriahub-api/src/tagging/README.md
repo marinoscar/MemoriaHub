@@ -25,3 +25,5 @@ Both job types are SERVER-ONLY, permanently: they declare `usesAi` and no node r
 None: the slice has no registry of its own. It is a client of one, the media slice's `UploadEnrichmentRegistry` (it registers `auto_tagging` at order 100, priority 20).
 
 **Diagnostics (RETRO-J10, #624).** The slice registers the `memoriahub.ai.flag-consistency` check (`AiFlagConsistencyDoctorCheck`) through the `MEMORIAHUB_DOCTOR` port from `forRoot()`. Read-only; the id and the statuses are the ones the app declared before the move.
+
+The slice also registers `memoriahub.ai.tagging` (`AiTaggingDoctorCheck`, a live `testModel` probe of `ai.features.tagging` through `MEMORIAHUB_AI_ADMIN`) and `memoriahub.ai.video-tagging` (`VideoTaggingDoctorCheck`: the visual pass is required and a gap is a `fail`; transcription is an enrichment and a gap is a `warn`, the job then runs visual-only; key presence and a provider's `transcribeAudio` capability come from the same port). Both are skipped when the host binds no AI administration port.

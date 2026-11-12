@@ -1,25 +1,34 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Optional, type OnModuleInit } from '@nestjs/common';
+
 import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  fail, pass, skip, warn,
+  readSystemNamespaces,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_AI_ADMIN,
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAiAdminPort,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
 
-import { AiSettingsService } from '../../../ai-port/ai-settings.service';
-import { AiProviderRegistry } from '@marinoscar/platform-api/ai';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
-import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
+/** The outcome when the host binds no AI administration port. */
+const AI_ADMIN_UNAVAILABLE = 'AI administration probes are not available in this host (no AI administration port is bound).';
 
-// Ported from `DoctorService.checkVideoTagging` (key `ai.videoTagging`, epic
-// #452, issue #457). READ-ONLY: a settings read, credential presence and a
-// provider-registry capability lookup.
+// Ported from `DoctorService.checkVideoTagging` (key `ai.videoTagging`, epic #452, issue #457). READ-ONLY: a
+// settings read, key presence and a provider capability lookup.
 //
-// The ladder encodes the two independent cost levers. The VISUAL pass is
-// required (no tagging model or credential => FAIL: the job cannot run at all);
-// TRANSCRIPTION is an optional enrichment (any gap => WARN: the job still runs
-// visual-only). Reporting both as failures would send an admin chasing a
-// transcription credential to fix a feature that already works.
+// The ladder encodes the two independent cost levers. The VISUAL pass is required (no tagging model or
+// credential => FAIL: the job cannot run at all); TRANSCRIPTION is an optional enrichment (any gap => WARN:
+// the job still runs visual-only). Reporting both as failures would send an admin chasing a transcription
+// credential to fix a feature that already works.
 
+/** The facts the video tagging check decides on. @stability experimental */
 export interface VideoTaggingInput {
   autoTaggingEnabled: boolean;
   videoEnabled: boolean;
@@ -31,10 +40,11 @@ export interface VideoTaggingInput {
   leadSeconds: number;
   transcription: { provider?: string | null; model?: string | null } | null | undefined;
   transcriptionCredentialEnabled: boolean;
-  /** `true` when the provider has no `transcribeAudio` (e.g. Anthropic). `false` when unknown. */
+  /** `true` when the provider has no audio capability (e.g. Anthropic). `false` when unknown. */
   transcriptionProviderLacksAudio: boolean;
 }
 
+/** The status ladder of the video tagging check. @stability experimental */
 export function decideVideoTagging(input: VideoTaggingInput): DoctorCheckOutcome {
   if (!input.autoTaggingEnabled) return skip('Auto-tagging is disabled.');
   if (!input.videoEnabled) return skip('Video AI tagging is disabled.');
@@ -93,32 +103,36 @@ export function decideVideoTagging(input: VideoTaggingInput): DoctorCheckOutcome
   );
 }
 
+/**
+ * The video AI tagging check.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('ai', 'video-tagging');
+export class VideoTaggingDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('ai', 'video-tagging');
   readonly category = 'ai';
   readonly label = 'Video AI tagging';
   readonly settingsPath = '/admin/settings/tagging';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly aiSettings: AiSettingsService,
-    private readonly systemSettings: AppSystemSettingsService,
-    private readonly aiProviderRegistry: AiProviderRegistry,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
+    @Optional() @Inject(MEMORIAHUB_AI_ADMIN) private readonly aiAdmin?: MemoriahubAiAdminPort,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.readKnownValue();
+    const settings = await readSystemNamespaces(this.settings, ['features', 'ai', 'autoTagging']);
     const video = settings.autoTagging?.video;
     const tagging = settings.ai?.features?.tagging;
-    const transcription = (
-      settings.ai?.features as { transcription?: { provider?: string; model?: string } | null } | undefined
-    )?.transcription;
+    const transcription = settings.ai?.features?.transcription as { provider?: string; model?: string } | null | undefined;
 
     const input: VideoTaggingInput = {
       autoTaggingEnabled: settings.features?.['autoTagging'] === true,
@@ -137,32 +151,20 @@ export class VideoTaggingDoctorCheck implements DoctorCheck, OnModuleInit {
     // Resolve the credential facts only for the rungs that need them.
     if (!input.autoTaggingEnabled || !input.videoEnabled || input.envDisabled) return decideVideoTagging(input);
     if (!tagging?.provider || !tagging?.model) return decideVideoTagging(input);
+    if (!this.aiAdmin) return skip(AI_ADMIN_UNAVAILABLE);
 
-    // Platform deployment key first, then the legacy row (RETRO-E3, #605); never decrypts.
-    const taggingCred = await this.aiSettings.credentialStatus(tagging.provider);
+    // The host's own key first (the deployment key, then any older row); never decrypts.
+    const taggingCred = await this.aiAdmin.credentialStatus(tagging.provider);
     input.taggingCredentialEnabled = taggingCred.configured && taggingCred.enabled;
 
     if (input.taggingCredentialEnabled && input.transcriptionOn && transcription?.provider && transcription?.model) {
-      const cred = await this.aiSettings.credentialStatus(transcription.provider);
+      const cred = await this.aiAdmin.credentialStatus(transcription.provider);
       input.transcriptionCredentialEnabled = cred.configured && cred.enabled;
-      const instance = this.safeGetAiProvider(transcription.provider);
-      input.transcriptionProviderLacksAudio = !!instance && typeof instance.transcribeAudio !== 'function';
+      // A provider the host does not know is not a missing capability: a check reports a misconfiguration,
+      // it never becomes one.
+      const capabilities = this.aiAdmin.providerCapabilities(transcription.provider);
+      input.transcriptionProviderLacksAudio = capabilities !== null && !capabilities.transcribeAudio;
     }
     return decideVideoTagging(input);
-  }
-
-  /**
-   * The platform registry's adapter for `providerKey`, or null for an unknown one; a check reports
-   * a misconfiguration rather than becoming one. `transcribeAudio` mirrors whether the adapter
-   * carries a speech-to-text port (OpenAI only in v1).
-   */
-  private safeGetAiProvider(providerKey: string): { transcribeAudio?: unknown } | null {
-    try {
-      const adapter = this.aiProviderRegistry.get(providerKey);
-      if (!adapter) return null;
-      return adapter.audio?.transcribe ? { transcribeAudio: adapter.audio.transcribe } : {};
-    } catch {
-      return null;
-    }
   }
 }

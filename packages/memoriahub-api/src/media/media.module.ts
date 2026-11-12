@@ -3,11 +3,13 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { UploadEnrichmentRegistry } from './enrichment-fanout/upload-enrichment.registry.js';
 import { UploadEnrichmentService } from './enrichment-fanout/upload-enrichment.service.js';
 import { AndroidMediaSyncDoctorCheck } from './doctor/android-media-sync.doctor-check.js';
+import { AndroidUploadPathDoctorCheck } from './doctor/android-upload-path.doctor-check.js';
 import { MediaEnrichmentService } from './enrichment/media-enrichment.service.js';
 import { MEDIA_ENRICHMENT } from './hooks/media-host-hooks.js';
 import { MediaSyncService } from './media-sync/media-sync.service.js';
 import { TrashEmptyRunService } from './trash-empty/trash-empty-run.service.js';
 import { MediaThumbnailService } from './thumbnails/media-thumbnail.service.js';
+import { ReviewQueueCounterRegistry } from './producers/review-queue-counter.registry.js';
 import { UploadNotificationService } from './producers/upload-notification.service.js';
 import { MediaTouchModule } from './touch/media-touch.module.js';
 
@@ -58,9 +60,11 @@ export class MediaModule {
       imports: [MediaTouchModule],
       providers: [
         UploadEnrichmentRegistry,
+        ReviewQueueCounterRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
         AndroidMediaSyncDoctorCheck,
+        AndroidUploadPathDoctorCheck,
         MediaEnrichmentService,
         { provide: MEDIA_ENRICHMENT, useExisting: MediaEnrichmentService },
         MediaSyncService,
@@ -70,6 +74,7 @@ export class MediaModule {
       exports: [
         MediaTouchModule,
         UploadEnrichmentRegistry,
+        ReviewQueueCounterRegistry,
         UploadEnrichmentService,
         UploadNotificationService,
         MediaEnrichmentService,

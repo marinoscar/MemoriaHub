@@ -12,6 +12,7 @@ import { DuplicateGroupReviewStrategy } from './duplicate-group.strategy.js';
 import { DuplicateService } from './duplicate.service.js';
 import { ReviewInsightsService } from './review-insights.service.js';
 import { VisualEmbeddingService } from './visual-embedding.service.js';
+import { DuplicateReviewQueueCounter } from './duplicate-review-queue.counter.js';
 import { DuplicateDetectionDoctorCheck } from './doctor/duplicate-detection.doctor-check.js';
 
 /**
@@ -63,6 +64,7 @@ export class DedupModule {
         DuplicateService,
         DuplicateGroupReviewStrategy,
         DuplicateDetectionDoctorCheck,
+        DuplicateReviewQueueCounter,
       ],
       exports: [
         VisualEmbeddingService,

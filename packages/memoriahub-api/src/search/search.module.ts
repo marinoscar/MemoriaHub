@@ -4,6 +4,8 @@ import { MediaModule } from '../media/index.js';
 import { SearchAgentService } from './agent/search-agent.service.js';
 import { SearchService } from './search.service.js';
 import { SemanticSearchService } from './semantic-search.service.js';
+import { AiEmbeddingDoctorCheck } from './doctor/ai-embedding.doctor-check.js';
+import { AiSearchDoctorCheck } from './doctor/ai-search.doctor-check.js';
 
 /**
  * Options of {@link SearchModule.forRoot}. None yet: the agent's round budget is a constant of the
@@ -43,7 +45,7 @@ export class SearchModule {
     SearchModule.root ??= {
       module: SearchModule,
       imports: [MediaModule.forRoot()],
-      providers: [SearchService, SemanticSearchService, SearchAgentService],
+      providers: [SearchService, SemanticSearchService, SearchAgentService, AiSearchDoctorCheck, AiEmbeddingDoctorCheck],
       exports: [SearchService, SemanticSearchService, SearchAgentService],
     };
     return SearchModule.root;

@@ -1,18 +1,29 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common';
-import {
-  DoctorCheckRegistry,
-  type DoctorCheck,
-  type DoctorCheckOutcome,
-} from '@marinoscar/platform-api/doctor';
+import { Inject, Injectable, Optional, type OnModuleInit } from '@nestjs/common';
 
-import { AiSettingsService } from '../../../ai-port/ai-settings.service';
-import { DOCTOR_CHECK_TIMEOUT_MS, checkId, fail, pass, skip, warn } from '../outcome';
-import { AppSystemSettingsService } from '../../../platform/settings/app-system-settings.service';
+import {
+  DOCTOR_CHECK_TIMEOUT_MS,
+  doctorCheckId,
+  fail, pass, skip, warn,
+  readSystemNamespaces,
+} from '../../core/index.js';
+import {
+  MEMORIAHUB_AI_ADMIN,
+  MEMORIAHUB_DOCTOR,
+  MEMORIAHUB_SETTINGS,
+  type MemoriahubAiAdminPort,
+  type MemoriahubDoctorCheck,
+  type MemoriahubDoctorOutcome as DoctorCheckOutcome,
+  type MemoriahubDoctorPort,
+  type MemoriahubSettingsPort,
+} from '../../ports/index.js';
+
+/** The outcome when the host binds no AI administration port. */
+const AI_ADMIN_UNAVAILABLE = 'AI administration probes are not available in this host (no AI administration port is bound).';
 
 // Ported from `DoctorService.checkPictureEnhancer` (key `ai.pictureEnhancer`).
-// READ-ONLY: a settings read and one credential `findUnique` (presence only,
-// never the key).
+// READ-ONLY: a settings read and one key status (presence only, never the key).
 
+/** The facts the picture enhancer check decides on. @stability experimental */
 export interface PictureEnhancerInput {
   featureEnabled: boolean;
   envDisabled: boolean;
@@ -22,6 +33,7 @@ export interface PictureEnhancerInput {
   credentialConfigured: boolean;
 }
 
+/** The status ladder of the picture enhancer check. @stability experimental */
 export function decidePictureEnhancer(input: PictureEnhancerInput): DoctorCheckOutcome {
   if (!input.featureEnabled) return skip('AI picture enhancer is disabled.');
   if (input.envDisabled) {
@@ -49,26 +61,33 @@ export function decidePictureEnhancer(input: PictureEnhancerInput): DoctorCheckO
   });
 }
 
+/**
+ * The AI picture enhancer check.
+ *
+ * @stability experimental
+ */
 @Injectable()
-export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
-  readonly id = checkId('ai', 'picture-enhancer');
+export class PictureEnhancerDoctorCheck implements MemoriahubDoctorCheck, OnModuleInit {
+  readonly id = doctorCheckId('ai', 'picture-enhancer');
   readonly category = 'ai';
   readonly label = 'AI picture enhancer';
   readonly settingsPath = '/admin/settings/enhancer';
   readonly timeoutMs = DOCTOR_CHECK_TIMEOUT_MS;
 
   constructor(
-    private readonly registry: DoctorCheckRegistry,
-    private readonly aiSettings: AiSettingsService,
-    private readonly systemSettings: AppSystemSettingsService,
+    @Inject(MEMORIAHUB_DOCTOR) private readonly doctor: MemoriahubDoctorPort,
+    @Inject(MEMORIAHUB_SETTINGS) private readonly settings: MemoriahubSettingsPort,
+    @Optional() @Inject(MEMORIAHUB_AI_ADMIN) private readonly aiAdmin?: MemoriahubAiAdminPort,
   ) {}
 
+  /** Registers the check with the diagnostics port. */
   onModuleInit(): void {
-    this.registry.register(this);
+    this.doctor.registerCheck(this);
   }
 
+  /** Runs the check. */
   async run(): Promise<DoctorCheckOutcome> {
-    const settings = await this.systemSettings.readKnownValue();
+    const settings = await readSystemNamespaces(this.settings, ['features', 'ai']);
     const enhance = settings.ai?.features?.enhance;
     const input: PictureEnhancerInput = {
       featureEnabled: settings.features?.['pictureEnhancement'] === true,
@@ -78,9 +97,10 @@ export class PictureEnhancerDoctorCheck implements DoctorCheck, OnModuleInit {
       credentialConfigured: false,
     };
     if (!input.featureEnabled || input.envDisabled) return decidePictureEnhancer(input);
+    if (!this.aiAdmin) return skip(AI_ADMIN_UNAVAILABLE);
 
-    // Platform deployment key first, then the legacy row (RETRO-E3, #605); never decrypts.
-    const cred = await this.aiSettings.credentialStatus(input.provider ?? 'openai');
+    // The host's own key first (the deployment key, then any older row); never decrypts.
+    const cred = await this.aiAdmin.credentialStatus(input.provider ?? 'openai');
     return decidePictureEnhancer({ ...input, credentialConfigured: cred.configured && cred.enabled });
   }
 }

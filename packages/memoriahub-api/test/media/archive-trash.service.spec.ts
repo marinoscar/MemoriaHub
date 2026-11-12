@@ -21,7 +21,7 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { MediaService } from '../../src/media/gallery/media.service.js';
-import { MediaMetadataSyncService } from '../../src/media/index.js';
+import { MediaMetadataSyncService, ReviewQueueCounterRegistry } from '../../src/media/index.js';
 import { MediaThumbnailService, MediaTouchService, UploadNotificationService } from '../../src/media/index.js';
 import { randomUUID } from 'crypto';
 import { MEMORIAHUB_ACCESS, MEMORIAHUB_OBJECT_STORE, MEMORIAHUB_PRISMA } from '../../src/ports/index.js';
@@ -183,6 +183,7 @@ describe('MediaService — archive & trash methods', () => {
         // STORAGE_PROVIDER/StorageProviderResolver mocks registered below.
         thumbnailServiceOverMocks,
         { provide: MEMORIAHUB_PRISMA, useValue: mockPrisma },
+        { provide: ReviewQueueCounterRegistry, useValue: new ReviewQueueCounterRegistry() },
         { provide: MEMORIAHUB_OBJECT_STORE, useValue: objectStoreOver(mockStorageProvider, mockResolver) },
         { provide: MediaMetadataSyncService, useValue: mockSyncService },
         { provide: MEMORIAHUB_ACCESS, useValue: accessOver(mockOwnerAccessService) },

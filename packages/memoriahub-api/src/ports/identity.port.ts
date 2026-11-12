@@ -95,4 +95,12 @@ export interface MemoriahubIdentityPort {
    * @param userId - the user.
    */
   permissionsOf(userId: string): Promise<readonly string[]>;
+
+  /**
+   * The ids of the active users who administer the deployment: whoever the host treats as an
+   * administrator (a notification that needs an operator, such as a permanent job failure, goes to
+   * them). Read fresh from the host. Optional: a host that has no notion of an administrator omits it,
+   * and what needs one is then silently skipped.
+   */
+  adminUserIds?(): Promise<readonly string[]>;
 }

@@ -5,13 +5,16 @@ import { MemoriahubPortsModule, type MemoriahubPortBindings } from '@marinoscar/
 import type { MemoriahubPrismaClientLike } from '@marinoscar/memoriahub-api/ports';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { AiPortModule } from '../ai-port/ai-port.module';
 import { aiModule } from '../platform/ai/ai.config';
 import { CredentialsModule } from '../platform/credentials/credentials.config';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
+import { sharingModule } from '../platform/sharing/sharing.config';
 import { StorageProviderResolver } from '../platform/storage/storage-provider.resolver';
 import { webhooksModule } from '../platform/webhooks/webhooks.config';
 import { PlatformMemoriahubAccessAdapter } from './access/platform-memoriahub-access.adapter';
 import { PlatformMemoriahubAiAdapter } from './ai/platform-memoriahub-ai.adapter';
+import { PlatformMemoriahubAiAdminAdapter } from './ai-admin/platform-memoriahub-ai-admin.adapter';
 import { PlatformMemoriahubAuditAdapter } from './audit/platform-memoriahub-audit.adapter';
 import { PlatformMemoriahubDoctorAdapter } from './doctor/platform-memoriahub-doctor.adapter';
 import { PlatformMemoriahubEventsAdapter } from './events/platform-memoriahub-events.adapter';
@@ -22,6 +25,7 @@ import { PlatformMemoriahubNotifyAdapter } from './notify/platform-memoriahub-no
 import { PlatformMemoriahubObjectStoreAdapter } from './object-store/platform-memoriahub-object-store.adapter';
 import { PlatformMemoriahubSecretsAdapter } from './secrets/platform-memoriahub-secrets.adapter';
 import { PlatformMemoriahubSettingsAdapter } from './settings/platform-memoriahub-settings.adapter';
+import { PlatformMemoriahubSharingAdapter } from './sharing/platform-memoriahub-sharing.adapter';
 import { PlatformMemoriahubWebhooksAdapter } from './webhooks/platform-memoriahub-webhooks.adapter';
 
 // =============================================================================
@@ -48,6 +52,9 @@ import { PlatformMemoriahubWebhooksAdapter } from './webhooks/platform-memoriahu
 //   MEMORIAHUB_AUDIT         -> audit/         the platform `AUDIT_SINK`
 //   MEMORIAHUB_WEBHOOKS      -> webhooks/      `WebhooksService.emit`
 //   MEMORIAHUB_METRICS       -> metrics/       `AppMetricsService`
+//   MEMORIAHUB_DOCTOR        -> doctor/        the platform `DoctorCheckRegistry`
+//   MEMORIAHUB_SHARING       -> sharing/       `LinkGrantsService` (the expiring public links)
+//   MEMORIAHUB_AI_ADMIN      -> ai-admin/      `AiSettingsService` (live probes, key status) and the platform `AiProviderRegistry`
 //
 // GLOBAL, because `MemoriahubPortsModule` is: a domain module imports nothing to inject a port. Imported in
 // `app.module.ts` after the platform slices and before any domain slice moved onto the ports. A missing binding
@@ -63,9 +70,9 @@ import { PlatformMemoriahubWebhooksAdapter } from './webhooks/platform-memoriahu
  * inject.
  */
 @Module({
-  imports: [aiModule, CredentialsModule, StorageProvidersModule, ObjectProcessingModule, OwnerAccessModule, webhooksModule],
+  imports: [aiModule, AiPortModule, CredentialsModule, StorageProvidersModule, ObjectProcessingModule, OwnerAccessModule, webhooksModule, sharingModule],
   providers: [JwtAuthGuard, StorageProviderResolver],
-  exports: [aiModule, CredentialsModule, JwtAuthGuard, StorageProviderResolver, StorageProvidersModule, ObjectProcessingModule, OwnerAccessModule, webhooksModule],
+  exports: [aiModule, AiPortModule, CredentialsModule, JwtAuthGuard, StorageProviderResolver, StorageProvidersModule, ObjectProcessingModule, OwnerAccessModule, webhooksModule, sharingModule],
 })
 export class PlatformMemoriahubDepsModule {}
 
@@ -92,6 +99,8 @@ export const platformMemoriahubPorts: MemoriahubPortBindings = {
   webhooks: { useClass: PlatformMemoriahubWebhooksAdapter },
   metrics: { useClass: PlatformMemoriahubMetricsAdapter },
   doctor: { useClass: PlatformMemoriahubDoctorAdapter },
+  sharing: { useClass: PlatformMemoriahubSharingAdapter },
+  aiAdmin: { useClass: PlatformMemoriahubAiAdminAdapter },
   imports: [PlatformMemoriahubDepsModule],
 };
 
