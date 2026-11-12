@@ -12,6 +12,7 @@ export { mediaSyncRefusal } from './media-sync/media-sync-refusal.js';
 export { MEDIA_SYNC_REASONS, AUDIT_COMMAND, AUDIT_CONFIG_UPDATED, AUDIT_TARGET_TYPE } from './media-sync/media-sync.constants.js';
 export type { MediaSyncReason, MediaSyncCommand } from './media-sync/media-sync.constants.js';
 export { assertMediaSyncSourceDevice } from './media-sync/media-sync-source.js';
+export * from './media-sync/media-sync-device-queries.js';
 export * from './thumbnails/media-thumbnail.service.js';
 export * from './thumbnails/media-thumbnail-rerun.controller.js';
 export * from './orientation/media-orientation-edit.service.js';

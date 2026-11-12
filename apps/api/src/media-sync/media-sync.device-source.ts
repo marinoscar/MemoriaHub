@@ -19,6 +19,10 @@
 //                    always did). A device running another package (a debug
 //                    build) is not counted: the current release cannot update it.
 //
+// The two queries are the media slice's (`mediaSyncReportedApps`, `mediaSyncDevicesBehind`, over its
+// database port); this file keeps only what binds them to the platform android-app slice: the registry
+// entry and the late-bound client.
+//
 // The registry is filled at IMPORT time (before the registries freeze), while a
 // Prisma client only exists once Nest has built the module graph. So the source
 // reads through a client bound later by `MediaSyncDeviceSourceBinder`
@@ -38,6 +42,8 @@ import {
   type AndroidDeviceSourceRow,
 } from '@marinoscar/platform-api/android-app';
 
+import { mediaSyncDevicesBehind, mediaSyncReportedApps } from '@marinoscar/memoriahub-api/media';
+
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The registry id of MemoriaHub's source (lower kebab case, permanent). */
@@ -53,52 +59,29 @@ export function bindMediaSyncDeviceSource(prisma: MediaSyncDeviceSourcePrisma | 
   boundPrisma = prisma;
 }
 
-/** The (package, signer) pairs active Media Sync devices report. */
-export async function mediaSyncReportedApps(
+/** The (package, signer) pairs active Media Sync devices report: the media slice's query over the bound client. */
+export async function reportedApps(
   prisma: MediaSyncDeviceSourcePrisma | null = boundPrisma,
 ): Promise<AndroidDeviceSourceRow[]> {
   if (!prisma) return [];
-  const groups = await prisma.mediaSyncDevice.groupBy({
-    by: ['packageName', 'signingSha256'],
-    where: { status: 'active', packageName: { not: null }, signingSha256: { not: null } },
-    _count: { _all: true },
-    _max: { lastSeenAt: true },
-  });
-  const rows: AndroidDeviceSourceRow[] = [];
-  for (const group of groups ?? []) {
-    if (!group.packageName || !group.signingSha256) continue;
-    const count = group._count;
-    rows.push({
-      packageName: group.packageName,
-      signingSha256: group.signingSha256,
-      deviceCount: typeof count === 'object' && count ? (count._all ?? 0) : 0,
-      lastSeenAt: group._max?.lastSeenAt ?? null,
-    });
-  }
-  return rows;
+  return mediaSyncReportedApps(prisma as never);
 }
 
 /** How many active Media Sync devices run an older build of `packageName` than `versionCode`. */
-export async function mediaSyncDevicesBehind(
+export async function devicesBehind(
   packageName: string,
   versionCode: number,
   prisma: MediaSyncDeviceSourcePrisma | null = boundPrisma,
 ): Promise<number> {
   if (!prisma) return 0;
-  return prisma.mediaSyncDevice.count({
-    where: {
-      status: 'active',
-      appVersionCode: { lt: versionCode },
-      OR: [{ packageName }, { packageName: null }],
-    },
-  });
+  return mediaSyncDevicesBehind(prisma as never, packageName, versionCode);
 }
 
 /** The source as registered. */
 export const MEDIA_SYNC_DEVICE_SOURCE: AndroidDeviceSource = Object.freeze({
   id: MEDIA_SYNC_DEVICE_SOURCE_ID,
-  reportedApps: () => mediaSyncReportedApps(),
-  devicesBehind: (packageName: string, versionCode: number) => mediaSyncDevicesBehind(packageName, versionCode),
+  reportedApps: () => reportedApps(),
+  devicesBehind: (packageName: string, versionCode: number) => devicesBehind(packageName, versionCode),
 });
 
 /** Registers {@link MEDIA_SYNC_DEVICE_SOURCE} unless it already is (idempotent per process). */
