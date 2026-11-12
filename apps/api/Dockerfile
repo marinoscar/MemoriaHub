@@ -96,7 +96,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends \
       openssl ffmpeg perl \
       postgresql-client-17 \
-      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
+      libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 liborc-0.4-0t64 \
     && rm -rf /var/lib/apt/lists/*
 
 # The source-built libvips 8.18.3 (HEIF/HEVC enabled). The apt libvips42t64
