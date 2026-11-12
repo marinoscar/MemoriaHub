@@ -83,6 +83,15 @@ export class FakeMemoriahubNotify implements MemoriahubNotifyPort {
     else this.state.set(key, data);
   }
 
+  /** Whether a recorded write of the event to the user carried every `match` value in its data. */
+  async hasNotified(eventKey: string, userId: string, match: Readonly<Record<string, string | number | boolean>>): Promise<boolean> {
+    return this.sent.some((n) => {
+      if (n.eventKey !== eventKey || n.to !== userId) return false;
+      const data = (n.data ?? {}) as Record<string, unknown>;
+      return Object.entries(match).every(([k, v]) => data[k] === v);
+    });
+  }
+
   /** Awaited send. */
   async notifyNow(eventKey: string, userId: string, data: unknown, _options?: MemoriahubNotifyOptions): Promise<MemoriahubNotifyNowResult> {
     this.record('notifyNow', eventKey, userId, data);

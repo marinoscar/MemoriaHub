@@ -29,9 +29,13 @@ import { ThumbnailRepairTask } from '@marinoscar/memoriahub-api/media';
 import { TrashPurgeTask } from '@marinoscar/memoriahub-api/media';
 import { NodeBackupStaleHandler } from '../../src/node-backup/node-backup-stale.handler';
 import { NodeBackupStaleTask } from '../../src/node-backup/node-backup-stale.task';
-import { ReviewQueueReconcileHandler, ReviewQueueReconcileTask, StorageRecoveryTask } from '@marinoscar/memoriahub-api/media';
-import { ShareExpiringHandler } from '../../src/notification-producers/share-expiring.handler';
-import { ShareExpiringTask } from '../../src/notification-producers/share-expiring.task';
+import {
+  ReviewQueueReconcileHandler,
+  ReviewQueueReconcileTask,
+  ShareExpiringHandler,
+  ShareExpiringTask,
+  StorageRecoveryTask,
+} from '@marinoscar/memoriahub-api/media';
 import { configuredWorkerMode } from '../../src/platform/jobs/legacy-env';
 import { DEFAULT_SYSTEM_SETTINGS } from '../../src/settings/registry/default-system-settings';
 import {
@@ -153,7 +157,14 @@ const HOUSEKEEPING_CRONS: HousekeepingCase[] = [
   {
     name: 'ShareExpiringTask',
     type: 'shares.expiring_sweep',
-    tick: (w) => new ShareExpiringTask(w.jobs as never, w.prisma as never).handleScheduledSweep(),
+    // The media slice's cron asks the jobs port for the housekeeping job (RETRO-J10).
+    tick: (w) =>
+      new ShareExpiringTask({
+        enqueueHousekeeping: async ({ type, what }: { type: string; what: string }) => {
+          const job = await enqueueHousekeepingJob({ jobs: w.jobs as never, prisma: w.prisma as never, logger: new Logger('ShareExpiringTask'), type, what });
+          return job ? { id: job.id } : null;
+        },
+      } as never).handleScheduledSweep(),
     gate: { env: 'NOTIFICATIONS_SHARE_EXPIRING_ENABLED', value: 'false' },
   },
 ];
@@ -485,7 +496,7 @@ describeJobHandlerConformance(
 describeJobHandlerConformance(
   'shares.expiring_sweep',
   () =>
-    new ShareExpiringHandler(registry, {
+    new ShareExpiringHandler({ registerHandler: (handler: unknown) => registry.register(handler as never) } as never, {
       sweep: async () => {
         if (sweeps.fail) throw new Error('sweep exploded');
         // `data.notifiedFor` keeps the sweep idempotent: the second run emits nothing.

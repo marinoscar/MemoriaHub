@@ -8,6 +8,7 @@ export * from './fake-ports.js';
 export * from './fake-prisma.js';
 export * from './fake-secrets.js';
 export * from './fake-settings.js';
+export * from './fake-sharing.js';
 export * from './in-memory-object-store.js';
 export * from './recording-ports.js';
 export * from './auth-guard-conformance.js';

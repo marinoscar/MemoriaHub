@@ -11,4 +11,5 @@ export * from './object-store.port.js';
 export * from './prisma.port.js';
 export * from './secrets.port.js';
 export * from './settings.port.js';
+export * from './sharing.port.js';
 export * from './webhooks.port.js';

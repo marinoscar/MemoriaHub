@@ -5,15 +5,15 @@ import {
   ReviewQueueReconcileHandler,
   ReviewQueueReconcileService,
   ReviewQueueReconcileTask,
+  ShareExpiringHandler,
+  ShareExpiringService,
+  ShareExpiringTask,
 } from '@marinoscar/memoriahub-api/media';
 
 import { MediaModule } from '../media/media.module';
 import { OwnerAccessModule } from '../platform/sharing/owner-access.module';
 import { sharingModule } from '../platform/sharing/sharing.config';
 import { RetiredNotificationJobTypes } from '../platform/notifications/retired-notification-job-types';
-import { ShareExpiringService } from './share-expiring.service';
-import { ShareExpiringTask } from './share-expiring.task';
-import { ShareExpiringHandler } from './share-expiring.handler';
 
 /** The self-driven producers; see `notification-producers.module.ts`. */
 @Module({

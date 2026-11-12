@@ -108,6 +108,7 @@ Every token below is an extension point: a host binds it, a slice injects it. Th
 | `MEMORIAHUB_WEBHOOKS`, `MemoriahubWebhooksPort` | token | outbound webhook events |
 | `MEMORIAHUB_METRICS`, `MemoriahubMetricsPort` | token | counters and histograms by registered name |
 | `MEMORIAHUB_DOCTOR`, `MemoriahubDoctorPort` | token | optional: the diagnostics checks a slice registers (`MemoriahubDoctorCheck`; read-only, permanent ids `memoriahub.<section>.<name>`); the default registers nothing |
+| `MEMORIAHUB_SHARING`, `MemoriahubSharingPort` | token | optional: the public links about to expire (`listExpiringLinks`); the default lists none |
 | `MemoriahubPortsModule`, `MemoriahubPortBindings` | token | the global module that binds all of the above |
 | `UploadEnrichmentRegistry` | registry | the media slice's upload fan-out: each slice registers its enrichment job and its gate |
 | `registerWorkflowField`, `registerWorkflowAction`, `WorkflowActionHandlerRegistry`, `WORKFLOW_RUN_OBSERVER`, `WorkflowRunObserver`, `WorkflowTriggerService` | registry, token, service | the workflows slice's catalog, action implementation, run side channels (`WorkflowRunObserver`) and settlement entry point (`WorkflowTriggerService.evaluateSettlement`) a host supplies ([slice README](src/workflows/README.md#extension-point-catalog)) |

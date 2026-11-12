@@ -301,6 +301,18 @@ export interface MemoriahubNotifyPort {
   liveStates?(eventKeys: readonly string[], scopeId?: string): Promise<MemoriahubLiveStateRow[]>;
 
   /**
+   * Whether the user already has a row of an event, LIVE OR DISMISSED, whose stored data carries the
+   * given scalar values: the idempotency probe of a producer that stamps what it already told the
+   * user ("this link, this expiry"). Optional: a host that cannot answer omits it, and the producer
+   * then skips (it would otherwise repeat itself on every run).
+   *
+   * @param eventKey - a registered event key.
+   * @param userId - the recipient.
+   * @param match - scalar values the row's data must carry.
+   */
+  hasNotified?(eventKey: string, userId: string, match: Readonly<Record<string, string | number | boolean>>): Promise<boolean>;
+
+  /**
    * The awaited sibling of `notify`, for a background path that must know whether the send was
    * rate-limited (a digest). Never rejects.
    *
