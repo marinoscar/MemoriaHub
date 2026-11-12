@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
-import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
-import { useOwnerScope } from './useOwnerScope';
-import { useIsMounted } from './useIsMounted';
+import type { ReviewCountsResponse } from '../../../media/headless/index.js';
+import { getReviewCounts } from '../../../media/headless/index.js';
+import { useIsMounted, useOwnerScope } from '../../../core/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Module-level refresh signal
@@ -57,19 +56,30 @@ function subscribeRevision(listener: () => void): () => void {
  * badge can never show two different numbers. Called on the Review hub's mount
  * (spec §4.5 requirement 1: returning after clearing four bursts must not show
  * a cached "4"), and by any caller's `refetch()`.
+ *
+ * @stability experimental
  */
 export function refreshReviewCounts(): void {
   revision += 1;
   listeners.forEach((listener) => listener());
 }
 
-/** Test hatch: the revision outlives React unmounts by design. */
+/**
+ * Test hatch: the revision outlives React unmounts by design.
+ *
+ * @stability experimental
+ */
 export function __resetReviewCountsForTests(): void {
   revision = 0;
   listeners.clear();
 }
 
-interface UseReviewCountsOptions {
+/**
+ * The options of {@link useReviewCounts}.
+ *
+ * @stability experimental
+ */
+export interface UseReviewCountsOptions {
   /**
    * When false, the hook makes NO request and reports `data: null`.
    *
@@ -87,10 +97,16 @@ interface UseReviewCountsOptions {
   enabled?: boolean;
 }
 
-interface UseReviewCountsResult {
+/**
+ * What {@link useReviewCounts} returns.
+ *
+ * @stability experimental
+ */
+export interface UseReviewCountsResult {
   data: ReviewCountsResponse | null;
   isLoading: boolean;
   error: string | null;
+  /** Reloads the counts. */
   refetch: () => void;
 }
 
@@ -101,6 +117,8 @@ interface UseReviewCountsResult {
  * pending-work number for a badge: `GET /api/media/review-counts` returns four
  * integers, where the dashboard also returns On This Day / recent / favorites
  * with a signed thumbnail URL per item.
+ *
+ * @stability experimental
  */
 export function useReviewCounts(
   options: UseReviewCountsOptions = {},

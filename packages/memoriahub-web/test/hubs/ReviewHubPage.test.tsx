@@ -7,41 +7,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { Routes, Route, Link as RouterLink } from 'react-router-dom';
-import { render } from '../utils/test-utils';
-import ReviewHubPage from '../../pages/Reviews/ReviewHubPage';
-import { __resetReviewCountsForTests } from '../../hooks/useReviewCounts';
-import { useReviewQueues } from '../../hooks/useReviewQueues';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PictureEnhancementPolicy } from '../../services/features';
+import { render, setTestHostDefaults, resetTestHostDefaults } from '../utils/test-utils.js';
+import ReviewHubPage from '../../src/hubs/ui/pages/ReviewHubPage.js';
+import { __resetReviewCountsForTests } from '../../src/hubs/headless/hooks/useReviewCounts.js';
+import { useReviewQueues } from '../../src/hubs/ui/hooks/useReviewQueues.js';
+import type { ReviewCountsResponse } from '../../src/media/headless/index.js';
 
-vi.mock('../../hooks/useFeatureFlags', () => ({
+type PictureEnhancementPolicy = { enabled: boolean; allowReplace: boolean; blockReplaceOnDownscale: boolean; model: string | null; maxBatchSize: number };
+
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useFeatureFlags: vi.fn(),
+  useScrollRestoration: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+vi.mock('../../src/workflows/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowsEnabled: vi.fn(),
 }));
-// The packaged rail's collapse preference (RETRO-F1, #571): the hub redirects
-// only while the context pane is showing, i.e. at lg AND with the rail expanded.
-const railPreference = vi.hoisted(() => ({ railCollapsed: false, isLoading: false, toggleRailCollapsed: () => undefined }));
-vi.mock('@marinoscar/platform-web/shell/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/platform-web/shell/headless')>()),
-  useShellRailPreference: () => railPreference,
-}));
-vi.mock('../../hooks/useScrollRestoration', () => ({
-  useScrollRestoration: vi.fn(),
-}));
+// The shell port's context-pane answer: true at lg AND with the rail expanded (the host's rule).
+let paneVisible = false;
+const shellPort = { useMainVariant: () => undefined, useContextPaneVisible: () => paneVisible };
 // The service layer, not the hook, so the count-refresh test drives the real
 // useReviewCounts / refreshReviewCounts machinery end to end.
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@marinoscar/memoriahub-web/media/headless')>()),
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   getReviewCounts: vi.fn(),
 }));
 
-import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useScrollRestoration } from '../../hooks/useScrollRestoration';
-import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
+import { useFeatureFlags, useScrollRestoration } from '../../src/core/headless/index.js';
+import { useWorkflowsEnabled } from '../../src/workflows/headless/index.js';
+import { getReviewCounts } from '../../src/media/headless/index.js';
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseWorkflowsEnabled = vi.mocked(useWorkflowsEnabled);
@@ -50,7 +45,7 @@ const mockGetReviewCounts = vi.mocked(getReviewCounts);
 
 function mockFlags(features: Record<string, boolean>, pictureEnhancement: PictureEnhancementPolicy | null = null) {
   mockUseFeatureFlags.mockReturnValue({
-    features,
+    flags: features,
     pictureEnhancement,
     isLoading: false,
     error: null,
@@ -73,6 +68,12 @@ describe('ReviewHubPage', () => {
     vi.clearAllMocks();
     __resetReviewCountsForTests();
     mockUseWorkflowsEnabled.mockReturnValue(false);
+    paneVisible = false;
+    setTestHostDefaults({ shell: shellPort });
+  });
+
+  afterEach(() => {
+    resetTestHostDefaults();
   });
 
   // =========================================================================
@@ -250,42 +251,12 @@ describe('ReviewHubPage', () => {
 
   describe('desktop (up("lg")) redirect', () => {
     function setViewportWidth(px: number) {
-      Object.defineProperty(window, 'matchMedia', {
-        writable: true,
-        value: vi.fn().mockImplementation((query: string) => {
-          const min = query.match(/min-width:\s*([\d.]+)px/);
-          const max = query.match(/max-width:\s*([\d.]+)px/);
-          let matches = true;
-          if (min) matches = matches && px >= parseFloat(min[1]);
-          if (max) matches = matches && px <= parseFloat(max[1]);
-          return {
-            matches,
-            media: query,
-            onchange: null,
-            addListener: vi.fn(),
-            removeListener: vi.fn(),
-            addEventListener: vi.fn(),
-            removeEventListener: vi.fn(),
-            dispatchEvent: vi.fn(),
-          };
-        }),
-      });
+      // The host's rule: the pane shows from `lg` (1200px) up, rail expanded.
+      paneVisible = px >= 1200;
     }
 
     function restoreDefaultViewport() {
-      Object.defineProperty(window, 'matchMedia', {
-        writable: true,
-        value: vi.fn().mockImplementation((query: string) => ({
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        })),
-      });
+      paneVisible = false;
     }
 
     const DESKTOP_WIDTH = 1300; // >= lg (1200)

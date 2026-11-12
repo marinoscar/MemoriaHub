@@ -12,6 +12,8 @@
     "./src/enhancement/ui/index.ts",
     "./src/face/headless/index.ts",
     "./src/face/ui/index.ts",
+    "./src/hubs/headless/index.ts",
+    "./src/hubs/ui/index.ts",
     "./src/media-sync/headless/index.ts",
     "./src/media-sync/ui/index.ts",
     "./src/insights/headless/index.ts",

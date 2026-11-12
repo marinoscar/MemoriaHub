@@ -23,11 +23,16 @@ import {
 } from '@mui/material';
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import { Link as RouterLink } from 'react-router-dom';
-import { LoadingSpinner } from '../common/LoadingSpinner';
-import type { ReviewQueueKey } from '../../config/reviewQueues';
-import type { ResolvedReviewQueue } from '../../hooks/useReviewQueues';
-import { useReviewQueues } from '../../hooks/useReviewQueues';
+import { LoadingSpinner } from '../../../core/ui/index.js';
+import type { ReviewQueueKey } from '../config/reviewQueues.js';
+import type { ResolvedReviewQueue } from '../hooks/useReviewQueues.js';
+import { useReviewQueues } from '../hooks/useReviewQueues.js';
 
+/**
+ * The props of {@link ReviewQueueList}.
+ *
+ * @stability experimental
+ */
 export interface ReviewQueueListProps {
   /**
    * `hub` is the full-width list on the hub page; `pane` is the denser
@@ -41,7 +46,11 @@ export interface ReviewQueueListProps {
   activeKey?: ReviewQueueKey | null;
 }
 
-/** The route a row points at. Rows always go through the hub's own namespace. */
+/**
+ * The route a row points at. Rows always go through the hub's own namespace.
+ *
+ * @stability experimental
+ */
 export function reviewQueuePath(key: ReviewQueueKey): string {
   return `/review/${key}`;
 }
@@ -133,6 +142,14 @@ function QueueRow({
   );
 }
 
+/**
+ * The Review queues as a list, for the hub page (`hub`) and the desktop context pane (`pane`).
+ *
+ * @param props - see {@link ReviewQueueListProps}
+ * @returns the list
+ *
+ * @stability experimental
+ */
 export function ReviewQueueList({
   variant = 'hub',
   onNavigate,

@@ -65,6 +65,8 @@ export interface WrapperOptions {
   features?: Partial<MemoriahubWebHost['features']>;
   /** The host's search surface. */
   search?: MemoriahubWebHost['search'];
+  /** The host's shell layout port. */
+  shell?: MemoriahubWebHost['shell'];
 }
 
 let hostDefaults: WrapperOptions = {};
@@ -121,7 +123,7 @@ export function buildTestHost(rawOptions: WrapperOptions = {}): MemoriahubWebHos
       ...options.ownerScope,
     },
   });
-  return { ...host, authLoading: isLoading, search: options.search };
+  return { ...host, authLoading: isLoading, search: options.search, shell: options.shell };
 }
 
 function createWrapper(options: WrapperOptions = {}) {

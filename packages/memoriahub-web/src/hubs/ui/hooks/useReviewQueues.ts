@@ -29,13 +29,18 @@
  */
 
 import { useMemo } from 'react';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { ReviewQueueDef, ReviewQueueFlag } from '../config/reviewQueues';
-import { REVIEW_QUEUES } from '../config/reviewQueues';
-import { useFeatureFlags } from './useFeatureFlags';
-import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useReviewCounts } from './useReviewCounts';
+import type { ReviewCountsResponse } from '../../../media/headless/index.js';
+import { useFeatureFlags } from '../../../core/headless/index.js';
+import { useWorkflowsEnabled } from '../../../workflows/headless/index.js';
+import { useReviewCounts } from '../../headless/hooks/useReviewCounts.js';
+import type { ReviewQueueDef, ReviewQueueFlag } from '../config/reviewQueues.js';
+import { REVIEW_QUEUES } from '../config/reviewQueues.js';
 
+/**
+ * A registry entry with its pending count (`null` for a secondary entry or while the counts are in flight).
+ *
+ * @stability experimental
+ */
 export interface ResolvedReviewQueue extends ReviewQueueDef {
   /**
    * Pending items in this queue.
@@ -49,6 +54,11 @@ export interface ResolvedReviewQueue extends ReviewQueueDef {
   count: number | null;
 }
 
+/**
+ * What {@link useReviewQueues} returns.
+ *
+ * @stability experimental
+ */
 export interface UseReviewQueuesResult {
   /** Resolved entries only, in the registry's FIXED order — never sorted by count. */
   entries: ResolvedReviewQueue[];
@@ -65,8 +75,15 @@ export interface UseReviewQueuesResult {
   anyEnabled: boolean;
 }
 
+/**
+ * Resolves the Review hub entries the caller can reach, with their pending counts and the aggregate badge total.
+ *
+ * @returns the entries (registry order), the counts, the total, the loading state and whether anything resolves
+ *
+ * @stability experimental
+ */
 export function useReviewQueues(): UseReviewQueuesResult {
-  const { features, pictureEnhancement, isLoading: flagsLoading } = useFeatureFlags();
+  const { flags: features, pictureEnhancement, isLoading: flagsLoading } = useFeatureFlags();
   const workflowsEnabled = useWorkflowsEnabled();
 
   // `=== true` everywhere, never a truthy check — the same convention `Sidebar`

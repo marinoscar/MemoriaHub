@@ -19,6 +19,7 @@ import type {
 } from '@marinoscar/memoriahub-web/core/headless';
 
 import { useShellMainVariant } from '@marinoscar/platform-web/shell/headless';
+import { useContextPaneVisible } from '../hooks/useContextPaneVisible';
 
 import { API_BASE_URL, api, rewriteEndpoint } from '../services/api';
 import { rewriteBody } from '../services/ownerScopeParams';
@@ -90,7 +91,7 @@ export function buildMemoriahubHost(inputs: MemoriahubHostInputs): MemoriahubWeb
     ownerScope: inputs.ownerScope,
     notify,
     timeZone: inputs.principal?.timeZone ?? null,
-    shell: { useMainVariant: useShellMainVariant },
+    shell: { useMainVariant: useShellMainVariant, useContextPaneVisible },
     slots: appMemoriahubSlots,
     admin: appMemoriahubAdmin,
     android: appMemoriahubAndroid,

@@ -7,16 +7,16 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
-import { render } from '../../utils/test-utils';
-import { ReviewQueueList, reviewQueuePath } from '../../../components/review/ReviewQueueList';
-import { REVIEW_QUEUES, type ReviewQueueKey } from '../../../config/reviewQueues';
-import type { ResolvedReviewQueue } from '../../../hooks/useReviewQueues';
+import { render } from '../utils/test-utils.js';
+import { ReviewQueueList, reviewQueuePath } from '../../src/hubs/ui/components/ReviewQueueList.js';
+import { REVIEW_QUEUES, type ReviewQueueKey } from '../../src/hubs/ui/config/reviewQueues.js';
+import type { ResolvedReviewQueue } from '../../src/hubs/ui/hooks/useReviewQueues.js';
 
-vi.mock('../../../hooks/useReviewQueues', () => ({
+vi.mock('../../src/hubs/ui/hooks/useReviewQueues.js', () => ({
   useReviewQueues: vi.fn(),
 }));
 
-import { useReviewQueues } from '../../../hooks/useReviewQueues';
+import { useReviewQueues } from '../../src/hubs/ui/hooks/useReviewQueues.js';
 
 const mockUseReviewQueues = vi.mocked(useReviewQueues);
 

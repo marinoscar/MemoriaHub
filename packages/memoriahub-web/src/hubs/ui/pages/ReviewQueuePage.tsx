@@ -16,25 +16,25 @@ import { Box, Button, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { Link as RouterLink, Navigate, useParams } from 'react-router-dom';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { reviewQueuePath } from '../../components/review/ReviewQueueList';
-import type { ReviewQueueKey } from '../../config/reviewQueues';
-import { REVIEW_QUEUES, findReviewQueue } from '../../config/reviewQueues';
-import type { ResolvedReviewQueue } from '../../hooks/useReviewQueues';
-import { useReviewQueues } from '../../hooks/useReviewQueues';
+import { LoadingSpinner } from '../../../core/ui/index.js';
+import { reviewQueuePath } from '../components/ReviewQueueList.js';
+import type { ReviewQueueKey } from '../config/reviewQueues.js';
+import { REVIEW_QUEUES, findReviewQueue } from '../config/reviewQueues.js';
+import type { ResolvedReviewQueue } from '../hooks/useReviewQueues.js';
+import { useReviewQueues } from '../hooks/useReviewQueues.js';
 
 // Lazily imported HERE rather than in `App.tsx` so opening `/review` does not
 // pull six unrelated page chunks in with it — only the queue actually opened is
 // fetched. Each is a zero-prop default export.
-const BurstsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsPage })));
-const DuplicatesPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesPage })));
+const BurstsPage = lazy(() => import('../../../review/ui/index.js').then((m) => ({ default: m.BurstsPage })));
+const DuplicatesPage = lazy(() => import('../../../review/ui/index.js').then((m) => ({ default: m.DuplicatesPage })));
 const LocationSuggestionsPage = lazy(() =>
-  import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })),
+  import('../../../review/ui/index.js').then((m) => ({ default: m.LocationSuggestionsPage })),
 );
-const EnhancementsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementsPage })));
-const ReviewInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.ReviewInsightsPage })));
+const EnhancementsPage = lazy(() => import('../../../enhancement/ui/index.js').then((m) => ({ default: m.EnhancementsPage })));
+const ReviewInsightsPage = lazy(() => import('../../../review/ui/index.js').then((m) => ({ default: m.ReviewInsightsPage })));
 const WorkflowListPage = lazy(() =>
-  import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowListPage })),
+  import('../../../workflows/ui/index.js').then((m) => ({ default: m.WorkflowListPage })),
 );
 
 const QUEUE_PAGES: Record<ReviewQueueKey, React.ComponentType> = {
@@ -78,6 +78,11 @@ function nextNonEmpty(
   return null;
 }
 
+/**
+ * One queue inside the Review hub: the queue's own page with a way back and chain-to-next.
+ *
+ * @stability experimental
+ */
 export default function ReviewQueuePage() {
   const { queue } = useParams<{ queue: string }>();
   const { entries, isLoading } = useReviewQueues();

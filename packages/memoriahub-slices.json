@@ -247,6 +247,13 @@
     ],
     "media-sync": [
       "core"
+    ],
+    "hubs": [
+      "core",
+      "media",
+      "review",
+      "enhancement",
+      "workflows"
     ]
   }
 }

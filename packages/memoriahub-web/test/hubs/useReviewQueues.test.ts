@@ -11,10 +11,11 @@ import { createElement } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { useReviewQueues } from '../../hooks/useReviewQueues';
-import { ReviewQueueList } from '../../components/review/ReviewQueueList';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
-import type { PictureEnhancementPolicy } from '../../services/features';
+import { useReviewQueues } from '../../src/hubs/ui/hooks/useReviewQueues.js';
+import { ReviewQueueList } from '../../src/hubs/ui/components/ReviewQueueList.js';
+import type { ReviewCountsResponse } from '../../src/media/headless/index.js';
+
+type PictureEnhancementPolicy = { enabled: boolean; allowReplace: boolean; blockReplaceOnDownscale: boolean; model: string | null; maxBatchSize: number };
 
 // This is a `.ts` file (not `.tsx`), so the loading-state integration test
 // below builds its element tree with `createElement` rather than JSX —
@@ -23,20 +24,21 @@ function reviewQueueListTree() {
   return createElement(MemoryRouter, null, createElement(ReviewQueueList, { variant: 'hub' }));
 }
 
-vi.mock('../../hooks/useFeatureFlags', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useFeatureFlags: vi.fn(),
 }));
-vi.mock('@marinoscar/memoriahub-web/workflows/headless', async (importOriginal) => ({
+vi.mock('../../src/workflows/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useWorkflowsEnabled: vi.fn(),
 }));
-vi.mock('../../hooks/useReviewCounts', () => ({
+vi.mock('../../src/hubs/headless/hooks/useReviewCounts.js', () => ({
   useReviewCounts: vi.fn(),
 }));
 
-import { useFeatureFlags } from '../../hooks/useFeatureFlags';
-import { useWorkflowsEnabled } from '@marinoscar/memoriahub-web/workflows/headless';
-import { useReviewCounts } from '../../hooks/useReviewCounts';
+import { useFeatureFlags } from '../../src/core/headless/index.js';
+import { useWorkflowsEnabled } from '../../src/workflows/headless/index.js';
+import { useReviewCounts } from '../../src/hubs/headless/hooks/useReviewCounts.js';
 
 const mockUseFeatureFlags = vi.mocked(useFeatureFlags);
 const mockUseWorkflowsEnabled = vi.mocked(useWorkflowsEnabled);
@@ -60,7 +62,7 @@ function mockFeatureFlags(options: {
 } = {}) {
   const { features = null, pictureEnhancement = null, isLoading = false } = options;
   mockUseFeatureFlags.mockReturnValue({
-    features,
+    flags: features,
     pictureEnhancement,
     isLoading,
     error: null,
@@ -69,7 +71,7 @@ function mockFeatureFlags(options: {
 }
 
 function enhancerPolicy(enabled: boolean): PictureEnhancementPolicy {
-  return { enabled, allowReplace: true, blockReplaceOnDownscale: false, model: 'gpt-image-1' };
+  return { enabled, allowReplace: true, blockReplaceOnDownscale: false, model: 'gpt-image-1', maxBatchSize: 25 };
 }
 
 function mockCounts(options: {

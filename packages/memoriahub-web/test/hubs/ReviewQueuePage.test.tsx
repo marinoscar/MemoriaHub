@@ -10,29 +10,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
-import { render } from '../utils/test-utils';
-import ReviewQueuePage from '../../pages/Reviews/ReviewQueuePage';
-import { REVIEW_QUEUES, type ReviewQueueKey } from '../../config/reviewQueues';
-import type { ResolvedReviewQueue } from '../../hooks/useReviewQueues';
+import { render } from '../utils/test-utils.js';
+import ReviewQueuePage from '../../src/hubs/ui/pages/ReviewQueuePage.js';
+import { REVIEW_QUEUES, type ReviewQueueKey } from '../../src/hubs/ui/config/reviewQueues.js';
+import type { ResolvedReviewQueue } from '../../src/hubs/ui/hooks/useReviewQueues.js';
 
-vi.mock('../../hooks/useReviewQueues', () => ({
+vi.mock('../../src/hubs/ui/hooks/useReviewQueues.js', () => ({
   useReviewQueues: vi.fn(),
 }));
 
-vi.mock('@marinoscar/memoriahub-web/review/ui', () => ({
+vi.mock('../../src/review/ui/index.js', () => ({
   BurstsPage: () => <div>BurstsPageStub</div>,
   DuplicatesPage: () => <div>DuplicatesPageStub</div>,
   LocationSuggestionsPage: () => <div>LocationSuggestionsPageStub</div>,
   ReviewInsightsPage: () => <div>ReviewInsightsPageStub</div>,
 }));
-vi.mock('@marinoscar/memoriahub-web/enhancement/ui', () => ({
+vi.mock('../../src/enhancement/ui/index.js', () => ({
   EnhancementsPage: () => <div>EnhancementsPageStub</div>,
 }));
-vi.mock('@marinoscar/memoriahub-web/workflows/ui', () => ({
+vi.mock('../../src/workflows/ui/index.js', () => ({
   WorkflowListPage: () => <div>WorkflowListPageStub</div>,
 }));
 
-import { useReviewQueues } from '../../hooks/useReviewQueues';
+import { useReviewQueues } from '../../src/hubs/ui/hooks/useReviewQueues.js';
 
 const mockUseReviewQueues = vi.mocked(useReviewQueues);
 

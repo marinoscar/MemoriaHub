@@ -13,23 +13,22 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { NavigationRail } from '../../../components/navigation/NavigationRail';
 import { renderShell } from '../../utils/shell-harness';
 
-vi.mock('../../../hooks/useReviewQueues', () => ({
-  useReviewQueues: vi.fn(),
-}));
 vi.mock('../../../components/collections/CollectionsList', () => ({
   CollectionsList: ({ activeKey }: { activeKey: string | null }) => (
     <div data-testid="collections-list">{String(activeKey)}</div>
   ),
 }));
-vi.mock('../../../components/review/ReviewQueueList', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useReviewQueues: vi.fn(),
   ReviewQueueList: ({ activeKey }: { activeKey: string | null }) => (
     <div data-testid="review-list">{String(activeKey)}</div>
   ),
   reviewQueuePath: (key: string) => `/review/${key}`,
 }));
 
-import { useReviewQueues } from '../../../hooks/useReviewQueues';
-import type { UseReviewQueuesResult } from '../../../hooks/useReviewQueues';
+import { useReviewQueues } from '@marinoscar/memoriahub-web/hubs/ui';
+import type { UseReviewQueuesResult } from '@marinoscar/memoriahub-web/hubs/ui';
 
 const mockUseReviewQueues = vi.mocked(useReviewQueues);
 

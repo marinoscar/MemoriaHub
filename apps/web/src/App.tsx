@@ -175,9 +175,9 @@ const DuplicateGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/
 const LocationSuggestionsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })));
 const LocationSuggestionRunRedirect = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionRunRedirect })));
 const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.ReviewRunPage })));
-const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
+const ReviewHubPage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.ReviewHubPage })));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
-const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
+const ReviewQueuePage = lazy(() => import('@marinoscar/memoriahub-web/hubs/ui').then((m) => ({ default: m.ReviewQueuePage })));
 const ReviewInsightsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.ReviewInsightsPage })));
 const ArchivePage = lazyMediaPage('ArchivePage');
 const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));

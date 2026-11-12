@@ -4,13 +4,13 @@ import {
   useReviewCounts,
   refreshReviewCounts,
   __resetReviewCountsForTests,
-} from '../../hooks/useReviewCounts';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
+} from '../../src/hubs/headless/hooks/useReviewCounts.js';
+import type { ReviewCountsResponse } from '../../src/media/headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Mock getReviewCounts service
 // ---------------------------------------------------------------------------
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getReviewCounts: vi.fn(),
 
@@ -19,12 +19,13 @@ vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => (
 // ---------------------------------------------------------------------------
 // Mock useOwnerScope so we can control activeCircleId without CircleProvider
 // ---------------------------------------------------------------------------
-vi.mock('../../hooks/useOwnerScope', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useOwnerScope: vi.fn(),
 }));
 
-import { getReviewCounts } from '@marinoscar/memoriahub-web/media/headless';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
+import { getReviewCounts } from '../../src/media/headless/index.js';
+import { useOwnerScope } from '../../src/core/headless/index.js';
 
 const mockGetReviewCounts = vi.mocked(getReviewCounts);
 const mockUseOwnerScope = vi.mocked(useOwnerScope);

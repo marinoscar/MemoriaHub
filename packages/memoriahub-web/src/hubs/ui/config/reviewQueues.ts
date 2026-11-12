@@ -30,9 +30,13 @@ import MyLocationIcon from '@mui/icons-material/MyLocation';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import InsightsIcon from '@mui/icons-material/Insights';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import type { ReviewCountsResponse } from '@marinoscar/memoriahub-web/media/headless';
+import type { ReviewCountsResponse } from '../../../media/headless/index.js';
 
-/** Stable identifiers — also the `:queue` segment of `/review/:queue`. */
+/**
+ * Stable identifiers — also the `:queue` segment of `/review/:queue`.
+ *
+ * @stability experimental
+ */
 export type ReviewQueueKey =
   | 'bursts'
   | 'duplicates'
@@ -47,6 +51,8 @@ export type ReviewQueueKey =
  * `null` means always available. These are resolved by `useReviewQueues`, which
  * reads the SAME hooks `Sidebar` already uses — no new request is issued for
  * this registry.
+ *
+ * @stability experimental
  */
 export type ReviewQueueFlag =
   | 'burstDetection'
@@ -56,6 +62,11 @@ export type ReviewQueueFlag =
   | 'workflows'
   | null;
 
+/**
+ * One entry of the Review hub registry: a queue or a secondary destination, with its route, count key and feature gate.
+ *
+ * @stability experimental
+ */
 export interface ReviewQueueDef {
   key: ReviewQueueKey;
   label: string;
@@ -75,6 +86,11 @@ export interface ReviewQueueDef {
   group: 'queue' | 'secondary';
 }
 
+/**
+ * The Review hub registry in its fixed order (bursts, duplicates, locations, enhancements, insights, automations); never sorted by count.
+ *
+ * @stability experimental
+ */
 export const REVIEW_QUEUES: readonly ReviewQueueDef[] = [
   {
     key: 'bursts',
@@ -132,7 +148,11 @@ export const REVIEW_QUEUES: readonly ReviewQueueDef[] = [
   },
 ];
 
-/** Look an entry up by its `/review/:queue` segment. */
+/**
+ * Look an entry up by its `/review/:queue` segment.
+ *
+ * @stability experimental
+ */
 export function findReviewQueue(key: string | undefined): ReviewQueueDef | null {
   if (!key) return null;
   return REVIEW_QUEUES.find((q) => q.key === key) ?? null;

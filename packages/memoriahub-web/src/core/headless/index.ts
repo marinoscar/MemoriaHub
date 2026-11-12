@@ -7,6 +7,7 @@ export * from './hooks.js';
 export * from './useIsMounted.js';
 export * from './useIntersectionObserver.js';
 export * from './useCircleRole.js';
+export * from './useScrollRestoration.js';
 export * from './useLongPress.js';
 export * from './run-format.js';
 export * from './format-bytes.js';

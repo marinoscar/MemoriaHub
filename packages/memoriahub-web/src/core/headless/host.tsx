@@ -191,6 +191,12 @@ export interface MemoriahubShellPort {
    * the same function for the life of the host and follow the rules of hooks.
    */
   useMainVariant(variant: 'padded' | 'full-bleed'): void;
+  /**
+   * A React hook: true while the shell's context pane is showing beside the rail (the rail is expanded).
+   * The hub pages are the phone and tablet form of what the pane shows, so they redirect into their first
+   * entry while it is on screen. It must be the same function for the life of the host.
+   */
+  useContextPaneVisible(): boolean;
 }
 
 /**

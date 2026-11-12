@@ -84,7 +84,6 @@ const CHROME = [
   'pages/UserSettingsHubPage.tsx',
   'pages/Admin/SettingsHubPage.tsx',
   'pages/Collections/CollectionsHubPage.tsx',
-  'pages/Reviews/ReviewHubPage.tsx',
   'platform/platformHost.tsx',
   'platform/shellProviders.tsx',
   'theme/index.ts',

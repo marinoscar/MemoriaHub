@@ -21,7 +21,8 @@ vi.mock('../../../components/collections/CollectionsList', () => ({
     </div>
   ),
 }));
-vi.mock('../../../components/review/ReviewQueueList', () => ({
+vi.mock('@marinoscar/memoriahub-web/hubs/ui', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   ReviewQueueList: ({ activeKey, variant }: { activeKey: string | null; variant: string }) => (
     <div data-testid="review-list" data-variant={variant}>
       {String(activeKey)}

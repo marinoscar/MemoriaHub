@@ -24,19 +24,24 @@
 
 import { useEffect, useMemo } from 'react';
 import { Box, Typography } from '@mui/material';
-import { useContextPaneVisible } from '../../hooks/useContextPaneVisible';
 import { Navigate } from 'react-router-dom';
+import { useMemoriahubHost, useScrollRestoration } from '../../../core/headless/index.js';
 import {
   ReviewQueueList,
   reviewQueuePath,
-} from '../../components/review/ReviewQueueList';
-import { refreshReviewCounts } from '../../hooks/useReviewCounts';
-import { useReviewQueues } from '../../hooks/useReviewQueues';
-import { useScrollRestoration } from '../../hooks/useScrollRestoration';
+} from '../components/ReviewQueueList.js';
+import { refreshReviewCounts } from '../../headless/hooks/useReviewCounts.js';
+import { useReviewQueues } from '../hooks/useReviewQueues.js';
 
+/**
+ * The Review hub: the queue list on a phone or tablet, and a redirect into the first enabled queue where the context pane shows the list.
+ *
+ * @stability experimental
+ */
 export default function ReviewHubPage() {
   // The context pane is showing (expanded rail): this hub is redundant there.
-  const isDesktop = useContextPaneVisible();
+  const { shell } = useMemoriahubHost();
+  const isDesktop = shell?.useContextPaneVisible() ?? false;
 
   // Hooks run unconditionally, above the redirect branch. Restoration is a
   // no-op on desktop, where this page never paints a scrollable list.

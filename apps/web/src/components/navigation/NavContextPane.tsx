@@ -51,11 +51,10 @@
 import { Box, Typography, useTheme } from '@mui/material';
 import type { ShellContextPaneProps } from '@marinoscar/platform-web/shell/headless';
 import { CollectionsList } from '../collections/CollectionsList';
-import { ReviewQueueList } from '../review/ReviewQueueList';
+import { REVIEW_QUEUES, ReviewQueueList } from '@marinoscar/memoriahub-web/hubs/ui';
+import type { ReviewQueueKey } from '@marinoscar/memoriahub-web/hubs/ui';
 import { COLLECTIONS } from '../../config/collections';
 import type { CollectionKey } from '../../config/collections';
-import { REVIEW_QUEUES } from '../../config/reviewQueues';
-import type { ReviewQueueKey } from '../../config/reviewQueues';
 import { owns } from '../../config/destinations';
 
 /**
