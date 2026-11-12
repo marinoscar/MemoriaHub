@@ -83,7 +83,7 @@ jobs:
       - name: sharp build info (inside the API image)
         run: |
           docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-api:parity-gate \
-            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif))"
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif));const fs=require('fs');s(fs.readFileSync('test/fixtures/golden-fixture.heic')).metadata().then(m=>console.log('heic metadata',m.format,m.width,m.height)).catch(e=>console.log('heic metadata ERROR',e.message)).then(()=>s(fs.readFileSync('test/fixtures/golden-fixture.heic')).raw().toBuffer().then(b=>console.log('heic decode ok',b.length)).catch(e=>console.log('heic decode ERROR',e.message))).then(()=>console.log([...new Set(fs.readFileSync('/proc/self/maps','utf8').split(String.fromCharCode(10)).filter(l=>/vips|heif|de265|sharp-/.test(l)).map(l=>l.split(/\s+/).pop()))].join(String.fromCharCode(10))))"
 
       - name: Golden-vector parity gate (inside the API image)
         # REQUIRE_CLIP_MODEL is not set: the API image does not bake the CLIP
@@ -132,7 +132,7 @@ jobs:
       - name: sharp build info (inside the worker image)
         run: |
           docker run --rm --entrypoint node -w /app/packages/memoriahub-compute memoriahub-worker:parity-gate \
-            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif))"
+            -e "const s=require('sharp');console.log(JSON.stringify(s.versions));console.log('heif',JSON.stringify(s.format.heif));const fs=require('fs');s(fs.readFileSync('test/fixtures/golden-fixture.heic')).metadata().then(m=>console.log('heic metadata',m.format,m.width,m.height)).catch(e=>console.log('heic metadata ERROR',e.message)).then(()=>s(fs.readFileSync('test/fixtures/golden-fixture.heic')).raw().toBuffer().then(b=>console.log('heic decode ok',b.length)).catch(e=>console.log('heic decode ERROR',e.message))).then(()=>console.log([...new Set(fs.readFileSync('/proc/self/maps','utf8').split(String.fromCharCode(10)).filter(l=>/vips|heif|de265|sharp-/.test(l)).map(l=>l.split(/\s+/).pop()))].join(String.fromCharCode(10))))"
 
       - name: Golden-vector parity gate (inside the worker image)
         # The worker image bakes the CLIP model, so a missing one is a failure.
