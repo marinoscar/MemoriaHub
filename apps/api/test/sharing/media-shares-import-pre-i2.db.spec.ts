@@ -30,6 +30,7 @@ import { Client } from 'pg';
 import '../../src/app-registrations/sharing';
 import { applyMediaSharesImport, planMediaSharesImport } from '../../src/legacy/media-shares-import';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { orgScoped } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -86,7 +87,7 @@ describeMaybeDb('media shares import before the I2 ownership migration (DB_GATED
   let creatorId: string;
   let defaultOrg: string;
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await db.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db, { bypass: true }).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
 
   const withTx = <T>(fn: (tx: Parameters<typeof planMediaSharesImport>[0]) => Promise<T>) =>

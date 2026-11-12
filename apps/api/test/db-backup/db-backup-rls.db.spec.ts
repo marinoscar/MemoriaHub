@@ -97,7 +97,10 @@ describe('db-backup cutover (real Postgres)', () => {
     }
 
     await admin.query(`CREATE ROLE ${ROLE} LOGIN PASSWORD '${ROLE_PASSWORD}' NOSUPERUSER NOBYPASSRLS`);
-    for (const db of [SOURCE_DB, TARGET_DB, EMPTY_DB]) await admin.query(`CREATE DATABASE ${db} OWNER ${ROLE}`);
+    // FROM template0: the DB tier's template1 carries the `vector` extension (created once by a superuser
+    // setup step, see ci.yml), and an extension the ordinary owner does not own cannot be restored by it
+    // (`COMMENT ON EXTENSION`). This spec's archive holds one plain table and needs no extension.
+    for (const db of [SOURCE_DB, TARGET_DB, EMPTY_DB]) await admin.query(`CREATE DATABASE ${db} OWNER ${ROLE} TEMPLATE template0`);
 
     // The source database, built by its ordinary owner: a table that FORCES row-level security
     // with the platform's policy shape (organization scope, or the transaction/session bypass).

@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
+import { orgScoped } from '../helpers/org-scope';
 
 const MIGRATION = join(
   __dirname,
@@ -55,7 +56,7 @@ describe('enrichment_jobs -> jobs cutover migration (db)', () => {
     memoryB: randomUUID(),
   };
 
-  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await client!.query(sql, params)).rows;
+  const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(client!, { bypass: true }).query(sql, params)).rows;
   const job = async (id: string): Promise<Row> => (await q('SELECT * FROM jobs WHERE id = $1', [id]))[0]!;
 
   async function insertLegacy(row: {

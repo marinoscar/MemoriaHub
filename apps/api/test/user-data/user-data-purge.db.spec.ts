@@ -44,6 +44,7 @@ import { newLibrary } from '../helpers/library';
 import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -69,6 +70,8 @@ const allDeleted = () => [...deletedKeys.values()].flat();
 
 describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
+  let bypass: PrismaService;
   let service: MemoriaHubUserDataService;
   let orgId: string;
   const enqueued: { type: string; payload: Record<string, unknown> }[] = [];
@@ -85,7 +88,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
   }
 
   async function object(uploadedById: string, storageKey: string, provider = 's3', bucket: string | null = 'bucket-a') {
-    return prisma.storageObject.create({
+    return seed.storageObject.create({
       data: {
         orgId,
         name: storageKey,
@@ -104,7 +107,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
   async function photo(circleId: string, addedById: string, provider = 's3', bucket: string | null = 'bucket-a') {
     const original = await object(addedById, `originals/${randomUUID()}.jpg`, provider, bucket);
     const thumb = await object(addedById, `thumbnails/${original.id}-abcdef0123456789.jpg`, provider, bucket);
-    const item = await prisma.mediaItem.create({
+    const item = await seed.mediaItem.create({
       data: {
         storageObjectId: original.id,
         circleId,
@@ -114,7 +117,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
         originalFilename: 'photo.jpg',
       },
     });
-    await prisma.face.create({
+    await seed.face.create({
       data: {
         mediaItemId: item.id,
         circleId,
@@ -132,6 +135,8 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
+    bypass = await rlsBypassPrisma();
     const org = await prisma.organization.findFirst({ where: { isDefault: true }, select: { id: true } });
     orgId = org!.id;
 
@@ -142,16 +147,22 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     };
     // The grants of a purged item go with its row (the access port of the app, minus its scope data).
     const access = { deleteGrantsFor: (tx: unknown, type: 'media_item' | 'album', ids: readonly string[]) => deleteGrantsForResources(tx, type, ids) };
-    Object.assign(media, { prisma, objectStore, access, logger: new Logger('MediaService') });
+    Object.assign(media, { prisma: bypass, objectStore, access, logger: new Logger('MediaService') });
     // The system client over the app's client (PrismaSystemService.asSystem in the app).
     const system = { asSystem: (reason: string) => forSystem(prisma, reason as never) };
+    // The purge and the removal hook read and delete rows of every organization table on the client they
+    // are given, with no organization of their own (the app-reads row of docs/platform-adoption/
+    // local-exceptions.md): under the ordinary role they get a connection with the explicit
+    // `app.rls_bypass` option (`rlsBypassPrisma`), never a superuser connection. Seeding and assertions
+    // below still go through the org-scoped `seed` client.
+    const purgeClient = bypass;
     service = new MemoriaHubUserDataService(
-      prisma,
+      purgeClient,
       media,
       resolver as never,
       system as never,
-      sqlScopeDirectory(prisma) as never,
-      new PersonalLibraryStore(prisma),
+      sqlScopeDirectory(bypass) as never,
+      new PersonalLibraryStore(bypass),
     );
     bindMemoriaHubFactoryResetDeps({ service });
   });
@@ -163,6 +174,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
 
   afterAll(async () => {
     jest.restoreAllMocks();
+    await bypass.$disconnect();
     await prisma.$disconnect();
   });
 
@@ -218,10 +230,10 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     const mine = await photo(personal, alpha, 's3', 'bucket-a');
     const minePrivate = await photo(personal, alpha, 'r2', 'bucket-r2');
     const contributed = await photo(shared, alpha, 's3', 'bucket-a');
-    await prisma.album.create({ data: { circleId: personal, addedById: alpha, name: 'Album Alpha' } });
-    await prisma.tag.create({ data: { circleId: personal, addedById: alpha, name: 'tag-alpha' } });
-    await prisma.person.create({ data: { circleId: personal, addedById: alpha, name: 'Person C' } });
-    const sharedAlbum = await prisma.album.create({ data: { circleId: shared, addedById: alpha, name: 'Album Beta' } });
+    await seed.album.create({ data: { circleId: personal, addedById: alpha, name: 'Album Alpha' } });
+    await seed.tag.create({ data: { circleId: personal, addedById: alpha, name: 'tag-alpha' } });
+    await seed.person.create({ data: { circleId: personal, addedById: alpha, name: 'Person C' } });
+    const sharedAlbum = await seed.album.create({ data: { circleId: shared, addedById: alpha, name: 'Album Beta' } });
 
     const { runner } = platform();
     const job = await jobRow('user.data.purge', { userId: alpha, scope: 'everything' });
@@ -240,11 +252,11 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     await handler.process({ id: randomUUID(), type: circleJob.type, payload: circleJob.payload } as never);
 
     // Personal circle emptied (the circle itself stays), files deleted through their own provider.
-    expect(await prisma.mediaItem.count({ where: { circleId: personal } })).toBe(0);
-    expect(await prisma.album.count({ where: { circleId: personal } })).toBe(0);
-    expect(await prisma.tag.count({ where: { circleId: personal } })).toBe(0);
-    expect(await prisma.person.count({ where: { circleId: personal } })).toBe(0);
-    expect(await prisma.face.count({ where: { circleId: personal } })).toBe(0);
+    expect(await seed.mediaItem.count({ where: { circleId: personal } })).toBe(0);
+    expect(await seed.album.count({ where: { circleId: personal } })).toBe(0);
+    expect(await seed.tag.count({ where: { circleId: personal } })).toBe(0);
+    expect(await seed.person.count({ where: { circleId: personal } })).toBe(0);
+    expect(await seed.face.count({ where: { circleId: personal } })).toBe(0);
     expect(await prisma.personalLibrary.count({ where: { id: personal } })).toBe(1);
     expect(deletedKeys.get('s3:bucket-a')).toEqual(
       expect.arrayContaining([mine.original.storageKey, mine.thumb.storageKey]),
@@ -253,14 +265,14 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
       expect.arrayContaining([minePrivate.original.storageKey, minePrivate.thumb.storageKey]),
     );
     expect(
-      await prisma.storageObject.count({ where: { id: { in: [mine.original.id, mine.thumb.id, minePrivate.original.id] } } }),
+      await seed.storageObject.count({ where: { id: { in: [mine.original.id, mine.thumb.id, minePrivate.original.id] } } }),
     ).toBe(0);
 
     // What alpha added to beta's circle stays, with its file.
-    expect(await prisma.mediaItem.count({ where: { id: contributed.item.id, addedById: alpha } })).toBe(1);
-    expect(await prisma.album.count({ where: { id: sharedAlbum.id } })).toBe(1);
+    expect(await seed.mediaItem.count({ where: { id: contributed.item.id, addedById: alpha } })).toBe(1);
+    expect(await seed.album.count({ where: { id: sharedAlbum.id } })).toBe(1);
     expect(allDeleted()).not.toContain(contributed.original.storageKey);
-    expect(await prisma.storageObject.count({ where: { id: contributed.original.id } })).toBe(1);
+    expect(await seed.storageObject.count({ where: { id: contributed.original.id } })).toBe(1);
   });
 
   it('the removal hook refuses while the user owns a shared circle with other members, changing nothing', async () => {
@@ -271,8 +283,8 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
 
     await expect(service.prepareUserRemoval(alpha)).rejects.toBeInstanceOf(SharedCircleOwnershipError);
     await expect(service.prepareUserRemoval(alpha)).rejects.toThrow(/Transfer ownership/);
-    expect(await prisma.group.count({ where: { id: owned } })).toBe(1);
-    expect(await prisma.mediaItem.count({ where: { id: kept.item.id } })).toBe(1);
+    expect(await seed.group.count({ where: { id: owned } })).toBe(1);
+    expect(await seed.mediaItem.count({ where: { id: kept.item.id } })).toBe(1);
   });
 
   it('the removal hook deletes the user\'s own circles, reassigns shared content, and the user row can go', async () => {
@@ -284,25 +296,25 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     const mine = await photo(personal, alpha);
     await photo(solo, alpha);
     const contributed = await photo(shared, alpha);
-    const album = await prisma.album.create({ data: { circleId: shared, addedById: alpha, name: 'Album Gamma' } });
-    const tag = await prisma.tag.create({ data: { circleId: shared, addedById: alpha, name: 'tag-gamma' } });
-    const person = await prisma.person.create({ data: { circleId: shared, addedById: alpha, name: 'Person D' } });
+    const album = await seed.album.create({ data: { circleId: shared, addedById: alpha, name: 'Album Gamma' } });
+    const tag = await seed.tag.create({ data: { circleId: shared, addedById: alpha, name: 'tag-gamma' } });
+    const person = await seed.person.create({ data: { circleId: shared, addedById: alpha, name: 'Person D' } });
 
     const counts = await service.prepareUserRemoval(alpha);
     expect(counts.circlesDeleted).toBe(2);
     expect(counts.mediaReassigned).toBe(1);
 
     expect(await prisma.personalLibrary.count({ where: { id: personal } })).toBe(0);
-    expect(await prisma.group.count({ where: { id: solo } })).toBe(0);
+    expect(await seed.group.count({ where: { id: solo } })).toBe(0);
     expect(allDeleted()).toContain(mine.original.storageKey);
-    expect((await prisma.mediaItem.findUnique({ where: { id: contributed.item.id } }))?.addedById).toBe(beta);
-    expect((await prisma.album.findUnique({ where: { id: album.id } }))?.addedById).toBe(beta);
-    expect((await prisma.tag.findUnique({ where: { id: tag.id } }))?.addedById).toBe(beta);
-    expect((await prisma.person.findUnique({ where: { id: person.id } }))?.addedById).toBe(beta);
+    expect((await seed.mediaItem.findUnique({ where: { id: contributed.item.id } }))?.addedById).toBe(beta);
+    expect((await seed.album.findUnique({ where: { id: album.id } }))?.addedById).toBe(beta);
+    expect((await seed.tag.findUnique({ where: { id: tag.id } }))?.addedById).toBe(beta);
+    expect((await seed.person.findUnique({ where: { id: person.id } }))?.addedById).toBe(beta);
 
     // No Restrict key names the user any more: the row deletes without a foreign-key error.
     await expect(prisma.user.delete({ where: { id: alpha } })).resolves.toBeDefined();
-    expect(await prisma.mediaItem.count({ where: { id: contributed.item.id } })).toBe(1);
+    expect(await seed.mediaItem.count({ where: { id: contributed.item.id } })).toBe(1);
   });
 
   it('a factory reset deletes every domain row and file but the kept list, and leaves the actor a personal circle', async () => {
@@ -313,7 +325,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     const shared = await circle(other, false, [actor]);
     const otherPhoto = await photo(otherPersonal, other, 'r2', 'bucket-r2');
     const actorPhoto = await photo(shared, actor);
-    await prisma.album.create({ data: { circleId: shared, addedById: other, name: 'Album Delta' } });
+    await seed.album.create({ data: { circleId: shared, addedById: other, name: 'Album Delta' } });
     await prisma.tagLabel.create({ data: { name: `label-${randomUUID()}` } });
     const backupObject = await object(actor, `database-backups/memoriahub/2026/11/${randomUUID()}.dump`);
     const labelsBefore = await prisma.tagLabel.count();
@@ -326,21 +338,21 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     await handler.process(job as never);
 
     expect(await prisma.user.count()).toBe(1);
-    expect(await prisma.mediaItem.count()).toBe(0);
-    expect(await prisma.album.count()).toBe(0);
-    expect(await prisma.tag.count()).toBe(0);
-    expect(await prisma.person.count()).toBe(0);
-    expect(await prisma.face.count()).toBe(0);
+    expect(await seed.mediaItem.count()).toBe(0);
+    expect(await seed.album.count()).toBe(0);
+    expect(await seed.tag.count()).toBe(0);
+    expect(await seed.person.count()).toBe(0);
+    expect(await seed.face.count()).toBe(0);
     expect(await prisma.mediaSyncDevice.count({ where: { id: sharedDevice.id } })).toBe(0);
     // The first-run state: exactly the actor's own personal library (the other users' left with them,
     // and so did the group they were the last members of).
     const libraries = await prisma.personalLibrary.findMany({ select: { userId: true } });
     expect(libraries).toEqual([{ userId: actor }]);
-    expect(await prisma.group.count()).toBe(0);
+    expect(await seed.group.count()).toBe(0);
     // Kept: configuration (the tag vocabulary) and backups (their files are never swept).
     expect(await prisma.tagLabel.count()).toBe(labelsBefore);
-    expect(await prisma.storageObject.count({ where: { id: backupObject.id } })).toBe(1);
-    expect(await prisma.storageObject.count({ where: { NOT: { storageKey: { startsWith: 'database-backups/' } } } })).toBe(0);
+    expect(await seed.storageObject.count({ where: { id: backupObject.id } })).toBe(1);
+    expect(await seed.storageObject.count({ where: { NOT: { storageKey: { startsWith: 'database-backups/' } } } })).toBe(0);
     expect(allDeleted()).not.toContain(backupObject.storageKey);
     // Files went through the provider recorded on each row.
     // (Earlier cases leave shared-circle content behind, which the reset sweeps too.)

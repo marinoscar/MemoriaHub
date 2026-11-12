@@ -28,6 +28,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { mediaItemJob } from '../helpers/platform-job';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -36,6 +37,8 @@ const HASH = '12297829382473034410';
 
 describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
+  let service: never;
   let orgId: string;
   let userId: string;
   const circles: string[] = [];
@@ -59,6 +62,8 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
+    service = (await rlsBypassPrisma()) as never;
     const org = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
     if (org.length === 0) throw new Error('no organization row: run the migrations first');
     orgId = org[0]!.id;
@@ -71,31 +76,36 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
         version: 1,
       }),
     };
+    // The domain services read `media_items` and the review groups on the client they are given, with no
+    // organization of their own (the app-reads row of docs/platform-adoption/local-exceptions.md): under
+    // the ordinary role they get a connection with the explicit `app.rls_bypass` option
+    // (`rlsBypassPrisma`). Seeding and assertions still go through the org-scoped `seed` client.
     const dedupService = new DuplicateDetectionService(
-      prisma,
+      service,
       noDownload as never,
       settings as never,
       degradedClip as never,
     );
     const burstService = new BurstDetectionService(
-      prisma as never,
+      service,
       noDownload as never,
       settings as never,
       dedupService,
     );
-    dedupHandler = new DuplicateDetectionHandler(registry as never, prisma, dedupService);
-    burstHandler = new BurstDetectionHandler(registry as never, prisma, burstService);
+    dedupHandler = new DuplicateDetectionHandler(registry as never, service, dedupService);
+    burstHandler = new BurstDetectionHandler(registry as never, service, burstService);
   });
 
   afterAll(async () => {
     for (const circleId of circles) {
-      await prisma.mediaItem.deleteMany({ where: { circleId } });
-      await prisma.burstGroup.deleteMany({ where: { circleId } });
-      await prisma.duplicateGroup.deleteMany({ where: { circleId } });
+      await seed.mediaItem.deleteMany({ where: { circleId } });
+      await seed.burstGroup.deleteMany({ where: { circleId } });
+      await seed.duplicateGroup.deleteMany({ where: { circleId } });
       await dropLibraries(prisma, [circleId]);
     }
-    if (objects.length > 0) await prisma.storageObject.deleteMany({ where: { id: { in: objects } } });
+    if (objects.length > 0) await seed.storageObject.deleteMany({ where: { id: { in: objects } } });
     if (userId) await prisma.user.delete({ where: { id: userId } });
+    await (service as unknown as PrismaService).$disconnect();
     await prisma.$disconnect();
   });
 
@@ -107,11 +117,11 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
     const ids: string[] = [];
     for (const offsetMs of [0, 2_000]) {
       const objectId = randomUUID();
-      await prisma.$executeRaw`
+      await seed.$executeRaw`
         INSERT INTO storage_objects (id, org_id, name, size, mime_type, storage_key, storage_provider, status, updated_at)
         VALUES (${objectId}::uuid, ${orgId}::uuid, 'photo.jpg', 1024, 'image/jpeg', ${`uploads/${objectId}.jpg`}, 's3', 'ready', now())`;
       objects.push(objectId);
-      const item = await prisma.mediaItem.create({
+      const item = await seed.mediaItem.create({
         data: {
           storageObjectId: objectId,
           circleId: circle.id,
@@ -132,7 +142,7 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
   }
 
   async function memberships(ids: string[]) {
-    return prisma.mediaItem.findMany({
+    return seed.mediaItem.findMany({
       where: { id: { in: ids } },
       select: { id: true, burstGroupId: true, duplicateGroupId: true },
       orderBy: { capturedAt: 'asc' },
@@ -176,6 +186,6 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
     const after = await memberships([a, b]);
     expect(after.every((m) => m.burstGroupId !== null)).toBe(true);
     expect(after.map((m) => m.duplicateGroupId)).toEqual([null, null]);
-    await expect(prisma.duplicateGroup.count({ where: { circleId } })).resolves.toBe(0);
+    await expect(seed.duplicateGroup.count({ where: { circleId } })).resolves.toBe(0);
   });
 });

@@ -51,6 +51,7 @@ import {
   type MediaSyncNetworkPolicy,
   type MediaSyncUploadExisting,
 } from '../../../services/mediaSync';
+import type { MediaSyncErrorReason } from '@marinoscar/memoriahub-contract/errors';
 import { formatBytes } from '../../../utils/formatBytes';
 import { useIsMounted } from '../../../hooks/useIsMounted';
 
@@ -211,7 +212,7 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
     } catch (err) {
       if (!isMounted()) return;
       const reason = mediaSyncErrorReason(err);
-      if (reason === 'UNKNOWN_FOLDER') {
+      if (reason === ('UNKNOWN_FOLDER' satisfies MediaSyncErrorReason)) {
         const ids = unknownFolderIds(err);
         const names = ids.map(
           (id) => device.config.folders.find((f) => f.bucketId === id)?.name ?? id,
@@ -219,7 +220,7 @@ export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: Me
         setFolderError(
           `The phone no longer reports ${names.length === 1 ? 'this folder' : 'these folders'}: ${names.join(', ')}. Unselect ${names.length === 1 ? 'it' : 'them'} and save again.`,
         );
-      } else if (reason === 'TARGET_CIRCLE_FORBIDDEN') {
+      } else if (reason === ('TARGET_CIRCLE_FORBIDDEN' satisfies MediaSyncErrorReason)) {
         setCircleError('You can only sync into a circle where you are a collaborator or admin.');
       } else {
         setError(mediaSyncErrorMessage(err, 'Failed to save the sync settings'));

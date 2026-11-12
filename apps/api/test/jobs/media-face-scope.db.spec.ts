@@ -22,17 +22,20 @@ import { jobWriteScope } from '../../src/platform/jobs/media-item-job';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { mediaItemJob } from '../helpers/platform-job';
+import { seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
 describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
+  let seed: SeedClient;
   let orgId: string;
   const created: string[] = [];
 
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
+    seed = await seedClient(prisma);
     const org = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
     if (org.length === 0) throw new Error('no organization row: run the migrations first');
     orgId = org[0]!.id;
@@ -50,7 +53,7 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
 
   async function originalObject(): Promise<string> {
     const id = randomUUID();
-    await prisma.$executeRaw`
+    await seed.$executeRaw`
       INSERT INTO storage_objects (id, org_id, name, size, mime_type, storage_key, storage_provider, status, metadata, updated_at)
       VALUES (${id}::uuid, ${orgId}::uuid, 'photo.jpg', 1024, 'image/jpeg', ${`uploads/${id}.jpg`}, 's3', 'ready',
               '{"_processing":{"exif":{"width":10}}}'::jsonb, now())`;
@@ -103,9 +106,9 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     );
 
     expect(seenOrg).toBe(orgId);
-    const thumb = await prisma.storageObject.findUnique({ where: { storageKey } });
+    const thumb = await seed.storageObject.findUnique({ where: { storageKey } });
     expect(thumb).toMatchObject({ orgId, status: 'ready', mimeType: 'image/jpeg' });
-    const original = await prisma.storageObject.findUnique({ where: { id: objectId } });
+    const original = await seed.storageObject.findUnique({ where: { id: objectId } });
     const meta = original!.metadata as { _processing: Record<string, unknown> };
     // The merge kept the existing entry and added the thumbnail.
     expect(meta._processing['exif']).toEqual({ width: 10 });
@@ -132,6 +135,6 @@ describeMaybeDb('thumbnail persist under JobScope (DB_GATED: real PostgreSQL)', 
     );
     expect(seenOrg).toBe(orgId);
 
-    await expect(prisma.storageObject.findUnique({ where: { storageKey } })).resolves.toMatchObject({ orgId });
+    await expect(seed.storageObject.findUnique({ where: { storageKey } })).resolves.toMatchObject({ orgId });
   });
 });
