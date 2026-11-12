@@ -24,13 +24,14 @@ import { buildOwnerAccessService } from '../helpers/owner-access';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
-import { seedClient, type SeedClient } from '../helpers/org-scope';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
 describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
   let seed: SeedClient;
+  let service: never;
   let userId: string;
   let otherId: string;
   let circleId: string;
@@ -45,16 +46,17 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
           : token === DefaultOrgId
             ? { get: async () => randomUUID() }
             : token === OwnerAccessService
-              ? buildOwnerAccessService(seed as never)
+              ? buildOwnerAccessService(service)
               : token === OwnerScopeSweepService
-                ? sqlScopeDirectory(seed as never)
-                : seed,
+                ? sqlScopeDirectory(service)
+                : service,
     }) as unknown as OnboardingRequestContext;
 
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.$connect();
     seed = await seedClient(prisma);
+    service = (await rlsBypassPrisma()) as never;
     const stamp = Date.now();
     userId = (await prisma.user.create({ data: { email: `onboarding-a-${stamp}@example.test` } })).id;
     otherId = (await prisma.user.create({ data: { email: `onboarding-b-${stamp}@example.test` } })).id;
@@ -68,6 +70,7 @@ describeMaybeDb('onboarding facts (DB_GATED: real PostgreSQL)', () => {
     await seed.album.deleteMany({ where: { circleId } });
     await dropLibraries(prisma, [circleId]);
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherId] } } });
+    await (service as unknown as PrismaService).$disconnect();
     await prisma.$disconnect();
   });
 

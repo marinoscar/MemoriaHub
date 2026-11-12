@@ -44,7 +44,7 @@ import { newLibrary } from '../helpers/library';
 import { PersonalLibraryStore } from '../../src/platform/sharing/personal-library.store';
 import { sqlScopeDirectory } from '../helpers/scope-directory';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
-import { seedClient, type SeedClient } from '../helpers/org-scope';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -71,6 +71,7 @@ const allDeleted = () => [...deletedKeys.values()].flat();
 describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
   let seed: SeedClient;
+  let bypass: PrismaService;
   let service: MemoriaHubUserDataService;
   let orgId: string;
   const enqueued: { type: string; payload: Record<string, unknown> }[] = [];
@@ -135,6 +136,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     prisma = new PrismaService();
     await prisma.$connect();
     seed = await seedClient(prisma);
+    bypass = await rlsBypassPrisma();
     const org = await prisma.organization.findFirst({ where: { isDefault: true }, select: { id: true } });
     orgId = org!.id;
 
@@ -145,22 +147,22 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
     };
     // The grants of a purged item go with its row (the access port of the app, minus its scope data).
     const access = { deleteGrantsFor: (tx: unknown, type: 'media_item' | 'album', ids: readonly string[]) => deleteGrantsForResources(tx, type, ids) };
-    Object.assign(media, { prisma: forSystem(prisma, 'purge' as never), objectStore, access, logger: new Logger('MediaService') });
+    Object.assign(media, { prisma: bypass, objectStore, access, logger: new Logger('MediaService') });
     // The system client over the app's client (PrismaSystemService.asSystem in the app).
     const system = { asSystem: (reason: string) => forSystem(prisma, reason as never) };
-    // The purge and the removal hook read and delete rows of every organization table, on the client they
+    // The purge and the removal hook read and delete rows of every organization table on the client they
     // are given, with no organization of their own (the app-reads row of docs/platform-adoption/
-    // local-exceptions.md). Under the ordinary role the spec hands them the platform's system client, the
-    // same `asSystem('purge')` bypass the service already uses for `storage_objects`: an explicit, reasoned
-    // bypass, never a superuser connection.
-    const purgeClient = forSystem(prisma, 'purge' as never) as unknown as PrismaService;
+    // local-exceptions.md): under the ordinary role they get a connection with the explicit
+    // `app.rls_bypass` option (`rlsBypassPrisma`), never a superuser connection. Seeding and assertions
+    // below still go through the org-scoped `seed` client.
+    const purgeClient = bypass;
     service = new MemoriaHubUserDataService(
       purgeClient,
       media,
       resolver as never,
       system as never,
-      sqlScopeDirectory(prisma) as never,
-      new PersonalLibraryStore(prisma),
+      sqlScopeDirectory(bypass) as never,
+      new PersonalLibraryStore(bypass),
     );
     bindMemoriaHubFactoryResetDeps({ service });
   });
@@ -172,6 +174,7 @@ describeMaybeDb('user-data purge, removal hook and factory reset (DB_GATED: real
 
   afterAll(async () => {
     jest.restoreAllMocks();
+    await bypass.$disconnect();
     await prisma.$disconnect();
   });
 

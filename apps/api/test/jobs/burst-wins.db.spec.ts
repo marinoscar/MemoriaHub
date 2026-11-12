@@ -28,7 +28,7 @@ import { PrismaService } from '../../src/prisma/prisma.service';
 import { dropLibraries, newLibrary } from '../helpers/library';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { mediaItemJob } from '../helpers/platform-job';
-import { seedClient, type SeedClient } from '../helpers/org-scope';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -38,6 +38,7 @@ const HASH = '12297829382473034410';
 describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)', () => {
   let prisma: PrismaService;
   let seed: SeedClient;
+  let service: never;
   let orgId: string;
   let userId: string;
   const circles: string[] = [];
@@ -62,6 +63,7 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
     prisma = new PrismaService();
     await prisma.$connect();
     seed = await seedClient(prisma);
+    service = (await rlsBypassPrisma()) as never;
     const org = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
     if (org.length === 0) throw new Error('no organization row: run the migrations first');
     orgId = org[0]!.id;
@@ -75,23 +77,23 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
       }),
     };
     // The domain services read `media_items` and the review groups on the client they are given, with no
-    // organization of their own (the "MemoriaHub's own reads" row of docs/platform-adoption/local-exceptions.md):
-    // under the ordinary role they are handed the default organization's scoped client, exactly the
-    // `forOrg(defaultOrgId)` the planned app-read scoping uses. In production a job runs under JobScope.
+    // organization of their own (the app-reads row of docs/platform-adoption/local-exceptions.md): under
+    // the ordinary role they get a connection with the explicit `app.rls_bypass` option
+    // (`rlsBypassPrisma`). Seeding and assertions still go through the org-scoped `seed` client.
     const dedupService = new DuplicateDetectionService(
-      seed as never,
+      service,
       noDownload as never,
       settings as never,
       degradedClip as never,
     );
     const burstService = new BurstDetectionService(
-      seed as never,
+      service,
       noDownload as never,
       settings as never,
       dedupService,
     );
-    dedupHandler = new DuplicateDetectionHandler(registry as never, seed as never, dedupService);
-    burstHandler = new BurstDetectionHandler(registry as never, seed as never, burstService);
+    dedupHandler = new DuplicateDetectionHandler(registry as never, service, dedupService);
+    burstHandler = new BurstDetectionHandler(registry as never, service, burstService);
   });
 
   afterAll(async () => {
@@ -103,6 +105,7 @@ describeMaybeDb('burst wins over duplicate detection (DB_GATED: real PostgreSQL)
     }
     if (objects.length > 0) await seed.storageObject.deleteMany({ where: { id: { in: objects } } });
     if (userId) await prisma.user.delete({ where: { id: userId } });
+    await (service as unknown as PrismaService).$disconnect();
     await prisma.$disconnect();
   });
 

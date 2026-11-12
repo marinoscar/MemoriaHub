@@ -27,7 +27,7 @@ import { MediaTouchService } from '@marinoscar/memoriahub-api/media';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { isDatabaseReachable } from '../helpers/db-probe.helper';
 import { dropLibraries, newLibrary } from '../helpers/library';
-import { seedClient, type SeedClient } from '../helpers/org-scope';
+import { rlsBypassPrisma, seedClient, type SeedClient } from '../helpers/org-scope';
 
 const describeMaybeDb = isDatabaseReachable() ? describe : describe.skip;
 
@@ -38,6 +38,7 @@ const configFor = (backend: 'app' | 'pgvector'): FaceConfigReader => ({
 describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector)', () => {
   let prisma: PrismaService;
   let seed: SeedClient;
+  let service: never;
   let orgId: string;
   let userId: string;
   const libraries: string[] = [];
@@ -47,6 +48,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
     prisma = new PrismaService();
     await prisma.$connect();
     seed = await seedClient(prisma);
+    service = (await rlsBypassPrisma()) as never;
     const org = await prisma.$queryRaw<Array<{ id: string }>>`SELECT id::text AS id FROM organizations ORDER BY is_default DESC LIMIT 1`;
     if (org.length === 0) throw new Error('no organization row: run the migrations first');
     orgId = org[0]!.id;
@@ -61,6 +63,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
     }
     if (objects.length > 0) await seed.storageObject.deleteMany({ where: { id: { in: objects } } });
     if (userId) await prisma.user.delete({ where: { id: userId } });
+    await (service as unknown as PrismaService).$disconnect();
     await prisma.$disconnect();
   });
 
@@ -90,21 +93,21 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
   async function faceSliceOverTheWebHost() {
     const { circleId, mediaItemId } = await seedLibrary();
     const keys = new Map<string, string>();
-    const matching = (backend: 'app' | 'pgvector') => new FaceMatchingService(seed as never, configFor(backend));
+    const matching = (backend: 'app' | 'pgvector') => new FaceMatchingService(service, configFor(backend));
     const appMatching = matching('app');
     const core = new FaceDetectionCore(
-      seed as never,
+      service,
       { resolveCredentials: async () => ({}) } as never,
       { get: () => ({ detect: async () => [] }) } as never,
       appMatching,
       { getSettings: async () => ({ features: {}, face: {} }), face: async () => undefined } as never,
     );
     const detection = new FaceDetectionService(
-      seed as never,
+      service,
       {} as never,
       { recordModel: async () => undefined } as never,
       core,
-      new MediaTouchService(seed as never),
+      new MediaTouchService(service),
     );
 
     const addFace = async (key: string, data: Record<string, unknown>): Promise<string> => {
@@ -137,7 +140,7 @@ describeMaybeDb('face slice conformance (DB_GATED: real PostgreSQL with pgvector
         },
       },
       clustering: {
-        service: new FaceClusteringService(seed as never, appMatching),
+        service: new FaceClusteringService(service, appMatching),
         circleId,
         userId,
         seedFaces: async (faces: ReadonlyArray<{ key: string; embedding: number[]; hidden: boolean }>) => {

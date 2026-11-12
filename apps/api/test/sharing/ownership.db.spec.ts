@@ -25,7 +25,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
 
 import {
@@ -95,6 +95,12 @@ describeMaybeDb('RETRO-I2 circles to groups and content ownership (DB_GATED: rea
   let migration: string;
   let defaultOrg: string;
 
+  /** One interactive transaction in the default organization's scope, the way `runInOrg` hands code its `tx`. */
+  const inOrg = <R>(fn: (tx: Prisma.TransactionClient) => Promise<R>): Promise<R> =>
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.org_id', ${defaultOrg}, true)`;
+      return fn(tx);
+    });
   const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await orgScoped(db).query(sql, params)).rows;
   const one = async (sql: string, params: unknown[] = []): Promise<Row> => (await q(sql, params))[0];
   const circleByName = async (name: string): Promise<Row> => one(`SELECT * FROM circles WHERE name = $1`, [name]);
@@ -379,26 +385,26 @@ describeMaybeDb('RETRO-I2 circles to groups and content ownership (DB_GATED: rea
       const mine = await q(`SELECT id FROM media_items WHERE circle_id = $1 ORDER BY id LIMIT 2`, [personal.id]);
       await q(`UPDATE media_items SET deleted_at = now() WHERE id = $1`, [mine[1].id]);
 
-      const owners = await prisma.$transaction((tx) => MEDIA_ITEM_RESOURCE_TYPE.loadOwners([shared.id, mine[0].id, mine[1].id], tx));
+      const owners = await inOrg((tx) => MEDIA_ITEM_RESOURCE_TYPE.loadOwners([shared.id, mine[0].id, mine[1].id], tx));
       expect(owners.get(shared.id)).toEqual({ orgId: defaultOrg, owner: { kind: 'group', groupId: alpha.id } });
       expect(owners.get(mine[0].id)).toEqual({ orgId: defaultOrg, owner: { kind: 'user', userId: a.id } });
       expect(owners.has(mine[1].id)).toBe(false);
 
       const album = await one(`SELECT id FROM albums WHERE circle_id = $1`, [alpha.id]);
-      const albumOwners = await prisma.$transaction((tx) => ALBUM_RESOURCE_TYPE.loadOwners([album.id], tx));
+      const albumOwners = await inOrg((tx) => ALBUM_RESOURCE_TYPE.loadOwners([album.id], tx));
       expect(albumOwners.get(album.id)).toEqual({ orgId: defaultOrg, owner: { kind: 'group', groupId: alpha.id } });
     });
 
     it('every group-owned type counts the group\'s rows', async () => {
       const gamma = await circleByName('Circle Gamma');
       const counts: Record<string, number> = {};
-      await prisma.$transaction(async (tx) => {
+      await inOrg(async (tx) => {
         for (const entry of MEMORIAHUB_GROUP_OWNED_RESOURCES) counts[entry.type] = await entry.count(tx, gamma.id);
         counts.media_item = await MEDIA_ITEM_RESOURCE_TYPE.countOwnedByGroup!(gamma.id, tx);
         counts.album = await ALBUM_RESOURCE_TYPE.countOwnedByGroup!(gamma.id, tx);
       });
       for (const [type, n] of Object.entries(counts)) expect([type, n > 0]).toEqual([type, true]);
-      const none = await prisma.$transaction((tx) => MEDIA_ITEM_RESOURCE_TYPE.countOwnedByGroup!(randomUUID(), tx));
+      const none = await inOrg((tx) => MEDIA_ITEM_RESOURCE_TYPE.countOwnedByGroup!(randomUUID(), tx));
       expect(none).toBe(0);
     });
   });

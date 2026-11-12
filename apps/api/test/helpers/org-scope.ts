@@ -19,7 +19,7 @@ import {
 } from '../../src/app-registrations/system-access-reasons';
 
 export interface OrgScopeOptions {
-  /** The organization; defaults to the default organization (`mh_default_org_id()`). */
+  /** The organization; defaults to the default organization (the default organization). */
   orgId?: string;
   /** Explicit, documented bypass for a spec that reads or writes every organization. */
   bypass?: boolean;
@@ -32,7 +32,24 @@ export interface ScopedQueryable {
 async function scopeStatement(client: Pick<Client, 'query'>, options: OrgScopeOptions): Promise<void> {
   if (options.bypass) await client.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
   else if (options.orgId) await client.query(`SELECT set_config('app.org_id', $1, true)`, [options.orgId]);
-  else await client.query(`SELECT set_config('app.org_id', mh_default_org_id()::text, true)`);
+  else await client.query(`SELECT set_config('app.org_id', $1, true)`, [await defaultOrgOf(client)]);
+}
+
+const defaultOrgs = new WeakMap<object, string>();
+
+/**
+ * The default organization's id, or '' while the schema predates `organizations` (a migration-replay spec
+ * applies the history step by step). `organizations` carries no row-level security, so this read needs no scope.
+ */
+async function defaultOrgOf(client: Pick<Client, 'query'>): Promise<string> {
+  const cached = defaultOrgs.get(client);
+  if (cached) return cached;
+  const has = await client.query(`SELECT to_regclass('public.organizations') IS NOT NULL AS ok`);
+  if (!has.rows[0]?.ok) return '';
+  const row = await client.query(`SELECT id::text AS id FROM organizations WHERE is_default LIMIT 1`);
+  const id = (row.rows[0]?.id as string | undefined) ?? '';
+  if (id) defaultOrgs.set(client, id);
+  return id;
 }
 
 /** Runs `fn` in one transaction whose first statement opens the scope. */
@@ -103,4 +120,33 @@ export async function seedClient(prisma: import('../../src/prisma/prisma.service
 export function housekeepingClient(prisma: import('../../src/prisma/prisma.service').PrismaService): never {
   registerMemoriaHubSystemAccessReasons();
   return forSystem(prisma as never, MEDIA_HOUSEKEEPING_REASON as never) as never;
+}
+
+/**
+ * A `PrismaService` whose CONNECTION carries `app.rls_bypass = on` (the `options` startup parameter), for
+ * the code under test that is MemoriaHub's own domain services.
+ *
+ * Those services read the organization tables on the plain client with no organization of their own and
+ * keep using `this.prisma` inside `$transaction(async tx => ...)`, which a `forOrg` client refuses
+ * (`ScopedAccessError`) and which returns 0 rows on the plain one under row-level security: the "API
+ * connects as the bootstrap superuser" row of docs/platform-adoption/local-exceptions.md. The app-read
+ * scoping release that row waits for removes the need; until then a spec of that code takes the bypass
+ * EXPLICITLY, on a connection of its own, as the same ordinary role (never a superuser) and the same
+ * `PGOPTIONS=-c app.rls_bypass=on` the platform backup engine uses. The seeding and the assertions of the
+ * spec still run through the org-scoped client, so only the code under test is unscoped.
+ */
+export async function rlsBypassPrisma(): Promise<import('../../src/prisma/prisma.service').PrismaService> {
+  const { PrismaService } = await import('../../src/prisma/prisma.service');
+  const { buildBaseDatabaseUrl } = await import('../../src/config/database-url.util');
+  const previous = process.env.DATABASE_URL;
+  const base = buildBaseDatabaseUrl();
+  process.env.DATABASE_URL = `${base}${base.includes('?') ? '&' : '?'}options=${encodeURIComponent('-c app.rls_bypass=on')}`;
+  try {
+    const client = new PrismaService();
+    await client.$connect();
+    return client;
+  } finally {
+    if (previous === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous;
+  }
 }

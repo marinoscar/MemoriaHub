@@ -1,4 +1,11 @@
-import type { GROUPED_FILTERS, LocationGroupLevelValue } from '@marinoscar/memoriahub-contract/location';
+import type { z } from 'zod';
+import type {
+  CreateLocationGroupSchema,
+  GROUPED_FILTERS,
+  LocationGroupLevelValue,
+  MergeLocationGroupsSchema,
+  UpdateLocationGroupSchema,
+} from '@marinoscar/memoriahub-contract/location';
 import { LOCATION_GROUP_LEVELS } from '@marinoscar/memoriahub-contract/location';
 import { api, ApiError } from './api';
 
@@ -105,26 +112,11 @@ export interface LocationGroupSuggestionListResponse {
   meta: { total: number; limit: number };
 }
 
-export interface CreateLocationGroupBody {
-  level: LocationGroupLevel;
-  canonicalName: string;
-  countryCode?: string;
-  memberValues?: string[];
-  coverMediaItemId?: string | null;
-  center?: { lat: number; lng: number } | null;
-  radiusKm?: number | null;
-  enabled?: boolean;
-  notes?: string | null;
-}
+/** `POST /api/location-groups` body: the request side of the contract's `CreateLocationGroupSchema`. */
+export type CreateLocationGroupBody = z.input<typeof CreateLocationGroupSchema>;
 
-export interface UpdateLocationGroupBody {
-  canonicalName?: string;
-  enabled?: boolean;
-  coverMediaItemId?: string | null;
-  center?: { lat: number; lng: number } | null;
-  radiusKm?: number | null;
-  notes?: string | null;
-}
+/** `PATCH /api/location-groups/:id` body: the request side of the contract's `UpdateLocationGroupSchema`. */
+export type UpdateLocationGroupBody = z.input<typeof UpdateLocationGroupSchema>;
 
 export interface RebuildLocationGroupsResult {
   jobId: string;
@@ -268,13 +260,7 @@ export async function listLocationGroupSuggestions(params: {
  * with a 400 — so a caller adding to an existing group should simply omit it
  * and let the group's own scope govern.
  */
-export interface MergeLocationGroupsBody {
-  level: LocationGroupLevel;
-  countryCode?: string;
-  values: string[];
-  targetGroupId?: string;
-  canonicalName?: string;
-}
+export type MergeLocationGroupsBody = z.input<typeof MergeLocationGroupsSchema>;
 
 export interface MergeLocationGroupsResult {
   groupId: string;
