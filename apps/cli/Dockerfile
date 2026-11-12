@@ -82,12 +82,12 @@ FROM base AS deps
 # Build toolchain for native modules that may fall back to source compilation
 # (better-sqlite3 via node-gyp when no prebuild matches the target arch). Kept
 # in this stage only so the final image stays lean.
-# pkg-config + glib/expat headers (the distro libvips-dev is deliberately NOT installed, its 8.16 headers must not shadow /opt/vips): build-only deps for sharp's from-source addon build
+# pkg-config + the dev headers libvips.pc requires (the distro libvips-dev is deliberately NOT installed: its 8.16 headers must not shadow /opt/vips): build-only deps for sharp's from-source addon build
 # against the global HEIF-enabled libvips (see SHARP_FORCE_GLOBAL_LIBVIPS below).
 # sharp locates libvips via `pkg-config --modversion vips-cpp`; libheif-dev is not
 # needed here (libvips dlopens libheif internally).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev \
+      python3 make g++ pkg-config libglib2.0-dev libexpat1-dev libjpeg-dev libpng-dev libwebp-dev libtiff-dev libheif-dev libexif-dev liblcms2-dev librsvg2-dev liborc-0.4-dev libcgif-dev libspng-dev libimagequant-dev libfftw3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Force sharp to build its native addon FROM SOURCE against the global
