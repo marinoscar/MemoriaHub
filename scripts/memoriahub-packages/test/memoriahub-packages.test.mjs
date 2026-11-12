@@ -684,3 +684,20 @@ test('the release workflow cannot publish by default (manual only, dry run first
     assert.equal(manifest.private, true, `memoriahub-${dir} stays private until the owner opens the publish gate`);
   }
 });
+
+test('the version workflow opens nothing by default (manual only, dry run first, no secret)', () => {
+  const text = readFileSync(join(REPO, '.github', 'workflows', 'memoriahub-version.yml'), 'utf8');
+  const code = text.replace(/^\s*#.*$/gm, '');
+  const triggers = code.slice(code.indexOf('\non:'), code.indexOf('\nconcurrency:'));
+  assert.match(triggers, /workflow_dispatch:/);
+  for (const trigger of ['push:', 'pull_request', 'schedule:', 'release:', 'workflow_run:', 'tags:']) {
+    assert.ok(!triggers.includes(trigger), `the version workflow must not trigger on ${trigger}`);
+  }
+  // open_pr defaults to false and a pull request needs it and the confirmation word.
+  assert.match(triggers, /open_pr:[\s\S]*?default: false/);
+  assert.match(code, /inputs\.open_pr == true && inputs\.confirm == 'version'/);
+  assert.match(code, /if: \$\{\{ env\.OPEN_PR == 'true' \}\}/);
+  // It never publishes and defines no repository secret (the workflow's own token only).
+  assert.ok(!/npm publish/.test(code));
+  assert.deepEqual([...code.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((m) => m[1]), []);
+});

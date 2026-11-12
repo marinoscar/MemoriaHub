@@ -8,7 +8,10 @@ import {
   type MemoriahubAiPort,
   type MemoriahubSettingsPort,
 } from '../ports/index.js';
-import { assertEmbeddingDimensions, TAGGING_AI_FEATURES } from '../tagging/index.js';
+// The two files, not the tagging barrel: the barrel loads the vocabulary CSV code and so would make the
+// search slice need `csv-parse` and `csv-stringify`, which its declared peers do not list.
+import { assertEmbeddingDimensions } from '../tagging/ai-calls.js';
+import { TAGGING_AI_FEATURES } from '../tagging/constants.js';
 import type { SearchDb } from './data/search-db.js';
 
 /**

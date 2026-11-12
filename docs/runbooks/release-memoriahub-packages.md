@@ -9,7 +9,7 @@ The owner has not yet chosen where MemoriaHub's own domain code is published (pu
 - every `@marinoscar/memoriahub-*` package has `"private": true` and `"license": "UNLICENSED"`, with `publishConfig`, `repository.directory`, `files` and `engines` ready;
 - no package name is claimed on any registry, and nothing has ever been published;
 - the repository defines no registry secret or variable (`MEMORIAHUB_REGISTRY_TOKEN` is the name the workflow expects; it does not exist);
-- no workflow runs on a push, a tag or a schedule to release anything: the release workflow is `workflow_dispatch` only;
+- no workflow runs on a push, a tag or a schedule to release or version anything: the release workflow and the version workflow (`memoriahub-version.yml`) are `workflow_dispatch` only;
 - versioning, `npm pack`, `check:memoriahub-pack`, `check:memoriahub-lean-install` and `check:memoriahub-bare-host` all work for a private package, so the packages are proven installable without being published.
 
 ## What the release workflow does
@@ -26,7 +26,7 @@ A script test (`npm run test:memoriahub-scripts`) fails if the workflow gains a 
 The packages are one Changesets `fixed` group in **pre mode** on the `next` tag, so they always share one version and every release is `0.1.0-next.N` on the `next` dist-tag.
 
 1. A pull request that changes a package carries a changeset (`npx changeset`); `memoriahub-packages.yml` fails it otherwise.
-2. A maintainer runs `npm run version-packages` in a pull request (`changeset version` and a lockfile refresh): versions, a `CHANGELOG.md` per package, `.changeset/pre.json` listing the consumed changesets. Review that all versions are equal and the lockfile diff is limited to workspace entries. No workflow opens this pull request.
+2. A maintainer runs `npm run version-packages` in a pull request (`changeset version` and a lockfile refresh): versions, a `CHANGELOG.md` per package, `.changeset/pre.json` listing the consumed changesets. Review that all versions are equal and the lockfile diff is limited to workspace entries. The only workflow that can open this pull request is `memoriahub-version.yml`, run by hand: by default it is a dry run that uploads the diff as an artifact and pushes nothing; it opens the pull request only when dispatched with `open_pr` = `true` and `confirm` = `version`, using the workflow's own `GITHUB_TOKEN` (no secret). It never publishes.
 3. After it merges, dispatch the release workflow as a dry run and inspect the tarballs: `tar -tzf` each one shows only `dist/`, the subpath stub folders, `schema/`, `migrations/` and the inventories for the db package, `README.md`, `CHANGELOG.md`, `LICENSE` and `package.json`.
 
 ## The publish gate
