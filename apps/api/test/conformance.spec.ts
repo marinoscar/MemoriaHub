@@ -287,7 +287,12 @@ runPlatformConformance({
         { name: 'apps/api', root: join(REPO_ROOT, 'apps', 'api', 'src'), minFiles: 350 },
         { name: 'apps/cli', root: join(REPO_ROOT, 'apps', 'cli', 'src'), minFiles: 50 },
       ],
-      webTrees: [{ name: 'apps/web', root: join(REPO_ROOT, 'apps', 'web', 'src'), minFiles: 200 }],
+      webTrees: [
+        // A vacuity floor: 171 source files after RETRO-J11 (#626) moved the web slices into packages/memoriahub-web (was 200+).
+        { name: 'apps/web', root: join(REPO_ROOT, 'apps', 'web', 'src'), minFiles: 150 },
+        // The moved code stays under the SDK-leak guard: 330 source files at RETRO-J11.
+        { name: 'packages/memoriahub-web', root: join(REPO_ROOT, 'packages', 'memoriahub-web', 'src'), minFiles: 300 },
+      ],
       providerDirs: [],
       sdkOwner: [
         {
