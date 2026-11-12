@@ -85,10 +85,10 @@ describe('MediaService.purgeMediaItemsBatched', () => {
       grant: { deleteMany: jest.fn(async () => ({ count: 0 })) },
       $transaction: jest.fn(async (fn: (tx: unknown) => unknown): Promise<unknown> => fn(prisma)),
     };
-    const args: unknown[] = Array.from({ length: 11 }, () => ({}));
+    const args: unknown[] = Array.from({ length: 12 }, () => ({}));
     args[0] = prisma;
     args[3] = { deleteGrantsFor: jest.fn(async () => 0) }; // the access port (grants go with the rows)
-    args[11] = events; // the webhook events hook (the first optional constructor parameter)
+    args[12] = events; // the webhook events hook (the first optional constructor parameter, after the review-queue registry at 11)
     return new (MediaService as unknown as new (...a: unknown[]) => MediaService)(...args);
   }
 

@@ -17,7 +17,7 @@ import {
   closeTestApp,
 } from '../helpers/test-app.helper';
 import { resetPrismaMock } from '../mocks/prisma.mock';
-import { setupBaseMocks } from '../fixtures/mock-setup.helper';
+import { setupBaseMocks, setupMockSystemSettings } from '../fixtures/mock-setup.helper';
 import {
   createMockContributorUser,
   createMockViewerUser,
@@ -310,8 +310,6 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
 
       // $queryRaw → no On This Day items
       (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([]);
-      // systemSettings for burst config
-      context.prismaMock.systemSettings.findUnique.mockResolvedValue(null);
       // findMany: recent, favorites
       context.prismaMock.mediaItem.findMany
         .mockResolvedValueOnce([makeMediaItem()]) // recent
@@ -340,7 +338,8 @@ describe('Media Bulk Dashboard Integration (DB-gated)', () => {
       setupCircleMocks(context, viewer.id, CIRCLE_ID, 'viewer');
 
       (context.prismaMock.$queryRaw as jest.Mock).mockResolvedValue([]);
-      context.prismaMock.systemSettings.findUnique.mockResolvedValue(null);
+      // The burst counter reads `burst.minGroupSize` through the settings port: the stored row is the base one.
+      setupMockSystemSettings();
       context.prismaMock.mediaItem.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
