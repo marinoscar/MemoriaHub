@@ -184,8 +184,8 @@ export type MemoriahubAdminPageHeaderComponent = (props: MemoriahubAdminPageHead
  * @stability experimental
  */
 export interface MemoriahubSavedSecret {
-  /** A masked hint of the stored secret (for example its last four characters). */
-  hint: string;
+  /** A masked hint of the stored secret (for example its last four characters); `null` when the stored secret has none. */
+  hint: string | null;
   /** When the secret was last changed (ISO 8601). */
   updatedAt?: string | null;
 }
@@ -379,6 +379,28 @@ export interface MemoriahubSocialSettings {
 }
 
 /**
+ * The geo half of the deployment settings (`geo.*`, `locationGrouping.*`).
+ *
+ * @stability experimental
+ */
+export interface MemoriahubGeoSettings {
+  /** `geo`: the reverse provider and the forward search switch; every key is absent until first saved. */
+  geo?: {
+    reverseProvider?: 'offline' | 'nominatim' | 'google';
+    forwardSearchEnabled?: boolean;
+  };
+  /**
+   * Location Grouping tuning. `features.locationGrouping` is the master toggle; `maxRadiusKm` is the
+   * ceiling the API validates a group's radius against, so the radius slider binds its maximum to it.
+   */
+  locationGrouping?: {
+    radiusCaptureEnabled?: boolean;
+    maxRadiusKm?: number;
+    suggestionMinItems?: number;
+  };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -391,7 +413,8 @@ export interface MemoriahubSystemSettings
     MemoriahubFaceSettings,
     MemoriahubReviewSettings,
     MemoriahubEnhancementSettings,
-    MemoriahubSocialSettings {
+    MemoriahubSocialSettings,
+    MemoriahubGeoSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */

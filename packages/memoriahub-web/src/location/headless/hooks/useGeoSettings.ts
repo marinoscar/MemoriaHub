@@ -5,10 +5,16 @@ import {
   deleteGeoCredentials,
   testGeoProvider,
   putGeoReverseFeature,
-} from '../services/geo';
-import { useIsMounted } from './useIsMounted';
-import type { GeoSettingsResponse, GeoTestResult, GeoReverseProvider } from '../services/geo';
+} from '../services/geo.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { GeoSettingsResponse, GeoTestResult, GeoReverseProvider } from '../services/geo.js';
 
+/**
+ * Loads and edits the geo provider settings (admin only).
+ *
+ * @returns the settings, the loading and error state and the load, save, remove, test and choose-provider actions
+ * @stability experimental
+ */
 export function useGeoSettings() {
   const [settings, setSettings] = useState<GeoSettingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,13 +65,21 @@ export function useGeoSettings() {
   }, []);
 
   return {
+    /** The settings document, `null` until loaded. */
     settings,
+    /** True while a load is in flight. */
     loading,
+    /** The failure message, `null` when none. */
     error,
+    /** Reloads the settings. */
     fetchSettings,
+    /** Stores a provider credential and reloads. */
     saveCredentials,
+    /** Removes a provider credential and reloads. */
     removeCredentials,
+    /** Tests a provider's connectivity. */
     testProvider,
+    /** Chooses the active reverse provider and reloads. */
     saveReverseFeature,
   };
 }

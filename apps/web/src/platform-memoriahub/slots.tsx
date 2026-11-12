@@ -1,12 +1,12 @@
 /**
  * The components the packaged media slice asks its host for (`slots` of
  * `MemoriahubWebHost`): the ones that belong to slices that have not moved into
- * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer, the
- * location-merge dialog), the platform's share dialog, and four components of
- * packaged slices that stay slots for good because those slices import the media
- * slice, so the media pages cannot import them: the two people pickers and the
- * AI enhancement drawer and batch dialog. Those four are bound straight to the
- * packaged components. Each is lazy, so the page that needs it keeps it out of
+ * `@marinoscar/memoriahub-web` yet (the lightbox and detail drawer), the
+ * platform's share dialog, and five components of packaged slices that stay
+ * slots for good because those slices import the media slice, so the media
+ * pages cannot import them: the two people pickers, the AI enhancement drawer
+ * and batch dialog and the location-merge dialog. Those five are bound to the
+ * packaged components (the merge dialog through a small bridge). Each is lazy, so the page that needs it keeps it out of
  * the main chunk exactly as before. A slot is deleted when its component moves
  * into the package and the slice that owns it can import it.
  */
@@ -71,13 +71,13 @@ const AlbumPeopleDialogSlot = lazySlot<AlbumPeopleDialogSlotProps>(() =>
 const PersonMultiSelectSlot = lazySlot<PersonMultiSelectSlotProps>(() =>
   import('@marinoscar/memoriahub-web/people/ui').then((m) => ({ default: m.PersonMultiSelect })),
 );
-// The dialog reports the merge result; the package wants the group's name.
+// The packaged location slice's dialog reports the merge result; the media slot wants the group's name.
 const MergeLocationsDialogSlot = lazySlot<MergeLocationsDialogSlotProps>(() =>
   Promise.all([
-    import('../components/locations/MergeLocationsDialog'),
-    import('../services/locationGroups'),
+    import('@marinoscar/memoriahub-web/location/ui'),
+    import('@marinoscar/memoriahub-web/location/headless'),
   ]).then(([dialog, groups]) => {
-    const MergeLocationsDialog = dialog.default;
+    const MergeLocationsDialog = dialog.MergeLocationsDialog;
     const Bridge = ({ onMerged, ...rest }: MergeLocationsDialogSlotProps) => (
       <MergeLocationsDialog {...rest} onMerged={(result) => onMerged(groups.mergedGroupName(result))} />
     );

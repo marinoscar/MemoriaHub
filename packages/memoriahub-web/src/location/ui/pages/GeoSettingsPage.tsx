@@ -1,4 +1,3 @@
-import { SecretField } from '@marinoscar/platform-web/credentials/ui';
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
@@ -23,12 +22,9 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useGeoSettings } from '../../hooks/useGeoSettings';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGeoBackfill } from '../../services/geo';
-import type { GeoReverseProvider } from '../../services/geo';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { runGeoBackfill, useGeoSettings } from '../../headless/index.js';
+import type { GeoReverseProvider } from '../../headless/index.js';
 
 const PROVIDER_LABELS: Record<string, string> = {
   offline: 'Offline (GeoNames)',
@@ -51,6 +47,7 @@ function GeoSettingsContent() {
     saveReverseFeature,
   } = useGeoSettings();
 
+  const { AdminPageHeader, SecretField, useSystemSettings } = useMemoriahubAdmin();
   const {
     settings: sysSettings,
     isSaving: sysSaving,
@@ -551,6 +548,11 @@ function GeoSettingsContent() {
   );
 }
 
+/**
+ * The admin Geo settings page: the reverse-geocoding provider, the Google key, forward search and the geocode backfill. Admin only.
+ *
+ * @stability experimental
+ */
 export default function GeoSettingsPage() {
   const { isAdmin } = usePermissions();
 

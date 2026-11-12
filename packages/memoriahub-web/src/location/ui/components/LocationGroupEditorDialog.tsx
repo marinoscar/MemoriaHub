@@ -40,10 +40,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { LocationPickerMap } from '@marinoscar/memoriahub-web/media/ui';
-import { useOwnerScope } from '../../hooks/useOwnerScope';
-import { listMedia } from '@marinoscar/memoriahub-web/media/headless';
-import type { MediaItem } from '@marinoscar/memoriahub-web/media/headless';
+import { useOwnerScope } from '../../../core/headless/index.js';
+import { LocationPickerMap } from '../../../media/ui/index.js';
+import { listMedia } from '../../../media/headless/index.js';
+import type { MediaItem } from '../../../media/headless/index.js';
 import {
   addLocationGroupMembers,
   createLocationGroup,
@@ -52,21 +52,30 @@ import {
   locationGroupErrorMessage,
   removeLocationGroupMembers,
   updateLocationGroup,
-} from '../../services/locationGroups';
+} from '../../headless/index.js';
 import type {
   LocationGroupDetail,
   LocationGroupLevel,
   LocationValue,
-} from '../../services/locationGroups';
+} from '../../headless/index.js';
 
+/**
+ * The props of {@link LocationGroupEditorDialog}.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupEditorDialogProps {
+  /** True while the dialog is shown. */
   open: boolean;
   /** `null` = create a new group at `level`; otherwise edit this group. */
   groupId: string | null;
+  /** The tier the group governs. */
   level: LocationGroupLevel;
   /** Ceiling for the radius slider — the LOADED `locationGrouping.maxRadiusKm`. */
   maxRadiusKm: number;
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
+  /** Called after a successful save. */
   onSaved: () => void;
 }
 
@@ -83,6 +92,12 @@ const LEVEL_MEDIA_FILTER: Record<LocationGroupLevel, 'country' | 'region' | 'loc
   locality: 'locality',
 };
 
+/**
+ * The create and edit dialog of one location group: name, country scope, members, cover and the optional capture area.
+ *
+ * @param props - see {@link LocationGroupEditorDialogProps}
+ * @stability experimental
+ */
 export default function LocationGroupEditorDialog({
   open,
   groupId,

@@ -43,18 +43,22 @@ import {
   listLocationGroups,
   locationGroupErrorMessage,
   mergeLocationGroups,
-} from '../../services/locationGroups';
+} from '../../headless/index.js';
 import type {
   LocationGroupLevel,
   LocationGroupSummary,
   MergeLocationGroupsResult,
-} from '../../services/locationGroups';
+} from '../../headless/index.js';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
-/** One selected location, as either surface knows it. */
+/**
+ * One selected location, as either surface knows it.
+ *
+ * @stability experimental
+ */
 export interface MergeLocationCandidate {
   /**
    * The member value submitted to the API. On `/places` this is the tile's
@@ -71,7 +75,13 @@ export interface MergeLocationCandidate {
   groupCanonicalName?: string | null;
 }
 
+/**
+ * The props of {@link MergeLocationsDialog}.
+ *
+ * @stability experimental
+ */
 export interface MergeLocationsDialogProps {
+  /** True while the dialog is shown. */
   open: boolean;
   /** Tier the merge targets — decides which groups the picker offers. */
   level: LocationGroupLevel;
@@ -86,6 +96,7 @@ export interface MergeLocationsDialogProps {
    * from the candidates instead.
    */
   forcedCountryCode?: string | null;
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
   /** Fired once the merge succeeds; the caller clears its selection here. */
   onMerged: (result: MergeLocationGroupsResult) => void;
@@ -103,6 +114,12 @@ type TargetMode = 'create' | 'existing';
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * Folds a selection of raw location values into one group, new or existing, with the country-scope consent a mixed selection needs.
+ *
+ * @param props - see {@link MergeLocationsDialogProps}
+ * @stability experimental
+ */
 export default function MergeLocationsDialog({
   open,
   level,

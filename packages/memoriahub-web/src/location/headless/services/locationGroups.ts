@@ -1,4 +1,3 @@
-import type { z } from 'zod';
 import type {
   CreateLocationGroupSchema,
   GROUPED_FILTERS,
@@ -7,7 +6,7 @@ import type {
   UpdateLocationGroupSchema,
 } from '@marinoscar/memoriahub-contract/location';
 import { LOCATION_GROUP_LEVELS } from '@marinoscar/memoriahub-contract/location';
-import { api, ApiError } from './api';
+import { api, MemoriahubApiError as ApiError } from '../../../core/headless/index.js';
 
 /**
  * Location Grouping management API client (epic #373, issue #375).
@@ -24,14 +23,27 @@ import { api, ApiError } from './api';
 // Types
 // ---------------------------------------------------------------------------
 
-/** The level vocabulary of `@marinoscar/memoriahub-contract/location` (mirrors the `LocationGroupLevel` Prisma enum). */
+/**
+ * The level vocabulary of `@marinoscar/memoriahub-contract/location` (mirrors the `LocationGroupLevel` Prisma enum).
+ *
+ * @stability experimental
+ */
 export type LocationGroupLevel = LocationGroupLevelValue;
 
 export { LOCATION_GROUP_LEVELS };
 
-/** `grouped` filter accepted by `GET /api/location-groups/values`. */
+/**
+ * `grouped` filter accepted by `GET /api/location-groups/values`.
+ *
+ * @stability experimental
+ */
 export type LocationValueGroupedFilter = (typeof GROUPED_FILTERS)[number];
 
+/**
+ * One group as the list shows it, with its counts and cover.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupSummary {
   id: string;
   level: LocationGroupLevel;
@@ -53,6 +65,11 @@ export interface LocationGroupSummary {
   updatedAt: string;
 }
 
+/**
+ * One raw spelling a group claims, with the items that carry it.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupAlias {
   id: string;
   rawValue: string;
@@ -62,17 +79,31 @@ export interface LocationGroupAlias {
   createdAt: string;
 }
 
+/**
+ * A group with its full alias list.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupDetail extends LocationGroupSummary {
   normalizedName: string;
   aliases: LocationGroupAlias[];
 }
 
+/**
+ * One page of groups.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupListResponse {
   items: LocationGroupSummary[];
   meta: { total: number; page: number; pageSize: number };
 }
 
-/** One distinct RAW geocoder value present in the library, app-wide. */
+/**
+ * One distinct RAW geocoder value present in the library, app-wide.
+ *
+ * @stability experimental
+ */
 export interface LocationValue {
   value: string;
   countryCode: string | null;
@@ -89,17 +120,29 @@ export interface LocationValue {
  * honest "showing 50 of 812". `limit` is present only on the legacy capped
  * (non-paginated) form the editor dialog's member picker still uses; `page` /
  * `pageSize` only on the paginated form (issue #407).
+ *
+ * @stability experimental
  */
 export interface LocationValueListResponse {
   items: LocationValue[];
   meta: { total: number; limit?: number; page?: number; pageSize?: number };
 }
 
+/**
+ * One raw value of a suggested cluster.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupSuggestionMember {
   value: string;
   itemCount: number;
 }
 
+/**
+ * A cluster of ungrouped raw values proposed as one group.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupSuggestion {
   suggestedCanonicalName: string;
   countryCode: string | null;
@@ -107,29 +150,59 @@ export interface LocationGroupSuggestion {
   totalItems: number;
 }
 
+/**
+ * The suggested clusters.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupSuggestionListResponse {
   items: LocationGroupSuggestion[];
   meta: { total: number; limit: number };
 }
 
-/** `POST /api/location-groups` body: the request side of the contract's `CreateLocationGroupSchema`. */
-export type CreateLocationGroupBody = z.input<typeof CreateLocationGroupSchema>;
+/**
+ * `POST /api/location-groups` body: the request side of the contract's `CreateLocationGroupSchema`.
+ *
+ * @stability experimental
+ */
+export type CreateLocationGroupBody = (typeof CreateLocationGroupSchema)['_zod']['input'];
 
-/** `PATCH /api/location-groups/:id` body: the request side of the contract's `UpdateLocationGroupSchema`. */
-export type UpdateLocationGroupBody = z.input<typeof UpdateLocationGroupSchema>;
+/**
+ * `PATCH /api/location-groups/:id` body: the request side of the contract's `UpdateLocationGroupSchema`.
+ *
+ * @stability experimental
+ */
+export type UpdateLocationGroupBody = (typeof UpdateLocationGroupSchema)['_zod']['input'];
 
+/**
+ * The job a rebuild enqueued.
+ *
+ * @stability experimental
+ */
 export interface RebuildLocationGroupsResult {
   jobId: string;
   status: string;
 }
 
-/** Enrichment job type enqueued by `POST /api/admin/location-groups/rebuild`. */
+/**
+ * Enrichment job type enqueued by `POST /api/admin/location-groups/rebuild`.
+ *
+ * @stability experimental
+ */
 export const LOCATION_GROUP_REBUILD_JOB_TYPE = 'location_group_rebuild';
 
 // ---------------------------------------------------------------------------
 // Groups
 // ---------------------------------------------------------------------------
 
+/**
+ * Lists location groups with their member and item counts.
+ *
+ * @param params - the tier, an enabled filter, a name search and the page
+ * @returns the page of groups
+ *
+ * @stability experimental
+ */
 export async function listLocationGroups(params: {
   level?: LocationGroupLevel;
   enabled?: boolean;
@@ -149,16 +222,41 @@ export async function listLocationGroups(params: {
   return api.get<LocationGroupListResponse>(`/location-groups${query ? `?${query}` : ''}`);
 }
 
+/**
+ * Reads one group with its aliases and their item counts.
+ *
+ * @param id - the group id
+ * @returns the group detail
+ *
+ * @stability experimental
+ */
 export async function getLocationGroup(id: string): Promise<LocationGroupDetail> {
   return api.get<LocationGroupDetail>(`/location-groups/${id}`);
 }
 
+/**
+ * Creates a group (admin only).
+ *
+ * @param body - the tier, the canonical name, the members and the optional centre and radius
+ * @returns the created group
+ *
+ * @stability experimental
+ */
 export async function createLocationGroup(
   body: CreateLocationGroupBody,
 ): Promise<LocationGroupDetail> {
   return api.post<LocationGroupDetail>('/location-groups', body);
 }
 
+/**
+ * Updates a group (admin only).
+ *
+ * @param id - the group id
+ * @param body - the fields to change
+ * @returns the updated group
+ *
+ * @stability experimental
+ */
 export async function updateLocationGroup(
   id: string,
   body: UpdateLocationGroupBody,
@@ -166,6 +264,13 @@ export async function updateLocationGroup(
   return api.patch<LocationGroupDetail>(`/location-groups/${id}`, body);
 }
 
+/**
+ * Deletes a group; its members revert to their raw names after the rebuild.
+ *
+ * @param id - the group id
+ *
+ * @stability experimental
+ */
 export async function deleteLocationGroup(id: string): Promise<void> {
   await api.delete<void>(`/location-groups/${id}`);
 }
@@ -174,6 +279,15 @@ export async function deleteLocationGroup(id: string): Promise<void> {
 // Members
 // ---------------------------------------------------------------------------
 
+/**
+ * Adds raw values to a group; a value another group owns is a 409.
+ *
+ * @param id - the group id
+ * @param values - the raw values to add
+ * @returns the number added
+ *
+ * @stability experimental
+ */
 export async function addLocationGroupMembers(
   id: string,
   values: string[],
@@ -184,6 +298,8 @@ export async function addLocationGroupMembers(
 /**
  * `DELETE` with a body — the API route takes the same `{ values }` payload as
  * the `POST` counterpart, so the body rides on the RequestInit passthrough.
+ *
+ * @stability experimental
  */
 export async function removeLocationGroupMembers(
   id: string,
@@ -206,6 +322,8 @@ export async function removeLocationGroupMembers(
  *     search-one-at-a-time member picker.
  *   - `page` / `pageSize` — real pagination (issue #407), used by the admin
  *     "All locations" browser. `meta.total` counts BEFORE slicing.
+ *
+ * @stability experimental
  */
 export async function listLocationValues(params: {
   level: LocationGroupLevel;
@@ -226,6 +344,14 @@ export async function listLocationValues(params: {
   return api.get<LocationValueListResponse>(`/location-groups/values?${qs.toString()}`);
 }
 
+/**
+ * Lists the clusters of ungrouped raw values that share a suggestion key.
+ *
+ * @param params - the tier and a cluster limit
+ * @returns the suggested clusters
+ *
+ * @stability experimental
+ */
 export async function listLocationGroupSuggestions(params: {
   level: LocationGroupLevel;
   limit?: number;
@@ -259,9 +385,16 @@ export async function listLocationGroupSuggestions(params: {
  * omitted (or `''`) `countryCode`, but rejects a non-empty one that disagrees
  * with a 400 — so a caller adding to an existing group should simply omit it
  * and let the group's own scope govern.
+ *
+ * @stability experimental
  */
-export type MergeLocationGroupsBody = z.input<typeof MergeLocationGroupsSchema>;
+export type MergeLocationGroupsBody = (typeof MergeLocationGroupsSchema)['_zod']['input'];
 
+/**
+ * The outcome of a merge: the group, whether it was created, and how many values were added or skipped.
+ *
+ * @stability experimental
+ */
 export interface MergeLocationGroupsResult {
   groupId: string;
   /** True when the merge created the group rather than extending one. */
@@ -288,6 +421,8 @@ export interface MergeLocationGroupsResult {
  * The name lives at `group.canonicalName`, not at the top level — on the
  * merge-into path there IS no new name, only the target group's existing one.
  * Read defensively so a UI success message can never render "undefined".
+ *
+ * @stability experimental
  */
 export function mergedGroupName(result: MergeLocationGroupsResult): string {
   return result.group?.canonicalName ?? 'the group';
@@ -300,6 +435,8 @@ export function mergedGroupName(result: MergeLocationGroupsResult): string {
  * owner lives at `details.groupId` / `details.groupName` — read it with
  * `extractLocationGroupConflict()`, never a top-level field (see the 409 gotcha
  * in CLAUDE.md).
+ *
+ * @stability experimental
  */
 export async function mergeLocationGroups(
   body: MergeLocationGroupsBody,
@@ -324,6 +461,14 @@ export async function mergeLocationGroups(
 // Rebuild
 // ---------------------------------------------------------------------------
 
+/**
+ * Enqueues a full rebuild of the canonical location columns (admin only).
+ *
+ * @param body - optional scope
+ * @returns the enqueued job
+ *
+ * @stability experimental
+ */
 export async function rebuildLocationGroups(body?: {
   circleId?: string;
   groupIds?: string[];
@@ -335,6 +480,11 @@ export async function rebuildLocationGroups(body?: {
 // Error helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * The owner of a raw value another group already claims.
+ *
+ * @stability experimental
+ */
 export interface LocationGroupConflict {
   message: string;
   groupId: string | null;
@@ -349,6 +499,8 @@ export interface LocationGroupConflict {
  * fixed key allowlist (`message`, `code`, `details`, …), so a top-level custom
  * field is silently dropped before the client ever sees it — reading one here
  * would always yield `undefined`. See the 409 gotcha in CLAUDE.md.
+ *
+ * @stability experimental
  */
 export function extractLocationGroupConflict(err: unknown): LocationGroupConflict | null {
   if (!(err instanceof ApiError) || err.status !== 409) return null;
@@ -368,6 +520,8 @@ export function extractLocationGroupConflict(err: unknown): LocationGroupConflic
 /**
  * Human-readable message for any location-group failure, naming the owning
  * group when the API reported a member conflict.
+ *
+ * @stability experimental
  */
 export function locationGroupErrorMessage(err: unknown, fallback = 'Request failed'): string {
   const conflict = extractLocationGroupConflict(err);
@@ -377,4 +531,28 @@ export function locationGroupErrorMessage(err: unknown, fallback = 'Request fail
       : conflict.message;
   }
   return err instanceof Error && err.message ? err.message : fallback;
+}
+
+/**
+ * The state of one enrichment job as the Location Groups page polls it.
+ *
+ * @stability experimental
+ */
+export interface LocationGroupRebuildJob {
+  /** The job id. */
+  id: string;
+  /** `pending`, `running`, `succeeded` or `failed`. */
+  status: string;
+}
+
+/**
+ * Lists the most recent `location_group_rebuild` jobs, so the page can follow the one it started to its end.
+ *
+ * @returns the newest jobs of the rebuild type (status only)
+ * @stability experimental
+ */
+export async function listLocationGroupRebuildJobs(): Promise<{ items: LocationGroupRebuildJob[] }> {
+  return api.get<{ items: LocationGroupRebuildJob[] }>(
+    `/admin/jobs?type=${encodeURIComponent(LOCATION_GROUP_REBUILD_JOB_TYPE)}&pageSize=20`,
+  );
 }

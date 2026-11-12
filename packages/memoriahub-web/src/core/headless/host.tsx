@@ -28,6 +28,8 @@ export interface MemoriahubRequestOptions {
   skipAuth?: boolean;
   /** Aborts the request. */
   signal?: AbortSignal;
+  /** A pre-serialised JSON body, for the rare `DELETE` that carries one. */
+  body?: string;
 }
 
 /**

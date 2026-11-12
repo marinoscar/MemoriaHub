@@ -236,6 +236,10 @@
     ],
     "social": [
       "core"
+    ],
+    "location": [
+      "core",
+      "media"
     ]
   }
 }

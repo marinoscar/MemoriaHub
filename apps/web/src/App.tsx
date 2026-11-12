@@ -101,7 +101,7 @@ const AiConfigRoute = lazy(() => import('./platform/ai/AiConfigRoute'));
 const AiModelsRoute = lazy(() => import('./platform/ai/AiModelsRoute'));
 const AiUsageRoute = lazy(() => import('./platform/ai/AiUsageRoute'));
 const FaceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/face/ui').then((m) => ({ default: m.FaceSettingsPage })));
-const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
+const GeoSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/location/ui').then((m) => ({ default: m.GeoSettingsPage })));
 // The platform's email settings page (RETRO-D2, #570): transports, sender, write-only secrets and the
 // test send to the caller's own address (`@marinoscar/platform-web/email/ui`).
 const EmailSettingsPage = lazy(() =>
@@ -154,7 +154,7 @@ const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
 );
 const LocationInferenceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationInferenceSettingsPage })));
-const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
+const LocationGroupsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/location/ui').then((m) => ({ default: m.LocationGroupsSettingsPage })));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() =>
   import('@marinoscar/memoriahub-web/search/ui').then((m) => ({ default: m.SearchPage })),

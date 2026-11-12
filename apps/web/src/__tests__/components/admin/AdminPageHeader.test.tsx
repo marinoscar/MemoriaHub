@@ -202,6 +202,9 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // 15 since RETRO-C2 (#581): the Worker Nodes page is the nodes slice's packaged WorkersPage.
     // 6 since RETRO-J11 (#626, social): the admin Social Media page is the packaged
     // SocialMediaSettingsPage, which renders the host's AdminPageHeader (the adopter moved with it).
-    expect(adopters.length).toBeGreaterThanOrEqual(6);
+    // 4 since RETRO-J11 (#626, location): the admin Geo and Location Groups pages are the packaged
+    // GeoSettingsPage and LocationGroupsSettingsPage, which render the host's AdminPageHeader
+    // (the adopters moved with them).
+    expect(adopters.length).toBeGreaterThanOrEqual(4);
   });
 });

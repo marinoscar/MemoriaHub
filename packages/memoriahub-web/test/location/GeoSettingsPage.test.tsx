@@ -20,26 +20,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must appear before imports of the mocked modules
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useGeoSettings', () => ({
+vi.mock('../../src/location/headless/hooks/useGeoSettings.js', () => ({
   useGeoSettings: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/geo', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../services/geo')>();
+vi.mock('../../src/location/headless/services/geo.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     runGeoBackfill: vi.fn().mockResolvedValue({ enqueued: 5 }),
@@ -50,14 +49,15 @@ vi.mock('../../services/geo', async (importOriginal) => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import GeoSettingsPage from '../../pages/Admin/GeoSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useGeoSettings } from '../../hooks/useGeoSettings';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
+import GeoSettingsPage from '../../src/location/ui/pages/GeoSettingsPage.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import { useGeoSettings } from '../../src/location/headless/hooks/useGeoSettings.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseGeoSettings = vi.mocked(useGeoSettings);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,9 +172,13 @@ function makeSystemSettingsMock(
 describe('GeoSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(adminPermissions() as ReturnType<typeof usePermissions>);
     mockUseGeoSettings.mockReturnValue(makeGeoSettingsMock() as ReturnType<typeof useGeoSettings>);
-    mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as ReturnType<typeof useSystemSettings>);
+    mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as never);
   });
 
   // -------------------------------------------------------------------------
@@ -373,7 +377,7 @@ describe('GeoSettingsPage', () => {
   describe('forward search toggle', () => {
     it('forward search switch is unchecked when forwardSearchEnabled is false', () => {
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: false }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: false }) as never,
       );
 
       render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
@@ -387,7 +391,7 @@ describe('GeoSettingsPage', () => {
 
     it('forward search switch is checked when forwardSearchEnabled is true', () => {
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: true }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: true }) as never,
       );
 
       render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
@@ -401,7 +405,7 @@ describe('GeoSettingsPage', () => {
 
     it('shows privacy warning when forward search is enabled', () => {
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: true }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: true }) as never,
       );
 
       render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
@@ -413,7 +417,7 @@ describe('GeoSettingsPage', () => {
 
     it('does NOT show privacy warning when forward search is disabled', () => {
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: false }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: false }) as never,
       );
 
       render(<GeoSettingsPage />, { wrapperOptions: { user: mockAdminUser } });
@@ -426,7 +430,7 @@ describe('GeoSettingsPage', () => {
     it('calls updateSettings with forwardSearchEnabled:true when switch is toggled on', async () => {
       const updateSettings = vi.fn().mockResolvedValue(undefined);
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as never,
       );
 
       const user = userEvent.setup();
@@ -450,7 +454,7 @@ describe('GeoSettingsPage', () => {
     it('calls updateSettings with forwardSearchEnabled:false when switch is toggled off', async () => {
       const updateSettings = vi.fn().mockResolvedValue(undefined);
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: true, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: true, updateSettings }) as never,
       );
 
       const user = userEvent.setup();
@@ -474,7 +478,7 @@ describe('GeoSettingsPage', () => {
     it('shows success snackbar after toggling forward search', async () => {
       const updateSettings = vi.fn().mockResolvedValue(undefined);
       mockUseSystemSettings.mockReturnValue(
-        makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+        makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as never,
       );
 
       const user = userEvent.setup();
@@ -513,7 +517,7 @@ describe('GeoSettingsPage', () => {
           .mockResolvedValueOnce(undefined);
 
         mockUseSystemSettings.mockReturnValue(
-          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as never,
         );
 
         const user = userEvent.setup();
@@ -539,7 +543,7 @@ describe('GeoSettingsPage', () => {
           .mockRejectedValueOnce(new Error(CONFLICT_MSG));
 
         mockUseSystemSettings.mockReturnValue(
-          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as never,
         );
 
         const user = userEvent.setup();
@@ -563,7 +567,7 @@ describe('GeoSettingsPage', () => {
           .mockRejectedValueOnce(new Error('Network error'));
 
         mockUseSystemSettings.mockReturnValue(
-          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as ReturnType<typeof useSystemSettings>,
+          makeSystemSettingsMock({ forwardSearchEnabled: false, updateSettings }) as never,
         );
 
         const user = userEvent.setup();

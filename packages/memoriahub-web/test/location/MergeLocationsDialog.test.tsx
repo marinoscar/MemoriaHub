@@ -14,16 +14,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render } from '../../utils/test-utils';
+import { render } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../../services/locationGroups', async () => {
-  const actual = await vi.importActual<typeof import('../../../services/locationGroups')>(
-    '../../../services/locationGroups',
-  );
+vi.mock('../../src/location/headless/index.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     listLocationGroups: vi.fn(),
@@ -35,13 +33,13 @@ vi.mock('../../../services/locationGroups', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import MergeLocationsDialog from '../../../components/locations/MergeLocationsDialog';
-import type { MergeLocationCandidate } from '../../../components/locations/MergeLocationsDialog';
-import { listLocationGroups, mergeLocationGroups } from '../../../services/locationGroups';
+import MergeLocationsDialog from '../../src/location/ui/components/MergeLocationsDialog.js';
+import type { MergeLocationCandidate } from '../../src/location/ui/components/MergeLocationsDialog.js';
+import { listLocationGroups, mergeLocationGroups } from '../../src/location/headless/index.js';
 import type {
   LocationGroupSummary,
   MergeLocationGroupsResult,
-} from '../../../services/locationGroups';
+} from '../../src/location/headless/index.js';
 
 const mockListGroups = vi.mocked(listLocationGroups);
 const mockMerge = vi.mocked(mergeLocationGroups);
@@ -288,7 +286,7 @@ describe('MergeLocationsDialog', () => {
   // -------------------------------------------------------------------------
   describe('409 conflict', () => {
     it('names the owning group and keeps the dialog open', async () => {
-      const { ApiError } = await import('../../../services/api');
+      const { MemoriahubApiError: ApiError } = await import('../../src/core/headless/index.js');
       mockMerge.mockRejectedValue(
         new ApiError('"conroe" is already a member of "Conroe TX"', 409, undefined, {
           groupId: 'g-owner',

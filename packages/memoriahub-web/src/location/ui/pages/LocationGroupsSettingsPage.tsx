@@ -43,10 +43,10 @@ import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PublicIcon from '@mui/icons-material/Public';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { listJobs } from '../../services/jobs';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { scrollableTabsProps } from '../../../core/ui/index.js';
 import {
+  listLocationGroupRebuildJobs,
   LOCATION_GROUP_REBUILD_JOB_TYPE,
   createLocationGroup,
   deleteLocationGroup,
@@ -57,18 +57,16 @@ import {
   mergedGroupName,
   rebuildLocationGroups,
   updateLocationGroup,
-} from '../../services/locationGroups';
+} from '../../headless/index.js';
 import type {
   LocationGroupLevel,
   LocationGroupSuggestion,
   LocationGroupSummary,
   LocationValue,
-} from '../../services/locationGroups';
-import MergeLocationsDialog from '../../components/locations/MergeLocationsDialog';
-import type { MergeLocationCandidate } from '../../components/locations/MergeLocationsDialog';
-import LocationGroupEditorDialog from './LocationGroupEditorDialog';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
-import { scrollableTabsProps } from '../../components/common/tabs';
+} from '../../headless/index.js';
+import MergeLocationsDialog from '../components/MergeLocationsDialog.js';
+import type { MergeLocationCandidate } from '../components/MergeLocationsDialog.js';
+import LocationGroupEditorDialog from '../components/LocationGroupEditorDialog.js';
 
 const LEVEL_TABS: Array<{ level: LocationGroupLevel; label: string }> = [
   { level: 'country', label: 'Countries' },
@@ -83,6 +81,7 @@ const REBUILD_POLL_MS = 3000;
 const VALUES_PAGE_SIZE = 50;
 
 function LocationGroupsSettingsContent() {
+  const { AdminPageHeader, useSystemSettings } = useMemoriahubAdmin();
   const { settings, isSaving, updateSettings, error } = useSystemSettings();
 
   // ---- Global settings (one Save for the whole namespace) ------------------
@@ -400,7 +399,7 @@ function LocationGroupsSettingsContent() {
     if (rebuildStatus && TERMINAL_JOB_STATUSES.has(rebuildStatus)) return;
 
     const timer = setInterval(() => {
-      listJobs({ type: LOCATION_GROUP_REBUILD_JOB_TYPE, pageSize: 20 })
+      listLocationGroupRebuildJobs()
         .then((res) => {
           if (!mountedRef.current) return;
           const job = res.items.find((j) => j.id === rebuildJobId);
@@ -952,6 +951,11 @@ function suggestionKeyOf(suggestion: LocationGroupSuggestion): string {
   return `${suggestion.countryCode ?? ''}|${suggestion.members.map((m) => m.value).join('|')}`;
 }
 
+/**
+ * The admin Location Groups page: the Location Grouping switch and tuning, suggestions, the group lists per tier, the all-locations merge list and the rebuild. Admin only.
+ *
+ * @stability experimental
+ */
 export default function LocationGroupsSettingsPage() {
   const { isAdmin, hasPermission } = usePermissions();
 

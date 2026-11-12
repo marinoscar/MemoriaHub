@@ -18,13 +18,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
+vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   LocationPickerMap: ({
     onChange,
@@ -45,16 +45,14 @@ vi.mock('@marinoscar/memoriahub-web/media/ui', async (importOriginal) => ({
 
 }));
 
-vi.mock('@marinoscar/memoriahub-web/media/headless', async (importOriginal) => ({
+vi.mock('../../src/media/headless/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listMedia: vi.fn(),
 
 }));
 
-vi.mock('../../services/locationGroups', async () => {
-  const actual = await vi.importActual<typeof import('../../services/locationGroups')>(
-    '../../services/locationGroups',
-  );
+vi.mock('../../src/location/headless/index.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     getLocationGroup: vi.fn(),
@@ -70,9 +68,9 @@ vi.mock('../../services/locationGroups', async () => {
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import LocationGroupEditorDialog from '../../pages/Admin/LocationGroupEditorDialog';
-import { ApiError } from '../../services/api';
-import { listMedia } from '@marinoscar/memoriahub-web/media/headless';
+import LocationGroupEditorDialog from '../../src/location/ui/components/LocationGroupEditorDialog.js';
+import { MemoriahubApiError as ApiError } from '../../src/core/headless/index.js';
+import { listMedia } from '../../src/media/headless/index.js';
 import {
   addLocationGroupMembers,
   createLocationGroup,
@@ -80,8 +78,8 @@ import {
   listLocationValues,
   removeLocationGroupMembers,
   updateLocationGroup,
-} from '../../services/locationGroups';
-import type { LocationGroupDetail, LocationValue } from '../../services/locationGroups';
+} from '../../src/location/headless/index.js';
+import type { LocationGroupDetail, LocationValue } from '../../src/location/headless/index.js';
 
 const mockListMedia = vi.mocked(listMedia);
 const mockGetGroup = vi.mocked(getLocationGroup);

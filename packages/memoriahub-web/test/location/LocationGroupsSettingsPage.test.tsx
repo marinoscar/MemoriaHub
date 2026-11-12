@@ -21,30 +21,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/jobs', () => ({
-  listJobs: vi.fn(),
-}));
-
-vi.mock('../../services/locationGroups', async () => {
-  const actual = await vi.importActual<typeof import('../../services/locationGroups')>(
-    '../../services/locationGroups',
-  );
+vi.mock('../../src/location/headless/index.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
+    listLocationGroupRebuildJobs: vi.fn(),
     listLocationGroups: vi.fn(),
     listLocationGroupSuggestions: vi.fn(),
     listLocationValues: vi.fn(),
@@ -57,7 +51,7 @@ vi.mock('../../services/locationGroups', async () => {
 });
 
 // The editor dialog owns its own network calls; it has its own spec.
-vi.mock('../../pages/Admin/LocationGroupEditorDialog', () => ({
+vi.mock('../../src/location/ui/components/LocationGroupEditorDialog.js', () => ({
   default: ({ open }: { open: boolean }) =>
     open ? <div data-testid="editor-dialog" /> : null,
 }));
@@ -66,11 +60,10 @@ vi.mock('../../pages/Admin/LocationGroupEditorDialog', () => ({
 // Imports after mocks
 // ---------------------------------------------------------------------------
 
-import LocationGroupsSettingsPage from '../../pages/Admin/LocationGroupsSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { listJobs } from '../../services/jobs';
+import LocationGroupsSettingsPage from '../../src/location/ui/pages/LocationGroupsSettingsPage.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
 import {
+  listLocationGroupRebuildJobs,
   createLocationGroup,
   deleteLocationGroup,
   listLocationGroupSuggestions,
@@ -79,16 +72,18 @@ import {
   mergeLocationGroups,
   rebuildLocationGroups,
   updateLocationGroup,
-} from '../../services/locationGroups';
+} from '../../src/location/headless/index.js';
 import type {
   LocationGroupSuggestion,
   LocationGroupSummary,
   LocationValue,
   MergeLocationGroupsResult,
-} from '../../services/locationGroups';
+} from '../../src/location/headless/index.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 const mockListGroups = vi.mocked(listLocationGroups);
 const mockListSuggestions = vi.mocked(listLocationGroupSuggestions);
 const mockListValues = vi.mocked(listLocationValues);
@@ -97,7 +92,7 @@ const mockCreateGroup = vi.mocked(createLocationGroup);
 const mockUpdateGroup = vi.mocked(updateLocationGroup);
 const mockDeleteGroup = vi.mocked(deleteLocationGroup);
 const mockRebuild = vi.mocked(rebuildLocationGroups);
-const mockListJobs = vi.mocked(listJobs);
+const mockListJobs = vi.mocked(listLocationGroupRebuildJobs);
 
 // ---------------------------------------------------------------------------
 // Factories
@@ -216,6 +211,10 @@ function makeSuggestion(
 describe('LocationGroupsSettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(makePermissions() as any);
     mockUseSystemSettings.mockReturnValue(makeSystemSettingsMock() as any);
     mockListGroups.mockResolvedValue({
@@ -425,7 +424,7 @@ describe('LocationGroupsSettingsPage', () => {
     });
 
     it('shows the owning group name when the merge hits a 409 conflict', async () => {
-      const { ApiError } = await import('../../services/api');
+      const { MemoriahubApiError: ApiError } = await import('../../src/core/headless/index.js');
       mockListSuggestions.mockResolvedValue({
         items: [makeSuggestion()],
         meta: { total: 1, limit: 25 },
@@ -601,7 +600,7 @@ describe('LocationGroupsSettingsPage', () => {
     });
 
     it('keeps the selection when the merge is rejected with a 409', async () => {
-      const { ApiError } = await import('../../services/api');
+      const { MemoriahubApiError: ApiError } = await import('../../src/core/headless/index.js');
       mockListValues.mockResolvedValue({
         items: WOODLANDS_PAGE,
         meta: { total: 2, page: 1, pageSize: 50 },
