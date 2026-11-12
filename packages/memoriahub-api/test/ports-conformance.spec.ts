@@ -52,7 +52,22 @@ function fakesUnderTest(): MemoriahubPortsUnderTest {
         unknownScopeId: 'scope-missing',
         bypassPermission: 'groups:admin',
       },
-      grants: { granteeId: 'user-grantee', mediaItemId: 'item-granted', otherMediaItemId: 'item-other' },
+      grants: {
+        granteeId: 'user-grantee',
+        mediaItemId: 'item-granted',
+        otherMediaItemId: 'item-other',
+        scopeItemId: 'item-in-scope',
+        // The fakes' records: the fake evaluates the `{ id: { in } }` fragment its `sharedWhere` answers.
+        matching: async ({ scopeIds, shared }) => {
+          const records = [
+            { id: 'item-granted', scopeId: 'scope-granted-elsewhere' },
+            { id: 'item-other', scopeId: 'scope-other' },
+            { id: 'item-in-scope', scopeId: 'scope-1' },
+          ];
+          const sharedIds = new Set(((shared as { id?: { in?: string[] } } | null)?.id?.in) ?? []);
+          return records.filter((r) => scopeIds.includes(r.scopeId) || sharedIds.has(r.id)).map((r) => r.id);
+        },
+      },
     },
     identity: {
       port: identity,
@@ -75,4 +90,4 @@ function fakesUnderTest(): MemoriahubPortsUnderTest {
   };
 }
 
-describeMemoriahubPortsConformance('the in-memory fakes', fakesUnderTest, { describe, it, expect });
+describeMemoriahubPortsConformance('the in-memory fakes', fakesUnderTest, { describe, it, expect }, { sharedWhereSql: true });

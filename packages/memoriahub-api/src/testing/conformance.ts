@@ -132,6 +132,17 @@ export interface MemoriahubGrantFixture {
   mediaItemId: string;
   /** A record the grantee holds no grant on. */
   otherMediaItemId: string;
+  /**
+   * The SQL half of the `sharedWhere` rules (`options.sharedWhereSql`): which records a list over the given
+   * owner scopes and shared fragment selects, run by the host against its real records. The records are the
+   * three above plus `scopeItemId`.
+   *
+   * @param filter - the owner scopes the caller belongs to and the shared `where` (or null when none).
+   * @returns the ids of the records the list selects: the ones in a scope OR matching the shared fragment.
+   */
+  matching?(filter: { scopeIds: readonly string[]; shared: Record<string, unknown> | null }): Promise<string[]>;
+  /** A record owned by the access fixture's scope (`scope.scopeId`), with no grant on it. */
+  scopeItemId?: string;
 }
 
 /**
@@ -269,6 +280,12 @@ export type MemoriahubConformancePort =
 export interface MemoriahubConformanceOptions {
   /** Ports to leave out (for example `webhooks` on a host that binds the default no-op). */
   skip?: MemoriahubConformancePort[];
+  /**
+   * Runs the `sharedWhere` and owner-scope list rules, which need the grant fixture's `matching` and
+   * `scopeItemId` (the host runs the fragment as SQL over real records). A host that promises them sets this;
+   * the rules then FAIL when the fixture lacks them, they are never silently passed.
+   */
+  sharedWhereSql?: boolean;
 }
 
 /** Reads a stream into a string. */
@@ -617,6 +634,48 @@ export function describeMemoriahubPortsConformance(
         h.expect(await port.grantAllows(scope.outsiderId, [], 'read', 'media_item', grants.mediaItemId)).toBe(false);
       });
     });
+
+    // ---- access: the shared fragment and the owner-scope list, as SQL ---------
+    if (options.sharedWhereSql && !skipped.has('access')) {
+      h.describe('access (sharedWhere and owner-scope lists as SQL)', () => {
+        const fixture = (grants: MemoriahubGrantFixture | undefined): Required<Pick<MemoriahubGrantFixture, 'matching' | 'scopeItemId'>> & MemoriahubGrantFixture => {
+          if (!grants?.matching || !grants.scopeItemId) {
+            throw new Error('options.sharedWhereSql needs grants.matching and grants.scopeItemId in the access fixture');
+          }
+          return grants as never;
+        };
+
+        rule('access', 'selects exactly the records granted to the caller through the shared fragment', async ({ port, grants }) => {
+          const g = fixture(grants);
+          const shared = await port.sharedWhere(g.granteeId, [], 'media_item');
+          h.expect(shared).not.toBeNull();
+          h.expect(await g.matching({ scopeIds: [], shared })).toEqual([g.mediaItemId]);
+        });
+
+        rule('access', 'answers null when nothing is shared, and for write access on a read grant', async ({ port, scope, grants }) => {
+          const g = fixture(grants);
+          h.expect(await port.sharedWhere(scope.outsiderId, [], 'media_item')).toBeNull();
+          h.expect(await port.sharedWhere(g.granteeId, [], 'media_item', 'editor')).toBeNull();
+          h.expect(await port.sharedWhere(scope.editorId, [], 'media_item')).toBeNull();
+        });
+
+        rule('access', 'lists a member the scope records and a grantee only the granted record, never a third record', async ({ port, scope, grants }) => {
+          const g = fixture(grants);
+          const memberScopes = await port.scopesOf(scope.editorId);
+          const memberList = await g.matching({ scopeIds: memberScopes, shared: await port.sharedWhere(scope.editorId, [], 'media_item') });
+          h.expect(memberList).toContain(g.scopeItemId);
+          h.expect(memberList).not.toContain(g.mediaItemId);
+          h.expect(memberList).not.toContain(g.otherMediaItemId);
+
+          const granteeScopes = await port.scopesOf(g.granteeId);
+          const granteeList = await g.matching({ scopeIds: granteeScopes, shared: await port.sharedWhere(g.granteeId, [], 'media_item') });
+          h.expect(granteeList).toEqual([g.mediaItemId]);
+
+          const outsiderList = await g.matching({ scopeIds: await port.scopesOf(scope.outsiderId), shared: await port.sharedWhere(scope.outsiderId, [], 'media_item') });
+          h.expect(outsiderList).toEqual([]);
+        });
+      });
+    }
 
     // ---- identity ------------------------------------------------------------
     h.describe('identity', () => {
