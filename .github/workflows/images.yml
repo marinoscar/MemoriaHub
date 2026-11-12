@@ -16,17 +16,20 @@ on:
     paths:
       - 'apps/api/**'
       - 'apps/cli/**'
+      - 'scripts/docker/**'
       - 'packages/memoriahub-*/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/images.yml'
   push:
-    branches: [main]
+    branches: [main, fix/heic-native-decode]  # TEMP-HEIC-FIX branch entry
     paths:
       - 'apps/api/Dockerfile'
       - 'apps/cli/Dockerfile'
+      - 'scripts/docker/**'
       - '.github/workflows/images.yml'
   workflow_dispatch:
+  # TEMP-HEIC-FIX: remove before finishing
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -90,14 +93,6 @@ jobs:
             --test --test-name-pattern='^(?!.*HEIC)' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the API image)
-        id: heic
-        # KNOWN FAILING, NON-BLOCKING until the image links a HEIF-enabled libvips (RETRO-J, #593/#616).
-        # sharp 0.35 has no install script and needs libvips >= 8.18.3 to build against a system
-        # libvips; Debian trixie ships 8.16, so `npm rebuild sharp --build-from-source` builds nothing
-        # and sharp keeps its bundled, HEVC-less libvips: HEIC still works, through the ffmpeg
-        # transcode fallback, but not natively. The assertion is real (REQUIRE_HEIC_DECODE=1) and
-        # its failure is surfaced below; delete `continue-on-error` when the image is fixed.
-        continue-on-error: true
         run: |
           docker run --rm \
             --entrypoint node \
@@ -107,11 +102,6 @@ jobs:
             memoriahub-api:parity-gate \
             --test --test-name-pattern='HEIC' test/golden.test.mjs
 
-      - name: HEIC decode gate result
-        if: steps.heic.outcome == 'failure'
-        run: |
-          echo "::warning title=HEIC native decode FAILS in the API image::sharp did not decode HEIC natively (ffmpeg fallback used). Known, tracked by #593/#616; this gate is non-blocking until the image links a HEIF-enabled libvips."
-          echo "### HEIC native decode FAILS in the API image (non-blocking, known)" >> "$GITHUB_STEP_SUMMARY"
 
   worker-image:
     name: Worker image gates
@@ -146,9 +136,6 @@ jobs:
             --test --test-name-pattern='^(?!.*HEIC)' test/golden.test.mjs
 
       - name: HEIC native decode gate (inside the worker image)
-        id: heic
-        # KNOWN FAILING, NON-BLOCKING: same cause as the API image (see there).
-        continue-on-error: true
         run: |
           docker run --rm \
             --entrypoint node \
@@ -158,11 +145,6 @@ jobs:
             memoriahub-worker:parity-gate \
             --test --test-name-pattern='HEIC' test/golden.test.mjs
 
-      - name: HEIC decode gate result
-        if: steps.heic.outcome == 'failure'
-        run: |
-          echo "::warning title=HEIC native decode FAILS in the worker image::sharp did not decode HEIC natively (ffmpeg fallback used). Known, tracked by #593/#616; this gate is non-blocking until the image links a HEIF-enabled libvips."
-          echo "### HEIC native decode FAILS in the worker image (non-blocking, known)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Worker engine smoke (inside the worker image)
         run: |

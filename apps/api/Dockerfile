@@ -25,6 +25,18 @@
 # which do not exist on Alpine/musl. Building on node:*-alpine here silently
 # degrades server-side CLIP visual embeddings (near-duplicate detection falls
 # back to hash-only). See GitHub issue #110.
+# -----------------------------------------------------------------------------
+# libvips stage: libvips 8.18.3 compiled WITH libheif/libde265 (RETRO-J, #593/#616)
+# -----------------------------------------------------------------------------
+# sharp 0.35.x only builds against a system libvips >= 8.18.3 and Debian trixie
+# ships 8.16, so the distro package cannot be used; sharp's bundled libvips has no
+# HEVC decoder. Compile it once here (scripts/docker/build-libvips.sh, shared by
+# apps/api and apps/cli so both executors link the IDENTICAL build: embedding
+# parity) and copy /opt/vips into `base`.
+FROM node:26-slim AS vips
+COPY scripts/docker/build-libvips.sh /tmp/build-libvips.sh
+RUN /tmp/build-libvips.sh
+
 FROM node:26-slim AS base
 WORKDIR /app
 # OpenSSL for Prisma; ffmpeg for video processing (and the HEIC transcode
@@ -87,6 +99,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libvips42t64 libheif1 libde265-0 libheif-plugin-libde265 \
     && rm -rf /var/lib/apt/lists/*
 
+# The source-built libvips 8.18.3 (HEIF/HEVC enabled). The apt libvips42t64
+# above stays only to pull in the shared-library dependency closure; the
+# LD_LIBRARY_PATH entry makes the dynamic loader prefer /opt/vips for libvips
+# itself, which is what the sharp addon (built against it below) links.
+COPY --from=vips /opt/vips /opt/vips
+ENV LD_LIBRARY_PATH=/opt/vips/lib \
+    PKG_CONFIG_PATH=/opt/vips/lib/pkgconfig
+
 # -----------------------------------------------------------------------------
 # Dependencies stage
 # -----------------------------------------------------------------------------
@@ -128,16 +148,27 @@ COPY packages/shared ./packages/shared/
 # Using npm install since this is a workspace package without its own lock file
 RUN npm install --ignore-scripts
 
-# The main install runs with --ignore-scripts (keeps control over other
-# postinstalls), which also suppresses sharp's build script — so sharp would
-# otherwise keep its bundled, HEIC-less libvips. Explicitly rebuild ONLY sharp
-# from source against the global HEIF-enabled libvips installed in the base
-# stage, so it decodes HEIC/HEIF natively (issue #128). node-gyp comes from npm;
-# python3/make/g++ + pkg-config/libvips-dev were installed above. VERIFY in-image
-# that `node -e "console.log(require('sharp').versions.vips)"` reports the system
-# libvips (Debian trixie's 8.16.x), not sharp's bundled version — if the build
-# fails against 8.16.x, fall back to compiling libvips 8.18.3 from source.
-RUN SHARP_FORCE_GLOBAL_LIBVIPS=1 npm rebuild sharp --build-from-source
+# The main install runs with --ignore-scripts, and sharp 0.35 has no install script
+# anyway, so sharp keeps its bundled HEIC-less libvips until it is built from source
+# in the step below.
+
+# Build sharp's native addon from source against the HEIF-enabled libvips in
+# /opt/vips (RETRO-J, #593/#616). sharp 0.35 has NO install script, so neither
+# `npm install` nor `npm rebuild sharp --build-from-source` builds anything: the
+# build is its own `install/build.js` (= `npm run build`), which needs
+# node-addon-api and node-gyp, both only devDependencies of sharp. They are
+# installed in a scratch dir and exposed through PATH/NODE_PATH so nothing leaks
+# into node_modules or the lockfile. The build fails loudly if pkg-config reports
+# a libvips below sharp's minimum, and the final check proves the addon really
+# links the source-built libvips with HEIF support (not the bundled one).
+RUN mkdir /tmp/sharp-tools && cd /tmp/sharp-tools \
+ && npm init -y >/dev/null \
+ && npm install --no-audit --no-fund node-addon-api@8.9.0 node-gyp@12.4.0 \
+ && cd /app/node_modules/sharp \
+ && PATH=/tmp/sharp-tools/node_modules/.bin:$PATH NODE_PATH=/tmp/sharp-tools/node_modules \
+    SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \
+ && rm -rf /tmp/sharp-tools \
+ && node -e "const s=require('/app/node_modules/sharp');const v=s.versions.vips;console.log('sharp libvips',v,'heif',JSON.stringify(s.versions.heif));if(!/^8\\.18\\./.test(v)||!s.format.heif.input.buffer){process.exit(1)}"
 
 # Build the shared memoriahub-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
