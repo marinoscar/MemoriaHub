@@ -182,6 +182,11 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
       return source.includes('<AdminPageHeader') || source.includes('<AdminBackLink');
     });
 
+    // 7 since RETRO-J11 (#626, review and enhancement): the admin Burst, Duplicate Detection and
+    // Location Inference pages are the packaged review slice's, and the AI Picture Enhancer page is
+    // the packaged enhancement slice's (the adopters moved with them).
+    // 11 since RETRO-J11 (#626, face settings): the admin Face Settings page is the packaged
+    // FaceSettingsPage, which renders the host's AdminPageHeader (the adopter moved with it).
     // 12 since RETRO-J11 (#626, people and memories): the admin Memories settings page is the
     // packaged MemoriesSettingsPage (the adopter moved with it).
     // 13 since RETRO-J11 (#626): the Tagging and Workflows settings pages are the packaged
@@ -195,6 +200,6 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // slice's packaged AndroidAppPage.
     // 16 since RETRO-E4 (#607): the AI page is the AI slice's packaged AiConfigPage.
     // 15 since RETRO-C2 (#581): the Worker Nodes page is the nodes slice's packaged WorkersPage.
-    expect(adopters.length).toBeGreaterThanOrEqual(12);
+    expect(adopters.length).toBeGreaterThanOrEqual(7);
   });
 });

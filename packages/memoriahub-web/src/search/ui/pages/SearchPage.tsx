@@ -31,7 +31,7 @@ import PlaceIcon from '@mui/icons-material/Place';
 import PublicIcon from '@mui/icons-material/Public';
 import TagIcon from '@mui/icons-material/LocalOffer';
 import { useOwnerScope } from '../../../core/headless/index.js';
-import { SearchPeopleExploreSlot } from '../slots.js';
+import { SearchPeopleExplore } from '../../../people/ui/index.js';
 import { performSearch } from '../../headless/services/search.js';
 import { getExploreLocations, getExploreTags } from '../../../media/headless/index.js';
 import type { ExploreItem, ExploreLocations } from '../../../media/headless/index.js';
@@ -289,7 +289,7 @@ export function SearchPage() {
       <PageSearchBarSection />
 
       {/* People (a slot: the people slice has not moved into the package) */}
-      <SearchPeopleExploreSlot circleId={activeCircle.id} />
+      <SearchPeopleExplore circleId={activeCircle.id} />
 
       {/* Countries */}
       <ExploreCarousel<ExploreLocationItem>

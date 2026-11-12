@@ -15,7 +15,7 @@ import {
   FormControlLabel,
 } from '@mui/material';
 import { LocationPickerMap } from '../../../../media/ui/index.js';
-import { WorkflowPersonSelectSlot } from '../../slots.js';
+import { WorkflowPersonSelect } from '../../../../people/ui/index.js';
 import { useOwnerScope } from '../../../../core/headless/index.js';
 import type { ExploreItem } from '../../../../media/headless/index.js';
 import type { Album } from '../../../../media/headless/index.js';
@@ -232,7 +232,7 @@ export function ActionParamEditor({
     // --- assign_person / remove_person ------------------------------------
     case 'person': {
       return (
-        <WorkflowPersonSelectSlot
+        <WorkflowPersonSelect
           circleId={circleId}
           value={typeof action.personId === 'string' ? action.personId : undefined}
           onChange={(personId) => set({ personId })}

@@ -58,7 +58,7 @@ import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
 import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { AddToAlbumDialog } from '@marinoscar/memoriahub-web/media/ui';
 import { MediaOrientationEditor } from '@marinoscar/memoriahub-web/media/ui';
-import { MediaEnhancementDrawer } from './MediaEnhancementDrawer';
+import { MediaEnhancementDrawer } from '@marinoscar/memoriahub-web/enhancement/ui';
 import { VideoPlayer } from './VideoPlayer';
 import { useFeatureFlags } from '../../hooks/useFeatureFlags';
 

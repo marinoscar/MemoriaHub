@@ -110,7 +110,6 @@ export const SLICE_DOCTOR_CHECKS = [
   WorkflowsStateDoctorCheck,
   // android
   AndroidMediaSyncDoctorCheck,
-  AndroidUploadPathDoctorCheck,
 ];
 
 /** Every `memoriahub.*` check of the application, the slices' and this module's. */

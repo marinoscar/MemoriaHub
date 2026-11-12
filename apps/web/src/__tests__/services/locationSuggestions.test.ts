@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import { listLocationSuggestions } from '../../services/locationSuggestions';
+import { listLocationSuggestions } from '@marinoscar/memoriahub-web/review/headless';
 import { api } from '../../services/api';
 
 beforeEach(() => {

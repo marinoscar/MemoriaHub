@@ -100,7 +100,7 @@ const DataExportPage = lazy(() =>
 const AiConfigRoute = lazy(() => import('./platform/ai/AiConfigRoute'));
 const AiModelsRoute = lazy(() => import('./platform/ai/AiModelsRoute'));
 const AiUsageRoute = lazy(() => import('./platform/ai/AiUsageRoute'));
-const FaceSettingsPage = lazy(() => import('./pages/Admin/FaceSettingsPage'));
+const FaceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/face/ui').then((m) => ({ default: m.FaceSettingsPage })));
 const GeoSettingsPage = lazy(() => import('./pages/Admin/GeoSettingsPage'));
 // The platform's email settings page (RETRO-D2, #570): transports, sender, write-only secrets and the
 // test send to the caller's own address (`@marinoscar/platform-web/email/ui`).
@@ -146,14 +146,14 @@ const SettingsHubPage = lazy(() => import('./pages/Admin/SettingsHubPage'));
 const TaggingSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/tagging/ui').then((m) => ({ default: m.TaggingSettingsPage })),
 );
-const BurstsSettingsPage = lazy(() => import('./pages/Admin/BurstsSettingsPage'));
-const DuplicatesSettingsPage = lazy(() => import('./pages/Admin/DuplicatesSettingsPage'));
+const BurstsSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsSettingsPage })));
+const DuplicatesSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesSettingsPage })));
 const SocialMediaSettingsPage = lazy(() => import('./pages/Admin/SocialMediaSettingsPage'));
-const EnhancerSettingsPage = lazy(() => import('./pages/Admin/EnhancerSettingsPage'));
+const EnhancerSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancerSettingsPage })));
 const MemoriesSettingsPage = lazy(() =>
   import('@marinoscar/memoriahub-web/memories/ui').then((m) => ({ default: m.MemoriesSettingsPage })),
 );
-const LocationInferenceSettingsPage = lazy(() => import('./pages/Admin/LocationInferenceSettingsPage'));
+const LocationInferenceSettingsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationInferenceSettingsPage })));
 const LocationGroupsSettingsPage = lazy(() => import('./pages/Admin/LocationGroupsSettingsPage'));
 const ArchivingSettingsPage = lazy(() => import('./pages/Admin/ArchivingSettingsPage'));
 const SearchPage = lazy(() =>
@@ -168,13 +168,13 @@ const TagsBrowsePage = lazy(() =>
 );
 const PlacesOverviewPage = lazyMediaPage('PlacesOverviewPage');
 const LevelBrowsePage = lazyMediaPage('LevelBrowsePage');
-const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
-const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
-const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
-const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
-const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
-const LocationSuggestionRunRedirect = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionRunRedirect'));
-const ReviewRunPage = lazy(() => import('./pages/Reviews/ReviewRunPage'));
+const BurstsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsPage })));
+const BurstGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstGroupPage })));
+const DuplicatesPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesPage })));
+const DuplicateGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicateGroupPage })));
+const LocationSuggestionsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })));
+const LocationSuggestionRunRedirect = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionRunRedirect })));
+const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.ReviewRunPage })));
 const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));
 const ReviewQueuePage = lazy(() => import('./pages/Reviews/ReviewQueuePage'));
@@ -182,7 +182,7 @@ const ReviewInsightsPage = lazy(() => import('./pages/Insights/ReviewInsightsPag
 const ArchivePage = lazyMediaPage('ArchivePage');
 const SharedWithMePage = lazy(() => import('./pages/Shared/SharedWithMePage'));
 const TrashPage = lazyMediaPage('TrashPage');
-const TrashEmptyRunPage = lazy(() => import('./pages/Trash/TrashEmptyRunPage'));
+const TrashEmptyRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.TrashEmptyRunPage })));
 const LegacyShareRedirect = lazy(() => import('./pages/Public/LegacyShareRedirect'));
 // RETRO-I4 (#578): public links are the sharing slice's; the page resolves `/s#lnk_...` and
 // renders the `media_item` / `album` renderers registered in `platform/linkRenderers`.
@@ -197,9 +197,9 @@ const WorkflowListPage = lazy(() =>
 const WorkflowBuilderPage = lazy(() =>
   import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowBuilderPage })),
 );
-const WorkflowRunPage = lazy(() => import('./pages/Workflows/WorkflowRunPage'));
-const EnhancementsPage = lazy(() => import('./pages/Enhancements/EnhancementsPage'));
-const EnhancementBatchPage = lazy(() => import('./pages/Enhancements/EnhancementBatchPage'));
+const WorkflowRunPage = lazy(() => import('@marinoscar/memoriahub-web/workflows/ui').then((m) => ({ default: m.WorkflowRunPage })));
+const EnhancementsPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementsPage })));
+const EnhancementBatchPage = lazy(() => import('@marinoscar/memoriahub-web/enhancement/ui').then((m) => ({ default: m.EnhancementBatchPage })));
 const NotificationsPage = lazy(() => import('./pages/Notifications/NotificationsPage'));
 // RETRO-J11: the memories pages are the packaged slice's.
 type MemoriesUiModule = typeof import('@marinoscar/memoriahub-web/memories/ui');

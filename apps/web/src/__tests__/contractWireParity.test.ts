@@ -38,7 +38,7 @@ import type {
   EnhancementStatusFilter,
   ListEnhancementBatchesParams,
   ListEnhancementsParams,
-} from '../services/enhance';
+} from '@marinoscar/memoriahub-web/enhancement/headless';
 import type {
   CreateLocationGroupBody,
   MergeLocationGroupsBody,

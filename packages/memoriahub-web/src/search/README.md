@@ -4,13 +4,13 @@ Search over the library: the deterministic filter panel, the AI (agentic) search
 
 ## Purpose and scope
 
-`search/headless` carries the clients over the host's API client (`getSearchFields`, `performSearch`, and `streamAgent`, the stateless SSE client of `POST /api/search/agent`, which sends the whole message history on every call and applies the host's owner-scope rewrite to its body), the request and response types and a `useDeterministicSearch` hook. `search/ui` carries `SearchProvider` and `useSearch` (the one search state the top bar and the page share: the agent chat, its results and the deterministic request), `SearchPanel` (the advanced-filter dialog body), `TopbarSearch`, `PageSearchBar`, `PageSearchBarSection` and `SearchPage`. The provider also feeds the host's `search` port: the app re-provides the host with `runDeterministicSearch` filled in, so a slice that has a filter to show (the map) hands it over without importing the search state. The people picker of the panel is the media slice's `PersonMultiSelectSlot`; the people carousel of the explore view is this slice's `SearchPeopleExploreSlot`, because people belong to a slice that has not moved yet.
+`search/headless` carries the clients over the host's API client (`getSearchFields`, `performSearch`, and `streamAgent`, the stateless SSE client of `POST /api/search/agent`, which sends the whole message history on every call and applies the host's owner-scope rewrite to its body), the request and response types and a `useDeterministicSearch` hook. `search/ui` carries `SearchProvider` and `useSearch` (the one search state the top bar and the page share: the agent chat, its results and the deterministic request), `SearchPanel` (the advanced-filter dialog body), `TopbarSearch`, `PageSearchBar`, `PageSearchBarSection` and `SearchPage`. The provider also feeds the host's `search` port: the app re-provides the host with `runDeterministicSearch` filled in, so a slice that has a filter to show (the map) hands it over without importing the search state. The people picker of the panel (`PersonMultiSelect`) and the people carousel of the explore view (`SearchPeopleExplore`) are the `people` slice's components, imported directly.
 
-Staying in the app: `PersonMultiSelect` (the people slice's picker, registered as the media slot) and the search-fields settings card.
+Staying in the app: the search-fields settings card.
 
 ## Entry point
 
-`@marinoscar/memoriahub-web/search/headless` and `@marinoscar/memoriahub-web/search/ui`. The slice imports `core` and `media` through their entries.
+`@marinoscar/memoriahub-web/search/headless` and `@marinoscar/memoriahub-web/search/ui`. The slice imports `core`, `media` and `people` through their entries.
 
 ## Peer dependencies
 
@@ -18,8 +18,8 @@ Staying in the app: `PersonMultiSelect` (the people slice's picker, registered a
 
 ## Configuration
 
-`SearchProvider` must sit under the host provider and inside the router, once, above the top bar and the Search page. The host's API client supplies the credential, the API root (`baseUrl`) and `rewriteBody` for the streamed request. The host registers the people carousel under `SEARCH_PEOPLE_EXPLORE_SLOT` (`search.peopleExplore`, props `SearchPeopleExploreSlotProps`).
+`SearchProvider` must sit under the host provider and inside the router, once, above the top bar and the Search page. The host's API client supplies the credential, the API root (`baseUrl`) and `rewriteBody` for the streamed request.
 
 ## Extension-point catalog
 
-The slot bridge `SearchPeopleExploreSlot` is the extension point: the host chooses the component. It is deleted when the people slice moves into the package.
+None: the slice registers no slot of its own. (`SEARCH_PEOPLE_EXPLORE_SLOT` and `SearchPeopleExploreSlot` were removed when the people slice moved into the package.)

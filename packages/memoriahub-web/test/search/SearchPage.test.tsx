@@ -15,7 +15,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils/test-utils.js';
-import { SEARCH_PEOPLE_EXPLORE_SLOT } from '../../src/search/headless/slot-names.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
@@ -44,6 +43,11 @@ vi.mock('../../src/media/ui/index.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   MediaGallery: vi.fn(() => <div data-testid="media-gallery" />),
 
+}));
+
+// The people carousel is the people slice's; a stub keeps the test free of async calls.
+vi.mock('../../src/people/ui/index.js', () => ({
+  SearchPeopleExplore: ({ circleId }: { circleId: string }) => <div data-testid="people-slot">{circleId}</div>,
 }));
 
 vi.mock('../../src/search/ui/components/SearchPanel.js', () => ({
@@ -142,9 +146,8 @@ describe('SearchPage', () => {
 
 
 
-    it('renders the host\'s people slot with the active circle in the explore view', () => {
-      const PeopleSlot = ({ circleId }: { circleId: string }) => <div data-testid="people-slot">{circleId}</div>;
-      render(<SearchPage />, { wrapperOptions: { slots: { [SEARCH_PEOPLE_EXPLORE_SLOT]: PeopleSlot } } });
+    it('renders the people carousel with the active circle in the explore view', () => {
+      render(<SearchPage />);
       expect(screen.getByTestId('people-slot')).toHaveTextContent('circle-1');
     });
 

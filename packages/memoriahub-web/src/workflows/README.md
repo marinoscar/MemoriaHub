@@ -6,13 +6,11 @@ Media workflow automation on the web: the workflow list, the builder (subject, t
 
 `workflows/headless` carries the clients over the host's API client (`workflows.ts`: list, create, update, delete, preview, run, approve, cancel, run detail and items), the hooks that load them (`useWorkflows`, `useWorkflow`, `useWorkflowSubjects` with `useWorkflowsEnabled`, `useWorkflowPreview`, `useWorkflowMutations`, `useWorkflowRun`, `useWorkflowRuns`, `useWorkflowRunItems`), the wire types, the builder's pure state machine (`builderState`: definition to editable state and back, the sanitiser the preview sends), the action metadata and the starter templates, and the pure helpers (`workflowCron` validation, `workflowFormat` labels and relative times, `workflowSentence`, which writes a definition as an English sentence). `workflows/ui` carries `WorkflowListPage`, `WorkflowBuilderPage`, `WorkflowCard`, `WorkflowRunHistory`, `WorkflowTemplatesGallery`, the builder blocks and the admin page: `WorkflowsSettingsPage` (feature and trigger switches, engine limits, the hard-delete danger card, the KPI strip), `WorkflowsOversightTable` and `WorkflowRunsDrawer`. `workflows/headless` also carries the admin client (`adminWorkflows.ts`: stats, every workflow, every run, force-disable, cancel). The admin page takes its data table, page header and system-settings hook from the host's admin port (`useMemoriahubAdmin` of `core`) and stays registered in the app's admin section registry. The run formatters shared by every async-run page and the scrollable tab props live in `core`.
 
-Components of slices that have not moved are reached through host slots: the people picker of a condition is the media slice's `PersonMultiSelectSlot`, and the single-person picker of the `assign_person` and `remove_person` actions is this slice's `WorkflowPersonSelectSlot`.
-
-Staying in the app: the run page (`WorkflowRunPage`, built on the shared run progress panel, run polling hook and item table, which the review and trash runs also use; it moves with the review-runs web slice).
+`workflows/ui` also carries `WorkflowRunPage` (approval preview, live progress and failed items), built on the `review-runs` slice's run progress panel, run polling hook and item table, which the review-queue and trash runs also use.
 
 ## Entry point
 
-`@marinoscar/memoriahub-web/workflows/headless` and `@marinoscar/memoriahub-web/workflows/ui`. The slice imports `core` and `media` through their entries.
+`@marinoscar/memoriahub-web/workflows/headless` and `@marinoscar/memoriahub-web/workflows/ui`. The slice imports `core`, `media`, `review-runs` and `people` through their entries.
 
 ## Peer dependencies
 
@@ -20,8 +18,8 @@ Staying in the app: the run page (`WorkflowRunPage`, built on the shared run pro
 
 ## Configuration
 
-The host registers the person picker under `WORKFLOW_PERSON_SELECT_SLOT` (`workflows.personSelect`, props `WorkflowPersonSelectSlotProps`) and the condition people picker under the media slice's `PERSON_MULTI_SELECT_SLOT`. Feature gating (`features.workflows`) and the active owner scope come from the host.
+The person pickers (`WorkflowPersonSelect` for the `assign_person` and `remove_person` actions, `PersonMultiSelect` for the people condition) are the `people` slice's components, imported directly. Feature gating (`features.workflows`) and the active owner scope come from the host.
 
 ## Extension-point catalog
 
-The slot bridge `WorkflowPersonSelectSlot` is the extension point: the host chooses the component. It is deleted when the people slice moves into the package.
+None: the slice registers no slot of its own. (`WORKFLOW_PERSON_SELECT_SLOT` and `WorkflowPersonSelectSlot` were removed when the people slice moved into the package.)
