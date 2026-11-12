@@ -208,6 +208,9 @@ describe('the "Back to Settings" link is never hand-rolled', () => {
     // 2 since RETRO-J11 (#626, insights and archiving): the admin Storage Insights and Archiving &
     // Deletion pages are the packaged StorageInsightsPage (the back link) and ArchivingSettingsPage
     // (the header), both reached through the host's admin port (the adopters moved with them).
-    expect(adopters.length).toBeGreaterThanOrEqual(2);
+    // 1 since RETRO-J11 (#626, shares): the admin Public Sharing page is the packaged PublicSharesPage, which
+    // renders the host's AdminBackLink (the adopter moved with it). The packages' own pages are scanned by the
+    // package suites; this sweep still proves the scan finds a page.
+    expect(adopters.length).toBeGreaterThanOrEqual(1);
   });
 });
