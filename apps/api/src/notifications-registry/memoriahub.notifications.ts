@@ -33,7 +33,7 @@
 // still render. Every link is root-relative (the platform drops anything else).
 // =============================================================================
 
-import { REVIEW_QUEUE_EVENT_KEYS, UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
+import { ENRICHMENT_FAILED_EVENT_KEY, REVIEW_QUEUE_EVENT_KEYS, UPLOAD_COMPLETED_EVENT_KEY, UPLOAD_COMPLETED_WINDOW_MS } from '@marinoscar/memoriahub-api/media';
 import { MEMORIES_READY_EVENT_KEY, MEMORIES_READY_WINDOW_MS } from '@marinoscar/memoriahub-api/memories';
 import { WORKFLOW_RUN_COMPLETED_EVENT_KEY } from '@marinoscar/memoriahub-api/workflows';
 import { createHash } from 'node:crypto';
@@ -56,7 +56,7 @@ export const MEMORIAHUB_EVENT_KEYS = {
   reviewLocationSuggestions: REVIEW_QUEUE_EVENT_KEYS.locationSuggestions,
   reviewEnhancements: REVIEW_QUEUE_EVENT_KEYS.enhancements,
   uploadCompleted: UPLOAD_COMPLETED_EVENT_KEY,
-  enrichmentFailed: 'media.enrichment_failed',
+  enrichmentFailed: ENRICHMENT_FAILED_EVENT_KEY,
   workflowRunCompleted: WORKFLOW_RUN_COMPLETED_EVENT_KEY,
   shareExpiring: 'shares.expiring',
   memoriesReady: MEMORIES_READY_EVENT_KEY,

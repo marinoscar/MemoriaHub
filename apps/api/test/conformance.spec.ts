@@ -229,12 +229,11 @@ runPlatformConformance({
     // RETRO-C9 (#612): the listeners the issue names are pinned with `mustScan`, so a move cannot
     // drop one out of the scan silently.
     onEventNoIo: {
-      minListenerFiles: 7, // 7 since RETRO-D3 removed the broadcast-failure listener
+      minListenerFiles: 6, // 7 since RETRO-D3 removed the broadcast-failure listener; 6 once the failure listener became the media slice's (RETRO-J10, no longer an @OnEvent)
       mustScan: [
         'media/sync/media-metadata-sync.listener.ts',
         'media/enrichment/media-enrichment-enqueue.listener.ts',
         'workflows/runs/workflow-trigger.listener.ts', // the app's listener over the workflows slice's settlement service
-        'notification-producers/enrichment-failure-notification.listener.ts',
         'media-processing/media-object-processing.service.ts',
       ],
     },

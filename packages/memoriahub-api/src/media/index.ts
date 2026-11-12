@@ -3,6 +3,7 @@ export * from './data/media-db.js';
 export * from './touch/media-touch.module.js';
 export * from './touch/media-touch.service.js';
 export * from './producers/upload-notification.service.js';
+export * from './producers/enrichment-failure-notification.listener.js';
 export * from './producers/review-queue.constants.js';
 export * from './producers/review-queue-reconcile.service.js';
 export * from './producers/review-queue-reconcile.handler.js';
