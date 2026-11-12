@@ -146,7 +146,7 @@ jobs:
 
       - name: Golden-vector parity gate (inside the worker image)
         # The committed CLIP golden vector is compared in the executor-parity job
-        # (CPU-class gated, see packages/memoriahub-compute/test/golden-report.mjs),
+        # (CPU-class gated, see packages/memoriahub-compute/scripts/golden-report.mjs),
         # so the CLIP case is excluded here. REQUIRE_CLIP_MODEL stays set for the
         # remaining cases.
         run: |
@@ -230,18 +230,18 @@ jobs:
               -v "$PWD/models:/app/models:ro" -v "$PWD/out:/out" \
               -e MODELS_DIR=/app/models \
               --entrypoint node -w /app/packages/memoriahub-compute \
-              "memoriahub-$kind:parity-gate" test/emit-parity.mjs "/out/$kind.json"
+              "memoriahub-$kind:parity-gate" scripts/emit-parity.mjs "/out/$kind.json"
           done
 
       - name: Cross-executor parity (BLOCKING)
         # The invariant that matters: the server and a worker node produce the
         # same embedding / dHash / pixels for the same fixture on the same CPU,
         # whatever the runner CPU class.
-        run: node packages/memoriahub-compute/test/compare-parity.mjs out/api.json out/worker.json
+        run: node packages/memoriahub-compute/scripts/compare-parity.mjs out/api.json out/worker.json
 
       - name: CLIP committed golden vector (blocking only on the blessed CPU class)
         # See golden-report.mjs: the result is always printed; only a CPU model
         # matching GOLDEN_BLESSED_CPU (the class the vector was derived on) fails.
         env:
           GOLDEN_BLESSED_CPU: 'EPYC 7763'
-        run: node packages/memoriahub-compute/test/golden-report.mjs out/api.json out/worker.json
+        run: node packages/memoriahub-compute/scripts/golden-report.mjs out/api.json out/worker.json

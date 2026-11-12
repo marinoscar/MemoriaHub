@@ -6,7 +6,7 @@
 // Also records the CPU model and the max diff against the committed golden
 // vector (golden-clip-512.json), which is CPU-class dependent (see the workflow).
 //
-// Usage (from this package's directory): node test/emit-parity.mjs <out.json>
+// Usage (from this package's directory): node scripts/emit-parity.mjs <out.json>
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const outPath = process.argv[2];
 if (!outPath) {
-  console.error('usage: node test/emit-parity.mjs <out.json>');
+  console.error('usage: node scripts/emit-parity.mjs <out.json>');
   process.exit(2);
 }
 const MODELS_DIR = process.env.MODELS_DIR ?? '/app/models';
@@ -35,7 +35,7 @@ const session = await createClipSession(MODEL_PATH);
 const result = { cpuModel, sharpVersion: sharp.versions.sharp ?? null, fixtures: {} };
 
 for (const [name, file] of [['jpg', 'golden-fixture.jpg'], ['heic', 'golden-fixture.heic']]) {
-  const buf = readFileSync(path.join(here, 'fixtures', file));
+  const buf = readFileSync(path.join(here, '..', 'test', 'fixtures', file));
   const entry = {};
   try {
     entry.decodePixelsSha256 = sha(await sharp(buf).raw().toBuffer());
@@ -51,7 +51,7 @@ for (const [name, file] of [['jpg', 'golden-fixture.jpg'], ['heic', 'golden-fixt
   result.fixtures[name] = entry;
 }
 
-const golden = JSON.parse(readFileSync(path.join(here, 'fixtures', 'golden-clip-512.json'), 'utf8'));
+const golden = JSON.parse(readFileSync(path.join(here, '..', 'test', 'fixtures', 'golden-clip-512.json'), 'utf8'));
 const jpgClip = result.fixtures.jpg.clip;
 result.goldenMaxDiff = jpgClip ? Math.max(...jpgClip.map((v, i) => Math.abs(v - golden[i]))) : null;
 
