@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/comm
 import { Readable } from 'stream';
 import { prepareImageForProcessing } from '@marinoscar/memoriahub-compute/image';
 
-import { aiRateLimit, streamToBuffer } from '../core/index.js';
+import { aiRateLimit, classifyProviderThrottle, streamToBuffer } from '../core/index.js';
 import {
   MEMORIAHUB_AI,
   MEMORIAHUB_JOBS,
@@ -356,8 +356,13 @@ export class PictureEnhancementHandler implements MemoriahubJobHandler, OnModule
 
       // Classify the failure the SAME way EnrichmentTerminalService will, so
       // the row's next state always agrees with the job's next state.
-      // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.)
-      const rl = err instanceof MemoriahubRateLimitError ? err : aiRateLimit(err, ENHANCEMENT_THROTTLE_KEY);
+      // (Mirrors AutoTaggingService.embedAndStore's classify-then-rethrow.) An AI throttle, and, as the tagging
+      // handlers do, a raw provider or object-store throttle (HTTP 429/529, an S3 `SlowDown`): the source download
+      // and the staging upload are not model calls, and a throttle there is a deferral too, never a failure.
+      const rl =
+        err instanceof MemoriahubRateLimitError
+          ? err
+          : (aiRateLimit(err, ENHANCEMENT_THROTTLE_KEY) ?? classifyProviderThrottle(err, ENHANCEMENT_THROTTLE_KEY));
 
       // Does the queue requeue this job, or is this its last breath?
       //
