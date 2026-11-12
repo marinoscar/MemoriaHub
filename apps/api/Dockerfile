@@ -170,7 +170,7 @@ RUN mkdir /tmp/sharp-tools && cd /tmp/sharp-tools \
  && PATH=/tmp/sharp-tools/node_modules/.bin:$PATH NODE_PATH=/tmp/sharp-tools/node_modules \
     SHARP_FORCE_GLOBAL_LIBVIPS=1 node install/build.js \
  && rm -rf /tmp/sharp-tools \
- && node -e "const s=require('/app/node_modules/sharp');const v=s.versions.vips;console.log('sharp libvips',v,'heif',JSON.stringify(s.versions.heif));if(!/^8\\.18\\./.test(v)||!s.format.heif.input.buffer){process.exit(1)}"
+ && node -e "require('/app/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node');const s=require('/app/node_modules/sharp');const v=s.versions.vips;console.log('sharp libvips',v,'heif',JSON.stringify(s.versions.heif));if(!/^8\\.18\\./.test(v)||!s.format.heif.input.buffer){process.exit(1)}"
 
 # Build the shared memoriahub-compute workspace package so its dist/ is
 # present before apps/api (which imports it) is compiled or run.
