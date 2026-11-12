@@ -41,9 +41,13 @@ export interface UseMediaSharesResult {
   meta: ShareListMeta | null;
   isLoading: boolean;
   error: string | null;
+  /** Reloads the current page. */
   refetch: () => Promise<void>;
+  /** Re-dates a link and reloads. */
   updateShare: (id: string, req: UpdateShareRequest) => Promise<void>;
+  /** Revokes a link and reloads. */
   revokeShare: (id: string) => Promise<void>;
+  /** Applies one action to several links and reloads; resolves with how many succeeded. */
   bulkAction: (req: BulkShareRequest) => Promise<{ affected: number }>;
 }
 

@@ -32,8 +32,12 @@ export interface ShareListResponse {
   meta: ShareListMeta;
 }
 
-/** One row of `GET /api/admin/links`. */
-interface AdminLinkDto {
+/**
+ * One row of `GET /api/admin/links`.
+ *
+ * @stability experimental
+ */
+export interface AdminLinkDto {
   id: string;
   resourceType: ShareTargetType;
   url: string | null;

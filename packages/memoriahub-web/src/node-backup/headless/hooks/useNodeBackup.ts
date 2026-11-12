@@ -42,6 +42,7 @@ export interface UseNodeBackupResult {
   saving: boolean;
   error: string | null;
 
+  /** Reloads the config and the runs now. */
   refresh: () => Promise<void>;
   /**
    * PUT the config. Returns the server's post-save config (GET shape) and

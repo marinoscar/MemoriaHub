@@ -555,6 +555,13 @@ function PublicSharesPageContent() {
 // Default export — admin-gated
 // ---------------------------------------------------------------------------
 
+/**
+ * The Public Sharing admin page: every public link, with status tabs, filters, bulk revoke and re-dating.
+ *
+ * @returns the page, or a redirect home for a non-admin.
+ *
+ * @stability experimental
+ */
 export default function PublicSharesPage() {
   const { isAdmin } = usePermissions();
 

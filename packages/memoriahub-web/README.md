@@ -54,6 +54,25 @@ Entry points (a slice README per folder):
 - `@marinoscar/memoriahub-web/workflows/headless`: the workflow clients, hooks, builder state, templates and formatters ([slice README](src/workflows/README.md#purpose-and-scope)).
 - `@marinoscar/memoriahub-web/workflows/ui`: the workflow list and builder pages and their blocks.
 
+### What stays in `apps/web/src`
+
+Only host bindings and pages of the platform. Each remaining area, with the one reason it is not in the package:
+
+| In `apps/web/src` | Why it stays |
+|---|---|
+| `platform-memoriahub/` (`host.ts`, `admin.tsx`, `android.ts`, `slots.tsx`, `HostBinding.tsx`) | the host the package asks for: the API client, the admin port and the Android port, built from the app's contexts |
+| `platform/`, `platform-extensions/` | the bindings of the platform slices (identity, notifications, jobs, nodes, storage, AI, db-backup, alerts, android-app, onboarding, sharing, telemetry) to this product |
+| `App.tsx`, `main.tsx`, `config/` (`adminSections.tsx`, `userSettingsSections.tsx`, `destinations.ts`, `shell.ts`, `settingsFeatures.ts`, `doctorCategories.ts`) | the routes and the section registries: the platform `SettingsHub` draws them, and a settings page is a registry card here (Settings UI Pattern) |
+| `contexts/` (`AuthContext`, `ThemeContext`, `CircleContext`, `OwnerScopeContext`) | the signed-in user, the theme and the owner scope, over the platform identity and sharing slices |
+| `components/common/`, `components/navigation/`, `components/notifications/`, `components/onboarding/`, `components/device-activation/` | the shell, the guards and the bell, over the platform shell, notifications, onboarding and device-flow slices |
+| `components/admin/`, `components/settings/` (but the Search card), `components/sharing/` | platform settings and identity cards: users and allowlist tables, access tokens, theme, time zone, storage and the group-invite banner |
+| `components/user/`, `pages/Profile/`, `services/userProfile.ts` | the account profile page: it refreshes the platform session (`refreshUser`) and loads the avatar through the app's authenticated image hook, neither of which the host has a port for yet (the avatar crop also needs `react-easy-crop`); a candidate for an auth port |
+| `pages/Admin/` (`AboutPage`, `DoctorPage`, `JobsPage`, `MaintenancePage`, `SettingsHubPage`), `pages/SystemSettingsPage.tsx` | thin bindings of platform pages; `JobsPage` adds the media slice's thumbnail repair button to the platform page's toolbar slot |
+| `pages/Notifications/`, `pages/UserSettingsHubPage.tsx`, `pages/settings/` | the platform notification inbox and the hub binding; each `pages/settings/` page is a registry card wrapper over a packaged card |
+| `pages/HomePage.tsx`, `pages/LegacyCircleRedirect.tsx`, `pages/TestLoginPage.tsx`, `pages/*/index.ts` | the home composition of packaged slices with the platform invite banner, a redirect, the test login and lazy re-exports |
+| `services/api.ts`, `services/circles.ts`, `services/ownerScopeParams.ts`, `services/features.ts`, `services/email.ts`, `services/ai.ts`, `services/notifications.ts`, `services/jobInsights.ts` | the transport and the host's implementations of its ports; `jobInsights` is the platform jobs slice's reset call used by the System Settings page |
+| `hooks/`, `utils/`, `types/`, `theme/`, `constants/` | app wiring: re-exports of the package hooks, platform settings hooks and app types |
+
 ## Install and peer dependencies
 
 ```bash
