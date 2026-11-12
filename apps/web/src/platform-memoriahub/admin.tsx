@@ -10,10 +10,12 @@
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { DataTable as PlatformDataTable } from '@marinoscar/platform-web/datatable/ui';
+import { SecretField } from '@marinoscar/platform-web/credentials/ui';
 import type {
   MemoriahubAdminPort,
   MemoriahubDataTableComponent,
   MemoriahubDataTableProps,
+  MemoriahubSecretFieldComponent,
 } from '@marinoscar/memoriahub-web/core/headless';
 
 import { AdminPageHeader } from '../components/admin/AdminPageHeader';
@@ -45,6 +47,8 @@ function AppDataTable<Row>(props: MemoriahubDataTableProps<Row>): ReactNode {
 export const appMemoriahubAdmin: MemoriahubAdminPort = {
   DataTable: AppDataTable,
   AdminPageHeader,
+  // The platform's field takes MUI's `sx`; the port types it as a plain object so a headless entry imports no MUI.
+  SecretField: SecretField as unknown as MemoriahubSecretFieldComponent,
   useSystemSettings,
   useAiSettings,
   getEmailReadiness: getEmailSettings,

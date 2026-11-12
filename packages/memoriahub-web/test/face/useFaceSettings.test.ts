@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-import { useFaceSettings } from '../../hooks/useFaceSettings';
+import { useFaceSettings } from '../../src/face/headless/hooks/useFaceSettings.js';
 
 // ---------------------------------------------------------------------------
 // Mock the entire face service module so tests are isolated from network
 // ---------------------------------------------------------------------------
 
-vi.mock('../../services/face', () => ({
+vi.mock('../../src/face/headless/services/faceSettings.js', () => ({
   getFaceSettings: vi.fn(),
   putFaceCredentials: vi.fn(),
   deleteFaceCredentials: vi.fn(),
@@ -22,8 +22,8 @@ import {
   testFaceProvider,
   getFaceModels,
   putFaceDetectionFeature,
-} from '../../services/face';
-import type { FaceSettingsResponse } from '../../services/face';
+} from '../../src/face/headless/services/faceSettings.js';
+import type { FaceSettingsResponse } from '../../src/face/headless/services/faceSettings.js';
 
 const mockGetFaceSettings = vi.mocked(getFaceSettings);
 const mockPutFaceCredentials = vi.mocked(putFaceCredentials);

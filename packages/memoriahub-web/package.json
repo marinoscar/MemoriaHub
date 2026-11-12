@@ -52,6 +52,14 @@
       "types": "./dist/shell/index.d.ts",
       "default": "./dist/shell/index.js"
     },
+    "./face/headless": {
+      "types": "./dist/face/headless/index.d.ts",
+      "default": "./dist/face/headless/index.js"
+    },
+    "./face/ui": {
+      "types": "./dist/face/ui/index.d.ts",
+      "default": "./dist/face/ui/index.js"
+    },
     "./media/headless": {
       "types": "./dist/media/headless/index.d.ts",
       "default": "./dist/media/headless/index.js"

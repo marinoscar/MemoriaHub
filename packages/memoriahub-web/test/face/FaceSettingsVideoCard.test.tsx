@@ -12,25 +12,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { render, mockAdminUser } from '../utils/test-utils';
+import { render, mockAdminUser } from '../utils/test-utils.js';
+import { createFakeAdminPort } from '../../src/core/testing/index.js';
 
 // ---------------------------------------------------------------------------
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/usePermissions', () => ({
+vi.mock('../../src/core/headless/index.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   usePermissions: vi.fn(),
+  useMemoriahubAdmin: vi.fn(),
 }));
 
-vi.mock('../../hooks/useFaceSettings', () => ({
+vi.mock('../../src/face/headless/hooks/useFaceSettings.js', () => ({
   useFaceSettings: vi.fn(),
 }));
 
-vi.mock('../../hooks/useSystemSettings', () => ({
-  useSystemSettings: vi.fn(),
-}));
-
-vi.mock('../../services/adminBackfill', () => ({
+vi.mock('../../src/face/headless/services/faceSettings.js', () => ({
   runGlobalFaceBackfill: vi.fn(),
 }));
 
@@ -38,14 +37,15 @@ vi.mock('../../services/adminBackfill', () => ({
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import FaceSettingsPage from '../../pages/Admin/FaceSettingsPage';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useFaceSettings } from '../../hooks/useFaceSettings';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
+import FaceSettingsPage from '../../src/face/ui/pages/FaceSettingsPage.js';
+import { usePermissions, useMemoriahubAdmin } from '../../src/core/headless/index.js';
+import { useFaceSettings } from '../../src/face/headless/hooks/useFaceSettings.js';
 
 const mockUsePermissions = vi.mocked(usePermissions);
 const mockUseFaceSettings = vi.mocked(useFaceSettings);
-const mockUseSystemSettings = vi.mocked(useSystemSettings);
+const mockUseAdmin = vi.mocked(useMemoriahubAdmin);
+// The settings hook is the admin port's.
+const mockUseSystemSettings = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Default mocks
@@ -126,6 +126,10 @@ describe('FaceSettingsPage — Video Face Detection card', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAdmin.mockReturnValue({
+      ...createFakeAdminPort().port,
+      useSystemSettings: mockUseSystemSettings,
+    } as never);
     mockUsePermissions.mockReturnValue(defaultPermissions() as any);
     mockUseFaceSettings.mockReturnValue(defaultFaceSettings() as any);
     mockUseSystemSettings.mockReturnValue(makeSystemSettings() as any);

@@ -1,4 +1,3 @@
-import { SecretField } from '@marinoscar/platform-web/credentials/ui';
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
@@ -23,11 +22,9 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import FaceIcon from '@mui/icons-material/Face';
-import { usePermissions } from '../../hooks/usePermissions';
-import { useFaceSettings } from '../../hooks/useFaceSettings';
-import { useSystemSettings } from '../../hooks/useSystemSettings';
-import { runGlobalFaceBackfill, runGlobalFaceAutoArchiveBackfill } from '../../services/adminBackfill';
-import { AdminPageHeader } from '../../components/admin/AdminPageHeader';
+import { useMemoriahubAdmin, usePermissions } from '../../../core/headless/index.js';
+import { useFaceSettings } from '../../headless/hooks/useFaceSettings.js';
+import { runGlobalFaceBackfill, runGlobalFaceAutoArchiveBackfill } from '../../headless/services/faceSettings.js';
 
 function FaceSettingsContent() {
   const {
@@ -42,6 +39,7 @@ function FaceSettingsContent() {
     saveDetectionFeature,
   } = useFaceSettings();
 
+  const { AdminPageHeader, SecretField, useSystemSettings } = useMemoriahubAdmin();
   const { settings: sysSettings, isSaving: sysSaving, updateSettings: updateSysSettings } = useSystemSettings();
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -812,6 +810,11 @@ function FaceSettingsContent() {
   );
 }
 
+/**
+ * The admin Face Settings page: the global switches, the provider credentials, video and auto-archive tuning and the backfills. Admin only.
+ *
+ * @stability experimental
+ */
 export default function FaceSettingsPage() {
   const { isAdmin } = usePermissions();
 

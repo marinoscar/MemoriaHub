@@ -17,6 +17,7 @@ import type {
   MemoriahubAiSettings,
   MemoriahubAiSettingsState,
   MemoriahubEmailReadiness,
+  MemoriahubSecretFieldProps,
   MemoriahubDataTableProps,
   MemoriahubSystemSettings,
   MemoriahubSystemSettingsState,
@@ -116,6 +117,17 @@ function FakeAdminPageHeader({ title, icon, titleAdornment, description, actions
   );
 }
 
+function FakeSecretField({ label, value, onChange, saved, emptyHelp, disabled, id, name }: MemoriahubSecretFieldProps): ReactNode {
+  const inputId = id ?? `fake-secret-${label.replace(/\W+/g, '-')}`;
+  return (
+    <div>
+      <label htmlFor={inputId}>{label}</label>
+      <input id={inputId} name={name} type="password" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <p>{saved ? `Saved ${saved.hint}` : emptyHelp}</p>
+    </div>
+  );
+}
+
 function mergeDeep(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(patch)) {
@@ -199,6 +211,7 @@ export function createFakeAdminPort(
     port: {
       DataTable: FakeDataTable,
       AdminPageHeader: FakeAdminPageHeader,
+      SecretField: FakeSecretField,
       useSystemSettings: useFakeSystemSettings,
       useAiSettings: useFakeAiSettings,
       getEmailReadiness: async () => extras.email ?? { provider: null, enabled: false },

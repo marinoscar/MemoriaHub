@@ -6,11 +6,45 @@ import {
   testFaceProvider,
   getFaceModels,
   putFaceDetectionFeature,
-} from '../services/face';
-import { useIsMounted } from './useIsMounted';
-import type { FaceSettingsResponse, FaceTestResult } from '../services/face';
+} from '../services/faceSettings.js';
+import { useIsMounted } from '../../../core/headless/index.js';
+import type { FaceSettingsResponse, FaceTestResult } from '../services/faceSettings.js';
 
-export function useFaceSettings() {
+/**
+ * The state and actions {@link useFaceSettings} returns.
+ *
+ * @stability experimental
+ */
+export interface UseFaceSettingsResult {
+  /** The settings, `null` until the first load. */
+  settings: FaceSettingsResponse | null;
+  /** True while the settings load. */
+  loading: boolean;
+  /** The load failure message, `null` when none. */
+  error: string | null;
+  /** Loads (or reloads) the settings. */
+  fetchSettings: () => Promise<void>;
+  /** Saves a provider's credentials. */
+  saveCredentials: (
+    provider: string,
+    body: { apiKey?: string; baseUrl?: string; region?: string; enabled?: boolean },
+  ) => Promise<void>;
+  /** Removes a provider's credentials. */
+  removeCredentials: (provider: string) => Promise<void>;
+  /** Tests a provider (and optionally a model). */
+  testProvider: (provider: string, model?: string) => Promise<FaceTestResult>;
+  /** Lists a provider's models. */
+  getModels: (provider: string) => Promise<string[]>;
+  /** Selects the detection provider and model. */
+  saveDetectionFeature: (provider: string, model: string) => Promise<void>;
+}
+
+/**
+ * Loads the face settings and exposes the provider mutations the Face Settings page calls.
+ *
+ * @stability experimental
+ */
+export function useFaceSettings(): UseFaceSettingsResult {
   const [settings, setSettings] = useState<FaceSettingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

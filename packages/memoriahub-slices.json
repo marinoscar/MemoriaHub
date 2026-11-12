@@ -218,6 +218,9 @@
     "review-runs": [
       "core",
       "media"
+    ],
+    "face": [
+      "core"
     ]
   }
 }
