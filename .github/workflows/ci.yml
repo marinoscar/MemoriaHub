@@ -243,7 +243,16 @@ jobs:
 
       - run: npm run prisma:migrate --workspace=api
       - run: npm run prisma:seed --workspace=api
+      # The database contract gates (RETRO-J, #606/#583). `db:check` verifies the installed
+      # migration copies against platform.lock and the memoriahub-db lock offline;
+      # `db:check:database` asserts the live database against the raw-SQL inventory and the
+      # RLS policies; `db:drift` replays prisma/migrations into a throwaway shadow database and
+      # diffs it against the composed schema. Intentional raw-SQL drift (the partial and
+      # expression indexes) is declared in raw-sql-indexes.json and is asserted against
+      # pg_indexes, never hidden: any other statement fails this job.
+      - run: npm run db:check --workspace=api
       - run: npm run db:check:database --workspace=api
+      - run: npm run db:drift --workspace=api
 
       - run: npm run test:db --workspace=api
 
