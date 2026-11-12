@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import type { EnhancementImageTools, EnhancementKeyStatus } from '@marinoscar/memoriahub-api/enhancement';
+import type { EnhancementImageTools, EnhancementKeyStatus, ExifCarryoverOptions } from '@marinoscar/memoriahub-api/enhancement';
+import { ExifCarryoverService } from '@marinoscar/memoriahub-api/enhancement';
 import sharp from 'sharp';
 
 import { AiDeploymentKeySource } from '../ai-port/ai-deployment-key-source';
 import { renderThumbnailBuffer } from '../media-processing/thumbnail-render.util';
-import { ExifCarryoverService, type ExifCarryoverOptions } from './exif-carryover.service';
 
 /**
  * The web app's binding of the enhancement slice's `ENHANCEMENT_IMAGE_TOOLS` hook: the native image libraries
- * (sharp for the thumbnail and the real pixel size, ExifTool for the metadata carry-over) stay with the host.
+ * (sharp for the thumbnail and the real pixel size stay with the host; the packaged `ExifCarryoverService` (ExifTool, an optional peer of the package) for the metadata carry-over).
  */
 @Injectable()
 export class EnhancementImageToolsAdapter implements EnhancementImageTools {

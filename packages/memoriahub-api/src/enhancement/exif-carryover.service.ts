@@ -10,9 +10,8 @@
  *
  * `exiftool-vendored` vendors the ExifTool script itself — on POSIX that is
  * `exiftool-vendored.pl`, which needs a `perl` interpreter on PATH (installed in
- * apps/api/Dockerfile's base stage, in lockstep with apps/cli/Dockerfile). It is
- * imported LAZILY and defensively, mirroring apps/cli/src/date-inference/
- * exif-writer.ts, so a stripped install or a missing perl degrades to a no-op
+ * the host's image, in lockstep with the worker image). It is an OPTIONAL peer of the
+ * package, imported LAZILY and defensively (mirroring the CLI's date-inference writer), so a stripped install or a missing perl degrades to a no-op
  * instead of crashing the enrichment worker.
  *
  * STRICTLY BEST-EFFORT: every failure path returns the enhanced buffer
@@ -20,7 +19,7 @@
  * enhancement job that otherwise produced good pixels.
  */
 
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,6 +46,7 @@ type ExiftoolModule = {
  * machine-readable marker for an AI-modified photograph. This is what makes the
  * downloaded file honestly self-describing to any conformant viewer.
  */
+/** @stability experimental */
 export const AI_DIGITAL_SOURCE_TYPE =
   'http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia';
 
@@ -59,6 +59,11 @@ const CARRIED_TAG_GROUPS = [
   '-ICC_Profile',
 ];
 
+/**
+ * What the carry-over needs to know about the enhanced file.
+ *
+ * @stability experimental
+ */
 export interface ExifCarryoverOptions {
   /** Model id, embedded in the human-readable Software/CreatorTool strings. */
   model: string;
@@ -73,6 +78,13 @@ export interface ExifCarryoverOptions {
   originalExtension?: string;
 }
 
+/**
+ * File-level EXIF carry-over and the AI marker for enhanced images. Best-effort: it never throws and
+ * returns the enhanced bytes unchanged on any failure. The host's `ENHANCEMENT_IMAGE_TOOLS` hook
+ * delegates `carryOverMetadata` to it.
+ *
+ * @stability experimental
+ */
 @Injectable()
 export class ExifCarryoverService implements OnModuleDestroy {
   private readonly logger = new Logger(ExifCarryoverService.name);
@@ -87,6 +99,7 @@ export class ExifCarryoverService implements OnModuleDestroy {
   /** Whether `end()` has anything to shut down (see onModuleDestroy). */
   private loaded = false;
 
+  /** Loads ExifTool once; `null` when the optional peer (or its perl runtime) is unavailable. */
   protected loadExiftool(): Promise<ExiftoolModule | null> {
     if (!this.modPromise) {
       this.modPromise = import('exiftool-vendored').then(
@@ -109,6 +122,12 @@ export class ExifCarryoverService implements OnModuleDestroy {
    * site) precisely because exiftool-vendored emits the `tags` object's
    * assignments BEFORE `writeArgs` — putting the overrides in `tags` would let
    * the bulk copy clobber them.
+   */
+  /**
+   * The ExifTool argument vector (see the note above on order).
+   *
+   * @param originalPath - the temp copy of the original file.
+   * @param opts - the model, output size and original extension.
    */
   buildWriteArgs(originalPath: string, opts: ExifCarryoverOptions): string[] {
     const software = `MemoriaHub AI Enhance (${opts.model})`;
@@ -166,6 +185,14 @@ export class ExifCarryoverService implements OnModuleDestroy {
    * missing, unwritable tmpdir, corrupt input) — `enhancedBuffer` unchanged.
    * Never throws.
    */
+  /**
+   * Copies the original's metadata onto the enhanced bytes and stamps the AI marker.
+   *
+   * @param originalBuffer - the original file.
+   * @param enhancedBuffer - the enhanced JPEG.
+   * @param opts - the model, output size and original extension.
+   * @returns the stamped bytes, or the enhanced bytes unchanged on any failure.
+   */
   async applyCarryover(
     originalBuffer: Buffer,
     enhancedBuffer: Buffer,
@@ -221,6 +248,7 @@ export class ExifCarryoverService implements OnModuleDestroy {
    * `exiftool-vendored` keeps ONE long-lived ExifTool child process alive across
    * calls; shut it down with the Nest lifecycle so the API exits cleanly.
    */
+  /** Shuts the shared ExifTool child process down with the Nest lifecycle. */
   async onModuleDestroy(): Promise<void> {
     if (!this.modPromise || !this.loaded) return;
     try {

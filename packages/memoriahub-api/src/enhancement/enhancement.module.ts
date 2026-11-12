@@ -1,6 +1,7 @@
 import { Module, type DynamicModule, type ModuleMetadata, type Provider } from '@nestjs/common';
 
 import { MediaModule } from '../media/index.js';
+import { ExifCarryoverService } from './exif-carryover.service.js';
 import { ENHANCEMENT_OPTIONS, type EnhancementModuleOptions } from './enhancement-host-hooks.js';
 import { MediaEnhancementService } from './media-enhancement.service.js';
 import { PictureEnhancementHandler } from './picture-enhancement.handler.js';
@@ -58,12 +59,13 @@ export class EnhancementModule {
       providers: [
         ...hostProviders,
         { provide: ENHANCEMENT_OPTIONS, useValue: rest satisfies EnhancementModuleOptions },
+        ExifCarryoverService,
         MediaEnhancementService,
         PictureEnhancementHandler,
         PictureEnhancementPurgeHandler,
         PictureEnhancementPurgeTask,
       ],
-      exports: [MediaEnhancementService],
+      exports: [MediaEnhancementService, ExifCarryoverService],
     };
     return EnhancementModule.root;
   }

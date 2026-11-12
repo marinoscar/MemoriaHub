@@ -11,3 +11,4 @@ export * from './http/enhancement.dto.js';
 export * from './http/media-enhancement.controller.js';
 export * from './http/enhancement-batches.controller.js';
 export * from './http/admin-enhancement.controller.js';
+export * from './exif-carryover.service.js';

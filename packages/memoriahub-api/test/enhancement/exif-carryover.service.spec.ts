@@ -8,7 +8,7 @@
  * available in this environment (verified via `exiftool.version()`), so the
  * suite spawns the real vendored binary against a committed fixture.
  *
- * Fixture: apps/api/test/fixtures/exif-source-sample.jpg — a small synthetic
+ * Fixture: packages/memoriahub-api/test/fixtures/exif-source-sample.jpg — a small synthetic
  * JPEG (400x300) stamped with known EXIF/GPS via exiftool-vendored:
  *   Make=MemoriaHubCam, Model=TestModel X100,
  *   DateTimeOriginal=2024:03:15 10:30:00, GPS 37.7749,-122.4194,
@@ -30,11 +30,11 @@ import { exiftool } from 'exiftool-vendored';
 import {
   AI_DIGITAL_SOURCE_TYPE,
   ExifCarryoverService,
-} from './exif-carryover.service';
+} from '../../src/enhancement/exif-carryover.service';
 
 jest.setTimeout(30000);
 
-const FIXTURE_PATH = join(__dirname, '..', '..', 'test', 'fixtures', 'exif-source-sample.jpg');
+const FIXTURE_PATH = join(__dirname, '..', 'fixtures', 'exif-source-sample.jpg');
 
 /** Read a Buffer through exiftool by round-tripping via a scratch temp file. */
 async function readTagsFromBuffer(buffer: Buffer, dir: string) {
