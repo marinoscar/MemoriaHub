@@ -37,7 +37,7 @@ import { groupsSettingsPage } from '@marinoscar/platform-web/sharing/ui';
 import type { SettingsSectionDef } from '@marinoscar/platform-web/settings/ui';
 // RETRO-J11 (#626): the `Media sync` card is the packaged domain's, as data (`@marinoscar/memoriahub-web/shell`).
 import { memoriahubUserSettingsCards } from '@marinoscar/memoriahub-web/shell';
-import { ANDROID_APP_SETTINGS_PATH } from '../services/androidApp';
+import { ANDROID_APP_SETTINGS_PATH } from '@marinoscar/memoriahub-web/media-sync/headless';
 
 /** The per-user hub itself — the one `/settings` route that owns no card. */
 export const USER_HUB_PATH = '/settings';

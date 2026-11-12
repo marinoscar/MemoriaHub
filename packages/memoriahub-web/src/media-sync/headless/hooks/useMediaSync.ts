@@ -15,9 +15,9 @@ import {
   type MediaSyncDevice,
   type MediaSyncReportSummary,
   type MediaSyncRun,
-} from '../services/mediaSync';
-import { getLatestRelease, type PublicRelease } from '../services/androidApp';
-import { useIsMounted } from './useIsMounted';
+} from '../services/mediaSync.js';
+import { getLatestRelease, type PublicRelease } from '../services/androidApp.js';
+import { useIsMounted } from '../../../core/headless/index.js';
 
 interface Loaded<T> {
   data: T;
@@ -76,6 +76,8 @@ function isVisible(): boolean {
 /**
  * Call `tick` every `intervalMs` while the page is visible, and once when it
  * becomes visible again. `intervalMs <= 0` disables polling.
+ *
+ * @stability experimental
  */
 export function useVisiblePolling(tick: () => void, intervalMs: number, enabled = true): void {
   const tickRef = useRef(tick);
@@ -97,14 +99,22 @@ export function useVisiblePolling(tick: () => void, intervalMs: number, enabled 
   }, [enabled, intervalMs]);
 }
 
-/** Refetch cadence of the Media Sync page (issue #515: every 30 s while visible). */
+/**
+ * Refetch cadence of the Media Sync page (issue #515: every 30 s while visible).
+ *
+ * @stability experimental
+ */
 export const MEDIA_SYNC_POLL_MS = 30_000;
 
 const NO_DEVICES: MediaSyncDevice[] = [];
 const NO_RUNS: MediaSyncRun[] = [];
 const NO_REPORTS: MediaSyncReportSummary[] = [];
 
-/** `GET /api/media-sync/devices`, optionally polled while the page is visible. */
+/**
+ * `GET /api/media-sync/devices`, optionally polled while the page is visible.
+ *
+ * @stability experimental
+ */
 export function useMediaSyncDevices(options: { enabled?: boolean; pollMs?: number } = {}) {
   const { enabled = true, pollMs = 0 } = options;
   const fetcher = useCallback(() => listDevices(), []);
@@ -115,17 +125,30 @@ export function useMediaSyncDevices(options: { enabled?: boolean; pollMs?: numbe
     enabled,
   );
   useVisiblePolling(() => void reload(), pollMs, enabled);
-  return { devices: data, reload, ...rest };
+  return {
+    devices: data,
+    /** Reloads without the loading state (a poll tick, or after a write). */
+    reload,
+    ...rest,
+  };
 }
 
-/** `GET /api/media-sync/devices/:id/runs`, once `enabled` (a section was opened). */
+/**
+ * `GET /api/media-sync/devices/:id/runs`, once `enabled` (a section was opened).
+ *
+ * @stability experimental
+ */
 export function useDeviceRuns(deviceId: string, enabled = true) {
   const fetcher = useCallback(() => listDeviceRuns(deviceId, 100), [deviceId]);
   const { data, ...rest } = useLoad(fetcher, NO_RUNS, 'Failed to load the sync history', enabled);
   return { runs: data, ...rest };
 }
 
-/** `GET /api/media-sync/devices/:id/diagnostics`, once `enabled`. */
+/**
+ * `GET /api/media-sync/devices/:id/diagnostics`, once `enabled`.
+ *
+ * @stability experimental
+ */
 export function useDeviceDiagnostics(deviceId: string, enabled = true) {
   const fetcher = useCallback(() => listDeviceDiagnostics(deviceId), [deviceId]);
   const { data, ...rest } = useLoad(
@@ -140,6 +163,8 @@ export function useDeviceDiagnostics(deviceId: string, enabled = true) {
 /**
  * `GET /api/android-app/releases/latest` while `enabled`: the current APK, or
  * `null` when none is published (the API's 404 `NO_RELEASE`).
+ *
+ * @stability experimental
  */
 export function useLatestRelease(enabled = true) {
   const fetcher = useCallback(() => getLatestRelease(), []);

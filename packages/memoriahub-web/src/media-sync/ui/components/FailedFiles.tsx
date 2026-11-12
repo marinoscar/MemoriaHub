@@ -6,12 +6,16 @@
  */
 import { Alert, Box, Button, List, ListItem, Skeleton, Typography } from '@mui/material';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
-import type { MediaSyncDevice, MediaSyncRun } from '../../../services/mediaSync';
-import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
-import { formatBytes } from '../../../utils/formatBytes';
-import { formatDateTime } from './format';
+import { formatBytes, useMemoriahubAndroid } from '../../../core/headless/index.js';
+import type { MediaSyncDevice, MediaSyncRun } from '../../headless/services/mediaSync.js';
+import { formatDateTime } from './format.js';
 
-interface FailedFilesProps {
+/**
+ * The props of {@link FailedFiles}.
+ *
+ * @stability experimental
+ */
+export interface FailedFilesProps {
   device: MediaSyncDevice;
   runs: MediaSyncRun[];
   isLoading: boolean;
@@ -19,10 +23,17 @@ interface FailedFilesProps {
   inTwa: boolean;
   canRetry: boolean;
   retrying: boolean;
+  /** Called when the user asks to retry the failed files. */
   onRetry: () => void;
 }
 
+/**
+ * The files that failed to sync, from the last runs, with a retry action.
+ *
+ * @stability experimental
+ */
 export function FailedFiles({ device, runs, isLoading, error, inTwa, canRetry, retrying, onRetry }: FailedFilesProps) {
+  const { mediaSyncDeepLink } = useMemoriahubAndroid();
   const lastRun = runs[0] ?? null;
   const sample = lastRun?.details?.failedSample ?? [];
   const failedNow = (device.stats?.failed ?? 0) + (device.stats?.blocked ?? 0);

@@ -68,6 +68,14 @@
       "types": "./dist/face/ui/index.d.ts",
       "default": "./dist/face/ui/index.js"
     },
+    "./media-sync/headless": {
+      "types": "./dist/media-sync/headless/index.d.ts",
+      "default": "./dist/media-sync/headless/index.js"
+    },
+    "./media-sync/ui": {
+      "types": "./dist/media-sync/ui/index.d.ts",
+      "default": "./dist/media-sync/ui/index.js"
+    },
     "./insights/headless": {
       "types": "./dist/insights/headless/index.d.ts",
       "default": "./dist/insights/headless/index.js"

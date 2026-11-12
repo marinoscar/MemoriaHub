@@ -1,8 +1,12 @@
 import { Chip } from '@mui/material';
-import type { MediaSyncRunStatus } from '../../../services/mediaSync';
-import { RUN_STATUS_COLORS, RUN_STATUS_LABELS } from './format';
+import type { MediaSyncRunStatus } from '../../headless/services/mediaSync.js';
+import { RUN_STATUS_COLORS, RUN_STATUS_LABELS } from './format.js';
 
-/** A sync run's status as a small coloured chip. */
+/**
+ * A sync run's status as a small coloured chip.
+ *
+ * @stability experimental
+ */
 export function RunStatusChip({ status }: { status: MediaSyncRunStatus }) {
   return (
     <Chip

@@ -13,16 +13,33 @@ import {
   DialogContentText,
   DialogTitle,
 } from '@mui/material';
-import { mediaSyncErrorMessage, unpairDevice, type MediaSyncDevice } from '../../../services/mediaSync';
+import { mediaSyncErrorMessage, unpairDevice, type MediaSyncDevice } from '../../headless/services/mediaSync.js';
 
+/**
+ * What unpairing does, shown in the confirmation.
+ *
+ * @stability experimental
+ */
 export const UNPAIR_EXPLANATION = 'The phone stops syncing; already uploaded media stays.';
 
-interface UnpairDialogProps {
+/**
+ * The props of {@link UnpairDialog}.
+ *
+ * @stability experimental
+ */
+export interface UnpairDialogProps {
   device: MediaSyncDevice | null;
+  /** Called when the dialog is dismissed. */
   onClose: () => void;
+  /** Called after the device was unpaired. */
   onUnpaired: (device: MediaSyncDevice) => void;
 }
 
+/**
+ * Confirms unpairing a device.
+ *
+ * @stability experimental
+ */
 export function UnpairDialog({ device, onClose, onUnpaired }: UnpairDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -65,8 +65,8 @@ const TimeZoneSettingsPage = lazy(() => import('./pages/settings/TimeZoneSetting
 const NotificationPreferencesPage = lazy(() => import('./pages/settings/NotificationPreferencesPage'));
 const MemoriesPreferencesPage = lazy(() => import('./pages/settings/MemoriesPreferencesPage'));
 const SearchPreferencesPage = lazy(() => import('./pages/settings/SearchPreferencesPage'));
-const AndroidAppDownloadPage = lazy(() => import('./pages/AndroidAppDownloadPage'));
-const MediaSyncPage = lazy(() => import('./pages/MediaSyncPage'));
+const AndroidAppDownloadPage = lazy(() => import('@marinoscar/memoriahub-web/media-sync/ui').then((m) => ({ default: m.AndroidAppDownloadPage })));
+const MediaSyncPage = lazy(() => import('@marinoscar/memoriahub-web/media-sync/ui').then((m) => ({ default: m.MediaSyncPage })));
 const ProfilePage = lazy(() => import('./pages/Profile/ProfilePage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const MediaLibraryPage = lazyMediaPage('MediaLibraryPage');

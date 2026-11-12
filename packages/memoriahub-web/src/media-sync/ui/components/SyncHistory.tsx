@@ -21,10 +21,10 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import type { MediaSyncRun } from '../../../services/mediaSync';
-import { formatBytes } from '../../../utils/formatBytes';
-import { RunStatusChip } from './RunStatusChip';
-import { TRIGGER_LABELS, formatDateTime } from './format';
+import { formatBytes } from '../../../core/headless/index.js';
+import type { MediaSyncRun } from '../../headless/services/mediaSync.js';
+import { RunStatusChip } from './RunStatusChip.js';
+import { TRIGGER_LABELS, formatDateTime } from './format.js';
 
 const PAGE_SIZE = 10;
 
@@ -32,13 +32,24 @@ function bytes(run: MediaSyncRun): string {
   return /^\d+$/.test(run.bytesUploaded) ? formatBytes(run.bytesUploaded) : run.bytesUploaded;
 }
 
-interface SyncHistoryProps {
+/**
+ * The props of {@link SyncHistory}.
+ *
+ * @stability experimental
+ */
+export interface SyncHistoryProps {
   runs: MediaSyncRun[];
   isLoading: boolean;
   error: string | null;
+  /** Called when the user asks to retry the failed files. */
   onRetry: () => void;
 }
 
+/**
+ * A device's recent sync runs.
+ *
+ * @stability experimental
+ */
 export function SyncHistory({ runs, isLoading, error, onRetry }: SyncHistoryProps) {
   const theme = useTheme();
   const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));

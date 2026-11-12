@@ -21,7 +21,7 @@ import { SettingsHub } from '@marinoscar/platform-web/settings/ui';
 import { usePermissions } from '../hooks/usePermissions';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import { USER_HUB_TITLE, USER_SETTINGS_SECTIONS } from '../config/userSettingsSections';
-import { ANDROID_APP_SETTINGS_PATH } from '../services/androidApp';
+import { ANDROID_APP_SETTINGS_PATH } from '@marinoscar/memoriahub-web/media-sync/headless';
 
 /** The stacked page's section anchors and the card page each moved to. */
 export const LEGACY_SETTINGS_ANCHORS: Readonly<Record<string, string>> = {

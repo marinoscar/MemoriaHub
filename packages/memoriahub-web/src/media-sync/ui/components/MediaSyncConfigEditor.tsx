@@ -38,6 +38,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { formatBytes, useIsMounted } from '../../../core/headless/index.js';
 import {
   mediaSyncErrorMessage,
   mediaSyncErrorReason,
@@ -50,22 +51,39 @@ import {
   type MediaSyncFolder,
   type MediaSyncNetworkPolicy,
   type MediaSyncUploadExisting,
-} from '../../../services/mediaSync';
+} from '../../headless/services/mediaSync.js';
 import type { MediaSyncErrorReason } from '@marinoscar/memoriahub-contract/errors';
-import { formatBytes } from '../../../utils/formatBytes';
-import { useIsMounted } from '../../../hooks/useIsMounted';
 
+/**
+ * The note shown while the phone has reported no folders.
+ *
+ * @stability experimental
+ */
 export const NO_INVENTORY_MESSAGE = 'Open the app on your phone once so it can report its folders.';
+/**
+ * The note about mobile data use under the network policy.
+ *
+ * @stability experimental
+ */
 export const DATA_USAGE_NOTE =
   'Wi-Fi and mobile data uploads over your mobile plan too, which can use a lot of data for videos.';
 
-/** A circle the user may sync into (collaborator or admin there). */
+/**
+ * A circle the user may sync into (collaborator or admin there).
+ *
+ * @stability experimental
+ */
 export interface TargetCircleOption {
   id: string;
   name: string;
 }
 
-interface Draft {
+/**
+ * The editor's working copy of a device config.
+ *
+ * @stability experimental
+ */
+export interface Draft {
   targetCircleId: string;
   /** Selected bucket ids, in a stable order. */
   folderIds: string[];
@@ -98,6 +116,8 @@ function sameSet(a: string[], b: string[]): boolean {
  * The PATCH body: only what changed. Exported for tests. Folder names come
  * from the inventory (the server overwrites them from it anyway), falling
  * back to the stored name for a folder the phone no longer reports.
+ *
+ * @stability experimental
  */
 export function buildConfigPatch(
   config: MediaSyncConfig,
@@ -122,13 +142,24 @@ export function buildConfigPatch(
   return patch;
 }
 
-interface MediaSyncConfigEditorProps {
+/**
+ * The props of {@link MediaSyncConfigEditor}.
+ *
+ * @stability experimental
+ */
+export interface MediaSyncConfigEditorProps {
   device: MediaSyncDevice;
   circles: TargetCircleOption[];
   canWrite: boolean;
+  /** Called after the config was saved. */
   onSaved: (result: MediaSyncConfigResult) => void;
 }
 
+/**
+ * The editor of a device's desired config: folders, network policy, target circle and upload scope.
+ *
+ * @stability experimental
+ */
 export function MediaSyncConfigEditor({ device, circles, canWrite, onSaved }: MediaSyncConfigEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFromConfig(device.config));
   const [search, setSearch] = useState('');

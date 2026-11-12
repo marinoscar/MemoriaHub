@@ -23,8 +23,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ErrorIcon from '@mui/icons-material/Error';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutlineOutlined';
-import type { MediaSyncReport } from '../../../services/mediaSync';
-import { CHECK_STATUS_LABELS, formatDateTime, type DiagnosticCheckStatus } from './format';
+import type { MediaSyncReport } from '../../headless/services/mediaSync.js';
+import { CHECK_STATUS_LABELS, formatDateTime, type DiagnosticCheckStatus } from './format.js';
 
 const LOG_TAIL_LINES = 100;
 
@@ -41,6 +41,11 @@ const VISUALLY_HIDDEN = {
   width: '1px',
 } as const;
 
+/**
+ * One check of a diagnostic report.
+ *
+ * @stability experimental
+ */
 export interface DiagnosticCheck {
   id: string;
   label: string;
@@ -61,7 +66,11 @@ function asText(value: unknown): string | null {
   return null;
 }
 
-/** The report's checks, normalised and sorted fail → warn → pass → skip. Exported for tests. */
+/**
+ * The report's checks, normalised and sorted fail → warn → pass → skip. Exported for tests.
+ *
+ * @stability experimental
+ */
 export function sortedChecks(report: Record<string, unknown>): DiagnosticCheck[] {
   const raw = Array.isArray(report.checks) ? report.checks : [];
   const checks = raw.map((value, index): DiagnosticCheck => {
@@ -99,6 +108,11 @@ function join(...parts: Array<string | null | undefined>): string {
   return parts.filter((p) => p !== null && p !== undefined && p !== '').join(' · ');
 }
 
+/**
+ * A diagnostic report: the summary and the checks sorted by severity.
+ *
+ * @stability experimental
+ */
 export function DiagnosticReportViewer({ report }: { report: MediaSyncReport }) {
   const [showRaw, setShowRaw] = useState(false);
   const body = asRecord(report.report);

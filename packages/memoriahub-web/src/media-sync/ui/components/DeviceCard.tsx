@@ -32,6 +32,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
+import { formatRelativeTime, useIsMounted, useMemoriahubAndroid } from '../../../core/headless/index.js';
 import {
   PAIRING_WARN_DAYS,
   daysUntil,
@@ -40,30 +41,34 @@ import {
   sendDeviceCommand,
   type MediaSyncConfigResult,
   type MediaSyncDevice,
-} from '../../../services/mediaSync';
-import { ANDROID_APP_SETTINGS_PATH } from '../../../services/androidApp';
-import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
-import { formatRelativeTime } from '../../../utils/runFormat';
-import { useDeviceRuns } from '../../../hooks/useMediaSync';
-import { useIsMounted } from '../../../hooks/useIsMounted';
-import { RunStatusChip } from './RunStatusChip';
-import { SyncCountTiles } from './SyncCountTiles';
-import { DeviceControls } from './DeviceControls';
-import { MediaSyncConfigEditor, type TargetCircleOption } from './MediaSyncConfigEditor';
-import { FailedFiles } from './FailedFiles';
-import { SyncHistory } from './SyncHistory';
-import { DiagnosticsSection } from './DiagnosticsSection';
+} from '../../headless/services/mediaSync.js';
+import { ANDROID_APP_SETTINGS_PATH } from '../../headless/services/androidApp.js';
+import { useDeviceRuns } from '../../headless/hooks/useMediaSync.js';
+import { RunStatusChip } from './RunStatusChip.js';
+import { SyncCountTiles } from './SyncCountTiles.js';
+import { DeviceControls } from './DeviceControls.js';
+import { MediaSyncConfigEditor, type TargetCircleOption } from './MediaSyncConfigEditor.js';
+import { FailedFiles } from './FailedFiles.js';
+import { SyncHistory } from './SyncHistory.js';
+import { DiagnosticsSection } from './DiagnosticsSection.js';
 
 type Section = 'settings' | 'failures' | 'history' | 'diagnostics';
 
-interface DeviceCardProps {
+/**
+ * The props of {@link DeviceCard}.
+ *
+ * @stability experimental
+ */
+export interface DeviceCardProps {
   device: MediaSyncDevice;
   circles: TargetCircleOption[];
   canWrite: boolean;
   inTwa: boolean;
   /** Open the settings section initially (a single phone). */
   defaultSettingsOpen?: boolean;
+  /** Called after a config or command change, with the result when there is one. */
   onChanged: (result?: MediaSyncConfigResult) => void;
+  /** Called when the user asks to unpair the device. */
   onUnpair: (device: MediaSyncDevice) => void;
 }
 
@@ -84,6 +89,11 @@ function PairingExpiry({ device }: { device: MediaSyncDevice }) {
   );
 }
 
+/**
+ * One paired phone: status, counts, controls, config, failed files, history and diagnostics.
+ *
+ * @stability experimental
+ */
 export function DeviceCard({
   device,
   circles,
@@ -104,6 +114,7 @@ export function DeviceCard({
   const [retrying, setRetrying] = useState(false);
   const [retryNotice, setRetryNotice] = useState<string | null>(null);
   const isMounted = useIsMounted();
+  const { mediaSyncDeepLink } = useMemoriahubAndroid();
 
   const revoked = device.status === 'revoked';
   const hardware = [device.manufacturer, device.model].filter(Boolean).join(' ');

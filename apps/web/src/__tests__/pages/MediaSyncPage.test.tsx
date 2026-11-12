@@ -5,10 +5,10 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { server } from '../mocks/server';
 import { render, mockUser, flushPendingAsyncWork, type MockUser } from '../utils/test-utils';
-import MediaSyncPage from '../../pages/MediaSyncPage';
-import { CONFIG_PENDING_MESSAGE, type MediaSyncDevice } from '../../services/mediaSync';
-import { COMMAND_APPLIES_LATER } from '../../components/settings/mediaSync/DeviceControls';
-import { GET_APP_TITLE } from '../../components/settings/mediaSync/GetAndroidApp';
+import { COMMAND_APPLIES_LATER, MediaSyncPage, getAppTitle } from '@marinoscar/memoriahub-web/media-sync/ui';
+import { CONFIG_PENDING_MESSAGE, type MediaSyncDevice } from '@marinoscar/memoriahub-web/media-sync/headless';
+
+const GET_APP_TITLE = getAppTitle('MemoriaHub');
 import { DEVICE_ID, makeCircle, makeDevice, makeRun } from '../fixtures/mediaSync';
 
 const writer: MockUser = { ...mockUser, permissions: [...mockUser.permissions, 'media:read', 'media:write'] };

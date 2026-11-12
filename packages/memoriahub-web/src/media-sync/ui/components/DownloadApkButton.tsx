@@ -9,14 +9,23 @@
 import { useState } from 'react';
 import { Alert, Box, Button, CircularProgress } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import { useAndroidAppClient } from '@marinoscar/platform-web/android-app/headless';
-import { downloadNavigator, type PublicRelease } from '../../../services/androidApp';
-import { mediaSyncErrorMessage } from '../../../services/mediaSync';
-import { useIsMounted } from '../../../hooks/useIsMounted';
+import { useIsMounted, useMemoriahubAndroid } from '../../../core/headless/index.js';
+import { downloadNavigator, type PublicRelease } from '../../headless/services/androidApp.js';
+import { mediaSyncErrorMessage } from '../../headless/services/mediaSync.js';
 
+/**
+ * The label of the download button.
+ *
+ * @stability experimental
+ */
 export const DOWNLOAD_APK_LABEL = 'Download APK';
 
-interface DownloadApkButtonProps {
+/**
+ * The props of {@link DownloadApkButton}.
+ *
+ * @stability experimental
+ */
+export interface DownloadApkButtonProps {
   release: Pick<PublicRelease, 'id' | 'versionName'>;
   /** Draw the button as the page's call to action (an update is waiting). */
   emphasized?: boolean;
@@ -24,11 +33,16 @@ interface DownloadApkButtonProps {
   quiet?: boolean;
 }
 
+/**
+ * Mints a short-lived download link and navigates to it, so Android hands the APK to the installer.
+ *
+ * @stability experimental
+ */
 export function DownloadApkButton({ release, emphasized = false, quiet = false }: DownloadApkButtonProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useIsMounted();
-  const client = useAndroidAppClient();
+  const client = useMemoriahubAndroid().useAndroidDownloadLink();
 
   const download = async () => {
     setBusy(true);

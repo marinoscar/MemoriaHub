@@ -21,18 +21,22 @@ import {
   useTheme,
 } from '@mui/material';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
+import { useIsMounted, useMemoriahubAndroid } from '../../../core/headless/index.js';
 import {
   getDeviceDiagnostic,
   mediaSyncErrorMessage,
   type MediaSyncReport,
   type MediaSyncReportSummary,
-} from '../../../services/mediaSync';
-import { useDeviceDiagnostics } from '../../../hooks/useMediaSync';
-import { useIsMounted } from '../../../hooks/useIsMounted';
-import { mediaSyncDeepLink } from '../../../platform/android-app/identity';
-import { DiagnosticReportViewer } from './DiagnosticReportViewer';
-import { formatDateTime } from './format';
+} from '../../headless/services/mediaSync.js';
+import { useDeviceDiagnostics } from '../../headless/hooks/useMediaSync.js';
+import { DiagnosticReportViewer } from './DiagnosticReportViewer.js';
+import { formatDateTime } from './format.js';
 
+/**
+ * A device's diagnostic reports: the list, the viewer and the link that opens diagnostics on the phone.
+ *
+ * @stability experimental
+ */
 export function DiagnosticsSection({ deviceId, inTwa }: { deviceId: string; inTwa: boolean }) {
   const theme = useTheme();
   const isCompactWindow = useMediaQuery(theme.breakpoints.down('sm'));
@@ -41,6 +45,7 @@ export function DiagnosticsSection({ deviceId, inTwa }: { deviceId: string; inTw
   const [report, setReport] = useState<MediaSyncReport | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const isMounted = useIsMounted();
+  const { mediaSyncDeepLink } = useMemoriahubAndroid();
 
   const view = async (summary: MediaSyncReportSummary) => {
     setOpen(summary);

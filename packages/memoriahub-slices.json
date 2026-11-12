@@ -244,6 +244,9 @@
     ],
     "insights": [
       "core"
+    ],
+    "media-sync": [
+      "core"
     ]
   }
 }

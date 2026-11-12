@@ -4,9 +4,8 @@
  * because the phone's ledger, not the server, is authoritative per file.
  */
 import { Box, LinearProgress, Typography } from '@mui/material';
-import { formatBytes } from '../../../utils/formatBytes';
-import { formatCount, formatRelativeTime } from '../../../utils/runFormat';
-import { syncCounts, type MediaSyncDevice } from '../../../services/mediaSync';
+import { formatBytes, formatCount, formatRelativeTime } from '../../../core/headless/index.js';
+import { syncCounts, type MediaSyncDevice } from '../../headless/services/mediaSync.js';
 
 function Tile({ label, value, testId, emphasis }: { label: string; value: string; testId: string; emphasis?: 'error' | 'warning' }) {
   return (
@@ -36,6 +35,11 @@ function Tile({ label, value, testId, emphasis }: { label: string; value: string
   );
 }
 
+/**
+ * The count tiles of a device: eligible, uploaded, waiting, failed.
+ *
+ * @stability experimental
+ */
 export function SyncCountTiles({ device }: { device: MediaSyncDevice }) {
   const counts = syncCounts(device.stats);
   if (!counts) {

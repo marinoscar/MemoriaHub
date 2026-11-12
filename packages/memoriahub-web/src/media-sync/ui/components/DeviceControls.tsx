@@ -15,16 +15,21 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ReplayIcon from '@mui/icons-material/Replay';
 import SyncIcon from '@mui/icons-material/Sync';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
+import { useIsMounted, useMemoriahubAndroid } from '../../../core/headless/index.js';
+import type { MemoriahubMediaSyncDeepLinkAction } from '../../../core/headless/index.js';
 import {
   mediaSyncErrorMessage,
   sendDeviceCommand,
   type MediaSyncCommand,
   type MediaSyncConfigResult,
   type MediaSyncDevice,
-} from '../../../services/mediaSync';
-import { mediaSyncDeepLink, type MediaSyncDeepLinkAction } from '../../../platform/android-app/identity';
-import { useIsMounted } from '../../../hooks/useIsMounted';
+} from '../../headless/services/mediaSync.js';
 
+/**
+ * The note shown after a command: the phone applies it at its next check-in.
+ *
+ * @stability experimental
+ */
 export const COMMAND_APPLIES_LATER =
   'Commands reach the phone the next time it checks in.';
 
@@ -35,18 +40,30 @@ const COMMAND_DONE: Record<MediaSyncCommand, string> = {
   sync_now: 'A sync was requested.',
 };
 
-interface DeviceControlsProps {
+/**
+ * The props of {@link DeviceControls}.
+ *
+ * @stability experimental
+ */
+export interface DeviceControlsProps {
   device: MediaSyncDevice;
   canWrite: boolean;
   inTwa: boolean;
+  /** Called after a command was accepted. */
   onChanged: (result: MediaSyncConfigResult) => void;
 }
 
+/**
+ * The pause, resume, retry and sync-now controls of a device, with the phone deep links.
+ *
+ * @stability experimental
+ */
 export function DeviceControls({ device, canWrite, inTwa, onChanged }: DeviceControlsProps) {
   const [busy, setBusy] = useState<MediaSyncCommand | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useIsMounted();
+  const { mediaSyncDeepLink } = useMemoriahubAndroid();
   const paused = device.config.paused;
   const disabled = !canWrite || device.status !== 'active' || busy !== null;
 
@@ -69,7 +86,7 @@ export function DeviceControls({ device, canWrite, inTwa, onChanged }: DeviceCon
   const icon = (action: MediaSyncCommand, fallback: ReactNode) =>
     busy === action ? <CircularProgress size={16} color="inherit" /> : fallback;
 
-  const phoneLinks: Array<{ action: MediaSyncDeepLinkAction; label: string }> = [
+  const phoneLinks: Array<{ action: MemoriahubMediaSyncDeepLinkAction; label: string }> = [
     { action: 'apply', label: 'Apply now on this phone' },
     { action: 'sync', label: 'Sync now on this phone' },
     { action: 'retry', label: 'Retry failed on this phone' },

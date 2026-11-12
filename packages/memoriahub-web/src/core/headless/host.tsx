@@ -14,6 +14,7 @@ import { createContext, createElement, useContext } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 
 import type { MemoriahubAdminPort } from './admin.js';
+import type { MemoriahubAndroidPort } from './android.js';
 import type { MemoriahubOwnerScopeValue } from './owner-scope.js';
 
 /**
@@ -243,6 +244,8 @@ export interface MemoriahubWebHost {
   shell?: MemoriahubShellPort;
   /** The host's admin port (data table, page header, deployment settings); absent in a host that mounts no admin page. */
   admin?: MemoriahubAdminPort;
+  /** The host's Android port (app identity, TWA helpers, release hooks); absent in a host that mounts no Android page. */
+  android?: MemoriahubAndroidPort;
   /** The active owner scope ("My library" or one group) and the caller's role in it. */
   ownerScope: MemoriahubOwnerScopeValue;
   /** Tell the user something happened. */

@@ -33,21 +33,35 @@ import {
   Typography,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { useAndroidRelease } from '@marinoscar/platform-web/android-app/headless';
-import { usePermissions } from '../hooks/usePermissions';
+import { useMemoriahubAndroid, usePermissions } from '../../../core/headless/index.js';
+import type { MemoriahubInstalledAppVersion } from '../../../core/headless/index.js';
 import {
   ANDROID_APP_ADMIN_PATH,
   formatMegabytes,
   type PublicRelease,
-} from '../services/androidApp';
-import { LEGACY_ANDROID_PACKAGE_NAME } from '../platform/android-app/identity';
-import { getInstalledAppVersion, isRunningInTwa, type InstalledAppVersion } from '../platform/android-app/twa';
-import { DownloadApkButton } from '../components/settings/androidApp/DownloadApkButton';
-import { APP_NAME } from '../constants/app';
+} from '../../headless/services/androidApp.js';
+import { DownloadApkButton } from '../components/DownloadApkButton.js';
 
+type InstalledAppVersion = MemoriahubInstalledAppVersion;
+
+/**
+ * The Android app page title.
+ *
+ * @stability experimental
+ */
 export const ANDROID_APP_PAGE_TITLE = 'Android app';
+/**
+ * The Android app page description.
+ *
+ * @stability experimental
+ */
 export const ANDROID_APP_PAGE_DESCRIPTION =
   'Download and install the Android app, which backs up photos and videos from your phone automatically.';
+/**
+ * The message shown when no Android release is published.
+ *
+ * @stability experimental
+ */
 export const NO_RELEASE_MESSAGE = 'No Android release has been published yet.';
 
 function formatDate(iso: string): string {
@@ -107,6 +121,7 @@ function InstalledStatus({ installed, release }: { installed: InstalledAppVersio
 }
 
 function InstallSteps() {
+  const { appName: APP_NAME, legacyPackageName: LEGACY_ANDROID_PACKAGE_NAME } = useMemoriahubAndroid();
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
     <Box component="ol" sx={{ m: 0, pl: 3 }} aria-label="Install steps">
@@ -177,6 +192,7 @@ function ReleaseCards({ release, installed }: { release: PublicRelease; installe
 
 /** The release card, the empty state or the error; remounted by Retry (the hook fetches on mount). */
 function ReleaseBody({ onRetry }: { onRetry: () => void }) {
+  const { useAndroidRelease, isRunningInTwa, getInstalledAppVersion } = useMemoriahubAndroid();
   const { release, isLoading, error } = useAndroidRelease();
   const { hasPermission } = usePermissions();
   const [installed] = useState(() => (isRunningInTwa() ? getInstalledAppVersion() : null));
@@ -216,6 +232,11 @@ function ReleaseBody({ onRetry }: { onRetry: () => void }) {
   return <ReleaseCards release={release} installed={installed} />;
 }
 
+/**
+ * The Android app page: the current release, its checksum, the install steps and the update status of the installed build.
+ *
+ * @stability experimental
+ */
 export default function AndroidAppDownloadPage() {
   const [attempt, setAttempt] = useState(0);
   const body = <ReleaseBody key={attempt} onRetry={() => setAttempt((n) => n + 1)} />;

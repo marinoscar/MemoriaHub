@@ -44,7 +44,7 @@ import type {
   MergeLocationGroupsBody,
   UpdateLocationGroupBody,
 } from '@marinoscar/memoriahub-web/location/headless';
-import type { MediaSyncConfigPatch } from '../services/mediaSync';
+import type { MediaSyncConfigPatch } from '@marinoscar/memoriahub-web/media-sync/headless';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const assertType = <_T extends true>() => undefined;

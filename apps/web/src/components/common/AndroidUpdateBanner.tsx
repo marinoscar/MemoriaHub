@@ -10,7 +10,7 @@
 import { AndroidUpdateBanner as PlatformAndroidUpdateBanner } from '@marinoscar/platform-web/android-app/ui';
 
 import { TWA_KEY_PREFIX } from '../../platform/android-app/identity';
-import { ANDROID_APP_SETTINGS_PATH } from '../../services/androidApp';
+import { ANDROID_APP_SETTINGS_PATH } from '@marinoscar/memoriahub-web/media-sync/headless';
 
 /** Where the dismissed versionCode is remembered (same key as before the platform banner). */
 export const ANDROID_UPDATE_DISMISSED_KEY = `${TWA_KEY_PREFIX}.androidUpdate.dismissedVersionCode`;

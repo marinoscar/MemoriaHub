@@ -32,27 +32,45 @@ import {
   Typography,
 } from '@mui/material';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
-import { usePermissions } from '../hooks/usePermissions';
-import { useOwnerScope } from '../hooks/useOwnerScope';
-import { MEDIA_SYNC_POLL_MS, useLatestRelease, useMediaSyncDevices } from '../hooks/useMediaSync';
-import { ANDROID_APP_SETTINGS_PATH } from '../services/androidApp';
-import type { MediaSyncDevice } from '../services/mediaSync';
-import { mediaSyncDeepLink } from '../platform/android-app/identity';
-import { isRunningInTwa } from '../platform/android-app/twa';
-import { DeviceCard } from '../components/settings/mediaSync/DeviceCard';
-import { GetAndroidApp } from '../components/settings/mediaSync/GetAndroidApp';
-import { UnpairDialog } from '../components/settings/mediaSync/UnpairDialog';
-import type { TargetCircleOption } from '../components/settings/mediaSync/MediaSyncConfigEditor';
+import { useMemoriahubAndroid, useOwnerScope, usePermissions } from '../../../core/headless/index.js';
+import { MEDIA_SYNC_POLL_MS, useLatestRelease, useMediaSyncDevices } from '../../headless/hooks/useMediaSync.js';
+import { ANDROID_APP_SETTINGS_PATH } from '../../headless/services/androidApp.js';
+import type { MediaSyncDevice } from '../../headless/services/mediaSync.js';
+import { DeviceCard } from '../components/DeviceCard.js';
+import { GetAndroidApp } from '../components/GetAndroidApp.js';
+import { UnpairDialog } from '../components/UnpairDialog.js';
+import type { TargetCircleOption } from '../components/MediaSyncConfigEditor.js';
 
+/**
+ * The Media Sync page title.
+ *
+ * @stability experimental
+ */
 export const MEDIA_SYNC_TITLE = 'Media sync';
+/**
+ * The Media Sync page description.
+ *
+ * @stability experimental
+ */
 export const MEDIA_SYNC_DESCRIPTION =
   'Phones that back up their photos and videos to this server: what is synced, what is missing, and how each one syncs.';
+/**
+ * The label of the button that opens Media Sync on the phone.
+ *
+ * @stability experimental
+ */
 export const OPEN_MEDIA_SYNC_LABEL = 'Open Media sync on this phone';
 
+/**
+ * The Media Sync page: the phones that back up to this server, what each one synced and how, with the desired config and the commands.
+ *
+ * @stability experimental
+ */
 export default function MediaSyncPage() {
   const { hasPermission } = usePermissions();
   const canWrite = hasPermission('media:write');
   const canPickAnyCircle = hasPermission('circles:manage_any');
+  const { isRunningInTwa, mediaSyncDeepLink } = useMemoriahubAndroid();
   const [inTwa] = useState(() => isRunningInTwa());
   const { devices, isLoading, error, refresh, reload } = useMediaSyncDevices({ pollMs: MEDIA_SYNC_POLL_MS });
   const { release } = useLatestRelease();

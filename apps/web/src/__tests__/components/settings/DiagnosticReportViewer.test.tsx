@@ -1,6 +1,6 @@
 /** Diagnostic report ordering (issue #515): failures first, unknown statuses fall back to skip. */
 import { describe, expect, it } from 'vitest';
-import { sortedChecks } from '../../../components/settings/mediaSync/DiagnosticReportViewer';
+import { sortedChecks } from '@marinoscar/memoriahub-web/media-sync/ui';
 
 describe('sortedChecks', () => {
   it('orders fail, warn, pass, skip and tolerates malformed entries', () => {
