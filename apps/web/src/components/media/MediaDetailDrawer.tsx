@@ -45,7 +45,11 @@ import { LinkSharePanel } from '../../platform/sharing/LinkSharePanel';
 import { useTheme } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import type { MediaItem, PatchMediaDto } from '@marinoscar/memoriahub-web/media/headless';
+import type {
+  MediaItem,
+  PatchMediaDto,
+  MediaMetadataStatusType,
+} from '@marinoscar/memoriahub-web/media/headless';
 import {
   patchMedia as patchMediaApi,
   getMedia,
@@ -54,29 +58,24 @@ import {
   bulkArchive,
   bulkUnarchive,
   bulkDelete,
-} from '@marinoscar/memoriahub-web/media/headless';
-import { VideoPlayer } from './VideoPlayer';
-import { LocationMiniMap } from '@marinoscar/memoriahub-web/media/ui';
-import { LocationSearchPicker } from '@marinoscar/memoriahub-web/media/ui';
-import { TagAutocomplete } from '@marinoscar/memoriahub-web/media/ui';
-import { FaceMarkerStrip, FaceThumbnails, VideoFacePanel } from '@marinoscar/memoriahub-web/people/ui';
-import { useMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
-import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
-import type { MediaTagStatusType } from '@marinoscar/memoriahub-web/tagging/headless';
-import { useMediaMetadata } from '@marinoscar/memoriahub-web/media/headless';
-import type { MediaMetadataStatusType } from '@marinoscar/memoriahub-web/media/headless';
-import { rerunThumbnail } from '@marinoscar/memoriahub-web/media/headless';
-import {
-  useSuggestLocation,
-  useItemAutoAppliedSuggestion,
-  useItemLocationCandidate,
-} from '../../hooks/useLocationSuggestions';
-import { revertLocationSuggestion } from '../../services/locationSuggestions';
-import {
+  useMediaMetadata,
+  rerunThumbnail,
   civilInputToIso,
   formatCivilDateTime,
   isoToCivilInput,
 } from '@marinoscar/memoriahub-web/media/headless';
+import { VideoPlayer } from './VideoPlayer';
+import { LocationMiniMap, LocationSearchPicker, TagAutocomplete } from '@marinoscar/memoriahub-web/media/ui';
+import { FaceMarkerStrip, FaceThumbnails, VideoFacePanel } from '@marinoscar/memoriahub-web/people/ui';
+import { useMediaFaces } from '@marinoscar/memoriahub-web/people/headless';
+import { useMediaTags } from '@marinoscar/memoriahub-web/tagging/headless';
+import type { MediaTagStatusType } from '@marinoscar/memoriahub-web/tagging/headless';
+import {
+  useSuggestLocation,
+  useItemAutoAppliedSuggestion,
+  useItemLocationCandidate,
+  revertLocationSuggestion,
+} from '@marinoscar/memoriahub-web/review/headless';
 
 // ---------------------------------------------------------------------------
 // Helpers

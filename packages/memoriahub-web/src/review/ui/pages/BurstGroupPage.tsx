@@ -1,0 +1,425 @@
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Box,
+  Typography,
+  Button,
+  CircularProgress,
+  Alert,
+  Chip,
+  Snackbar,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  LinearProgress,
+  Tooltip,
+} from '@mui/material';
+import BackIcon from '@mui/icons-material/ArrowBack';
+import BurstModeIcon from '@mui/icons-material/BurstMode';
+import ArchiveIcon from '@mui/icons-material/Archive';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { useBurstGroupDetail } from '../../headless/hooks/useBursts.js';
+import { usePermissions, useOwnerScope } from '../../../core/headless/index.js';
+import { SelectionCheckboxOverlay } from '../components/SelectionCheckboxOverlay.js';
+import type { BurstGroupMember, GroupResolveAction } from '../../headless/services/bursts.js';
+import { formatCivilDateTime } from '../../../media/headless/index.js';
+
+interface MemberCardProps {
+  member: BurstGroupMember;
+  selected: boolean;
+  onToggle: (id: string) => void;
+}
+
+function MemberCard({ member, selected, onToggle }: MemberCardProps) {
+  const capturedTime = member.capturedAt
+    ? formatCivilDateTime(member.capturedAt, { timeStyle: 'medium' })
+    : null;
+
+  const resolution =
+    member.width != null && member.height != null
+      ? `${member.width}×${member.height}`
+      : null;
+
+  const qualityPct =
+    member.burstScore != null ? Math.round(member.burstScore * 100) : null;
+
+  return (
+    <Box
+      onClick={() => onToggle(member.id)}
+      sx={{
+        position: 'relative',
+        cursor: 'pointer',
+        borderRadius: 2,
+        border: '2px solid',
+        borderColor: member.isSuggestedBest
+          ? 'primary.main'
+          : selected
+          ? 'secondary.main'
+          : 'divider',
+        overflow: 'hidden',
+        userSelect: 'none',
+        transition: 'border-color 0.15s',
+        bgcolor: 'background.paper',
+        // Below `md` the strip is a wrapping grid, so the card must be free to
+        // shrink to its cell; the fixed width only applies to the md+ strip.
+        minWidth: { xs: 0, md: 200 },
+        flexShrink: { xs: 1, md: 0 },
+      }}
+    >
+      {/* Thumbnail */}
+      <Box sx={{ position: 'relative', width: '100%', paddingBottom: '75%', bgcolor: 'action.hover' }}>
+        {member.thumbnailUrl ? (
+          <Box
+            component="img"
+            src={member.thumbnailUrl}
+            alt=""
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+            }}
+          />
+        ) : (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <BurstModeIcon sx={{ fontSize: 40, color: 'text.disabled' }} />
+          </Box>
+        )}
+
+        {/* Checkbox overlay */}
+        <SelectionCheckboxOverlay
+          checked={selected}
+          onToggle={() => onToggle(member.id)}
+          ariaLabel="Select photo"
+        />
+
+        {/* Best pick chip */}
+        {member.isSuggestedBest && (
+          <Box sx={{ position: 'absolute', top: 4, right: 4 }}>
+            <Chip label="Best pick" size="small" color="primary" />
+          </Box>
+        )}
+      </Box>
+
+      {/* Info section */}
+      <Box sx={{ p: 1 }}>
+        {qualityPct != null && (
+          <Box sx={{ mb: 0.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
+              <Typography variant="caption" color="text.secondary">
+                Quality
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {qualityPct}%
+              </Typography>
+            </Box>
+            <Tooltip title={`Burst score: ${qualityPct}%`}>
+              <LinearProgress
+                variant="determinate"
+                value={qualityPct}
+                sx={{ height: 4, borderRadius: 2 }}
+                color={qualityPct >= 70 ? 'success' : qualityPct >= 40 ? 'warning' : 'error'}
+              />
+            </Tooltip>
+          </Box>
+        )}
+        {capturedTime && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {capturedTime}
+          </Typography>
+        )}
+        {resolution && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            {resolution}
+          </Typography>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * The detail page of one burst group: its members side by side, and the keep, archive, trash and dismiss actions.
+ *
+ * @stability experimental
+ */
+export default function BurstGroupPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { activeCircleRole } = useOwnerScope();
+  const { isAdmin, hasPermission } = usePermissions();
+
+  const groupId = id ?? '';
+  const { group, isLoading, error, fetchGroup, resolve, dismiss, resolving, dismissing } =
+    useBurstGroupDetail(groupId);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [action, setAction] = useState<GroupResolveAction>('archive');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [dismissConfirmOpen, setDismissConfirmOpen] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const canAct =
+    isAdmin || activeCircleRole === 'collaborator' || activeCircleRole === 'circle_admin';
+  const canTrash = hasPermission('media:delete');
+
+  useEffect(() => {
+    if (!groupId) return;
+    void fetchGroup(groupId);
+  }, [groupId, fetchGroup]);
+
+  // Pre-select suggested best on load
+  useEffect(() => {
+    if (!group) return;
+    const initialSelected = new Set<string>();
+    if (group.suggestedBestItemId) {
+      initialSelected.add(group.suggestedBestItemId);
+    }
+    setSelectedIds(initialSelected);
+  }, [group]);
+
+  const handleToggle = (memberId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  };
+
+  const handleResolveConfirm = async () => {
+    setConfirmOpen(false);
+    setActionError(null);
+    try {
+      const keepIds = Array.from(selectedIds);
+      const result = await resolve(keepIds, action);
+      const verb = action === 'trash' ? 'moved to Trash' : 'archived';
+      setSuccessMsg(
+        `Kept ${result.kept} photo${result.kept !== 1 ? 's' : ''}; ${result.removed} ${verb}.`,
+      );
+      setTimeout(() => navigate('/bursts'), 1500);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to resolve burst group');
+    }
+  };
+
+  const handleDismissConfirm = async () => {
+    setDismissConfirmOpen(false);
+    setActionError(null);
+    try {
+      await dismiss();
+      setSuccessMsg('Burst group dismissed — all photos kept.');
+      setTimeout(() => navigate('/bursts'), 1500);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to dismiss burst group');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: { xs: 2, md: 3 } }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
+
+  if (!group) return null;
+
+  const keepCount = selectedIds.size;
+  const deleteCount = group.members.length - keepCount;
+
+  const capturedDate = group.capturedAt
+    ? formatCivilDateTime(group.capturedAt, { dateStyle: 'medium', timeStyle: 'short' })
+    : null;
+
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 } }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+        <IconButton onClick={() => navigate('/bursts')} aria-label="Back to burst list">
+          <BackIcon />
+        </IconButton>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="h5" component="h1">
+            Burst Group
+          </Typography>
+          {capturedDate && (
+            <Typography variant="body2" color="text.secondary">
+              {capturedDate} &middot; {group.members.length} photos
+            </Typography>
+          )}
+        </Box>
+      </Box>
+
+      {actionError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {actionError}
+        </Alert>
+      )}
+
+      {/* Instructions */}
+      <Alert severity="info" sx={{ mb: 3 }}>
+        Select the photos you want to <strong>keep</strong>. Unselected photos will be archived or
+        moved to Trash — your choice below — when you confirm. The suggested best photo is
+        pre-selected.
+      </Alert>
+
+      {/* Photo grid — 2-up / 3-up below md so the whole burst fits the viewport */}
+      <Box
+        sx={{
+          display: { xs: 'grid', md: 'flex' },
+          gridTemplateColumns: {
+            xs: 'repeat(2, minmax(0, 1fr))',
+            sm: 'repeat(3, minmax(0, 1fr))',
+          },
+          flexWrap: 'wrap',
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        {group.members.map((member: BurstGroupMember) => (
+          <MemberCard
+            key={member.id}
+            member={member}
+            selected={selectedIds.has(member.id)}
+            onToggle={handleToggle}
+          />
+        ))}
+      </Box>
+
+      {/* Action bar */}
+      {canAct && (
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={keepCount === 0 || resolving || dismissing}
+            onClick={() => {
+              setAction('archive');
+              setConfirmOpen(true);
+            }}
+            startIcon={resolving ? <CircularProgress size={16} /> : <ArchiveIcon />}
+          >
+            {keepCount === 0
+              ? 'Select photos to keep'
+              : `Keep ${keepCount}, archive ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
+          </Button>
+
+          {canTrash && (
+            <Button
+              variant="contained"
+              color="error"
+              disabled={keepCount === 0 || resolving || dismissing}
+              onClick={() => {
+                setAction('trash');
+                setConfirmOpen(true);
+              }}
+              startIcon={resolving ? <CircularProgress size={16} /> : <DeleteIcon />}
+            >
+              {keepCount === 0
+                ? 'Select photos to keep'
+                : `Keep ${keepCount}, delete ${deleteCount} other${deleteCount !== 1 ? 's' : ''}`}
+            </Button>
+          )}
+
+          <Button
+            variant="outlined"
+            color="inherit"
+            disabled={resolving || dismissing}
+            onClick={() => setDismissConfirmOpen(true)}
+            startIcon={dismissing ? <CircularProgress size={16} /> : undefined}
+          >
+            {dismissing ? 'Dismissing…' : 'Not a burst — dismiss'}
+          </Button>
+        </Box>
+      )}
+
+      {/* Resolve confirm dialog */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Confirm {action === 'trash' ? 'trash' : 'archive'}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            You are about to keep <strong>{keepCount}</strong> photo{keepCount !== 1 ? 's' : ''} and{' '}
+            {action === 'trash' ? (
+              <>
+                move <strong>{deleteCount}</strong> other{deleteCount !== 1 ? 's' : ''} to{' '}
+                <strong>Trash</strong>. Trashed items can be restored within the retention window.
+              </>
+            ) : (
+              <>
+                <strong>archive</strong> <strong>{deleteCount}</strong> other
+                {deleteCount !== 1 ? 's' : ''}. Archived items can be unarchived later.
+              </>
+            )}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color={action === 'trash' ? 'error' : 'primary'}
+            onClick={() => void handleResolveConfirm()}
+          >
+            {action === 'trash' ? 'Move to Trash' : 'Archive'} {deleteCount} photo
+            {deleteCount !== 1 ? 's' : ''}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dismiss confirm dialog */}
+      <Dialog open={dismissConfirmOpen} onClose={() => setDismissConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Dismiss burst group</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            All {group.members.length} photos will be kept and this group will be dismissed. No
+            photos will be deleted.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDismissConfirmOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => void handleDismissConfirm()}
+          >
+            Dismiss
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={Boolean(successMsg)}
+        autoHideDuration={3000}
+        onClose={() => setSuccessMsg(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSuccessMsg(null)} severity="success" sx={{ width: '100%' }}>
+          {successMsg}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+}

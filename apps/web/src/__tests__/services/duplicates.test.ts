@@ -22,8 +22,8 @@ import {
   fetchAllPendingDuplicateGroupIds,
   listDuplicateGroups,
   type DuplicateGroupSummary,
-} from '../../services/duplicates';
-import { BULK_RESOLVE_CHUNK_SIZE } from '../../services/bursts';
+  BULK_RESOLVE_CHUNK_SIZE,
+} from '@marinoscar/memoriahub-web/review/headless';
 import { api } from '../../services/api';
 
 beforeEach(() => {

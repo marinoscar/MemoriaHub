@@ -168,12 +168,12 @@ const TagsBrowsePage = lazy(() =>
 );
 const PlacesOverviewPage = lazyMediaPage('PlacesOverviewPage');
 const LevelBrowsePage = lazyMediaPage('LevelBrowsePage');
-const BurstsPage = lazy(() => import('./pages/Bursts/BurstsPage'));
-const BurstGroupPage = lazy(() => import('./pages/Bursts/BurstGroupPage'));
-const DuplicatesPage = lazy(() => import('./pages/Duplicates/DuplicatesPage'));
-const DuplicateGroupPage = lazy(() => import('./pages/Duplicates/DuplicateGroupPage'));
-const LocationSuggestionsPage = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionsPage'));
-const LocationSuggestionRunRedirect = lazy(() => import('./pages/LocationSuggestions/LocationSuggestionRunRedirect'));
+const BurstsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstsPage })));
+const BurstGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.BurstGroupPage })));
+const DuplicatesPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicatesPage })));
+const DuplicateGroupPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.DuplicateGroupPage })));
+const LocationSuggestionsPage = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionsPage })));
+const LocationSuggestionRunRedirect = lazy(() => import('@marinoscar/memoriahub-web/review/ui').then((m) => ({ default: m.LocationSuggestionRunRedirect })));
 const ReviewRunPage = lazy(() => import('@marinoscar/memoriahub-web/review-runs/ui').then((m) => ({ default: m.ReviewRunPage })));
 const ReviewHubPage = lazy(() => import('./pages/Reviews/ReviewHubPage'));
 const CollectionsHubPage = lazy(() => import('./pages/Collections/CollectionsHubPage'));

@@ -16,6 +16,8 @@
     "./src/people/ui/index.ts",
     "./src/memories/headless/index.ts",
     "./src/memories/ui/index.ts",
+    "./src/review/headless/index.ts",
+    "./src/review/ui/index.ts",
     "./src/review-runs/headless/index.ts",
     "./src/review-runs/ui/index.ts",
     "./src/search/headless/index.ts",

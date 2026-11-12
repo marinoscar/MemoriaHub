@@ -316,6 +316,21 @@ export interface MemoriahubFaceSettings {
 }
 
 /**
+ * The review-queue half of the deployment settings: the confidence floors the
+ * burst, duplicate and location-suggestion pages preselect for their bulk actions.
+ *
+ * @stability experimental
+ */
+export interface MemoriahubReviewSettings {
+  /** `burst`: the auto-resolve threshold (percent). */
+  burst?: { autoResolveThreshold?: number };
+  /** `dedup`: the auto-resolve threshold (percent). */
+  dedup?: { autoResolveThreshold?: number };
+  /** `locationInference`: the bulk-accept threshold (percent). */
+  locationInference?: { bulkAcceptThreshold?: number };
+}
+
+/**
  * The deployment settings document as the domain admin pages read it: the
  * namespaces they edit, typed, and the version the host sends back as `If-Match`.
  *
@@ -325,7 +340,8 @@ export interface MemoriahubSystemSettings
   extends MemoriahubTaggingSettings,
     MemoriahubWorkflowsSettings,
     MemoriahubMemoriesSettings,
-    MemoriahubFaceSettings {
+    MemoriahubFaceSettings,
+    MemoriahubReviewSettings {
   /** The global feature flags. */
   features: Record<string, boolean>;
   /** The document version. */

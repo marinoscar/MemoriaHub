@@ -223,6 +223,11 @@
     ],
     "face": [
       "core"
+    ],
+    "review": [
+      "core",
+      "media",
+      "review-runs"
     ]
   }
 }

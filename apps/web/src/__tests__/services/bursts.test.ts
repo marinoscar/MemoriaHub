@@ -23,7 +23,7 @@ import {
   listBurstGroups,
   BULK_RESOLVE_CHUNK_SIZE,
   type BurstGroupSummary,
-} from '../../services/bursts';
+} from '@marinoscar/memoriahub-web/review/headless';
 import { api } from '../../services/api';
 
 beforeEach(() => {

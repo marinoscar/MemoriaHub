@@ -1,22 +1,6 @@
-// formatBytes: converts BigInt-safe string or bigint to human-readable storage
-// Uses BigInt arithmetic to avoid precision loss
-export function formatBytes(bytes: string | bigint): string {
-  const val = typeof bytes === 'string' ? BigInt(bytes) : bytes;
-  if (val === 0n) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let unitIndex = 0;
-  let reduced = val;
-  while (reduced >= 1024n && unitIndex < units.length - 1) {
-    reduced = reduced / 1024n;
-    unitIndex++;
-  }
-  // For decimal display: get the original in the chosen unit as a float
-  const divisor = 1024n ** BigInt(unitIndex);
-  const whole = Number(val / divisor);
-  const remainder = Number(val % divisor) / Number(divisor);
-  const display = (whole + remainder).toFixed(unitIndex === 0 ? 0 : 2);
-  return `${display} ${units[unitIndex]}`;
-}
+// formatBytes lives in the packaged core (`@marinoscar/memoriahub-web/core/headless`);
+// this re-export keeps the app's imports unchanged.
+export { formatBytes } from '@marinoscar/memoriahub-web/core/headless';
 
 // formatCompactNumber: e.g. 1234 → "1.2K", 4217 → "4,217"
 export function formatCompactNumber(n: number): string {
