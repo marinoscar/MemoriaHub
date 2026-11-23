@@ -21,8 +21,8 @@
     "@emotion/styled": "^11.14.1",
     "@marinoscar/memoriahub-contract": "*",
     "@marinoscar/memoriahub-web": "*",
-    "@marinoscar/platform-contract": "0.1.0-next.29",
-    "@marinoscar/platform-web": "0.1.0-next.29",
+    "@marinoscar/platform-contract": "0.1.0-next.39",
+    "@marinoscar/platform-web": "0.1.0-next.39",
     "@mui/icons-material": "^9.1.1",
     "@mui/material": "^9.1.0",
     "@mui/x-charts": "^9.14.0",
@@ -40,7 +40,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@marinoscar/platform-api": "0.1.0-next.29",
+    "@marinoscar/platform-api": "0.1.0-next.39",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
