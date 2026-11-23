@@ -18,10 +18,10 @@
     "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.js --ci --testPathIgnorePatterns='test/db/migrations\\.spec\\.ts$' 'test/db/migration-v6\\.spec\\.ts$' 'test/export/scan-export\\.spec\\.ts$' 'test/sync/sync-engine-date-range\\.spec\\.ts$'"
   },
   "dependencies": {
-    "@marinoscar/platform-cli": "0.1.0-next.29",
-    "@marinoscar/platform-infra": "0.1.0-next.29",
     "@marinoscar/memoriahub-compute": "*",
     "@marinoscar/memoriahub-contract": "*",
+    "@marinoscar/platform-cli": "0.1.0-next.29",
+    "@marinoscar/platform-infra": "0.1.0-next.29",
     "better-sqlite3": "^12.10.0",
     "boxen": "^5.1.2",
     "chalk": "^5.3.0",
@@ -35,14 +35,14 @@
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "ora": "^5.4.1",
-    "react": "19",
-    "react-reconciler": "^0.33.0",
-    "zod": "^4.4.3"
+    "react": "^19.3.1",
+    "react-reconciler": "^0.34.0",
+    "zod": "^4.6.7"
   },
   "optionalDependencies": {
     "exiftool-vendored": "35.21.0",
-    "onnxruntime-node": "1.27.0",
-    "sharp": "0.35.3",
+    "onnxruntime-node": "1.31.1",
+    "sharp": "0.35.5",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
@@ -50,10 +50,10 @@
     "@types/cli-progress": "^3.11.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.3",
-    "@types/react": "19",
+    "@types/react": "^19.3.0",
     "ink-testing-library": "^4.0.0",
-    "jest": "^30.4.2",
-    "ts-jest": "^29.4.11",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
     "typescript": "^6.0.3"
   }
 }
